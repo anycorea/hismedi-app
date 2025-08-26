@@ -572,4 +572,6 @@ with tab_pdf:
                     height=740,
                 )
     else:
+
         st.caption("처음 사용 시 [인덱스(Drive)] 버튼으로 Google Drive 내 PDF를 인덱싱하세요. (로컬 폴더 방식도 가능)")
+        
