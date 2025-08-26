@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-import os, re, html
+import os, re, io, html, requests
 from pathlib import Path
-from typing import List
+from typing import List, Tuple, Dict
 from urllib.parse import quote
 
 import pandas as pd
@@ -16,6 +16,15 @@ st.set_page_config(page_title="★★★ HISMEDI 인증 준비 ★★★", layou
 st.markdown("# HISMEDI - 지침/QnA/규정")
 # 하이라이트 색(선택)
 st.markdown("<style> mark { background: #ffe2a8; } </style>", unsafe_allow_html=True)
+
+# ------------------------------------------------------------
+# 옵션: 간단 접근 비밀번호 (Secrets에 APP_PASSWORD 넣었을 때만 작동)
+# ------------------------------------------------------------
+_APP_PW = (st.secrets.get("APP_PASSWORD") or os.getenv("APP_PASSWORD") or "").strip()
+if _APP_PW:
+    pw = st.text_input("접속 비밀번호", type="password")
+    if pw.strip() != _APP_PW:
+        st.stop()
 
 # ------------------------------------------------------------
 # DB 연결 유틸
@@ -33,6 +42,7 @@ def _ensure_psycopg_url(url: str) -> str:
         u = u.replace("postgresql://", "postgresql+psycopg://", 1)
     if u.startswith("postgres://"):
         u = u.replace("postgres://", "postgresql+psycopg://", 1)
+    # Supabase pooler(6543) / direct(5432) 모두 허용. sslmode 없으면 추가.
     if "sslmode=" not in u:
         u += ("&" if ("?" in u) else "?") + "sslmode=require"
     return u
@@ -93,6 +103,7 @@ def run_select_query(eng, sql_text, params=None):
 
 # ------------------------------------------------------------
 # PDF 인덱싱/검색 (스키마 자동 교정 포함)
+#  - local/HTTP 서버 방식 + Google Drive 방식 병행
 # ------------------------------------------------------------
 REQUIRED_REG_COLUMNS = ["id", "filename", "page", "text", "file_mtime", "me"]
 
@@ -147,8 +158,7 @@ def _clean_text(s: str) -> str:
     return s.strip()
 
 def index_pdfs(eng, folder: Path):
-    """폴더의 PDF를 파일별 최신 mtime 기준으로 incremental 인덱싱
-       ('.ipynb_checkpoints' 경로는 자동 제외)"""
+    """로컬/서버 폴더의 PDF를 incremental 인덱싱 (Streamlit Cloud에선 보통 미사용)"""
     ensure_reg_table(eng)
     pdfs = sorted(folder.rglob("*.pdf"))
     if not pdfs:
@@ -158,11 +168,11 @@ def index_pdfs(eng, folder: Path):
     done_files = []
 
     with eng.begin() as con:
-         # >>> 기존에 들어간 체크포인트 파일들 싹 정리(한 번 실행해두면 좋음)
+        # 기존에 들어간 체크포인트 파일들 싹 정리(한 번 실행해두면 좋음)
         con.execute(text(r"delete from regulations where filename ~* '(^|[\\/])\.ipynb_checkpoints([\\/]|$)'"))
 
         for f in pdfs:
-            # === 체크포인트 폴더 제외 ===
+            # 체크포인트 폴더 제외
             if any(part == ".ipynb_checkpoints" for part in f.parts):
                 skipped += 1
                 try:
@@ -171,7 +181,6 @@ def index_pdfs(eng, folder: Path):
                     fn_skip = str(f)
                 done_files.append((fn_skip, "skip(checkpoints)"))
                 continue
-            # =========================
 
             try:
                 fn = str(f.relative_to(folder))
@@ -179,7 +188,7 @@ def index_pdfs(eng, folder: Path):
                 fn = str(f)
             mt = int(f.stat().st_mtime)
 
-            # 이미 최신으로 인덱싱되어 있으면 스킵
+            # 최신이면 스킵
             row = con.execute(
                 text("select count(*) from regulations where filename=:fn and file_mtime=:mt"),
                 {"fn": fn, "mt": mt},
@@ -189,7 +198,7 @@ def index_pdfs(eng, folder: Path):
                 done_files.append((fn, "skip"))
                 continue
 
-            # 기존 파일 레코드 제거 후 재적재
+            # 기존 레코드 제거 후 재적재
             con.execute(text("delete from regulations where filename=:fn"), {"fn": fn})
 
             # PDF 읽기
@@ -218,6 +227,111 @@ def index_pdfs(eng, folder: Path):
                 done_files.append((fn, f"indexed {len(rows)}p"))
             else:
                 done_files.append((fn, "no-text"))
+
+    return {"indexed": indexed, "skipped": skipped, "errors": errors, "files": done_files}
+
+# ---------------- Google Drive 크롤/인덱싱 ------------------
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _drive_list_all(folder_id: str, api_key: str):
+    """folder_id 이하 모든 파일/폴더 메타데이터(id,name,mimeType,parents)를 재귀 수집"""
+    files = []
+    def list_children(pid):
+        page_token = None
+        while True:
+            params = {
+                "q": f"'{pid}' in parents and trashed=false",
+                "pageSize": 1000,
+                "fields": "nextPageToken, files(id,name,mimeType,parents)",
+                "key": api_key,
+            }
+            if page_token: params["pageToken"] = page_token
+            r = requests.get("https://www.googleapis.com/drive/v3/files", params=params, timeout=30)
+            r.raise_for_status()
+            data = r.json()
+            batch = data.get("files", [])
+            files.extend(batch)
+            for f in batch:
+                if f.get("mimeType") == "application/vnd.google-apps.folder":
+                    list_children(f["id"])
+            page_token = data.get("nextPageToken")
+            if not page_token:
+                break
+    list_children(folder_id)
+    return files
+
+def _drive_path_map(folder_id: str, api_key: str):
+    """id->node, id->상대경로, 상대경로->fileId 매핑 생성"""
+    nodes = _drive_list_all(folder_id, api_key)
+    by_id = {n["id"]: n for n in nodes}
+    def path_of(fid):
+        p = []
+        cur = by_id.get(fid)
+        while cur:
+            p.append(cur["name"])
+            parents = cur.get("parents") or []
+            cur = by_id.get(parents[0]) if parents else None
+        p = [x for x in reversed(p) if x]   # ['하위', '파일.pdf']
+        return "/".join(p)
+    id_to_rel = {n["id"]: path_of(n["id"]) for n in nodes}
+    rel_to_id = {v:k for k,v in id_to_rel.items()
+                 if by_id[k].get("mimeType") == "application/pdf" or v.lower().endswith(".pdf")}
+    return by_id, id_to_rel, rel_to_id
+
+def _drive_download_pdf(file_id: str, api_key: str) -> bytes:
+    """공개 파일 직접 다운로드 (PDF 바이트)"""
+    url = f"https://www.googleapis.com/drive/v3/files/{file_id}"
+    r = requests.get(url, params={"alt": "media", "key": api_key}, timeout=60)
+    r.raise_for_status()
+    return r.content
+
+def index_pdfs_from_drive(eng, folder_id: str, api_key: str, limit_files: int = 0):
+    """구글드라이브 폴더에서 PDF를 내려받아 인덱싱 (me 칼럼에 file_id 저장)"""
+    ensure_reg_table(eng)
+    by_id, id_to_rel, rel_to_id = _drive_path_map(folder_id, api_key)
+
+    indexed = skipped = errors = 0
+    done_files = []
+
+    with eng.begin() as con:
+        for rel, fid in rel_to_id.items():
+            try:
+                # 간단화를 위해 mtime 비교 생략 → filename 단위로 새로고침
+                row = con.execute(text("select count(*) from regulations where filename=:fn"),
+                                  {"fn": rel}).scalar()
+                if row and row > 0:
+                    skipped += 1
+                    done_files.append((rel, "skip"))
+                    continue
+
+                con.execute(text("delete from regulations where filename=:fn"), {"fn": rel})
+
+                pdf_bytes = _drive_download_pdf(fid, api_key)
+                reader = PdfReader(io.BytesIO(pdf_bytes))
+                rows = []
+                for pno, page in enumerate(reader.pages, start=1):
+                    try:
+                        txt = page.extract_text() or ""
+                    except Exception:
+                        txt = ""
+                    txt = _clean_text(txt)
+                    if not txt:
+                        continue
+                    rows.append({"filename": rel, "page": pno, "text": txt,
+                                 "file_mtime": 0, "me": fid})  # me에 file_id 저장
+
+                if rows:
+                    pd.DataFrame(rows).to_sql("regulations", con, if_exists="append", index=False)
+                    indexed += 1
+                    done_files.append((rel, f"indexed {len(rows)}p"))
+                else:
+                    done_files.append((rel, "no-text"))
+            except Exception as e:
+                errors += 1
+                done_files.append((rel, f"error: {type(e).__name__}"))
+
+            if limit_files and indexed >= limit_files:
+                break
 
     return {"indexed": indexed, "skipped": skipped, "errors": errors, "files": done_files}
 
@@ -269,8 +383,7 @@ def search_regs(eng, keywords: str, filename_like: str = "", limit: int = 500, h
         where_parts.append("filename ILIKE :fn")
         params["fn"] = f"%{filename_like.strip()}%"
 
-    # >>> .ipynb_checkpoints 숨기기(정규식)
-    # 슬래시/백슬래시 둘 다 경로 구분자로 인식
+    # .ipynb_checkpoints 숨기기
     if hide_ipynb_chk:
         where_parts.append(r"(filename !~* '(^|[\\/])\.ipynb_checkpoints([\\/]|$)')")
 
@@ -300,42 +413,24 @@ except Exception as e:
     st.exception(e); st.stop()
 
 # ------------------------------------------------------------
+# Secrets(Drive) 읽기
+# ------------------------------------------------------------
+DRIVE_API_KEY = (st.secrets.get("DRIVE_API_KEY") or os.getenv("DRIVE_API_KEY") or "").strip()
+DRIVE_FOLDER_ID = (st.secrets.get("DRIVE_FOLDER_ID") or os.getenv("DRIVE_FOLDER_ID") or "").strip()
+
+# ------------------------------------------------------------
 # 탭 UI
 # ------------------------------------------------------------
-tab_main, tab_qna, tab_pdf = st.tabs(
-    ["Main 조회", "QnA 조회", "PDF 검색"]
-)
+tab_main, tab_qna, tab_pdf = st.tabs(["Main 조회", "QnA 조회", "PDF 검색"])
 
-# --------------------- Main 조회 (필터 포함 통합검색) ----------------------------
+# --------------------- Main 조회 ----------------------------
 with tab_main:
     st.subheader("Main 조회")
-
     main_table = _pick_table(eng, ["main_v", "main_raw"]) or "main_raw"
     all_cols = _list_columns(eng, main_table)
 
-    # --- (선택) 자동 컬럼 매핑: 실제 컬럼명이 다를 수 있으니 후보에서 1개 자동 선택
-    CAND_PLACE  = ["조사장소", "장소", "location", "place", "부서", "dept"]
-    CAND_TARGET = ["조사대상", "대상", "target", "role", "직군", "직무"]
-
-    def _pick_col(cands):
-        for c in cands:
-            if c in all_cols:
-                return c
-        return None
-
-    col_place  = _pick_col(CAND_PLACE)
-    col_target = _pick_col(CAND_TARGET)
-
-    # --- 검색 대상 열 선택(기존 기능 유지)
-    kw = st.text_input("전체 키워드 (공백=AND · 선택된 열에서 검색)", "", key="main_kw")
-
-    mode = st.radio(
-        "전체 키워드 검색 대상",
-        ["전체 열", "특정 열 선택", "ME만"],
-        horizontal=True,
-        key="main_mode"
-    )
-
+    kw = st.text_input("키워드 (공백=AND)", "", key="main_kw")
+    mode = st.radio("검색 대상", ["전체 열", "특정 열 선택", "ME만"], horizontal=True, key="main_mode")
     if mode == "특정 열 선택":
         sel_cols = st.multiselect("검색할 열 선택", options=all_cols, default=all_cols, key="main_cols")
     elif mode == "ME만":
@@ -343,95 +438,20 @@ with tab_main:
         if "ME" not in all_cols:
             st.info("ME 칼럼이 없어 첫 칼럼으로 대체합니다.")
     else:
-        sel_cols = None  # 전체 열
+        sel_cols = None
+    limit = st.number_input("최대 행수", 1, 5000, 500, step=100, key="main_lim")
 
-    st.divider()
-
-    # --- 필터 조건(단어 1개, 부분일치) : 조사장소 / 조사대상
-    c1, c2 = st.columns(2)
-    with c1:
-        place_word = st.text_input(
-            f"조사장소 필터(단어 1개 · 부분일치) [{col_place or '컬럼없음'}]",
-            "",
-            key="flt_place_one",
-            help="예: 원무  → 조사장소에 '원무'가 포함된 행만"
-        )
-    with c2:
-        target_word = st.text_input(
-            f"조사대상 필터(단어 1개 · 부분일치) [{col_target or '컬럼없음'}]",
-            "",
-            key="flt_target_one",
-            help="예: 간호사 → 조사대상에 '간호사'가 포함된 행만"
-        )
-
-    # --- 추가 컬럼 필터: 필요한 컬럼을 선택하고, 각자에 부분일치 단어 1개 입력
-    st.markdown("**추가 컬럼 필터(선택)** — 필요한 컬럼을 선택하고 각자 검색어(부분일치)를 입력하세요.")
-    extra_cols = st.multiselect(
-        "추가로 필터할 컬럼들 선택",
-        options=[c for c in all_cols if c not in {col_place, col_target}],
-        default=[],
-        key="extra_cols"
-    )
-    extra_terms = {}
-    if extra_cols:
-        cols_box = st.columns(min(3, len(extra_cols)))
-        for i, c in enumerate(extra_cols):
-            with cols_box[i % len(cols_box)]:
-                extra_terms[c] = st.text_input(f"{c} 포함 단어", "", key=f"extra_term_{c}")
-
-    limit = st.number_input("최대 행수", 1, 10000, 1000, step=100, key="main_lim2")
-
-    if st.button("검색", key="main_search2"):
-        where_parts, params = [], {}
-
-        # 1) 조사장소 필터
-        if place_word.strip() and col_place:
-            where_parts.append(f'"{col_place}" ILIKE :place')
-            params["place"] = f"%{place_word.strip()}%"
-
-        # 2) 조사대상 필터
-        if target_word.strip() and col_target:
-            where_parts.append(f'"{col_target}" ILIKE :target')
-            params["target"] = f"%{target_word.strip()}%"
-
-        # 3) 추가 컬럼 필터(각 컬럼별 부분일치)
-        for c, term in (extra_terms or {}).items():
-            t = (term or "").strip()
-            if t:
-                pkey = f"extra_{len(params)}"
-                where_parts.append(f'"{c}" ILIKE :{pkey}')
-                params[pkey] = f"%{t}%"
-
-        # 4) 전체 키워드(공백=AND) — 선택된 열(sel_cols) 대상, 없으면 전체 열 대상
-        if kw.strip():
-            tokens = [t for t in kw.split() if t.strip()]
-            cols_for_kw = sel_cols if sel_cols else all_cols
-            for i, t in enumerate(tokens):
-                # 선택된(또는 전체) 열 중 어느 하나에라도 포함되면 통과
-                ors = " OR ".join([f'CAST("{c}" AS TEXT) ILIKE :kw{i}' for c in cols_for_kw])
-                where_parts.append(f"({ors})")
-                params[f"kw{i}"] = f"%{t}%"
-
-        where_sql = " AND ".join(where_parts) if where_parts else "TRUE"
-        sql = text(f'SELECT * FROM "{main_table}" WHERE {where_sql} LIMIT :lim')
-        params["lim"] = int(limit)
-
+    btn = st.button("검색", key="main_search")
+    if btn and kw.strip():
         with st.spinner("검색 중..."):
-            with eng.begin() as con:
-                df = pd.read_sql_query(sql, con, params=params)
-
+            df = search_table_any(eng, main_table, kw, columns=sel_cols, limit=limit)
         st.write(f"결과: {len(df):,}건")
         if df.empty:
             st.info("결과 없음")
         else:
             st.dataframe(df, use_container_width=True, height=520)
-
-            # (선택) CSV 다운로드
-            csv = df.to_csv(index=False).encode("utf-8-sig")
-            st.download_button("CSV 다운로드", csv, "main_filtered_search.csv", "text/csv")
-
     else:
-        st.caption("순서: (필요시) 조사장소/조사대상/추가 컬럼 필터 입력 → 전체 키워드 입력 → [검색] 클릭")
+        st.caption("여러 단어를 공백으로 구분하면 모든 단어를 포함한 행만 조회합니다.")
 
 # --------------------- QnA 조회 -----------------------------
 with tab_qna:
@@ -439,33 +459,30 @@ with tab_qna:
     qna_table = _pick_table(eng, ["qna_v", "qna_raw"]) or "qna_raw"
     kw_q = st.text_input("키워드 (공백=AND)", "", key="qna_kw")
     limit_q = st.number_input("최대 행수", 1, 5000, 500, step=100, key="qna_lim")
-
-    if st.button("검색", key="qna_search") and kw_q.strip():
+    btn_q = st.button("검색", key="qna_search")
+    if btn_q and kw_q.strip():
         with st.spinner("검색 중..."):
             df = search_table_any(eng, qna_table, kw_q, columns=None, limit=limit_q)
         st.write(f"결과: {len(df):,}건")
-
         if df.empty:
             st.info("결과 없음")
         else:
             st.dataframe(df, use_container_width=True, height=520)
-
     else:
-        st.caption("필요 시 ‘임시 SQL’에서 직접 SELECT 실행 가능.")
+        st.caption("필요 시 PDF 탭에서 전체 지침을 본문 검색할 수 있습니다.")
 
-
-# --------------------- PDF 검색 (HTTP 서버 방식 고정) -------
+# --------------------- PDF 검색 (Drive + HTTP 링크 병행) -------
 with tab_pdf:
     st.subheader("PDF 검색")
 
     # 1) 인덱싱 관련
     default_folder = str((Path.cwd() / "PDFs").resolve())
-    folder_str = st.text_input("PDF 폴더 경로", default_folder, key="pdf_folder")
+    folder_str = st.text_input("PDF 폴더 경로 (로컬/옵션)", default_folder, key="pdf_folder")
     folder = Path(folder_str)
 
     cols1 = st.columns(3)
     with cols1[0]:
-        if st.button("인덱스 갱신", key="pdf_reindex"):
+        if st.button("인덱스 갱신(로컬)", key="pdf_reindex"):
             if not folder.exists():
                 st.error(f"폴더가 없습니다: {folder}")
             else:
@@ -475,13 +492,24 @@ with tab_pdf:
                 with st.expander("상세 로그 보기"):
                     for fn, stat in rep["files"]:
                         st.write(f"- {fn}: {stat}")
+    with cols1[1]:
+        if st.button("인덱스(Drive)", key="pdf_reindex_drive"):
+            if not (DRIVE_API_KEY and DRIVE_FOLDER_ID and "?" not in DRIVE_FOLDER_ID):
+                st.error("Secrets에 DRIVE_API_KEY / DRIVE_FOLDER_ID(쿼리스트링 제거) 를 설정하세요.")
+            else:
+                with st.spinner("Google Drive에서 인덱싱 중..."):
+                    rep = index_pdfs_from_drive(eng, DRIVE_FOLDER_ID, DRIVE_API_KEY)
+                st.success(f"Drive 인덱스 완료 | indexed={rep['indexed']} | skipped={rep['skipped']} | errors={rep['errors']}")
+                with st.expander("상세 로그 보기"):
+                    for fn, stat in rep["files"]:
+                        st.write(f"- {fn}: {stat}")
 
     st.markdown(
-        "🔗 **링크 방식: HTTP 서버(권장)** &nbsp;&nbsp;"
+        "🔗 **링크 방식: HTTP 서버(옵션)** &nbsp;&nbsp;"
         "`cd /d D:\\Anaconda\\PDFs && python -m http.server 8010` 을 별도 터미널에서 실행하세요."
     )
     http_base = st.text_input(
-        "HTTP 서버 주소",
+        "HTTP 서버 주소 (Drive 미사용 시)",
         value="http://localhost:8010",
         key="pdf_http_base",
         help="다른 PC에서 열려면 http://<내PC IP>:8010 로 변경 (예: http://192.168.0.23:8010)"
@@ -505,11 +533,16 @@ with tab_pdf:
         else:
             kw_list = [k.strip() for k in kw_pdf.split() if k.strip()]
 
-            # HTTP 링크 만들기 (상대경로 → URL 인코딩, 슬래시 유지)
             def make_href(row):
                 rel_web = str(row["filename"]).replace("\\", "/")
-                rel_enc = quote(rel_web, safe="/")  # '/'는 유지하고 한글/공백만 인코딩
-                return f"{base_http}/{rel_enc}#page={int(row['page'])}"
+                page = int(row["page"])
+                # me 컬럼에 Google Drive file_id가 있으면 Drive 미리보기
+                fid = (row.get("me") or "").strip() if isinstance(row.get("me"), str) else ""
+                if fid:
+                    return f"https://drive.google.com/file/d/{fid}/preview#page={page}"
+                # 없으면 로컬 HTTP 서버 링크
+                rel_enc = quote(rel_web, safe="/")
+                return f"{base_http}/{rel_enc}#page={page}"
 
             view = df[["filename", "page", "me"]].copy()
             view["open"] = df.apply(make_href, axis=1)
@@ -530,15 +563,13 @@ with tab_pdf:
                     key="pdf_preview_idx"
                 )
                 row = df.iloc[int(idx)]
-                st.write(f"**파일**: {row['filename']}  |  **페이지**: {int(row['page'])}  |  **ME**: {row.get('me') or '-'}")
+                st.write(f"**파일**: {row['filename']}  |  **페이지**: {int(row['page'])}  |  **ME(file_id)**: {row.get('me') or '-'}")
                 st.markdown(highlight_html(row["text"], kw_list, width=200), unsafe_allow_html=True)
 
-                # iframe 미리보기 (HTTP 서버가 켜져 있어야 보임)
                 href = make_href(row)
                 st.components.v1.html(
                     f'<iframe src="{href}" style="width:100%; height:720px;" frameborder="0"></iframe>',
                     height=740,
                 )
-
     else:
-        st.caption("먼저 [인덱스 갱신]을 한 번 수행해야 검색이 잘 동작합니다.")
+        st.caption("처음 사용 시 [인덱스(Drive)] 버튼으로 Google Drive 내 PDF를 인덱싱하세요. (로컬 폴더 방식도 가능)")
