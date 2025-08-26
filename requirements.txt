@@ -1,0 +1,6 @@
+streamlit==1.37.0
+sqlalchemy>=2.0
+psycopg[binary,pool]>=3.2
+pandas
+pypdf
+requests
