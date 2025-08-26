@@ -480,27 +480,12 @@ with tab_qna:
     else:
         st.caption("필요 시 ‘임시 SQL’ 탭에서 직접 SELECT 실행 가능합니다.")
 
-# --------------------- PDF 검색 (Drive + HTTP 링크 병행) -------
+# --------------------- PDF 검색 (Google Drive 전용) -------
 with tab_pdf:
-    st.subheader("PDF 검색")
+    st.subheader("PDF 검색 (Google Drive)")
 
-    # 1) 인덱싱 관련
-    default_folder = str((Path.cwd() / "PDFs").resolve())
-    folder_str = st.text_input("PDF 폴더 경로 (로컬/옵션)", default_folder, key="pdf_folder")
-    folder = Path(folder_str)
-
-    cols1 = st.columns(3)
-    with cols1[0]:
-        if st.button("인덱스 갱신(로컬)", key="pdf_reindex"):
-            if not folder.exists():
-                st.error(f"폴더가 없습니다: {folder}")
-            else:
-                with st.spinner("PDF 인덱싱 중... (처음은 다소 걸릴 수 있습니다)"):
-                    rep = index_pdfs(eng, folder)
-                st.success(f"인덱스 완료 | indexed={rep['indexed']} | skipped={rep['skipped']} | errors={rep['errors']}")
-                with st.expander("상세 로그 보기"):
-                    for fn, stat in rep["files"]:
-                        st.write(f"- {fn}: {stat}")
+    # 1) 인덱싱: Google Drive만 사용
+    cols1 = st.columns([1, 2, 1])
     with cols1[1]:
         if st.button("인덱스(Drive)", key="pdf_reindex_drive"):
             if not (DRIVE_API_KEY and DRIVE_FOLDER_ID and "?" not in DRIVE_FOLDER_ID):
@@ -513,18 +498,6 @@ with tab_pdf:
                     for fn, stat in rep["files"]:
                         st.write(f"- {fn}: {stat}")
 
-    st.markdown(
-        "🔗 **링크 방식: HTTP 서버(옵션)** &nbsp;&nbsp;"
-        "`cd /d D:\\Anaconda\\PDFs && python -m http.server 8010` 을 별도 터미널에서 실행하세요."
-    )
-    http_base = st.text_input(
-        "HTTP 서버 주소 (Drive 미사용 시)",
-        value="http://localhost:8010",
-        key="pdf_http_base",
-        help="다른 PC에서 열려면 http://<내PC IP>:8010 로 변경 (예: http://192.168.0.23:8010)"
-    )
-    base_http = http_base.rstrip("/")
-
     st.divider()
 
     # 2) 검색 조건
@@ -532,26 +505,25 @@ with tab_pdf:
     fn_like = st.text_input("파일명 필터(선택)", "", key="pdf_fn")
     limit_pdf = st.number_input("최대 결과", 1, 5000, 500, step=100, key="pdf_lim")
 
-    # 3) 검색 실행
+    # 3) 검색 실행 (Drive 인덱스 레코드만 대상으로)
     if st.button("검색", key="pdf_search") and kw_pdf.strip():
         with st.spinner("검색 중..."):
             df = search_regs(eng, kw_pdf, filename_like=fn_like, limit=int(limit_pdf))
+
+        # me(Drive file_id) 있는 행만 사용 → Drive 인덱싱 결과만 보여주기
+        if "me" in df.columns:
+            df = df[df["me"].astype(str).str.strip() != ""]
+
         st.write(f"결과: {len(df):,}건")
         if df.empty:
-            st.info("조건에 맞는 결과가 없습니다.")
+            st.info("조건에 맞는 결과가 없습니다. 먼저 [인덱스(Drive)]를 수행했는지 확인하세요.")
         else:
             kw_list = [k.strip() for k in kw_pdf.split() if k.strip()]
 
             def make_href(row):
-                rel_web = str(row["filename"]).replace("\\", "/")
+                fid = (row.get("me") or "").strip()
                 page = int(row["page"])
-                # me 컬럼에 Google Drive file_id가 있으면 Drive 미리보기
-                fid = (row.get("me") or "").strip() if isinstance(row.get("me"), str) else ""
-                if fid:
-                    return f"https://drive.google.com/file/d/{fid}/preview#page={page}"
-                # 없으면 로컬 HTTP 서버 링크
-                rel_enc = quote(rel_web, safe="/")
-                return f"{base_http}/{rel_enc}#page={page}"
+                return f"https://drive.google.com/file/d/{fid}/preview#page={page}"
 
             view = df[["filename", "page", "me"]].copy()
             view["open"] = df.apply(make_href, axis=1)
@@ -572,7 +544,7 @@ with tab_pdf:
                     key="pdf_preview_idx"
                 )
                 row = df.iloc[int(idx)]
-                st.write(f"**파일**: {row['filename']}  |  **페이지**: {int(row['page'])}  |  **ME(file_id)**: {row.get('me') or '-'}")
+                st.write(f"**파일**: {row['filename']}  |  **페이지**: {int(row['page'])}  |  **file_id**: {row.get('me') or '-'}")
                 st.markdown(highlight_html(row["text"], kw_list, width=200), unsafe_allow_html=True)
 
                 href = make_href(row)
@@ -581,4 +553,4 @@ with tab_pdf:
                     height=740,
                 )
     else:
-        st.caption("처음 사용 시 [인덱스(Drive)] 버튼으로 Google Drive 내 PDF를 인덱싱하세요. (로컬 폴더 방식도 가능)")
+        st.caption("먼저 [인덱스(Drive)] 버튼으로 Google Drive 내 PDF를 인덱싱하세요. 그 후 키워드로 검색할 수 있습니다.")
