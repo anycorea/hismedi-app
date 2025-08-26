@@ -431,14 +431,11 @@ with tab_main:
 
     cols_top = st.columns([2, 1, 1])
     with cols_top[0]:
-        kw = st.text_input("키워드 (공백=AND)", "", key="main_kw",
-                           help="여러 단어를 공백으로 구분하면 모든 단어가 포함된 행만 조회합니다.")
+        kw = st.text_input("키워드 (공백=AND)", "", key="main_kw")
     with cols_top[1]:
-        f_person = st.text_input("조사대상 (선택 · 포함 단어 1개)", "", key="main_filter_person",
-                                 help="예: 간호사, 의사, 원무 등. 입력하면 위 키워드와 AND로 결합됩니다.")
+        f_person = st.text_input("조사대상 (선택)", "", key="main_filter_person")
     with cols_top[2]:
-        f_place = st.text_input("조사장소 (선택 · 포함 단어 1개)", "", key="main_filter_place",
-                                help="예: 병동, 외래, 수술실, 약제부서 등. 입력하면 위 키워드와 AND로 결합됩니다.")
+        f_place = st.text_input("조사장소 (선택)", "", key="main_filter_place")
 
     mode = st.radio("검색 대상", ["전체 열", "특정 열 선택", "ME만"], horizontal=True, key="main_mode")
     if mode == "특정 열 선택":
@@ -452,16 +449,18 @@ with tab_main:
 
     limit = st.number_input("최대 행수", 1, 5000, 500, step=100, key="main_lim")
 
-    # 필터 단어들을 메인 키워드와 합쳐서 AND 검색 (공백 결합)
     combined_kw = " ".join([s for s in [kw, f_person, f_place] if str(s).strip()]).strip()
 
     if st.button("검색", key="main_search") and combined_kw:
         with st.spinner("검색 중..."):
             df = search_table_any(eng, main_table, combined_kw, columns=sel_cols, limit=limit)
         st.write(f"결과: {len(df):,}건")
-        st.dataframe(df, use_container_width=True, height=520) if not df.empty else st.info("결과 없음")
+        if df.empty:
+            st.info("결과 없음")
+        else:
+            st.dataframe(df, use_container_width=True, height=520)
     else:
-        st.caption("힌트: ‘조사대상/조사장소’에 단어를 넣으면 메인 키워드와 AND로 결합되어 더 정밀하게 검색됩니다.")
+        st.caption("힌트: 조사대상/조사장소 단어는 메인 키워드와 AND로 결합되어 검색됩니다.")
 
 # --------------------- QnA 조회 -----------------------------
 with tab_qna:
@@ -469,8 +468,8 @@ with tab_qna:
     qna_table = _pick_table(eng, ["qna_v", "qna_raw"]) or "qna_raw"
     kw_q = st.text_input("키워드 (공백=AND)", "", key="qna_kw")
     limit_q = st.number_input("최대 행수", 1, 5000, 500, step=100, key="qna_lim")
-    btn_q = st.button("검색", key="qna_search")
-    if btn_q and kw_q.strip():
+
+    if st.button("검색", key="qna_search") and kw_q.strip():
         with st.spinner("검색 중..."):
             df = search_table_any(eng, qna_table, kw_q, columns=None, limit=limit_q)
         st.write(f"결과: {len(df):,}건")
@@ -479,7 +478,7 @@ with tab_qna:
         else:
             st.dataframe(df, use_container_width=True, height=520)
     else:
-        st.caption("필요 시 PDF 탭에서 전체 지침을 본문 검색할 수 있습니다.")
+        st.caption("필요 시 ‘임시 SQL’ 탭에서 직접 SELECT 실행 가능합니다.")
 
 # --------------------- PDF 검색 (Drive + HTTP 링크 병행) -------
 with tab_pdf:
@@ -582,7 +581,4 @@ with tab_pdf:
                     height=740,
                 )
     else:
-
         st.caption("처음 사용 시 [인덱스(Drive)] 버튼으로 Google Drive 내 PDF를 인덱싱하세요. (로컬 폴더 방식도 가능)")
-        
-
