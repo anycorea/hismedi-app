@@ -423,13 +423,23 @@ DRIVE_FOLDER_ID = (st.secrets.get("DRIVE_FOLDER_ID") or os.getenv("DRIVE_FOLDER_
 # ------------------------------------------------------------
 tab_main, tab_qna, tab_pdf = st.tabs(["Main 조회", "QnA 조회", "PDF 검색"])
 
-# --------------------- Main 조회 ----------------------------
+# --------------------- Main 조회 (필터 포함) ----------------------------
 with tab_main:
     st.subheader("Main 조회")
     main_table = _pick_table(eng, ["main_v", "main_raw"]) or "main_raw"
     all_cols = _list_columns(eng, main_table)
 
-    kw = st.text_input("키워드 (공백=AND)", "", key="main_kw")
+    cols_top = st.columns([2, 1, 1])
+    with cols_top[0]:
+        kw = st.text_input("키워드 (공백=AND)", "", key="main_kw",
+                           help="여러 단어를 공백으로 구분하면 모든 단어가 포함된 행만 조회합니다.")
+    with cols_top[1]:
+        f_person = st.text_input("조사대상 (선택 · 포함 단어 1개)", "", key="main_filter_person",
+                                 help="예: 간호사, 의사, 원무 등. 입력하면 위 키워드와 AND로 결합됩니다.")
+    with cols_top[2]:
+        f_place = st.text_input("조사장소 (선택 · 포함 단어 1개)", "", key="main_filter_place",
+                                help="예: 병동, 외래, 수술실, 약제부서 등. 입력하면 위 키워드와 AND로 결합됩니다.")
+
     mode = st.radio("검색 대상", ["전체 열", "특정 열 선택", "ME만"], horizontal=True, key="main_mode")
     if mode == "특정 열 선택":
         sel_cols = st.multiselect("검색할 열 선택", options=all_cols, default=all_cols, key="main_cols")
@@ -439,19 +449,19 @@ with tab_main:
             st.info("ME 칼럼이 없어 첫 칼럼으로 대체합니다.")
     else:
         sel_cols = None
+
     limit = st.number_input("최대 행수", 1, 5000, 500, step=100, key="main_lim")
 
-    btn = st.button("검색", key="main_search")
-    if btn and kw.strip():
+    # 필터 단어들을 메인 키워드와 합쳐서 AND 검색 (공백 결합)
+    combined_kw = " ".join([s for s in [kw, f_person, f_place] if str(s).strip()]).strip()
+
+    if st.button("검색", key="main_search") and combined_kw:
         with st.spinner("검색 중..."):
-            df = search_table_any(eng, main_table, kw, columns=sel_cols, limit=limit)
+            df = search_table_any(eng, main_table, combined_kw, columns=sel_cols, limit=limit)
         st.write(f"결과: {len(df):,}건")
-        if df.empty:
-            st.info("결과 없음")
-        else:
-            st.dataframe(df, use_container_width=True, height=520)
+        st.dataframe(df, use_container_width=True, height=520) if not df.empty else st.info("결과 없음")
     else:
-        st.caption("여러 단어를 공백으로 구분하면 모든 단어를 포함한 행만 조회합니다.")
+        st.caption("힌트: ‘조사대상/조사장소’에 단어를 넣으면 메인 키워드와 AND로 결합되어 더 정밀하게 검색됩니다.")
 
 # --------------------- QnA 조회 -----------------------------
 with tab_qna:
@@ -575,3 +585,4 @@ with tab_pdf:
 
         st.caption("처음 사용 시 [인덱스(Drive)] 버튼으로 Google Drive 내 PDF를 인덱싱하세요. (로컬 폴더 방식도 가능)")
         
+
