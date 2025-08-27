@@ -514,55 +514,62 @@ with tab_pdf:
         # Drive 인덱싱 결과만 (me=file_id 존재)
         if "me" in df.columns:
             df = df[df["me"].astype(str).str.strip() != ""]
+        df = df.sort_values(["filename", "page"], kind="stable").reset_index(drop=True)
 
         st.write(f"결과: {len(df):,}건")
         if df.empty:
             st.info("조건에 맞는 결과가 없습니다. 먼저 [인덱스(Drive)]를 수행했는지 확인하세요.")
         else:
-            # 정렬 고정
-            df = df.sort_values(["filename", "page"], kind="stable").reset_index(drop=True)
-
-            # --- 링크 유틸 ---
-            def click_url(fid: str, page: int) -> str:
+            # ---- 유틸 ----
+            def view_url(fid: str, page: int) -> str:
                 fid = (fid or "").strip()
-                return f"https://drive.google.com/file/d/{fid}/view#page={int(page)}"      # 새 탭(원문 열기)
-            def iframe_url(fid: str, page: int) -> str:
+                return f"https://drive.google.com/file/d/{fid}/view#page={int(page)}"      # 새 탭(원문)
+            def preview_url(fid: str, page: int) -> str:
                 fid = (fid or "").strip()
-                return f"https://drive.google.com/file/d/{fid}/preview#page={int(page)}"   # 임베드 미리보기
+                return f"https://drive.google.com/file/d/{fid}/preview#page={int(page)}"   # iframe
 
-            # --- 결과 표: Data Editor로 표시(행 선택 → 미리보기 갱신) ---
-            table_df = df[["filename", "page", "me"]].copy()
-            table_df.rename(columns={"filename": "파일명", "page": "페이지", "me": "file_id"}, inplace=True)
-            table_df["열기"] = df.apply(lambda r: click_url(r["me"], int(r["page"])), axis=1)
+            # ---- 결과 표: '파일명'을 클릭하면 쿼리파람(sfn, spg)로 선택 반영 (새창 X) ----
+            tbl = df[["filename", "page", "me"]].copy()
+            tbl.rename(columns={"filename": "파일명", "page": "페이지", "me": "file_id"}, inplace=True)
 
-            st.caption("표에서 원하는 **행(파일명)** 을 클릭하면 아래 미리보기가 즉시 갱신됩니다.")
-            st.data_editor(
-                table_df[["파일명", "페이지", "열기"]],
-                hide_index=True,
-                use_container_width=True,
-                disabled=True,  # 편집 불가 (선택만)
-                column_config={
-                    "열기": st.column_config.LinkColumn("열기", display_text="열기"),
-                },
-                key="pdf_results_table",
+            # 파일명 클릭 → 같은 페이지에서 쿼리파람만 변경 (스트림릿은 재실행되며 아래 미리보기 갱신)
+            tbl["파일명"] = tbl.apply(
+                lambda r: f'<a href="?sfn={quote(str(r["파일명"]))}&spg={int(r["페이지"])}">{html.escape(str(r["파일명"]))}</a>',
+                axis=1,
             )
-
-            # 선택된 행 인덱스 읽기 (없으면 0)
-            sel_rows = (
-                st.session_state.get("pdf_results_table", {})
-                .get("selection", {})
-                .get("rows", [])
+            # 원문 열기(새 탭)
+            tbl["열기"] = tbl.apply(
+                lambda r: f'<a href="{view_url(r["file_id"], int(r["페이지"]))}" target="_blank" rel="noopener noreferrer">열기</a>',
+                axis=1,
             )
-            sel_idx = int(sel_rows[0]) if sel_rows else 0
-            sel_idx = max(0, min(sel_idx, len(df) - 1))  # 안전 가드
+            st.write(tbl[["파일명", "페이지", "열기"]].to_html(index=False, escape=False), unsafe_allow_html=True)
 
-            # 선택 레코드로 미리보기 표시
-            row = df.iloc[sel_idx]
+            # ---- 아래 미리보기: 쿼리파람(sfn, spg)으로 선택된 행을 사용 ----
+            q = st.query_params
+            sel_file = q.get("sfn")
+            sel_page = q.get("spg")
+            if sel_file is not None:
+                # 파일+페이지가 정확히 일치하는 첫 행
+                mask = (df["filename"] == sel_file)
+                if sel_page is not None:
+                    try:
+                        sel_page = int(sel_page)
+                        mask &= (df["page"] == sel_page)
+                    except Exception:
+                        pass
+                if not mask.any():
+                    sel_idx = 0
+                else:
+                    sel_idx = df[mask].index[0]
+            else:
+                sel_idx = 0  # 기본은 첫 행
+
+            row = df.iloc[int(sel_idx)]
             fid = (row.get("me") or "").strip()
             sel_file = row["filename"]
             sel_page = int(row["page"])
 
-            # --- 텍스트 스니펫 + 문서 임베드 ---
+            # ---- 텍스트 미리보기 & 문서 보기 ----
             kw_list = [k.strip() for k in kw_pdf.split() if k.strip()]
             st.caption("텍스트 미리보기 & 문서 보기 (선택한 1건)")
             st.write(f"**파일**: {sel_file}  |  **페이지**: {sel_page}  |  **file_id**: {fid or '-'}")
@@ -571,7 +578,7 @@ with tab_pdf:
                 unsafe_allow_html=True
             )
             st.components.v1.html(
-                f'<iframe src="{iframe_url(fid, sel_page)}" style="width:100%; height:720px;" frameborder="0"></iframe>',
+                f'<iframe src="{preview_url(fid, sel_page)}" style="width:100%; height:720px;" frameborder="0"></iframe>',
                 height=740,
             )
     else:
