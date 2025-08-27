@@ -585,11 +585,10 @@ with tab_main:
         else:
             st.session_state["main_results"] = _df.to_dict("records")
 
-    # ===== 하이라이트 규칙 설정 =====
-    # - '조사항목' 컬럼(이름에 '조사항목' 또는 '항목' 포함)을 파란색 진하게
-    # - '등급' 컬럼 값이 '필수'이면 빨간색 진하게
+    # ===== 하이라이트 규칙 =====
+    # - '조사항목' 컬럼의 값 → 파란색 진하게
+    # - '등급' 값이 '필수' → 빨간색 진하게
     def _find_item_col(cols):
-        # 우선순위: 정확히 '조사항목' -> 이름에 '조사항목' 포함 -> '항목' 포함
         lowers = [(c, str(c).lower()) for c in cols]
         for c, lc in lowers:
             if lc == "조사항목":
@@ -603,7 +602,6 @@ with tab_main:
         return None
 
     def _find_grade_col(cols):
-        # 우선순위: 정확히 '등급' -> 이름에 '등급' 포함 -> '필수'/'필수여부' 포함
         lowers = [(c, str(c).lower()) for c in cols]
         for c, lc in lowers:
             if lc == "등급":
@@ -619,7 +617,23 @@ with tab_main:
     ITEM_COL = _find_item_col(all_cols)
     GRADE_COL = _find_grade_col(all_cols)
 
-    # HTML/CSS 공통 스타일 (카드형/표형 모두 사용)
+    # 가장 긴 컬럼(요청): '조사기준의 이해와 조사방법1' 탐지
+    def _find_long_col(cols):
+        target = "조사기준의 이해와 조사방법1"
+        # 정확 일치 우선
+        for c in cols:
+            if str(c).strip() == target:
+                return c
+        # 포함(혹시 표기 변형)
+        for c in cols:
+            s = str(c)
+            if "조사기준" in s and "조사방법" in s:
+                return c
+        return None
+
+    LONG_COL = _find_long_col(all_cols)
+
+    # 공통 스타일
     st.markdown("""
 <style>
 .hl-item{ color:#0d47a1; font-weight:800; }          /* 진한 파랑 */
@@ -627,14 +641,17 @@ with tab_main:
 
 /* 카드 스타일 */
 .card{border:1px solid #e9ecef;border-radius:10px;padding:12px 14px;margin:8px 0;background:#fff}
-.card h4{margin:0 0 8px 0;font-size:16px;line-height:1.3;word-break:break-all}
-.card .row{margin:4px 0;font-size:13px;color:#333;word-break:break-all}
+.card h4{margin:0 0 8px 0;font-size:16px;line-height:1.3;word-break:break-word}
+.card .row{margin:4px 0;font-size:13px;color:#333;word-break:break-word}
 .card .lbl{display:inline-block;min-width:96px;color:#6c757d}
 
-/* 표형(HTML 테이블) 스타일 */
+/* 표형(HTML 테이블) 스타일: 고정 레이아웃 + 줄바꿈 보장 */
 .table-wrap{ overflow-x:auto; }
-.table-wrap table{ width:100%; border-collapse:collapse; font-size:13px; background:#fff; }
-.table-wrap th, .table-wrap td{ border:1px solid #e9ecef; padding:8px 10px; text-align:left; vertical-align:top; }
+.table-wrap table{ width:100%; border-collapse:collapse; background:#fff; table-layout:fixed; }
+.table-wrap th, .table-wrap td{
+  border:1px solid #e9ecef; padding:8px 10px; text-align:left; vertical-align:top;
+  font-size:13px; word-break:break-word; overflow-wrap:anywhere; white-space:normal;
+}
 .table-wrap th{ background:#f8f9fa; font-weight:700; }
 </style>
     """, unsafe_allow_html=True)
@@ -642,14 +659,13 @@ with tab_main:
     # 텍스트 이스케이프 + 하이라이트 적용 유틸
     def _fmt_cell(colname: str, value) -> str:
         s = html.escape("" if value is None else str(value))
-        # '필수' 인지 판별 (공백/대소문자 무시)
         def _is_required(val: str) -> bool:
             t = (val or "").strip().replace(" ", "").lower()
             return t in ("필수", "必須")
-        # 조사항목 컬럼 → 파랑 굵게
+        # 조사항목 → 파랑
         if ITEM_COL and colname == ITEM_COL and s:
             return f'<span class="hl-item">{s}</span>'
-        # 등급 컬럼이면서 값이 필수 → 빨강 굵게
+        # 등급이 필수 → 빨강
         if GRADE_COL and colname == GRADE_COL and _is_required(s):
             return f'<span class="hl-required">{s}</span>'
         return s
@@ -657,7 +673,6 @@ with tab_main:
     # 카드 렌더러
     def render_cards(df_: pd.DataFrame):
         for _, r in df_.iterrows():
-            # 타이틀은 첫 컬럼 값
             title_val = r[df_.columns[0]]
             title_html = _fmt_cell(df_.columns[0], title_val)
             rows_html = []
@@ -666,18 +681,53 @@ with tab_main:
                 rows_html.append(f'<div class="row"><span class="lbl">{html.escape(str(c))}</span> {v_html}</div>')
             st.markdown(f'<div class="card"><h4>{title_html}</h4>' + "".join(rows_html) + '</div>', unsafe_allow_html=True)
 
-    # 표형(강조표) 렌더러: HTML 테이블로 렌더(색 강조 지원)
+    # 표형 렌더러: LONG_COL/ITEM_COL 너비 우선 → 나머지 균등
     def render_table(df_: pd.DataFrame):
+        cols = list(df_.columns)
+        n = len(cols)
+
+        # 기본 퍼센트
+        long_pct_default = 44
+        item_pct_default = 26
+
+        # 실제 존재하는 고정 컬럼 수에 따라 가변 배분
+        fixed = {}
+        if LONG_COL in cols:
+            fixed[LONG_COL] = long_pct_default
+        if ITEM_COL in cols:
+            # LONG_COL과 중복일 일단 없음, 그래도 방지
+            if ITEM_COL != LONG_COL:
+                fixed[ITEM_COL] = item_pct_default
+
+        fixed_sum = sum(fixed.values())
+        others = [c for c in cols if c not in fixed]
+        other_pct = 0
+        if others:
+            other_pct = max(0, (100 - fixed_sum) / len(others))
+
         # 헤더
-        header_cells = "".join(f"<th>{html.escape(str(c))}</th>" for c in df_.columns)
+        header_cells = "".join(f"<th>{html.escape(str(c))}</th>" for c in cols)
+
+        # colgroup(너비 지정) 생성
+        col_styles = []
+        for c in cols:
+            if c in fixed:
+                col_styles.append(f'<col style="width:{fixed[c]}%;">')
+            else:
+                # 나머지는 균등 분배 + 최소폭 보장
+                col_styles.append(f'<col style="width:{other_pct:.2f}%; min-width:140px;">')
+        colgroup_html = f"<colgroup>{''.join(col_styles)}</colgroup>"
+
         # 바디
         body_rows = []
         for _, r in df_.iterrows():
-            cells = "".join(f"<td>{_fmt_cell(c, r[c])}</td>" for c in df_.columns)
+            cells = "".join(f"<td>{_fmt_cell(c, r[c])}</td>" for c in cols)
             body_rows.append(f"<tr>{cells}</tr>")
+
         table_html = f"""
 <div class="table-wrap">
   <table>
+    {colgroup_html}
     <thead><tr>{header_cells}</tr></thead>
     <tbody>
       {''.join(body_rows)}
@@ -694,9 +744,9 @@ with tab_main:
 
         view_mode = st.radio("보기 형식", ["카드형(모바일)", "표형"], horizontal=True, key="main_view_mode")
         if view_mode == "표형":
-            render_table(df)      # 색 하이라이트 적용되는 HTML 표
+            render_table(df)      # 너비 조정/색 하이라이트 적용
         else:
-            render_cards(df)      # 카드에서 하이라이트 적용
+            render_cards(df)      # 카드에서 색 하이라이트 적용
     else:
         st.caption("힌트: 조사대상/조사장소 단어는 메인 키워드와 AND로 결합되어 검색됩니다.")
 
@@ -956,6 +1006,7 @@ with tab_pdf:
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
         st.caption("먼저 키워드를 입력하고 **키보드 Enter**를 누르면 결과가 표시됩니다.")
+
 
 
 
