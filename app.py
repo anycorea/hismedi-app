@@ -513,7 +513,6 @@ with tab_pdf:
 
         if "me" in _df.columns:
             _df = _df[_df["me"].astype(str).str.strip() != ""]
-
         _df = _df.sort_values(["filename", "page"], kind="stable").reset_index(drop=True)
 
         if _df.empty:
@@ -533,24 +532,10 @@ with tab_pdf:
 
         st.write(f"결과: {len(df):,}건")
 
-        # ---- 링크/미리보기 URL 유틸
+        # ---- 유틸
         def view_url(fid: str, page: int) -> str:
             fid = (fid or "").strip()
-            return f"https://drive.google.com/file/d/{fid}/view#page={int(page)}"   # 새 탭 원문
-
-        def pdfjs_viewer_url(fid: str, page: int) -> str:
-            """
-            pdf.js 공식 뷰어 사용.
-            Drive 다운로드 URL을 file 인자로 넘기고 #page 로 원하는 페이지를 지정.
-            캐시버스터를 붙여 같은 파일 내 페이지 전환도 보장.
-            """
-            from urllib.parse import quote
-            import time as _t
-            fid = (fid or "").strip()
-            bust = str(int(_t.time()))
-            pdf_url = f"https://drive.google.com/uc?export=download&id={fid}&r={bust}"
-            base = "https://mozilla.github.io/pdf.js/web/viewer.html"
-            return f"{base}?file={quote(pdf_url, safe='')}" + f"#page={int(page)}&zoom=page-width"
+            return f"https://drive.google.com/file/d/{fid}/view#page={int(page)}"
 
         # ---- 파일명/페이지 버튼 테이블
         st.caption("표에서 **파일명 버튼** 또는 **페이지 버튼**을 클릭하면 아래 미리보기가 즉시 바뀝니다.")
@@ -564,16 +549,10 @@ with tab_pdf:
 
         for i, row in df.iterrows():
             c1, c2, c3 = st.columns([7, 1, 1])
-
-            # 파일명 버튼 (내부 선택만 변경)
             if c1.button(str(row["filename"]), key=f"pick_file_{i}"):
                 st.session_state["pdf_sel_idx"] = int(i)
-
-            # 페이지 버튼 (내부 선택만 변경)
             if c2.button(str(int(row["page"])), key=f"pick_page_{i}"):
                 st.session_state["pdf_sel_idx"] = int(i)
-
-            # '열기' 박스형 버튼
             c3.markdown(
                 f'<a href="{view_url(row["me"], int(row["page"]))}" target="_blank" rel="noopener noreferrer" '
                 f'style="display:inline-block;padding:6px 12px;border:1px solid #ddd;border-radius:8px;'
@@ -581,26 +560,78 @@ with tab_pdf:
                 unsafe_allow_html=True
             )
 
-        # ---- 현재 선택된 행으로 미리보기
+        # ---- 현재 선택된 행
         sel_idx = int(st.session_state.get("pdf_sel_idx", 0))
         sel_idx = max(0, min(sel_idx, len(df) - 1))
         sel = df.iloc[sel_idx]
-
         fid = (sel.get("me") or "").strip()
         sel_file = sel["filename"]
         sel_page = int(sel["page"])
 
         st.caption("텍스트 미리보기 & 문서 보기 (선택한 1건)")
         st.write(f"**파일**: {sel_file}  |  **페이지**: {sel_page}  |  **file_id**: {fid or '-'}")
-        st.markdown(
-            highlight_html(sel["text"], kw_list, width=200),
-            unsafe_allow_html=True
-        )
+        st.markdown(highlight_html(sel["text"], kw_list, width=200), unsafe_allow_html=True)
 
-        # pdf.js 뷰어로 임베드 (페이지 점프 확실)
-        st.components.v1.html(
-            f'<iframe src="{pdfjs_viewer_url(fid, sel_page)}" width="100%" height="720" style="border:0;" allow="fullscreen"></iframe>',
-            height=740,
-        )
+        # ---- PDF 바이트 직접 내려받아(pdf bytes) pdf.js로 렌더 (CORS/임베드 이슈 우회)
+        try:
+            import base64
+            # Google Drive에서 파일 바이트 가져오기 (공개/링크공유 파일 기준)
+            pdf_bytes = _drive_download_pdf(fid, DRIVE_API_KEY)  # 이미 app.py 상단에 정의된 함수
+            b64 = base64.b64encode(pdf_bytes).decode("ascii")
+
+            viewer_html = f"""
+<div id="pdf-root" style="width:100%;height:720px;background:#fafafa;overflow:auto;">
+  <canvas id="pdf-canvas" style="display:block;margin:0 auto;"></canvas>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+  // pdf.js 워커 설정
+  if (window['pdfjsLib']) {{
+    pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+  }}
+
+  // base64 → Uint8Array
+  function b64ToUint8Array(b64) {{
+    const raw = atob(b64), len = raw.length;
+    const arr = new Uint8Array(len);
+    for (let i=0; i<len; i++) arr[i] = raw.charCodeAt(i);
+    return arr;
+  }}
+
+  const pdfData = b64ToUint8Array("{b64}");
+  const targetPage = {sel_page};   // 1-based
+
+  pdfjsLib.getDocument({{ data: pdfData }}).promise.then(function(pdf) {{
+    const pageNo = Math.min(Math.max(1, targetPage), pdf.numPages);
+    return pdf.getPage(pageNo).then(function(page) {{
+      const container = document.getElementById('pdf-root');
+      const canvas = document.getElementById('pdf-canvas');
+      const ctx = canvas.getContext('2d');
+
+      // 컨테이너 폭에 맞춰 자동 스케일
+      const initialViewport = page.getViewport({{scale: 1}});
+      const scale = container.clientWidth / initialViewport.width;
+      const viewport = page.getViewport({{scale: scale}});
+
+      canvas.width  = viewport.width;
+      canvas.height = viewport.height;
+
+      page.render({{
+        canvasContext: ctx,
+        viewport: viewport
+      }});
+    }});
+  }}).catch(function(e) {{
+    const el = document.getElementById('pdf-root');
+    el.innerHTML = '<div style="padding:16px;color:#d6336c;">PDF 미리보기를 표시할 수 없습니다.</div>';
+    console.error(e);
+  }});
+</script>
+"""
+            st.components.v1.html(viewer_html, height=740)
+        except Exception as e:
+            st.warning("PDF 미리보기를 불러오지 못했습니다. (네트워크/권한 문제일 수 있어요)")
+            st.exception(e)
+
     else:
         st.caption("먼저 [검색]을 실행해 결과를 보신 뒤, 파일명/페이지 버튼을 클릭하면 아래 미리보기가 갱신됩니다.")
