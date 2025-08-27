@@ -595,17 +595,23 @@ with tab_pdf:
             b64 = base64.b64encode(pdf_bytes).decode("ascii")
             cache[fid] = b64
 
-        # ---- 미리보기 컨트롤 (페이지/줌)
+        # ---- 미리보기 컨트롤 (페이지/줌/높이)
         page_view = st.number_input(
             "미리보기 페이지", 1, 9999, int(sel_page), step=1, key=f"pv_page_{fid}"
         )
         zoom_pct = st.slider(
-            "줌(%)", 50, 300, 100, step=10, key=f"pv_zoom_{fid}"
+            "줌(%)", 30, 200, 80, step=5, key=f"pv_zoom_{fid}"   # 기본 80%
+        )
+        height_px = st.slider(
+            "미리보기 높이(px)", 480, 1200, 640, step=40, key=f"pv_h_{fid}"
         )
 
         # ---- pdf.js로 직접 렌더 (선택 페이지로 정확히 이동)
+        #     기본 화면이 너무 넓을 때 과도하게 커지지 않도록 최대 기본 폭(900px) 제한
+        max_fit_width = 900
+
         viewer_html = f"""
-<div id="pdf-root" style="width:100%;height:720px;background:#fafafa;overflow:auto;">
+<div id="pdf-root" style="width:100%;height:{height_px}px;background:#fafafa;overflow:auto;">
   <canvas id="pdf-canvas" style="display:block;margin:0 auto;background:#fff;box-shadow:0 0 4px rgba(0,0,0,0.08)"></canvas>
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
@@ -626,6 +632,7 @@ with tab_pdf:
   const pdfData    = b64ToUint8Array("{b64}");
   const targetPage = {int(page_view)};          // 1-based
   const zoomScale  = {float(zoom_pct)}/100.0;   // 1.0 = 100%
+  const maxFitW    = {int(max_fit_width)};      // 기본 폭 제한
 
   pdfjsLib.getDocument({{ data: pdfData }}).promise.then(function(pdf) {{
     const pageNo = Math.min(Math.max(1, targetPage), pdf.numPages);
@@ -634,10 +641,11 @@ with tab_pdf:
       const canvas = document.getElementById('pdf-canvas');
       const ctx = canvas.getContext('2d');
 
-      // 컨테이너 폭에 맞춰 기본 스케일 산출 + 줌 반영
+      // 컨테이너 폭과 최대 기본 폭 중 작은 값을 사용해서 너무 커지지 않도록 제한
       const initialViewport = page.getViewport({{scale: 1}});
-      const fitScale = container.clientWidth / initialViewport.width;
-      const viewport  = page.getViewport({{scale: fitScale * zoomScale}});
+      const fitWidth   = Math.min(container.clientWidth, maxFitW);
+      const fitScale   = fitWidth / initialViewport.width;
+      const viewport   = page.getViewport({{scale: fitScale * zoomScale}});
 
       canvas.width  = Math.floor(viewport.width);
       canvas.height = Math.floor(viewport.height);
@@ -654,7 +662,7 @@ with tab_pdf:
   }});
 </script>
 """
-        st.components.v1.html(viewer_html, height=740)
+        st.components.v1.html(viewer_html, height=height_px + 20)
 
     else:
         st.caption("먼저 [검색]을 실행해 결과를 보신 뒤, 파일명/페이지 버튼을 클릭하면 아래 미리보기가 갱신됩니다.")
