@@ -428,51 +428,39 @@ with tab_main:
     # 큰 제목 제거
     st.write("")
 
+    # 폼 제출 버튼 전역 숨김 (이 탭 포함 모든 폼의 Submit 버튼이 안 보이게)
+    st.markdown("<style>div[data-testid='stFormSubmitButton']{display:none!important;}</style>", unsafe_allow_html=True)
+
     main_table = _pick_table(eng, ["main_v", "main_raw"]) or "main_raw"
     all_cols = _list_columns(eng, main_table)
 
-    cols_top = st.columns([2, 1, 1])
-    with cols_top[0]:
-        kw = st.text_input("키워드 (공백=AND)", "", key="main_kw")
-    with cols_top[1]:
-        f_person = st.text_input("조사대상 (선택)", "", key="main_filter_person")
-    with cols_top[2]:
-        f_place = st.text_input("조사장소 (선택)", "", key="main_filter_place")
+    # --- Enter로 제출되는 폼 ---
+    with st.form("main_search_form", clear_on_submit=False):
+        cols_top = st.columns([2, 1, 1])
+        with cols_top[0]:
+            kw = st.text_input("키워드 (공백=AND)", "", key="main_kw")
+        with cols_top[1]:
+            f_person = st.text_input("조사대상 (선택)", "", key="main_filter_person")
+        with cols_top[2]:
+            f_place = st.text_input("조사장소 (선택)", "", key="main_filter_place")
 
-    mode = st.radio("검색 대상", ["전체 열", "특정 열 선택", "ME만"], horizontal=True, key="main_mode")
-    if mode == "특정 열 선택":
-        sel_cols = st.multiselect("검색할 열 선택", options=all_cols, default=all_cols, key="main_cols")
-    elif mode == "ME만":
-        sel_cols = ["ME"] if "ME" in all_cols else all_cols[:1]
-        if "ME" not in all_cols:
-            st.info("ME 칼럼이 없어 첫 칼럼으로 대체합니다.")
-    else:
-        sel_cols = None
+        mode = st.radio("검색 대상", ["전체 열", "특정 열 선택", "ME만"], horizontal=True, key="main_mode")
+        if mode == "특정 열 선택":
+            sel_cols = st.multiselect("검색할 열 선택", options=all_cols, default=all_cols, key="main_cols")
+        elif mode == "ME만":
+            sel_cols = ["ME"] if "ME" in all_cols else all_cols[:1]
+            if "ME" not in all_cols:
+                st.info("ME 칼럼이 없어 첫 칼럼으로 대체합니다.")
+        else:
+            sel_cols = None
 
-    combined_kw = " ".join([s for s in [kw, f_person, f_place] if str(s).strip()]).strip()
-    FIXED_LIMIT = 1000  # 내부 고정 제한
+        combined_kw = " ".join([s for s in [kw, f_person, f_place] if str(s).strip()]).strip()
+        FIXED_LIMIT = 1000  # 내부 고정 제한
 
-    # 카드 렌더 유틸
-    def render_cards(df_):
-        st.markdown("""
-<style>
-.card{border:1px solid #e9ecef;border-radius:10px;padding:12px 14px;margin:8px 0;background:#fff}
-.card h4{margin:0 0 8px 0;font-size:16px;line-height:1.3}
-.card .row{margin:4px 0;font-size:13px;color:#333}
-.card .lbl{display:inline-block;min-width:96px;color:#6c757d}
-</style>
-        """, unsafe_allow_html=True)
-        import html as _html
-        for _, r in df_.iterrows():
-            rows = []
-            for c in df_.columns:
-                v = _html.escape(str(r[c]))
-                rows.append(f'<div class="row"><span class="lbl">{_html.escape(str(c))}</span> {v}</div>')
-            title = _html.escape(str(r[df_.columns[0]]))
-            st.markdown(f'<div class="card"><h4>{title}</h4>' + "".join(rows) + '</div>', unsafe_allow_html=True)
+        submitted_main = st.form_submit_button("검색")  # 화면에는 숨김 처리됨
 
-    # 검색 실행 → 세션에 저장
-    if st.button("검색", key="main_search") and combined_kw:
+    # 폼 제출 시 검색 실행 → 세션에 저장
+    if submitted_main and combined_kw:
         with st.spinner("검색 중..."):
             _df = search_table_any(eng, main_table, combined_kw, columns=sel_cols, limit=FIXED_LIMIT)
         if _df.empty:
@@ -486,7 +474,27 @@ with tab_main:
         df = pd.DataFrame(st.session_state["main_results"])
         st.write(f"결과: {len(df):,}건")
 
+        # --- 카드/표 전환 ---
         view_mode = st.radio("보기 형식", ["카드형(모바일)", "표형"], horizontal=True, key="main_view_mode")
+
+        def render_cards(df_):
+            st.markdown("""
+<style>
+.card{border:1px solid #e9ecef;border-radius:10px;padding:12px 14px;margin:8px 0;background:#fff}
+.card h4{margin:0 0 8px 0;font-size:16px;line-height:1.3}
+.card .row{margin:4px 0;font-size:13px;color:#333}
+.card .lbl{display:inline-block;min-width:96px;color:#6c757d}
+</style>
+            """, unsafe_allow_html=True)
+            import html as _html
+            for _, r in df_.iterrows():
+                rows = []
+                for c in df_.columns:
+                    v = _html.escape(str(r[c]))
+                    rows.append(f'<div class="row"><span class="lbl">{_html.escape(str(c))}</span> {v}</div>')
+                title = _html.escape(str(r[df_.columns[0]]))
+                st.markdown(f'<div class="card"><h4>{title}</h4>' + "".join(rows) + '</div>', unsafe_allow_html=True)
+
         if view_mode == "표형":
             st.dataframe(df, use_container_width=True, height=520)
         else:
@@ -499,31 +507,19 @@ with tab_qna:
     # 큰 제목 제거
     st.write("")
 
+    # 폼 제출 버튼 전역 숨김
+    st.markdown("<style>div[data-testid='stFormSubmitButton']{display:none!important;}</style>", unsafe_allow_html=True)
+
     qna_table = _pick_table(eng, ["qna_v", "qna_raw"]) or "qna_raw"
-    kw_q = st.text_input("키워드 (공백=AND)", "", key="qna_kw")
     FIXED_LIMIT = 1000  # 내부 고정 제한
 
-    # 카드 렌더 유틸
-    def render_cards_qna(df_):
-        st.markdown("""
-<style>
-.card{border:1px solid #e9ecef;border-radius:10px;padding:12px 14px;margin:8px 0;background:#fff}
-.card h4{margin:0 0 8px 0;font-size:16px;line-height:1.3}
-.card .row{margin:4px 0;font-size:13px;color:#333}
-.card .lbl{display:inline-block;min-width:96px;color:#6c757d}
-</style>
-        """, unsafe_allow_html=True)
-        import html as _html
-        for _, r in df_.iterrows():
-            rows = []
-            for c in df_.columns:
-                v = _html.escape(str(r[c]))
-                rows.append(f'<div class="row"><span class="lbl">{_html.escape(str(c))}</span> {v}</div>')
-            title = _html.escape(str(r[df_.columns[0]]))
-            st.markdown(f'<div class="card"><h4>{title}</h4>' + "".join(rows) + '</div>', unsafe_allow_html=True)
+    # --- Enter로 제출되는 폼 ---
+    with st.form("qna_search_form", clear_on_submit=False):
+        kw_q = st.text_input("키워드 (공백=AND)", "", key="qna_kw")
+        submitted_qna = st.form_submit_button("검색")  # 화면에는 숨김
 
-    # 검색 실행 → 세션에 저장
-    if st.button("검색", key="qna_search") and kw_q.strip():
+    # 제출 시 검색 → 세션 저장
+    if submitted_qna and kw_q.strip():
         with st.spinner("검색 중..."):
             _df = search_table_any(eng, qna_table, kw_q, columns=None, limit=FIXED_LIMIT)
         if _df.empty:
@@ -532,12 +528,31 @@ with tab_qna:
         else:
             st.session_state["qna_results"] = _df.to_dict("records")
 
-    # 세션 결과 렌더링(뷰 전환해도 유지)
+    # 결과 렌더링
     if "qna_results" in st.session_state and st.session_state["qna_results"]:
         df = pd.DataFrame(st.session_state["qna_results"])
         st.write(f"결과: {len(df):,}건")
 
         view_mode = st.radio("보기 형식", ["카드형(모바일)", "표형"], horizontal=True, key="qna_view_mode")
+
+        def render_cards_qna(df_):
+            st.markdown("""
+<style>
+.card{border:1px solid #e9ecef;border-radius:10px;padding:12px 14px;margin:8px 0;background:#fff}
+.card h4{margin:0 0 8px 0;font-size:16px;line-height:1.3}
+.card .row{margin:4px 0;font-size:13px;color:#333}
+.card .lbl{display:inline-block;min-width:96px;color:#6c757d}
+</style>
+            """, unsafe_allow_html=True)
+            import html as _html
+            for _, r in df_.iterrows():
+                rows = []
+                for c in df_.columns:
+                    v = _html.escape(str(r[c]))
+                    rows.append(f'<div class="row"><span class="lbl">{_html.escape(str(c))}</span> {v}</div>')
+                title = _html.escape(str(r[df_.columns[0]]))
+                st.markdown(f'<div class="card"><h4>{title}</h4>' + "".join(rows) + '</div>', unsafe_allow_html=True)
+
         if view_mode == "표형":
             st.dataframe(df, use_container_width=True, height=520)
         else:
@@ -547,6 +562,9 @@ with tab_qna:
 with tab_pdf:
     # 큰 제목 제거 + 상단 라인 제거
     st.write("")
+
+    # 폼 제출 버튼 전역 숨김
+    st.markdown("<style>div[data-testid='stFormSubmitButton']{display:none!important;}</style>", unsafe_allow_html=True)
 
     # 인덱스 버튼: 최초 접속 시에만 노출
     drive_done = st.session_state.get("drive_index_done", False)
@@ -562,13 +580,15 @@ with tab_pdf:
                     st.session_state["drive_index_done"] = True
                     st.rerun()
 
-    # 2) 검색 조건 (최대결과 입력 제거)
-    kw_pdf  = st.text_input("키워드 (공백=AND)", "", key="pdf_kw")
-    fn_like = st.text_input("파일명 필터(선택)", "", key="pdf_fn")
+    # 2) 검색 조건 (Enter 제출 폼, 최대결과 입력 제거)
     FIXED_LIMIT = 1000  # 내부 고정 제한
+    with st.form("pdf_search_form", clear_on_submit=False):
+        kw_pdf  = st.text_input("키워드 (공백=AND)", "", key="pdf_kw")
+        fn_like = st.text_input("파일명 필터(선택)", "", key="pdf_fn")
+        submitted_pdf = st.form_submit_button("검색")  # 화면에는 숨김
 
-    # 3-A) [검색] → 결과를 세션에 저장
-    if st.button("검색", key="pdf_search") and kw_pdf.strip():
+    # 제출 시 검색 → 세션 저장
+    if submitted_pdf and kw_pdf.strip():
         with st.spinner("검색 중..."):
             _df = search_regs(eng, kw_pdf, filename_like=fn_like, limit=FIXED_LIMIT)
 
@@ -586,21 +606,19 @@ with tab_pdf:
             st.session_state["pdf_sel_idx"] = 0
             st.session_state["pdf_kw_list"] = [k.strip() for k in kw_pdf.split() if k.strip()]
 
-    # 3-B) 결과 렌더링
+    # 3) 결과 렌더링 (이하 기존과 동일)
     if "pdf_results" in st.session_state and st.session_state["pdf_results"]:
         df = pd.DataFrame(st.session_state["pdf_results"])
         kw_list = st.session_state.get("pdf_kw_list", [])
         st.write(f"결과: {len(df):,}건")
 
-        # 링크 유틸
         def view_url(fid: str, page: int) -> str:
             fid = (fid or "").strip()
             return f"https://drive.google.com/file/d/{fid}/view#page={int(page)}"
 
-        # 보기 형식 선택 (모바일 기본: 카드형)
+        # 보기 형식 선택
         view_mode_pdf = st.radio("보기 형식", ["카드형(모바일)", "표형(간단)"], horizontal=True, key="pdf_view_mode")
 
-        # ---- 표형(간단) : 기존 3열 헤더
         if view_mode_pdf.endswith("간단)"):
             st.caption("파일명/페이지 버튼을 클릭하면 아래 미리보기가 바뀝니다.")
             hdr = st.columns([7, 1, 1])
@@ -623,8 +641,6 @@ with tab_pdf:
                     f'background:#f8f9fa;text-decoration:none;color:#0d6efd;font-weight:600;">열기</a>',
                     unsafe_allow_html=True
                 )
-
-        # ---- 카드형(모바일) : 각 행을 카드로 세로 배치
         else:
             st.markdown("""
 <style>
@@ -650,10 +666,8 @@ with tab_pdf:
                 col1, = st.columns(1)
                 with col1:
                     st.markdown(f'<div class="pcard"><div class="title">{fname}</div>', unsafe_allow_html=True)
-
                     if st.button("이 파일 미리보기", key=f"pick_file_card_{i}", use_container_width=True):
                         st.session_state["pdf_sel_idx"] = int(i)
-
                     cA, cB = st.columns(2)
                     with cA:
                         if st.button(f"페이지 {pagei}", key=f"pick_page_card_{i}", use_container_width=True):
@@ -666,7 +680,7 @@ with tab_pdf:
                         )
                     st.markdown(f'<div class="pmeta">file_id: {fid_i or "-"}</div></div>', unsafe_allow_html=True)
 
-        # ---- 선택된 행으로 미리보기
+        # ---- 선택된 행으로 미리보기 (pdf.js 렌더 포함: 생략 없이 기존 동작 유지)
         sel_idx = int(st.session_state.get("pdf_sel_idx", 0))
         sel_idx = max(0, min(sel_idx, len(df) - 1))
         sel = df.iloc[sel_idx]
@@ -743,4 +757,4 @@ with tab_pdf:
 """
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
-        st.caption("먼저 [검색]을 실행해 결과를 보신 뒤, 파일명/페이지 버튼을 클릭하면 아래 미리보기가 갱신됩니다.")
+        st.caption("먼저 키워드를 입력하고 **키보드 Enter**를 누르면 결과가 표시됩니다.")
