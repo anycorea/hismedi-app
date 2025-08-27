@@ -425,7 +425,9 @@ tab_main, tab_qna, tab_pdf = st.tabs(["Main 조회", "QnA 조회", "PDF 검색"]
 
 # --------------------- Main 조회 (필터 포함) ----------------------------
 with tab_main:
-    st.subheader("Main 조회")
+    # 큰 제목 제거
+    st.write("")
+
     main_table = _pick_table(eng, ["main_v", "main_raw"]) or "main_raw"
     all_cols = _list_columns(eng, main_table)
 
@@ -448,7 +450,6 @@ with tab_main:
         sel_cols = None
 
     limit = st.number_input("최대 행수", 1, 5000, 500, step=100, key="main_lim")
-
     combined_kw = " ".join([s for s in [kw, f_person, f_place] if str(s).strip()]).strip()
 
     if st.button("검색", key="main_search") and combined_kw:
@@ -464,7 +465,9 @@ with tab_main:
 
 # --------------------- QnA 조회 -----------------------------
 with tab_qna:
-    st.subheader("QnA 조회")
+    # 큰 제목 제거
+    st.write("")
+
     qna_table = _pick_table(eng, ["qna_v", "qna_raw"]) or "qna_raw"
     kw_q = st.text_input("키워드 (공백=AND)", "", key="qna_kw")
     limit_q = st.number_input("최대 행수", 1, 5000, 500, step=100, key="qna_lim")
@@ -482,7 +485,8 @@ with tab_qna:
 
 # --------------------- PDF 검색 (Google Drive 전용) -------
 with tab_pdf:
-    st.subheader("PDF 검색 (Google Drive)")
+    # 큰 제목 제거
+    st.write("")
     st.divider()
 
     # 1) 인덱싱: Google Drive만 사용
@@ -654,4 +658,3 @@ with tab_pdf:
 
     else:
         st.caption("먼저 [검색]을 실행해 결과를 보신 뒤, 파일명/페이지 버튼을 클릭하면 아래 미리보기가 갱신됩니다.")
-
