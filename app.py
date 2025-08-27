@@ -534,7 +534,7 @@ tab_main, tab_qna, tab_pdf = st.tabs([
     "규정검색(PDF파일/본문)"
 ])
 
-# --------------------- Main 조회 (필터 포함) ----------------------------
+# --------------------- 인증기준/조사지침 (필터 포함) ----------------------------
 with tab_main:
     # 큰 제목 제거
     st.write("")
@@ -613,7 +613,7 @@ with tab_main:
     else:
         st.caption("힌트: 조사대상/조사장소 단어는 메인 키워드와 AND로 결합되어 검색됩니다.")
 
-# --------------------- QnA 조회 -----------------------------
+# --------------------- 조사위원 질문 -----------------------------
 with tab_qna:
     # 큰 제목 제거
     st.write("")
@@ -669,7 +669,7 @@ with tab_qna:
         else:
             render_cards_qna(df)
 
-# --------------------- PDF 검색 (Google Drive 전용) -------
+# --------------------- 규정검색(PDF파일/본문) (Google Drive 전용) -------
 with tab_pdf:
     # 큰 제목 제거 + 상단 라인 제거
     st.write("")
@@ -869,6 +869,7 @@ with tab_pdf:
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
         st.caption("먼저 키워드를 입력하고 **키보드 Enter**를 누르면 결과가 표시됩니다.")
+
 
 
 
