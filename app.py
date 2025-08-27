@@ -449,8 +449,8 @@ with tab_main:
     else:
         sel_cols = None
 
-    limit = st.number_input("최대 행수", 1, 5000, 500, step=100, key="main_lim")
     combined_kw = " ".join([s for s in [kw, f_person, f_place] if str(s).strip()]).strip()
+    FIXED_LIMIT = 1000  # 내부 고정 제한
 
     # 카드 렌더 유틸
     def render_cards(df_):
@@ -474,7 +474,7 @@ with tab_main:
     # 검색 실행 → 세션에 저장
     if st.button("검색", key="main_search") and combined_kw:
         with st.spinner("검색 중..."):
-            _df = search_table_any(eng, main_table, combined_kw, columns=sel_cols, limit=limit)
+            _df = search_table_any(eng, main_table, combined_kw, columns=sel_cols, limit=FIXED_LIMIT)
         if _df.empty:
             st.info("결과 없음")
             st.session_state.pop("main_results", None)
@@ -501,7 +501,7 @@ with tab_qna:
 
     qna_table = _pick_table(eng, ["qna_v", "qna_raw"]) or "qna_raw"
     kw_q = st.text_input("키워드 (공백=AND)", "", key="qna_kw")
-    limit_q = st.number_input("최대 행수", 1, 5000, 500, step=100, key="qna_lim")
+    FIXED_LIMIT = 1000  # 내부 고정 제한
 
     # 카드 렌더 유틸
     def render_cards_qna(df_):
@@ -525,7 +525,7 @@ with tab_qna:
     # 검색 실행 → 세션에 저장
     if st.button("검색", key="qna_search") and kw_q.strip():
         with st.spinner("검색 중..."):
-            _df = search_table_any(eng, qna_table, kw_q, columns=None, limit=limit_q)
+            _df = search_table_any(eng, qna_table, kw_q, columns=None, limit=FIXED_LIMIT)
         if _df.empty:
             st.info("결과 없음")
             st.session_state.pop("qna_results", None)
@@ -542,8 +542,6 @@ with tab_qna:
             st.dataframe(df, use_container_width=True, height=520)
         else:
             render_cards_qna(df)
-    else:
-        st.caption("필요 시 ‘임시 SQL’ 탭에서 직접 SELECT 실행 가능합니다.")
 
 # --------------------- PDF 검색 (Google Drive 전용) -------
 with tab_pdf:
@@ -564,15 +562,16 @@ with tab_pdf:
                     st.session_state["drive_index_done"] = True
                     st.rerun()
 
-    # 2) 검색 조건
-    kw_pdf   = st.text_input("키워드 (공백=AND)", "", key="pdf_kw")
-    fn_like  = st.text_input("파일명 필터(선택)", "", key="pdf_fn")
-    limit_pdf = st.number_input("최대 결과", 1, 5000, 500, step=100, key="pdf_lim")
+    # 2) 검색 조건 (최대결과 입력 제거)
+    kw_pdf  = st.text_input("키워드 (공백=AND)", "", key="pdf_kw")
+    fn_like = st.text_input("파일명 필터(선택)", "", key="pdf_fn")
+    FIXED_LIMIT = 1000  # 내부 고정 제한
 
     # 3-A) [검색] → 결과를 세션에 저장
     if st.button("검색", key="pdf_search") and kw_pdf.strip():
         with st.spinner("검색 중..."):
-            _df = search_regs(eng, kw_pdf, filename_like=fn_like, limit=int(limit_pdf))
+            _df = search_regs(eng, kw_pdf, filename_like=fn_like, limit=FIXED_LIMIT)
+
         if "me" in _df.columns:
             _df = _df[_df["me"].astype(str).str.strip() != ""]
         _df = _df.sort_values(["filename", "page"], kind="stable").reset_index(drop=True)
@@ -652,11 +651,9 @@ with tab_pdf:
                 with col1:
                     st.markdown(f'<div class="pcard"><div class="title">{fname}</div>', unsafe_allow_html=True)
 
-                    # 파일명(선택) 버튼 – 가로폭 100%
                     if st.button("이 파일 미리보기", key=f"pick_file_card_{i}", use_container_width=True):
                         st.session_state["pdf_sel_idx"] = int(i)
 
-                    # 하단 버튼 묶음: 페이지 / 열기
                     cA, cB = st.columns(2)
                     with cA:
                         if st.button(f"페이지 {pagei}", key=f"pick_page_card_{i}", use_container_width=True):
@@ -669,7 +666,7 @@ with tab_pdf:
                         )
                     st.markdown(f'<div class="pmeta">file_id: {fid_i or "-"}</div></div>', unsafe_allow_html=True)
 
-        # ---- 선택된 행으로 미리보기 (이하는 동일)
+        # ---- 선택된 행으로 미리보기
         sel_idx = int(st.session_state.get("pdf_sel_idx", 0))
         sel_idx = max(0, min(sel_idx, len(df) - 1))
         sel = df.iloc[sel_idx]
@@ -747,4 +744,3 @@ with tab_pdf:
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
         st.caption("먼저 [검색]을 실행해 결과를 보신 뒤, 파일명/페이지 버튼을 클릭하면 아래 미리보기가 갱신됩니다.")
-
