@@ -528,7 +528,11 @@ DRIVE_FOLDER_ID = (st.secrets.get("DRIVE_FOLDER_ID") or os.getenv("DRIVE_FOLDER_
 # ------------------------------------------------------------
 # 탭 UI
 # ------------------------------------------------------------
-tab_main, tab_qna, tab_pdf = st.tabs(["Main 조회", "QnA 조회", "PDF 검색"])
+tab_main, tab_qna, tab_pdf = st.tabs([
+    "인증기준/조사지침",
+    "조사위원 질문",
+    "규정검색(PDF파일/본문)"
+])
 
 # --------------------- Main 조회 (필터 포함) ----------------------------
 with tab_main:
@@ -865,6 +869,7 @@ with tab_pdf:
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
         st.caption("먼저 키워드를 입력하고 **키보드 Enter**를 누르면 결과가 표시됩니다.")
+
 
 
 
