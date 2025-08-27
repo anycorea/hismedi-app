@@ -566,10 +566,10 @@ with tab_main:
         else:
             sel_cols = None
 
-        FIXED_LIMIT = 1000  # 내부 고정 제한
-        submitted_main = st.form_submit_button("검색")  # 화면에는 숨김 처리됨
+        FIXED_LIMIT = 1000  # 내부 고정 제한 (UI 노출 없음)
+        submitted_main = st.form_submit_button("검색")  # 화면에서는 숨김 처리됨
 
-    # 검색 실행 → 세션에 저장
+    # ---- 검색 실행 → 세션 저장 ----
     combined_kw = " ".join([s for s in [
         st.session_state.get("main_kw",""),
         st.session_state.get("main_filter_person",""),
@@ -585,9 +585,9 @@ with tab_main:
         else:
             st.session_state["main_results"] = _df.to_dict("records")
 
-    # ===== 하이라이트 규칙 =====
-    # - '조사항목' 컬럼의 값 → 파란색 진하게
-    # - '등급' 값이 '필수' → 빨간색 진하게
+    # ===== 하이라이트/탐지 규칙 =====
+    # - '조사항목' 컬럼(이름에 '조사항목' 또는 '항목' 포함)을 파란색 굵게
+    # - '등급' 값이 '필수' → 빨간색 굵게
     def _find_item_col(cols):
         lowers = [(c, str(c).lower()) for c in cols]
         for c, lc in lowers:
@@ -617,60 +617,61 @@ with tab_main:
     ITEM_COL = _find_item_col(all_cols)
     GRADE_COL = _find_grade_col(all_cols)
 
-    # 가장 긴 컬럼(요청): '조사기준의 이해와 조사방법1' 탐지
-    def _find_long_col(cols):
-        target = "조사기준의 이해와 조사방법1"
-        # 정확 일치 우선
-        for c in cols:
-            if str(c).strip() == target:
-                return c
-        # 포함(혹시 표기 변형)
-        for c in cols:
-            s = str(c)
-            if "조사기준" in s and "조사방법" in s:
-                return c
-        return None
-
-    LONG_COL = _find_long_col(all_cols)
-
-    # 공통 스타일
+    # ===== 공통 스타일(CSS) : 너비·최소폭 지정 없음, 반응형 미디어쿼리만 =====
     st.markdown("""
 <style>
-.hl-item{ color:#0d47a1; font-weight:800; }          /* 진한 파랑 */
-.hl-required{ color:#b10000; font-weight:800; }      /* 진한 빨강 */
+.hl-item{ color:#0d47a1; font-weight:800; }          /* 조사항목 파랑 굵게 */
+.hl-required{ color:#b10000; font-weight:800; }      /* 등급=필수 빨강 굵게 */
 
-/* 카드 스타일 */
+/* 카드 */
 .card{border:1px solid #e9ecef;border-radius:10px;padding:12px 14px;margin:8px 0;background:#fff}
 .card h4{margin:0 0 8px 0;font-size:16px;line-height:1.3;word-break:break-word}
 .card .row{margin:4px 0;font-size:13px;color:#333;word-break:break-word}
 .card .lbl{display:inline-block;min-width:96px;color:#6c757d}
 
-/* 표형(HTML 테이블) 스타일: 고정 레이아웃 + 줄바꿈 보장 */
+/* 표형(HTML 테이블) : 자동 레이아웃 + 줄바꿈 + 반응형 */
 .table-wrap{ overflow-x:auto; }
-.table-wrap table{ width:100%; border-collapse:collapse; background:#fff; table-layout:fixed; }
+.table-wrap table{
+  width:100%; border-collapse:collapse; background:#fff; table-layout:auto;
+}
 .table-wrap th, .table-wrap td{
   border:1px solid #e9ecef; padding:8px 10px; text-align:left; vertical-align:top;
   font-size:13px; word-break:break-word; overflow-wrap:anywhere; white-space:normal;
 }
 .table-wrap th{ background:#f8f9fa; font-weight:700; }
+
+/* ↓ 화면이 줄어들수록 글자/패딩 축소 */
+@media (max-width: 1400px){
+  .table-wrap th, .table-wrap td{ font-size:12px; padding:6px 8px; }
+}
+@media (max-width: 1200px){
+  .table-wrap th, .table-wrap td{ font-size:11.5px; padding:5px 7px; }
+}
+@media (max-width: 1024px){
+  .table-wrap th, .table-wrap td{ font-size:11px; padding:5px 6px; }
+}
+@media (max-width: 900px){
+  .table-wrap th, .table-wrap td{ font-size:10.5px; padding:4px 5px; }
+}
+@media (max-width: 768px){
+  .table-wrap th, .table-wrap td{ font-size:10px; padding:3px 4px; }
+}
 </style>
     """, unsafe_allow_html=True)
 
-    # 텍스트 이스케이프 + 하이라이트 적용 유틸
+    # ===== 셀 포맷(강조 적용) =====
     def _fmt_cell(colname: str, value) -> str:
         s = html.escape("" if value is None else str(value))
         def _is_required(val: str) -> bool:
             t = (val or "").strip().replace(" ", "").lower()
             return t in ("필수", "必須")
-        # 조사항목 → 파랑
         if ITEM_COL and colname == ITEM_COL and s:
             return f'<span class="hl-item">{s}</span>'
-        # 등급이 필수 → 빨강
         if GRADE_COL and colname == GRADE_COL and _is_required(s):
             return f'<span class="hl-required">{s}</span>'
         return s
 
-    # 카드 렌더러
+    # ===== 카드 렌더러 =====
     def render_cards(df_: pd.DataFrame):
         for _, r in df_.iterrows():
             title_val = r[df_.columns[0]]
@@ -681,42 +682,12 @@ with tab_main:
                 rows_html.append(f'<div class="row"><span class="lbl">{html.escape(str(c))}</span> {v_html}</div>')
             st.markdown(f'<div class="card"><h4>{title_html}</h4>' + "".join(rows_html) + '</div>', unsafe_allow_html=True)
 
-    # 표형 렌더러: LONG_COL/ITEM_COL 너비 우선 → 나머지 균등
+    # ===== 표형 렌더러 : colgroup/width 지정 없음(완전 자동) =====
     def render_table(df_: pd.DataFrame):
         cols = list(df_.columns)
-        n = len(cols)
-
-        # 기본 퍼센트
-        long_pct_default = 44
-        item_pct_default = 26
-
-        # 실제 존재하는 고정 컬럼 수에 따라 가변 배분
-        fixed = {}
-        if LONG_COL in cols:
-            fixed[LONG_COL] = long_pct_default
-        if ITEM_COL in cols:
-            # LONG_COL과 중복일 일단 없음, 그래도 방지
-            if ITEM_COL != LONG_COL:
-                fixed[ITEM_COL] = item_pct_default
-
-        fixed_sum = sum(fixed.values())
-        others = [c for c in cols if c not in fixed]
-        other_pct = 0
-        if others:
-            other_pct = max(0, (100 - fixed_sum) / len(others))
 
         # 헤더
         header_cells = "".join(f"<th>{html.escape(str(c))}</th>" for c in cols)
-
-        # colgroup(너비 지정) 생성
-        col_styles = []
-        for c in cols:
-            if c in fixed:
-                col_styles.append(f'<col style="width:{fixed[c]}%;">')
-            else:
-                # 나머지는 균등 분배 + 최소폭 보장
-                col_styles.append(f'<col style="width:{other_pct:.2f}%; min-width:140px;">')
-        colgroup_html = f"<colgroup>{''.join(col_styles)}</colgroup>"
 
         # 바디
         body_rows = []
@@ -727,7 +698,6 @@ with tab_main:
         table_html = f"""
 <div class="table-wrap">
   <table>
-    {colgroup_html}
     <thead><tr>{header_cells}</tr></thead>
     <tbody>
       {''.join(body_rows)}
@@ -737,16 +707,16 @@ with tab_main:
 """
         st.markdown(table_html, unsafe_allow_html=True)
 
-    # 결과 렌더링
+    # ---- 결과 렌더링 ----
     if "main_results" in st.session_state and st.session_state["main_results"]:
         df = pd.DataFrame(st.session_state["main_results"])
         st.write(f"결과: {len(df):,}건")
 
         view_mode = st.radio("보기 형식", ["카드형(모바일)", "표형"], horizontal=True, key="main_view_mode")
         if view_mode == "표형":
-            render_table(df)      # 너비 조정/색 하이라이트 적용
+            render_table(df)      # 자동 너비 + 색 하이라이트
         else:
-            render_cards(df)      # 카드에서 색 하이라이트 적용
+            render_cards(df)      # 카드에서 색 하이라이트
     else:
         st.caption("힌트: 조사대상/조사장소 단어는 메인 키워드와 AND로 결합되어 검색됩니다.")
 
@@ -1006,6 +976,7 @@ with tab_pdf:
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
         st.caption("먼저 키워드를 입력하고 **키보드 Enter**를 누르면 결과가 표시됩니다.")
+
 
 
 
