@@ -484,6 +484,64 @@ with tab_qna:
 with tab_pdf:
     st.subheader("PDF 검색 (Google Drive)")
 
+    # 0) [진단/복구] : regulations 초기화 & Drive 폴더 점검
+    with st.expander("🔧 PDF 진단/복구 (초기화 / 폴더 점검)"):
+        c1, c2, c3 = st.columns(3)
+
+        # (a) 현재 regulations 통계 보기
+        with c1:
+            if st.button("테이블 통계 보기", key="diag_stats"):
+                with eng.begin() as con:
+                    total = con.execute(text("select count(*) from regulations")).scalar() or 0
+                    null_me = con.execute(text("select count(*) from regulations where coalesce(me,'')=''")).scalar() or 0
+                    sample = pd.read_sql_query(
+                        text("select filename, page, left(text, 80) as snippet, coalesce(me,'') as me "
+                             "from regulations order by filename, page limit 5"),
+                        con
+                    )
+                st.write(f"총 레코드: {total:,}  |  file_id(me) 비어있는 행: {null_me:,}")
+                if not sample.empty:
+                    st.dataframe(sample, use_container_width=True)
+
+        # (b) regulations 초기화(모든 레코드 삭제)
+        with c2:
+            if st.button("🔴 regulations 비우기(초기화)", key="diag_wipe"):
+                with eng.begin() as con:
+                    con.execute(text("delete from regulations"))
+                st.success("regulations 테이블을 비웠습니다. → 아래 [인덱스(Drive)]를 다시 수행하세요.")
+
+        # (c) DRIVE_FOLDER_ID 점검 (하위 몇 개 파일 미리 확인)
+        with c3:
+            if st.button("Drive 폴더 점검", key="diag_drive"):
+                if not (DRIVE_API_KEY and DRIVE_FOLDER_ID and "?" not in DRIVE_FOLDER_ID):
+                    st.error("DRIVE_API_KEY / DRIVE_FOLDER_ID 설정을 확인하세요.")
+                else:
+                    try:
+                        params = {
+                            "q": f"'{DRIVE_FOLDER_ID}' in parents and trashed=false",
+                            "pageSize": 3,
+                            "fields": "files(id,name,mimeType)",
+                            "key": DRIVE_API_KEY,
+                        }
+                        r = requests.get("https://www.googleapis.com/drive/v3/files", params=params, timeout=30)
+                        r.raise_for_status()
+                        files = r.json().get("files", [])
+                        if not files:
+                            st.warning("하위 항목이 없습니다. 폴더 ID가 맞는지 확인하세요.")
+                        else:
+                            df_chk = pd.DataFrame(files)
+                            st.write("하위 항목(최대 3개) 미리보기:")
+                            st.dataframe(df_chk, use_container_width=True)
+                            pdfs = [f for f in files if f.get("mimeType") == "application/pdf" or (f.get("name","").lower().endswith(".pdf"))]
+                            if not pdfs:
+                                st.info("표시된 항목 중 PDF가 없습니다. 실제 하위 폴더 더 안쪽에 있을 수 있습니다.")
+                            else:
+                                st.success("Drive 폴더 접근 OK (id/name 확인). 이 상태에서 [인덱스(Drive)]를 실행하세요.")
+                    except Exception as e:
+                        st.exception(e)
+
+    st.divider()
+
     # 1) 인덱싱: Google Drive만 사용
     cols1 = st.columns([1, 2, 1])
     with cols1[1]:
@@ -529,14 +587,15 @@ with tab_pdf:
                 fid = (fid or "").strip()
                 return f"https://drive.google.com/file/d/{fid}/preview#page={int(page)}"
 
-            # --- 표: HTML로 렌더링(의존성 없음, 클릭 보장) ---
+            # --- 표: HTML로 렌더링(의존성 없음, 링크 클릭 보장) ---
             view = df[["filename", "page", "me"]].copy()
             view.rename(columns={"filename": "파일명", "page": "페이지", "me": "file_id"}, inplace=True)
 
-            # 열기 링크(새 탭)
             view["열기"] = view.apply(
-                lambda r: f'<a href="{make_click_url_from_vals(r["file_id"], r["페이지"])}" '
-                          f'target="_blank" rel="noopener noreferrer">열기</a>',
+                lambda r: (
+                    f'<a href="{make_click_url_from_vals(r["file_id"], r["페이지"])}" '
+                    f'target="_blank" rel="noopener noreferrer">열기</a>'
+                ),
                 axis=1,
             )
 
@@ -557,6 +616,7 @@ with tab_pdf:
                 st.write(
                     f"**파일**: {row['filename']}  |  **페이지**: {int(row['page'])}  |  **file_id**: {row.get('me') or '-'}"
                 )
+
                 st.markdown(
                     highlight_html(row["text"], kw_list, width=200),
                     unsafe_allow_html=True
