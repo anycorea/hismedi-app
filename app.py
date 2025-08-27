@@ -485,25 +485,29 @@ with tab_qna:
 
 # --------------------- PDF 검색 (Google Drive 전용) -------
 with tab_pdf:
-    # 큰 제목 제거
+    # 큰 제목 제거 + 상단 라인(구분선) 제거: st.divider() 사용하지 않음
     st.write("")
-    st.divider()
 
-    # 1) 인덱싱: Google Drive만 사용
-    cols1 = st.columns([1, 2, 1])
-    with cols1[1]:
-        if st.button("인덱스(Drive)", key="pdf_reindex_drive"):
-            if not (DRIVE_API_KEY and DRIVE_FOLDER_ID and "?" not in DRIVE_FOLDER_ID):
-                st.error("Secrets에 DRIVE_API_KEY / DRIVE_FOLDER_ID(쿼리스트링 제거) 를 설정하세요.")
-            else:
-                with st.spinner("Google Drive에서 인덱싱 중..."):
-                    rep = index_pdfs_from_drive(eng, DRIVE_FOLDER_ID, DRIVE_API_KEY)
-                st.success(f"Drive 인덱스 완료 | indexed={rep['indexed']} | skipped={rep['skipped']} | errors={rep['errors']}")
-                with st.expander("상세 로그 보기"):
-                    for fn, stat in rep["files"]:
-                        st.write(f"- {fn}: {stat}")
+    # 세션에서 인덱스 완료 여부 플래그
+    drive_done = st.session_state.get("drive_index_done", False)
 
-    st.divider()
+    # 1) 인덱싱: Google Drive만 사용 (최초 접속 시에만 노출)
+    if not drive_done:
+        cols1 = st.columns([1, 2, 1])
+        with cols1[1]:
+            if st.button("인덱스(Drive)", key="pdf_reindex_drive"):
+                if not (DRIVE_API_KEY and DRIVE_FOLDER_ID and "?" not in DRIVE_FOLDER_ID):
+                    st.error("Secrets에 DRIVE_API_KEY / DRIVE_FOLDER_ID(쿼리스트링 제거) 를 설정하세요.")
+                else:
+                    # 진행 상황만 보여주기 (스피너). 완료 후 버튼/영역 모두 사라짐.
+                    with st.spinner("Google Drive 인덱싱 중..."):
+                        _ = index_pdfs_from_drive(eng, DRIVE_FOLDER_ID, DRIVE_API_KEY)
+                    st.session_state["drive_index_done"] = True
+                    # 완료 후 재렌더링하여 버튼/라인 등 모두 사라지게 처리
+                    st.rerun()
+
+    # (인덱싱 영역과 검색 영역 사이 구분은 원하시면 아래 주석 해제)
+    # st.divider()
 
     # 2) 검색 조건
     kw_pdf   = st.text_input("키워드 (공백=AND)", "", key="pdf_kw")
@@ -606,10 +610,7 @@ with tab_pdf:
             "미리보기 높이(px)", 480, 1200, 640, step=40, key=f"pv_h_{fid}"
         )
 
-        # ---- pdf.js로 직접 렌더 (선택 페이지로 정확히 이동) — 모바일 최적화
-        #     - 너무 넓을 때 과확대 방지: 기본 폭 제한(900px)
-        #     - 모바일 폭에서 자동 가독성 보정(mobileBoost)
-        #     - HiDPI(레티나)에서 글자 번짐 방지: devicePixelRatio 스케일링
+        # ---- pdf.js로 직접 렌더 (선택 페이지로 정확히 이동) — 모바일 최적화 포함
         max_fit_width = 900
 
         viewer_html = f"""
@@ -655,7 +656,7 @@ with tab_pdf:
       const finalScale = fitScale * sliderZoom * mobileBoost;
       const viewport = page.getViewport({{scale: finalScale}});
 
-      // HiDPI(레티나) 대응: 장치 픽셀 비율 반영
+      // HiDPI(레티나) 대응
       const dpr = (window.devicePixelRatio || 1);
       canvas.width  = Math.floor(viewport.width  * dpr);
       canvas.height = Math.floor(viewport.height * dpr);
