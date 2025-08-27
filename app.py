@@ -537,10 +537,13 @@ with tab_pdf:
         def view_url(fid: str, page: int) -> str:
             fid = (fid or "").strip()
             return f"https://drive.google.com/file/d/{fid}/view#page={int(page)}"   # 새 탭 원문
+
         def preview_url(fid: str, page: int) -> str:
+            # 캐시버스터(r=page-epoch) + 페이지 해시 → 동일 파일 내 페이지 전환을 확실히 반영
+            import time as _t
             fid = (fid or "").strip()
-            # 캐시버스터(r) + page 해시로 동일 파일 내 페이지 전환을 확실히 반영
-            return f"https://drive.google.com/file/d/{fid}/preview?r={int(page)}#page={int(page)}"
+            bust = f"{int(page)}-{int(_t.time())}"
+            return f"https://drive.google.com/file/d/{fid}/preview?embedded=true&r={bust}#page={int(page)}"
 
         # ---- 파일명/페이지 버튼 테이블
         st.caption("표에서 **파일명 버튼** 또는 **페이지 버튼**을 클릭하면 아래 미리보기가 즉시 바뀝니다.")
@@ -563,7 +566,7 @@ with tab_pdf:
             if c2.button(str(int(row["page"])), key=f"pick_page_{i}"):
                 st.session_state["pdf_sel_idx"] = int(i)
 
-            # 원문 열기(새 탭)
+            # 원문 열기(새 탭) — HTML 앵커로 안정 렌더
             c3.markdown(
                 f'<a href="{view_url(row["me"], int(row["page"]))}" target="_blank" rel="noopener noreferrer">열기</a>',
                 unsafe_allow_html=True
@@ -584,10 +587,21 @@ with tab_pdf:
             highlight_html(sel["text"], kw_list, width=200),
             unsafe_allow_html=True
         )
-        st.components.v1.html(
-            f'<iframe src="{preview_url(fid, sel_page)}" style="width:100%; height:720px;" frameborder="0"></iframe>',
-            height=740,
-            key=f"pdf_iframe_{fid}_{sel_page}",   # 페이지 변경 시 리렌더 보장
-        )
+
+        # 안정 임베드(버전 호환): components.html + scrolling=True (key는 일부 버전에서 미지원이므로 생략)
+        try:
+            iframe_html = (
+                f'<iframe src="{preview_url(fid, sel_page)}" '
+                f'width="100%" height="720" style="border:0;" '
+                f'allow="fullscreen"></iframe>'
+            )
+            st.components.v1.html(iframe_html, height=740, scrolling=True)
+        except Exception:
+            # 폴백: 임베드가 실패하면 '열기' 링크라도 제공
+            st.warning("브라우저 임베드가 차단되어 미리보기를 표시하지 못했습니다. 새 탭에서 열기로 확인해 주세요.")
+            st.markdown(
+                f'<a href="{view_url(fid, sel_page)}" target="_blank" rel="noopener noreferrer">새 탭에서 열기</a>',
+                unsafe_allow_html=True
+            )
     else:
         st.caption("먼저 [검색]을 실행해 결과를 보신 뒤, 파일명/페이지 버튼을 클릭하면 아래 미리보기가 갱신됩니다.")
