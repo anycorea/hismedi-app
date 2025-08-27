@@ -530,49 +530,71 @@ with tab_pdf:
                 fid = (fid or "").strip()
                 return f"https://drive.google.com/file/d/{fid}/preview#page={int(page)}"   # 임베드
 
-            # --- 결과 표: 파일명 클릭 시 ?pdf_file=... 로 선택 반영 ---
+            # ----- (A) 결과 표: 파일명은 '선택' 버튼으로 동작(새 창/새 탭 없음) -----
+            # 표에는 파일명/페이지/열기 링크만 보여주고, 파일 선택은 표 아래에서 라디오/버튼으로.
             view = df[["filename", "page", "me"]].copy()
             view.rename(columns={"filename": "파일명", "page": "페이지", "me": "file_id"}, inplace=True)
-
-            # 파일명 → 쿼리파람 세팅 링크
-            view["파일명"] = view["파일명"].apply(
-                lambda s: f'<a href="?pdf_file={quote(str(s))}">{html.escape(str(s))}</a>'
-            )
-            # 열기(새 탭)
             view["열기"] = view.apply(
                 lambda r: f'<a href="{click_url(r["file_id"], r["페이지"])}" target="_blank" rel="noopener noreferrer">열기</a>',
                 axis=1,
             )
             st.write(view[["파일명", "페이지", "열기"]].to_html(index=False, escape=False), unsafe_allow_html=True)
 
-            # --- 파일/페이지 선택 UI (파일명 기반) ---
-            st.caption("행 번호 대신, 파일과 페이지를 선택해서 미리보세요.")
+            # ----- (B) 파일 선택 UI (드롭다운 X → 라디오/버튼 스타일) -----
+            st.caption("행 번호 대신, 아래에서 파일을 선택하고 페이지를 골라 미리보세요.")
 
-            # 쿼리파람으로 넘어온 파일명(있으면 기본값으로 사용)
-            qp_file = st.query_params.get("pdf_file", None)
-            file_options = list(pd.unique(df["filename"]))
-            default_idx = file_options.index(qp_file) if (qp_file in file_options) else 0
+            unique_files = list(pd.unique(df["filename"]))
+            # 기본 선택 파일(이전 선택 기억)
+            default_file = st.session_state.get("pdf_sel_file", unique_files[0])
 
-            sel_file = st.selectbox("파일 선택", file_options, index=default_idx, key="pdf_file_sel")
+            # 가로 라디오(드롭다운 제거)
+            sel_file = st.radio(
+                "파일 선택",
+                options=unique_files,
+                index=unique_files.index(default_file) if default_file in unique_files else 0,
+                horizontal=True,
+                key="pdf_sel_file",
+            )
+
+            # 해당 파일의 페이지 목록
             pages_in_file = sorted(df.loc[df["filename"] == sel_file, "page"].unique().tolist())
 
+            # RangeError 방지: 페이지가 0개/1개인 경우 처리
             if not pages_in_file:
-                st.warning("선택한 파일의 페이지 목록을 찾지 못했습니다.")
+                st.warning("선택한 파일의 페이지 목록이 비어 있습니다.")
+                st.stop()
+            elif len(pages_in_file) == 1:
+                sel_page = pages_in_file[0]
+                st.info(f"이 문서는 1페이지입니다. (페이지: {sel_page})")
             else:
-                sel_page = st.select_slider("페이지 선택", options=pages_in_file, value=pages_in_file[0], key="pdf_page_sel")
-
-                # 선택 레코드
-                row = df[(df["filename"] == sel_file) & (df["page"] == sel_page)].iloc[0]
-                fid = (row.get("me") or "").strip()
-
-                # --- 텍스트 스니펫 + 문서 임베드 ---
-                kw_list = [k.strip() for k in kw_pdf.split() if k.strip()]
-                st.write(f"**파일**: {sel_file}  |  **페이지**: {int(sel_page)}  |  **file_id**: {fid or '-'}")
-                st.markdown(highlight_html(row["text"], kw_list, width=200), unsafe_allow_html=True)
-
-                st.components.v1.html(
-                    f'<iframe src="{iframe_url(fid, int(sel_page))}" style="width:100%; height:720px;" frameborder="0"></iframe>',
-                    height=740,
+                # 이전 선택 기억(없으면 첫 페이지)
+                default_page = st.session_state.get("pdf_sel_page", pages_in_file[0])
+                # 슬라이더 (연속 정수)
+                sel_page = st.slider(
+                    "페이지 선택",
+                    min_value=int(min(pages_in_file)),
+                    max_value=int(max(pages_in_file)),
+                    value=int(default_page) if default_page in pages_in_file else int(pages_in_file[0]),
+                    step=1,
+                    key="pdf_page_slider",
                 )
+
+            # 현재 선택 저장
+            st.session_state["pdf_sel_file"] = sel_file
+            st.session_state["pdf_sel_page"] = sel_page
+
+            # 선택 레코드
+            row = df[(df["filename"] == sel_file) & (df["page"] == sel_page)].iloc[0]
+            fid = (row.get("me") or "").strip()
+
+            # --- 텍스트 스니펫 + 문서 임베드 ---
+            kw_list = [k.strip() for k in kw_pdf.split() if k.strip()]
+            st.write(f"**파일**: {sel_file}  |  **페이지**: {int(sel_page)}  |  **file_id**: {fid or '-'}")
+            st.markdown(highlight_html(row["text"], kw_list, width=200), unsafe_allow_html=True)
+
+            st.components.v1.html(
+                f'<iframe src="{iframe_url(fid, int(sel_page))}" style="width:100%; height:720px;" frameborder="0"></iframe>',
+                height=740,
+            )
     else:
         st.caption("먼저 [인덱스(Drive)] 버튼으로 Google Drive 내 PDF를 인덱싱하세요. 그 후 키워드로 검색할 수 있습니다.")
