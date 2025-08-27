@@ -501,8 +501,8 @@ with tab_pdf:
     st.divider()
 
     # 2) 검색 조건
-    kw_pdf = st.text_input("키워드 (공백=AND)", "", key="pdf_kw")
-    fn_like = st.text_input("파일명 필터(선택)", "", key="pdf_fn")
+    kw_pdf   = st.text_input("키워드 (공백=AND)", "", key="pdf_kw")
+    fn_like  = st.text_input("파일명 필터(선택)", "", key="pdf_fn")
     limit_pdf = st.number_input("최대 결과", 1, 5000, 500, step=100, key="pdf_lim")
 
     # 3) 검색 실행 (Drive 인덱스 레코드만 대상으로)
@@ -510,7 +510,7 @@ with tab_pdf:
         with st.spinner("검색 중..."):
             df = search_regs(eng, kw_pdf, filename_like=fn_like, limit=int(limit_pdf))
 
-        # me(Drive file_id) 있는 행만 사용 → Drive 인덱싱 결과만 보여주기
+        # me(Drive file_id) 있는 행만 사용 → Drive 인덱싱 결과만
         if "me" in df.columns:
             df = df[df["me"].astype(str).str.strip() != ""]
 
@@ -518,25 +518,31 @@ with tab_pdf:
         if df.empty:
             st.info("조건에 맞는 결과가 없습니다. 먼저 [인덱스(Drive)]를 수행했는지 확인하세요.")
         else:
-            kw_list = [k.strip() for k in kw_pdf.split() if k.strip()]
+            # --- 안정적인 링크 전략 ---
+            # 클릭(새 탭)용: /view#page=n
+            # iframe(앱 내 미리보기)용: /preview#page=n
+            def make_click_url(row):
+                fid = (row.get("me") or "").strip()
+                page = int(row["page"])
+                return f"https://drive.google.com/file/d/{fid}/view#page={page}"
 
-            def make_href(row):
+            def make_iframe_url(row):
                 fid = (row.get("me") or "").strip()
                 page = int(row["page"])
                 return f"https://drive.google.com/file/d/{fid}/preview#page={page}"
 
+            # 표: 마크다운 링크로 렌더링(가장 호환성이 좋음)
             view = df[["filename", "page", "me"]].copy()
-            view["open"] = df.apply(make_href, axis=1)
+            view.rename(columns={"filename": "파일명", "page": "페이지", "me": "file_id"}, inplace=True)
+            view["열기"] = df.apply(lambda r: f"[열기]({make_click_url(r)})", axis=1)
 
-            st.dataframe(
-                view,
-                use_container_width=True,
-                height=520,
-                column_config={"open": st.column_config.LinkColumn("열기", display_text="열기")},
-            )
+            # DataFrame 위젯 대신 마크다운 표로 링크 클릭 보장
+            st.markdown(view[["파일명", "페이지", "열기"]].to_markdown(index=False), unsafe_allow_html=True)
 
-            # 미리보기(하이라이트 + iframe)
-            st.caption("행을 선택해 본문 스니펫과 문서 미리보기를 확인하세요.")
+            # --- 미리보기(하이라이트 + iframe) ---
+            kw_list = [k.strip() for k in kw_pdf.split() if k.strip()]
+
+            st.caption("행 번호를 선택해 본문 스니펫과 문서 미리보기를 확인하세요.")
             with st.expander("텍스트 미리보기 & 문서 보기 (선택한 1건)"):
                 idx = st.number_input(
                     "행 번호(0부터)",
@@ -544,12 +550,17 @@ with tab_pdf:
                     key="pdf_preview_idx"
                 )
                 row = df.iloc[int(idx)]
-                st.write(f"**파일**: {row['filename']}  |  **페이지**: {int(row['page'])}  |  **file_id**: {row.get('me') or '-'}")
-                st.markdown(highlight_html(row["text"], kw_list, width=200), unsafe_allow_html=True)
+                st.write(
+                    f"**파일**: {row['filename']}  |  **페이지**: {int(row['page'])}  |  **file_id**: {row.get('me') or '-'}"
+                )
+                st.markdown(
+                    highlight_html(row["text"], kw_list, width=200),
+                    unsafe_allow_html=True
+                )
 
-                href = make_href(row)
+                iframe_src = make_iframe_url(row)  # /preview
                 st.components.v1.html(
-                    f'<iframe src="{href}" style="width:100%; height:720px;" frameborder="0"></iframe>',
+                    f'<iframe src="{iframe_src}" style="width:100%; height:720px;" frameborder="0"></iframe>',
                     height=740,
                 )
     else:
