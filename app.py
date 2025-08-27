@@ -539,7 +539,7 @@ with tab_main:
     # 큰 제목 제거
     st.write("")
 
-    # 폼 제출 버튼 전역 숨김 (이 탭 포함 모든 폼의 Submit 버튼이 안 보이게)
+    # 폼 제출 버튼 전역 숨김(Enter로 바로 검색)
     st.markdown("<style>div[data-testid='stFormSubmitButton']{display:none!important;}</style>", unsafe_allow_html=True)
 
     main_table = _pick_table(eng, ["main_v", "main_raw"]) or "main_raw"
@@ -549,15 +549,16 @@ with tab_main:
     with st.form("main_search_form", clear_on_submit=False):
         cols_top = st.columns([2, 1, 1])
         with cols_top[0]:
-            kw = st.text_input("키워드 (공백=AND)", "", key="main_kw")
+            kw = st.text_input("키워드 (공백=AND)", st.session_state.get("main_kw", ""), key="main_kw")
         with cols_top[1]:
-            f_person = st.text_input("조사대상 (선택)", "", key="main_filter_person")
+            f_person = st.text_input("조사대상 (선택)", st.session_state.get("main_filter_person", ""), key="main_filter_person")
         with cols_top[2]:
-            f_place = st.text_input("조사장소 (선택)", "", key="main_filter_place")
+            f_place = st.text_input("조사장소 (선택)", st.session_state.get("main_filter_place", ""), key="main_filter_place")
 
         mode = st.radio("검색 대상", ["전체 열", "특정 열 선택", "ME만"], horizontal=True, key="main_mode")
         if mode == "특정 열 선택":
-            sel_cols = st.multiselect("검색할 열 선택", options=all_cols, default=all_cols, key="main_cols")
+            sel_cols = st.multiselect("검색할 열 선택", options=all_cols,
+                                      default=st.session_state.get("main_cols", all_cols), key="main_cols")
         elif mode == "ME만":
             sel_cols = ["ME"] if "ME" in all_cols else all_cols[:1]
             if "ME" not in all_cols:
@@ -565,12 +566,16 @@ with tab_main:
         else:
             sel_cols = None
 
-        combined_kw = " ".join([s for s in [kw, f_person, f_place] if str(s).strip()]).strip()
         FIXED_LIMIT = 1000  # 내부 고정 제한
-
         submitted_main = st.form_submit_button("검색")  # 화면에는 숨김 처리됨
 
-    # 폼 제출 시 검색 실행 → 세션에 저장
+    # 검색 실행 → 세션에 저장
+    combined_kw = " ".join([s for s in [
+        st.session_state.get("main_kw",""),
+        st.session_state.get("main_filter_person",""),
+        st.session_state.get("main_filter_place","")
+    ] if str(s).strip()]).strip()
+
     if submitted_main and combined_kw:
         with st.spinner("검색 중..."):
             _df = search_table_any(eng, main_table, combined_kw, columns=sel_cols, limit=FIXED_LIMIT)
@@ -580,36 +585,118 @@ with tab_main:
         else:
             st.session_state["main_results"] = _df.to_dict("records")
 
-    # 세션 결과 렌더링(뷰 전환해도 유지)
+    # ===== 하이라이트 규칙 설정 =====
+    # - '조사항목' 컬럼(이름에 '조사항목' 또는 '항목' 포함)을 파란색 진하게
+    # - '등급' 컬럼 값이 '필수'이면 빨간색 진하게
+    def _find_item_col(cols):
+        # 우선순위: 정확히 '조사항목' -> 이름에 '조사항목' 포함 -> '항목' 포함
+        lowers = [(c, str(c).lower()) for c in cols]
+        for c, lc in lowers:
+            if lc == "조사항목":
+                return c
+        for c, lc in lowers:
+            if "조사항목" in lc:
+                return c
+        for c, lc in lowers:
+            if "항목" in lc:
+                return c
+        return None
+
+    def _find_grade_col(cols):
+        # 우선순위: 정확히 '등급' -> 이름에 '등급' 포함 -> '필수'/'필수여부' 포함
+        lowers = [(c, str(c).lower()) for c in cols]
+        for c, lc in lowers:
+            if lc == "등급":
+                return c
+        for c, lc in lowers:
+            if "등급" in lc:
+                return c
+        for c, lc in lowers:
+            if "필수" in lc:
+                return c
+        return None
+
+    ITEM_COL = _find_item_col(all_cols)
+    GRADE_COL = _find_grade_col(all_cols)
+
+    # HTML/CSS 공통 스타일 (카드형/표형 모두 사용)
+    st.markdown("""
+<style>
+.hl-item{ color:#0d47a1; font-weight:800; }          /* 진한 파랑 */
+.hl-required{ color:#b10000; font-weight:800; }      /* 진한 빨강 */
+
+/* 카드 스타일 */
+.card{border:1px solid #e9ecef;border-radius:10px;padding:12px 14px;margin:8px 0;background:#fff}
+.card h4{margin:0 0 8px 0;font-size:16px;line-height:1.3;word-break:break-all}
+.card .row{margin:4px 0;font-size:13px;color:#333;word-break:break-all}
+.card .lbl{display:inline-block;min-width:96px;color:#6c757d}
+
+/* 표형(HTML 테이블) 스타일 */
+.table-wrap{ overflow-x:auto; }
+.table-wrap table{ width:100%; border-collapse:collapse; font-size:13px; background:#fff; }
+.table-wrap th, .table-wrap td{ border:1px solid #e9ecef; padding:8px 10px; text-align:left; vertical-align:top; }
+.table-wrap th{ background:#f8f9fa; font-weight:700; }
+</style>
+    """, unsafe_allow_html=True)
+
+    # 텍스트 이스케이프 + 하이라이트 적용 유틸
+    def _fmt_cell(colname: str, value) -> str:
+        s = html.escape("" if value is None else str(value))
+        # '필수' 인지 판별 (공백/대소문자 무시)
+        def _is_required(val: str) -> bool:
+            t = (val or "").strip().replace(" ", "").lower()
+            return t in ("필수", "必須")
+        # 조사항목 컬럼 → 파랑 굵게
+        if ITEM_COL and colname == ITEM_COL and s:
+            return f'<span class="hl-item">{s}</span>'
+        # 등급 컬럼이면서 값이 필수 → 빨강 굵게
+        if GRADE_COL and colname == GRADE_COL and _is_required(s):
+            return f'<span class="hl-required">{s}</span>'
+        return s
+
+    # 카드 렌더러
+    def render_cards(df_: pd.DataFrame):
+        for _, r in df_.iterrows():
+            # 타이틀은 첫 컬럼 값
+            title_val = r[df_.columns[0]]
+            title_html = _fmt_cell(df_.columns[0], title_val)
+            rows_html = []
+            for c in df_.columns:
+                v_html = _fmt_cell(c, r[c])
+                rows_html.append(f'<div class="row"><span class="lbl">{html.escape(str(c))}</span> {v_html}</div>')
+            st.markdown(f'<div class="card"><h4>{title_html}</h4>' + "".join(rows_html) + '</div>', unsafe_allow_html=True)
+
+    # 표형(강조표) 렌더러: HTML 테이블로 렌더(색 강조 지원)
+    def render_table(df_: pd.DataFrame):
+        # 헤더
+        header_cells = "".join(f"<th>{html.escape(str(c))}</th>" for c in df_.columns)
+        # 바디
+        body_rows = []
+        for _, r in df_.iterrows():
+            cells = "".join(f"<td>{_fmt_cell(c, r[c])}</td>" for c in df_.columns)
+            body_rows.append(f"<tr>{cells}</tr>")
+        table_html = f"""
+<div class="table-wrap">
+  <table>
+    <thead><tr>{header_cells}</tr></thead>
+    <tbody>
+      {''.join(body_rows)}
+    </tbody>
+  </table>
+</div>
+"""
+        st.markdown(table_html, unsafe_allow_html=True)
+
+    # 결과 렌더링
     if "main_results" in st.session_state and st.session_state["main_results"]:
         df = pd.DataFrame(st.session_state["main_results"])
         st.write(f"결과: {len(df):,}건")
 
-        # --- 카드/표 전환 ---
         view_mode = st.radio("보기 형식", ["카드형(모바일)", "표형"], horizontal=True, key="main_view_mode")
-
-        def render_cards(df_):
-            st.markdown("""
-<style>
-.card{border:1px solid #e9ecef;border-radius:10px;padding:12px 14px;margin:8px 0;background:#fff}
-.card h4{margin:0 0 8px 0;font-size:16px;line-height:1.3}
-.card .row{margin:4px 0;font-size:13px;color:#333}
-.card .lbl{display:inline-block;min-width:96px;color:#6c757d}
-</style>
-            """, unsafe_allow_html=True)
-            import html as _html
-            for _, r in df_.iterrows():
-                rows = []
-                for c in df_.columns:
-                    v = _html.escape(str(r[c]))
-                    rows.append(f'<div class="row"><span class="lbl">{_html.escape(str(c))}</span> {v}</div>')
-                title = _html.escape(str(r[df_.columns[0]]))
-                st.markdown(f'<div class="card"><h4>{title}</h4>' + "".join(rows) + '</div>', unsafe_allow_html=True)
-
         if view_mode == "표형":
-            st.dataframe(df, use_container_width=True, height=520)
+            render_table(df)      # 색 하이라이트 적용되는 HTML 표
         else:
-            render_cards(df)
+            render_cards(df)      # 카드에서 하이라이트 적용
     else:
         st.caption("힌트: 조사대상/조사장소 단어는 메인 키워드와 AND로 결합되어 검색됩니다.")
 
@@ -869,6 +956,7 @@ with tab_pdf:
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
         st.caption("먼저 키워드를 입력하고 **키보드 Enter**를 누르면 결과가 표시됩니다.")
+
 
 
 
