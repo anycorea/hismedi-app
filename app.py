@@ -526,30 +526,28 @@ with tab_pdf:
             st.session_state["pdf_sel_idx"] = 0
             st.session_state["pdf_kw_list"] = [k.strip() for k in kw_pdf.split() if k.strip()]
 
-    # 3-B) 세션 결과가 있으면 항상 렌더링 (파일명/페이지 버튼 클릭만으로 갱신)
+    # 3-B) 세션 결과가 있으면 렌더링 (파일명/페이지 버튼 클릭만으로 갱신)
     if "pdf_results" in st.session_state and st.session_state["pdf_results"]:
         df = pd.DataFrame(st.session_state["pdf_results"])
         kw_list = st.session_state.get("pdf_kw_list", [])
 
         st.write(f"결과: {len(df):,}건")
 
-        # ---- 링크 유틸
+        # ---- 링크/미리보기 URL 유틸
         def view_url(fid: str, page: int) -> str:
             fid = (fid or "").strip()
             return f"https://drive.google.com/file/d/{fid}/view#page={int(page)}"   # 새 탭 원문
 
-        def preview_url(fid: str, page: int) -> str:
+        def embed_pdf_url(fid: str, page: int) -> str:
             """
-            Drive preview가 임베드에서 #page를 무시하는 케이스 보완:
-            viewerng + srcid 사용, 캐시버스터(r) 부착.
+            브라우저 내장 PDF 뷰어를 사용해 지정 페이지로 바로 이동.
+            Google Drive의 다운로드 URL + #page 을 사용.
             """
-            import time as _t
             fid = (fid or "").strip()
-            r = f"{int(page)}-{int(_t.time())}"
-            return (
-                "https://drive.google.com/viewerng/viewer?"
-                f"embedded=true&pid=explorer&srcid={fid}&chrome=false&hl=ko&r={r}#page={int(page)}"
-            )
+            # 캐시버스터로 매 클릭 시 강제 새로고침 (같은 파일 내 페이지 전환 보장)
+            import time as _t
+            bust = f"{int(_t.time())}"
+            return f"https://drive.google.com/uc?export=download&id={fid}&r={bust}#page={int(page)}"
 
         # ---- 파일명/페이지 버튼 테이블
         st.caption("표에서 **파일명 버튼** 또는 **페이지 버튼**을 클릭하면 아래 미리보기가 즉시 바뀝니다.")
@@ -572,9 +570,18 @@ with tab_pdf:
             if c2.button(str(int(row["page"])), key=f"pick_page_{i}"):
                 st.session_state["pdf_sel_idx"] = int(i)
 
-            # 원문 열기(새 탭)
+            # '열기'를 박스형 버튼 스타일의 앵커로 렌더링
             c3.markdown(
-                f'<a href="{view_url(row["me"], int(row["page"]))}" target="_blank" rel="noopener noreferrer">열기</a>',
+                f'''
+                <a href="{view_url(row["me"], int(row["page"]))}"
+                   target="_blank" rel="noopener noreferrer"
+                   style="
+                     display:inline-block; padding:6px 12px;
+                     border:1px solid #ddd; border-radius:8px;
+                     background:#f8f9fa; text-decoration:none; color:#0d6efd;
+                     font-weight:600;"
+                >열기</a>
+                ''',
                 unsafe_allow_html=True
             )
 
@@ -594,12 +601,10 @@ with tab_pdf:
             unsafe_allow_html=True
         )
 
-        # 안정 임베드: viewerng URL 사용 (지정 페이지로 바로 이동)
-        iframe_html = (
-            f'<iframe src="{preview_url(fid, sel_page)}" '
-            f'width="100%" height="720" style="border:0;" allow="fullscreen"></iframe>'
+        # 브라우저 내장 PDF 뷰어로 임베드(지정 페이지로 바로 이동)
+        st.components.v1.html(
+            f'<embed src="{embed_pdf_url(fid, sel_page)}" type="application/pdf" width="100%" height="720px" />',
+            height=740,
         )
-        st.components.v1.html(iframe_html, height=740)
-
     else:
         st.caption("먼저 [검색]을 실행해 결과를 보신 뒤, 파일명/페이지 버튼을 클릭하면 아래 미리보기가 갱신됩니다.")
