@@ -511,7 +511,7 @@ with tab_pdf:
         with st.spinner("검색 중..."):
             df = search_regs(eng, kw_pdf, filename_like=fn_like, limit=int(limit_pdf))
 
-        # me(Drive file_id) 있는 행만 사용 → Drive 인덱싱 결과만
+        # Drive 인덱싱 결과만 (me=file_id 존재)
         if "me" in df.columns:
             df = df[df["me"].astype(str).str.strip() != ""]
 
@@ -519,34 +519,59 @@ with tab_pdf:
         if df.empty:
             st.info("조건에 맞는 결과가 없습니다. 먼저 [인덱스(Drive)]를 수행했는지 확인하세요.")
         else:
+            # 정렬 고정
+            df = df.sort_values(["filename", "page"], kind="stable").reset_index(drop=True)
+
             # --- 링크 유틸 ---
             def click_url(fid: str, page: int) -> str:
                 fid = (fid or "").strip()
-                return f"https://drive.google.com/file/d/{fid}/view#page={int(page)}"      # 새 탭 뷰어
+                return f"https://drive.google.com/file/d/{fid}/view#page={int(page)}"      # 새 탭
             def iframe_url(fid: str, page: int) -> str:
                 fid = (fid or "").strip()
-                return f"https://drive.google.com/file/d/{fid}/preview#page={int(page)}"   # 앱 내 임베드
+                return f"https://drive.google.com/file/d/{fid}/preview#page={int(page)}"   # 임베드
 
-            # --- 표: HTML로 렌더링(의존성 無, 클릭 보장) ---
+            # --- 결과 표: 파일명 클릭 시 ?pdf_file=... 로 선택 반영 ---
             view = df[["filename", "page", "me"]].copy()
             view.rename(columns={"filename": "파일명", "page": "페이지", "me": "file_id"}, inplace=True)
+
+            # 파일명 → 쿼리파람 세팅 링크
+            view["파일명"] = view["파일명"].apply(
+                lambda s: f'<a href="?pdf_file={quote(str(s))}">{html.escape(str(s))}</a>'
+            )
+            # 열기(새 탭)
             view["열기"] = view.apply(
                 lambda r: f'<a href="{click_url(r["file_id"], r["페이지"])}" target="_blank" rel="noopener noreferrer">열기</a>',
                 axis=1,
             )
             st.write(view[["파일명", "페이지", "열기"]].to_html(index=False, escape=False), unsafe_allow_html=True)
 
-            # --- 미리보기(하이라이트 + iframe) ---
-            kw_list = [k.strip() for k in kw_pdf.split() if k.strip()]
-            st.caption("행 번호를 선택해 본문 스니펫과 문서 미리보기를 확인하세요.")
-            with st.expander("텍스트 미리보기 & 문서 보기 (선택한 1건)"):
-                idx = st.number_input("행 번호(0부터)", min_value=0, max_value=len(df) - 1, value=0, step=1, key="pdf_preview_idx")
-                row = df.iloc[int(idx)]
-                st.write(f"**파일**: {row['filename']}  |  **페이지**: {int(row['page'])}  |  **file_id**: {row.get('me') or '-'}")
+            # --- 파일/페이지 선택 UI (파일명 기반) ---
+            st.caption("행 번호 대신, 파일과 페이지를 선택해서 미리보세요.")
+
+            # 쿼리파람으로 넘어온 파일명(있으면 기본값으로 사용)
+            qp_file = st.query_params.get("pdf_file", None)
+            file_options = list(pd.unique(df["filename"]))
+            default_idx = file_options.index(qp_file) if (qp_file in file_options) else 0
+
+            sel_file = st.selectbox("파일 선택", file_options, index=default_idx, key="pdf_file_sel")
+            pages_in_file = sorted(df.loc[df["filename"] == sel_file, "page"].unique().tolist())
+
+            if not pages_in_file:
+                st.warning("선택한 파일의 페이지 목록을 찾지 못했습니다.")
+            else:
+                sel_page = st.select_slider("페이지 선택", options=pages_in_file, value=pages_in_file[0], key="pdf_page_sel")
+
+                # 선택 레코드
+                row = df[(df["filename"] == sel_file) & (df["page"] == sel_page)].iloc[0]
+                fid = (row.get("me") or "").strip()
+
+                # --- 텍스트 스니펫 + 문서 임베드 ---
+                kw_list = [k.strip() for k in kw_pdf.split() if k.strip()]
+                st.write(f"**파일**: {sel_file}  |  **페이지**: {int(sel_page)}  |  **file_id**: {fid or '-'}")
                 st.markdown(highlight_html(row["text"], kw_list, width=200), unsafe_allow_html=True)
 
                 st.components.v1.html(
-                    f'<iframe src="{iframe_url(row.get("me"), int(row["page"]))}" style="width:100%; height:720px;" frameborder="0"></iframe>',
+                    f'<iframe src="{iframe_url(fid, int(sel_page))}" style="width:100%; height:720px;" frameborder="0"></iframe>',
                     height=740,
                 )
     else:
