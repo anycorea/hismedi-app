@@ -606,12 +606,14 @@ with tab_pdf:
             "미리보기 높이(px)", 480, 1200, 640, step=40, key=f"pv_h_{fid}"
         )
 
-        # ---- pdf.js로 직접 렌더 (선택 페이지로 정확히 이동)
-        #     기본 화면이 너무 넓을 때 과도하게 커지지 않도록 최대 기본 폭(900px) 제한
+        # ---- pdf.js로 직접 렌더 (선택 페이지로 정확히 이동) — 모바일 최적화
+        #     - 너무 넓을 때 과확대 방지: 기본 폭 제한(900px)
+        #     - 모바일 폭에서 자동 가독성 보정(mobileBoost)
+        #     - HiDPI(레티나)에서 글자 번짐 방지: devicePixelRatio 스케일링
         max_fit_width = 900
 
         viewer_html = f"""
-<div id="pdf-root" style="width:100%;height:{height_px}px;background:#fafafa;overflow:auto;">
+<div id="pdf-root" style="width:100%;height:{height_px}px;max-height:80vh;background:#fafafa;overflow:auto;">
   <canvas id="pdf-canvas" style="display:block;margin:0 auto;background:#fff;box-shadow:0 0 4px rgba(0,0,0,0.08)"></canvas>
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
@@ -631,7 +633,7 @@ with tab_pdf:
 
   const pdfData    = b64ToUint8Array("{b64}");
   const targetPage = {int(page_view)};          // 1-based
-  const zoomScale  = {float(zoom_pct)}/100.0;   // 1.0 = 100%
+  const sliderZoom = {float(zoom_pct)}/100.0;   // 1.0 = 100%
   const maxFitW    = {int(max_fit_width)};      // 기본 폭 제한
 
   pdfjsLib.getDocument({{ data: pdfData }}).promise.then(function(pdf) {{
@@ -641,14 +643,25 @@ with tab_pdf:
       const canvas = document.getElementById('pdf-canvas');
       const ctx = canvas.getContext('2d');
 
-      // 컨테이너 폭과 최대 기본 폭 중 작은 값을 사용해서 너무 커지지 않도록 제한
+      // 컨테이너 폭과 최대 기본 폭 중 작은 값을 사용
       const initialViewport = page.getViewport({{scale: 1}});
-      const fitWidth   = Math.min(container.clientWidth, maxFitW);
-      const fitScale   = fitWidth / initialViewport.width;
-      const viewport   = page.getViewport({{scale: fitScale * zoomScale}});
+      const fitWidth = Math.min(container.clientWidth, maxFitW);
 
-      canvas.width  = Math.floor(viewport.width);
-      canvas.height = Math.floor(viewport.height);
+      // 모바일 가독성 보정: 폭이 520px 미만이면 약간 확대
+      const isPhone = fitWidth < 520;
+      const mobileBoost = isPhone ? 1.15 : 1.0;
+
+      const fitScale = fitWidth / initialViewport.width;
+      const finalScale = fitScale * sliderZoom * mobileBoost;
+      const viewport = page.getViewport({{scale: finalScale}});
+
+      // HiDPI(레티나) 대응: 장치 픽셀 비율 반영
+      const dpr = (window.devicePixelRatio || 1);
+      canvas.width  = Math.floor(viewport.width  * dpr);
+      canvas.height = Math.floor(viewport.height * dpr);
+      canvas.style.width  = Math.floor(viewport.width) + 'px';
+      canvas.style.height = Math.floor(viewport.height) + 'px';
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
       page.render({{
         canvasContext: ctx,
@@ -662,7 +675,7 @@ with tab_pdf:
   }});
 </script>
 """
-        st.components.v1.html(viewer_html, height=height_px + 20)
+        st.components.v1.html(viewer_html, height=height_px + 40)
 
     else:
         st.caption("먼저 [검색]을 실행해 결과를 보신 뒤, 파일명/페이지 버튼을 클릭하면 아래 미리보기가 갱신됩니다.")
