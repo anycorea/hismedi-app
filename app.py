@@ -722,59 +722,128 @@ with tab_main:
 
 # --------------------- 조사위원 질문 -----------------------------
 with tab_qna:
-    # 큰 제목 제거
+    # 큰 제목은 생략
     st.write("")
 
-    # 폼 제출 버튼 전역 숨김
+    # 폼 제출 버튼 숨김(Enter로 검색)
     st.markdown("<style>div[data-testid='stFormSubmitButton']{display:none!important;}</style>", unsafe_allow_html=True)
 
     qna_table = _pick_table(eng, ["qna_v", "qna_raw"]) or "qna_raw"
-    FIXED_LIMIT = 1000  # 내부 고정 제한
+    all_q_cols = _list_columns(eng, qna_table)
 
-    # --- Enter로 제출되는 폼 ---
+    # ====== 입력폼 (Enter 제출) ======
     with st.form("qna_search_form", clear_on_submit=False):
-        kw_q = st.text_input("키워드 (공백=AND)", "", key="qna_kw")
-        submitted_qna = st.form_submit_button("검색")  # 화면에는 숨김
+        kw_q = st.text_input("키워드 (공백=AND)", st.session_state.get("qna_kw", ""), key="qna_kw")
+        FIXED_LIMIT_QNA = 1000   # 내부 고정 제한
+        submitted_qna = st.form_submit_button("검색")  # 화면엔 숨김
 
-    # 제출 시 검색 → 세션 저장
+    # ====== 검색 실행 ======
     if submitted_qna and kw_q.strip():
         with st.spinner("검색 중..."):
-            _df = search_table_any(eng, qna_table, kw_q, columns=None, limit=FIXED_LIMIT)
-        if _df.empty:
+            df_q = search_table_any(eng, qna_table, kw_q, columns=None, limit=FIXED_LIMIT_QNA)
+        if df_q.empty:
             st.info("결과 없음")
             st.session_state.pop("qna_results", None)
         else:
-            st.session_state["qna_results"] = _df.to_dict("records")
+            st.session_state["qna_results"] = df_q.to_dict("records")
 
-    # 결과 렌더링
+    # ====== 컬럼 선택 헬퍼 ======
+    def _pick_col(cols, candidates):
+        """
+        cols 중에서 candidates 리스트와 정확일치 → 부분일치 순으로 찾아서 반환.
+        못 찾으면 None.
+        """
+        # 정확 일치 우선
+        for want in candidates:
+            for c in cols:
+                if str(c).strip() == want:
+                    return c
+        # 부분 일치(공백 제거/소문자)
+        cand_norm = [re.sub(r"\s+", "", want).lower() for want in candidates]
+        for c in cols:
+            cn = re.sub(r"\s+", "", str(c)).lower()
+            if any(w in cn for w in cand_norm):
+                return c
+        return None
+
+    # ====== 결과 표시 ======
     if "qna_results" in st.session_state and st.session_state["qna_results"]:
         df = pd.DataFrame(st.session_state["qna_results"])
-        st.write(f"결과: {len(df):,}건")
 
-        view_mode = st.radio("보기 형식", ["카드형(모바일)", "표형"], horizontal=True, key="qna_view_mode")
+        # 'No' 컬럼(또는 유사 식별자) 제외
+        drop_like = [c for c in df.columns if str(c).strip().lower() in ("no", "번호", "순번")]
+        if drop_like:
+            df = df.drop(columns=drop_like)
 
-        def render_cards_qna(df_):
-            st.markdown("""
+        # 보여줄 2개 컬럼 자동 매핑 (조사장소 제외)
+        COL_QUESTION = _pick_col(df.columns, ["조사위원 질문", "조사위원질문", "질문", "QnA", "질문사항"])
+        COL_CONFIRM  = _pick_col(df.columns, ["확인내용", "확인 내용", "확인사항", "확인 내역", "확인내용(기록)", "확인 근거"])
+
+        chosen = [c for c in [COL_QUESTION, COL_CONFIRM] if c is not None]
+        if len(chosen) < 2:
+            # 못 찾으면 가지고 있는 것 중 앞의 2개만 임시 노출
+            chosen = list(df.columns)[:2]
+
+        view = df[chosen].copy()
+
+        # 표시명 통일
+        rename_map = {}
+        if COL_QUESTION: rename_map[COL_QUESTION] = "조사위원 질문"
+        if COL_CONFIRM:  rename_map[COL_CONFIRM]  = "확인내용"
+        view.rename(columns=rename_map, inplace=True)
+
+        # ===== 테이블 스타일(CSS) - 반응형 =====
+        st.markdown("""
 <style>
-.card{border:1px solid #e9ecef;border-radius:10px;padding:12px 14px;margin:8px 0;background:#fff}
-.card h4{margin:0 0 8px 0;font-size:16px;line-height:1.3}
-.card .row{margin:4px 0;font-size:13px;color:#333}
-.card .lbl{display:inline-block;min-width:96px;color:#6c757d}
+.qna-table-wrap{ overflow-x:auto; }
+.qna-table-wrap table{
+  width:100%; border-collapse:collapse; background:#fff; table-layout:auto;
+}
+.qna-table-wrap th, .qna-table-wrap td{
+  border:1px solid #e9ecef; padding:8px 10px; text-align:left; vertical-align:top;
+  font-size:13px; word-break:break-word; overflow-wrap:anywhere; white-space:normal;
+}
+.qna-table-wrap th{ background:#f8f9fa; font-weight:700; }
+@media (max-width: 1400px){
+  .qna-table-wrap th, .qna-table-wrap td{ font-size:12px; padding:6px 8px; }
+}
+@media (max-width: 1200px){
+  .qna-table-wrap th, .qna-table-wrap td{ font-size:11.5px; padding:5px 7px; }
+}
+@media (max-width: 1024px){
+  .qna-table-wrap th, .qna-table-wrap td{ font-size:11px; padding:5px 6px; }
+}
+@media (max-width: 900px){
+  .qna-table-wrap th, .qna-table-wrap td{ font-size:10.5px; padding:4px 5px; }
+}
+@media (max-width: 768px){
+  .qna-table-wrap th, .qna-table-wrap td{ font-size:10px; padding:3px 4px; }
+}
 </style>
-            """, unsafe_allow_html=True)
-            import html as _html
-            for _, r in df_.iterrows():
-                rows = []
-                for c in df_.columns:
-                    v = _html.escape(str(r[c]))
-                    rows.append(f'<div class="row"><span class="lbl">{_html.escape(str(c))}</span> {v}</div>')
-                title = _html.escape(str(r[df_.columns[0]]))
-                st.markdown(f'<div class="card"><h4>{title}</h4>' + "".join(rows) + '</div>', unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
 
-        if view_mode == "표형":
-            st.dataframe(df, use_container_width=True, height=520)
-        else:
-            render_cards_qna(df)
+        # ===== HTML 테이블(인덱스 없음) 렌더 =====
+        header = "".join(f"<th>{html.escape(str(c))}</th>" for c in view.columns)
+        rows = []
+        for _, r in view.iterrows():
+            cells = "".join(f"<td>{html.escape('' if pd.isna(v) else str(v))}</td>" for v in r.tolist())
+            rows.append(f"<tr>{cells}</tr>")
+
+        st.write(f"결과: {len(view):,}건")
+        st.markdown(
+            f"""
+<div class="qna-table-wrap">
+  <table>
+    <thead><tr>{header}</tr></thead>
+    <tbody>
+      {''.join(rows)}
+    </tbody>
+  </table>
+</div>
+""",
+            unsafe_allow_html=True,
+        )
+    # else: (힌트/캡션은 생략)
 
 # --------------------- 규정검색(PDF파일/본문) (Google Drive 전용) -------
 with tab_pdf:
@@ -976,6 +1045,7 @@ with tab_pdf:
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
         st.caption("먼저 키워드를 입력하고 **키보드 Enter**를 누르면 결과가 표시됩니다.")
+
 
 
 
