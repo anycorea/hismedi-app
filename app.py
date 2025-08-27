@@ -400,15 +400,15 @@ def search_regs(eng, keywords: str, filename_like: str = "", limit: int = 500, h
         return pd.read_sql_query(sql, con, params=params)
 
 # ------------------------------------------------------------
-# 연결 배너
+# 연결 배너 (KST로 시간 표시)
 # ------------------------------------------------------------
 eng = get_engine()
 try:
     with eng.begin() as con:
-        user, port, now = con.execute(
-            text("select current_user, inet_server_port(), now()")
+        user, port, now_kst = con.execute(
+            text("select current_user, inet_server_port(), (now() at time zone 'Asia/Seoul')")
         ).one()
-    st.success(f"DB 연결 OK | user={user} | port={port} | time={now}")
+    st.success(f"DB 연결 OK | user={user} | port={port} | time={now_kst:%Y-%m-%d %H:%M:%S} (KST)")
 except Exception as e:
     st.exception(e); st.stop()
 
@@ -654,3 +654,4 @@ with tab_pdf:
 
     else:
         st.caption("먼저 [검색]을 실행해 결과를 보신 뒤, 파일명/페이지 버튼을 클릭하면 아래 미리보기가 갱신됩니다.")
+
