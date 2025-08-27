@@ -452,6 +452,25 @@ with tab_main:
     limit = st.number_input("최대 행수", 1, 5000, 500, step=100, key="main_lim")
     combined_kw = " ".join([s for s in [kw, f_person, f_place] if str(s).strip()]).strip()
 
+    # 카드 렌더 유틸 (HTML 이스케이프 포함)
+    def render_cards(df_):
+        st.markdown("""
+<style>
+.card{border:1px solid #e9ecef;border-radius:10px;padding:12px 14px;margin:8px 0;background:#fff}
+.card h4{margin:0 0 8px 0;font-size:16px;line-height:1.3}
+.card .row{margin:4px 0;font-size:13px;color:#333}
+.card .lbl{display:inline-block;min-width:96px;color:#6c757d}
+</style>
+        """, unsafe_allow_html=True)
+        import html as _html
+        for _, r in df_.iterrows():
+            rows = []
+            for c in df_.columns:
+                v = _html.escape(str(r[c]))
+                rows.append(f'<div class="row"><span class="lbl">{_html.escape(str(c))}</span> {v}</div>')
+            title = _html.escape(str(r[df_.columns[0]]))
+            st.markdown(f'<div class="card"><h4>{title}</h4>' + "".join(rows) + '</div>', unsafe_allow_html=True)
+
     if st.button("검색", key="main_search") and combined_kw:
         with st.spinner("검색 중..."):
             df = search_table_any(eng, main_table, combined_kw, columns=sel_cols, limit=limit)
@@ -459,7 +478,11 @@ with tab_main:
         if df.empty:
             st.info("결과 없음")
         else:
-            st.dataframe(df, use_container_width=True, height=520)
+            view_mode = st.radio("보기 형식", ["카드형(모바일)", "표형"], horizontal=True, key="main_view_mode")
+            if view_mode == "표형":
+                st.dataframe(df, use_container_width=True, height=520)
+            else:
+                render_cards(df)
     else:
         st.caption("힌트: 조사대상/조사장소 단어는 메인 키워드와 AND로 결합되어 검색됩니다.")
 
@@ -472,6 +495,25 @@ with tab_qna:
     kw_q = st.text_input("키워드 (공백=AND)", "", key="qna_kw")
     limit_q = st.number_input("최대 행수", 1, 5000, 500, step=100, key="qna_lim")
 
+    # 카드 렌더 유틸
+    def render_cards_qna(df_):
+        st.markdown("""
+<style>
+.card{border:1px solid #e9ecef;border-radius:10px;padding:12px 14px;margin:8px 0;background:#fff}
+.card h4{margin:0 0 8px 0;font-size:16px;line-height:1.3}
+.card .row{margin:4px 0;font-size:13px;color:#333}
+.card .lbl{display:inline-block;min-width:96px;color:#6c757d}
+</style>
+        """, unsafe_allow_html=True)
+        import html as _html
+        for _, r in df_.iterrows():
+            rows = []
+            for c in df_.columns:
+                v = _html.escape(str(r[c]))
+                rows.append(f'<div class="row"><span class="lbl">{_html.escape(str(c))}</span> {v}</div>')
+            title = _html.escape(str(r[df_.columns[0]]))
+            st.markdown(f'<div class="card"><h4>{title}</h4>' + "".join(rows) + '</div>', unsafe_allow_html=True)
+
     if st.button("검색", key="qna_search") and kw_q.strip():
         with st.spinner("검색 중..."):
             df = search_table_any(eng, qna_table, kw_q, columns=None, limit=limit_q)
@@ -479,19 +521,21 @@ with tab_qna:
         if df.empty:
             st.info("결과 없음")
         else:
-            st.dataframe(df, use_container_width=True, height=520)
+            view_mode = st.radio("보기 형식", ["카드형(모바일)", "표형"], horizontal=True, key="qna_view_mode")
+            if view_mode == "표형":
+                st.dataframe(df, use_container_width=True, height=520)
+            else:
+                render_cards_qna(df)
     else:
         st.caption("필요 시 ‘임시 SQL’ 탭에서 직접 SELECT 실행 가능합니다.")
 
 # --------------------- PDF 검색 (Google Drive 전용) -------
 with tab_pdf:
-    # 큰 제목 제거 + 상단 라인(구분선) 제거: st.divider() 사용하지 않음
+    # 큰 제목 제거 + 상단 라인 제거
     st.write("")
 
-    # 세션에서 인덱스 완료 여부 플래그
+    # 인덱스 버튼: 최초 접속 시에만 노출
     drive_done = st.session_state.get("drive_index_done", False)
-
-    # 1) 인덱싱: Google Drive만 사용 (최초 접속 시에만 노출)
     if not drive_done:
         cols1 = st.columns([1, 2, 1])
         with cols1[1]:
@@ -499,15 +543,10 @@ with tab_pdf:
                 if not (DRIVE_API_KEY and DRIVE_FOLDER_ID and "?" not in DRIVE_FOLDER_ID):
                     st.error("Secrets에 DRIVE_API_KEY / DRIVE_FOLDER_ID(쿼리스트링 제거) 를 설정하세요.")
                 else:
-                    # 진행 상황만 보여주기 (스피너). 완료 후 버튼/영역 모두 사라짐.
                     with st.spinner("Google Drive 인덱싱 중..."):
                         _ = index_pdfs_from_drive(eng, DRIVE_FOLDER_ID, DRIVE_API_KEY)
                     st.session_state["drive_index_done"] = True
-                    # 완료 후 재렌더링하여 버튼/라인 등 모두 사라지게 처리
                     st.rerun()
-
-    # (인덱싱 영역과 검색 영역 사이 구분은 원하시면 아래 주석 해제)
-    # st.divider()
 
     # 2) 검색 조건
     kw_pdf   = st.text_input("키워드 (공백=AND)", "", key="pdf_kw")
@@ -518,7 +557,6 @@ with tab_pdf:
     if st.button("검색", key="pdf_search") and kw_pdf.strip():
         with st.spinner("검색 중..."):
             _df = search_regs(eng, kw_pdf, filename_like=fn_like, limit=int(limit_pdf))
-
         if "me" in _df.columns:
             _df = _df[_df["me"].astype(str).str.strip() != ""]
         _df = _df.sort_values(["filename", "page"], kind="stable").reset_index(drop=True)
@@ -533,48 +571,89 @@ with tab_pdf:
             st.session_state["pdf_sel_idx"] = 0
             st.session_state["pdf_kw_list"] = [k.strip() for k in kw_pdf.split() if k.strip()]
 
-    # 3-B) 세션 결과가 있으면 렌더링 (파일명/페이지 버튼 클릭만으로 갱신)
+    # 3-B) 결과 렌더링
     if "pdf_results" in st.session_state and st.session_state["pdf_results"]:
         df = pd.DataFrame(st.session_state["pdf_results"])
         kw_list = st.session_state.get("pdf_kw_list", [])
-
         st.write(f"결과: {len(df):,}건")
 
-        # ---- 링크 유틸
+        # 링크 유틸
         def view_url(fid: str, page: int) -> str:
             fid = (fid or "").strip()
             return f"https://drive.google.com/file/d/{fid}/view#page={int(page)}"
 
-        # ---- 파일명/페이지 버튼 테이블
-        st.caption("표에서 **파일명 버튼** 또는 **페이지 버튼**을 클릭하면 아래 미리보기가 즉시 바뀝니다.")
-        hdr = st.columns([7, 1, 1])
-        hdr[0].markdown("**파일명**")
-        hdr[1].markdown("**페이지**")
-        hdr[2].markdown("**열기**")
+        # 보기 형식 선택 (모바일 기본: 카드형)
+        view_mode_pdf = st.radio("보기 형식", ["카드형(모바일)", "표형(간단)"], horizontal=True, key="pdf_view_mode")
 
-        if "pdf_sel_idx" not in st.session_state:
-            st.session_state["pdf_sel_idx"] = 0
+        # ---- 표형(간단) : 기존 3열 헤더
+        if view_mode_pdf.endswith("간단)"):
+            st.caption("파일명/페이지 버튼을 클릭하면 아래 미리보기가 바뀝니다.")
+            hdr = st.columns([7, 1, 1])
+            hdr[0].markdown("**파일명**")
+            hdr[1].markdown("**페이지**")
+            hdr[2].markdown("**열기**")
 
-        for i, row in df.iterrows():
-            c1, c2, c3 = st.columns([7, 1, 1])
+            if "pdf_sel_idx" not in st.session_state:
+                st.session_state["pdf_sel_idx"] = 0
 
-            # 파일명 버튼 (내부 선택만 변경)
-            if c1.button(str(row["filename"]), key=f"pick_file_{i}"):
-                st.session_state["pdf_sel_idx"] = int(i)
+            for i, row in df.iterrows():
+                c1, c2, c3 = st.columns([7, 1, 1])
+                if c1.button(str(row["filename"]), key=f"pick_file_{i}"):
+                    st.session_state["pdf_sel_idx"] = int(i)
+                if c2.button(str(int(row["page"])), key=f"pick_page_{i}"):
+                    st.session_state["pdf_sel_idx"] = int(i)
+                c3.markdown(
+                    f'<a href="{view_url(row["me"], int(row["page"]))}" target="_blank" rel="noopener noreferrer" '
+                    f'style="display:inline-block;padding:6px 12px;border:1px solid #ddd;border-radius:8px;'
+                    f'background:#f8f9fa;text-decoration:none;color:#0d6efd;font-weight:600;">열기</a>',
+                    unsafe_allow_html=True
+                )
 
-            # 페이지 버튼 (내부 선택만 변경)
-            if c2.button(str(int(row["page"])), key=f"pick_page_{i}"):
-                st.session_state["pdf_sel_idx"] = int(i)
+        # ---- 카드형(모바일) : 각 행을 카드로 세로 배치
+        else:
+            st.markdown("""
+<style>
+.pcard{border:1px solid #e9ecef;border-radius:12px;padding:12px 14px;margin:10px 0;background:#fff}
+.pcard .title{font-size:15px;font-weight:700;margin-bottom:10px;word-break:break-all}
+.pbtn{display:inline-block;padding:8px 12px;border:1px solid #dee2e6;border-radius:10px;background:#f8f9fa;
+      text-decoration:none;color:#0d6efd;font-weight:600}
+.pbtn + .pbtn{margin-left:8px}
+.pmeta{font-size:12px;color:#6c757d;margin-top:6px}
+.rowbtn{display:flex;gap:8px;flex-wrap:wrap}
+.rowbtn .stButton>button{width:100%}
+</style>
+            """, unsafe_allow_html=True)
 
-            # '열기' 박스형 버튼
-            c3.markdown(
-                f'<a href="{view_url(row["me"], int(row["page"]))}" target="_blank" rel="noopener noreferrer" '
-                f'style="display:inline-block;padding:6px 12px;border:1px solid #ddd;border-radius:8px;'
-                f'background:#f8f9fa;text-decoration:none;color:#0d6efd;font-weight:600;">열기</a>',
-                unsafe_allow_html=True
-            )
+            if "pdf_sel_idx" not in st.session_state:
+                st.session_state["pdf_sel_idx"] = 0
 
-        # ---- 현재 선택된 행
+            import html as _html
+            for i, row in df.iterrows():
+                fid_i = (row.get("me") or "").strip()
+                fname = _html.escape(str(row["filename"]))
+                pagei = int(row["page"])
+                col1, = st.columns(1)
+                with col1:
+                    st.markdown(f'<div class="pcard"><div class="title">{fname}</div>', unsafe_allow_html=True)
+
+                    # 파일명(선택) 버튼 – 가로폭 100%
+                    if st.button("이 파일 미리보기", key=f"pick_file_card_{i}", use_container_width=True):
+                        st.session_state["pdf_sel_idx"] = int(i)
+
+                    # 하단 버튼 묶음: 페이지 / 열기
+                    cA, cB = st.columns(2)
+                    with cA:
+                        if st.button(f"페이지 {pagei}", key=f"pick_page_card_{i}", use_container_width=True):
+                            st.session_state["pdf_sel_idx"] = int(i)
+                    with cB:
+                        st.markdown(
+                            f'<a class="pbtn" href="{view_url(fid_i, pagei)}" target="_blank" rel="noopener noreferrer" '
+                            f'style="display:block;text-align:center;padding:9px 12px;">열기</a>',
+                            unsafe_allow_html=True
+                        )
+                    st.markdown(f'<div class="pmeta">file_id: {fid_i or "-"}</div></div>', unsafe_allow_html=True)
+
+        # ---- 선택된 행으로 미리보기 (이하는 동일)
         sel_idx = int(st.session_state.get("pdf_sel_idx", 0))
         sel_idx = max(0, min(sel_idx, len(df) - 1))
         sel = df.iloc[sel_idx]
@@ -584,90 +663,63 @@ with tab_pdf:
 
         st.caption("텍스트 미리보기 & 문서 보기 (선택한 1건)")
         st.write(f"**파일**: {sel_file}  |  **페이지**: {sel_page}  |  **file_id**: {fid or '-'}")
-        st.markdown(
-            highlight_html(sel["text"], kw_list, width=200),
-            unsafe_allow_html=True
-        )
+        st.markdown(highlight_html(sel["text"], kw_list, width=200), unsafe_allow_html=True)
 
         # ---- PDF 바이트 캐시 + 내려받기
         import base64
         cache = st.session_state.setdefault("pdf_cache", {})
         b64 = cache.get(fid)
         if not b64:
-            # 공개/링크공유 파일 가정
             pdf_bytes = _drive_download_pdf(fid, DRIVE_API_KEY)
             b64 = base64.b64encode(pdf_bytes).decode("ascii")
             cache[fid] = b64
 
         # ---- 미리보기 컨트롤 (페이지/줌/높이)
-        page_view = st.number_input(
-            "미리보기 페이지", 1, 9999, int(sel_page), step=1, key=f"pv_page_{fid}"
-        )
-        zoom_pct = st.slider(
-            "줌(%)", 30, 200, 80, step=5, key=f"pv_zoom_{fid}"   # 기본 80%
-        )
-        height_px = st.slider(
-            "미리보기 높이(px)", 480, 1200, 640, step=40, key=f"pv_h_{fid}"
-        )
+        page_view = st.number_input("미리보기 페이지", 1, 9999, int(sel_page), step=1, key=f"pv_page_{fid}")
+        zoom_pct  = st.slider("줌(%)", 30, 200, 80, step=5, key=f"pv_zoom_{fid}")
+        height_px = st.slider("미리보기 높이(px)", 480, 1200, 640, step=40, key=f"pv_h_{fid}")
 
-        # ---- pdf.js로 직접 렌더 (선택 페이지로 정확히 이동) — 모바일 최적화 포함
+        # ---- pdf.js 렌더 (모바일 최적화 포함)
         max_fit_width = 900
-
         viewer_html = f"""
 <div id="pdf-root" style="width:100%;height:{height_px}px;max-height:80vh;background:#fafafa;overflow:auto;">
   <canvas id="pdf-canvas" style="display:block;margin:0 auto;background:#fff;box-shadow:0 0 4px rgba(0,0,0,0.08)"></canvas>
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script>
-  // pdf.js 워커 설정
   if (window['pdfjsLib']) {{
     pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
   }}
-
-  // base64 → Uint8Array
   function b64ToUint8Array(b64) {{
     const raw = atob(b64), len = raw.length;
     const arr = new Uint8Array(len);
     for (let i=0; i<len; i++) arr[i] = raw.charCodeAt(i);
     return arr;
   }}
-
   const pdfData    = b64ToUint8Array("{b64}");
-  const targetPage = {int(page_view)};          // 1-based
-  const sliderZoom = {float(zoom_pct)}/100.0;   // 1.0 = 100%
-  const maxFitW    = {int(max_fit_width)};      // 기본 폭 제한
-
+  const targetPage = {int(page_view)};
+  const sliderZoom = {float(zoom_pct)}/100.0;
+  const maxFitW    = {int(max_fit_width)};
   pdfjsLib.getDocument({{ data: pdfData }}).promise.then(function(pdf) {{
     const pageNo = Math.min(Math.max(1, targetPage), pdf.numPages);
     return pdf.getPage(pageNo).then(function(page) {{
       const container = document.getElementById('pdf-root');
       const canvas = document.getElementById('pdf-canvas');
       const ctx = canvas.getContext('2d');
-
-      // 컨테이너 폭과 최대 기본 폭 중 작은 값을 사용
       const initialViewport = page.getViewport({{scale: 1}});
       const fitWidth = Math.min(container.clientWidth, maxFitW);
-
-      // 모바일 가독성 보정: 폭이 520px 미만이면 약간 확대
       const isPhone = fitWidth < 520;
       const mobileBoost = isPhone ? 1.15 : 1.0;
-
       const fitScale = fitWidth / initialViewport.width;
       const finalScale = fitScale * sliderZoom * mobileBoost;
       const viewport = page.getViewport({{scale: finalScale}});
-
-      // HiDPI(레티나) 대응
       const dpr = (window.devicePixelRatio || 1);
       canvas.width  = Math.floor(viewport.width  * dpr);
       canvas.height = Math.floor(viewport.height * dpr);
       canvas.style.width  = Math.floor(viewport.width) + 'px';
       canvas.style.height = Math.floor(viewport.height) + 'px';
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-      page.render({{
-        canvasContext: ctx,
-        viewport: viewport
-      }});
+      page.render({{ canvasContext: ctx, viewport: viewport }});
     }});
   }}).catch(function(e) {{
     const el = document.getElementById('pdf-root');
@@ -677,6 +729,5 @@ with tab_pdf:
 </script>
 """
         st.components.v1.html(viewer_html, height=height_px + 40)
-
     else:
         st.caption("먼저 [검색]을 실행해 결과를 보신 뒤, 파일명/페이지 버튼을 클릭하면 아래 미리보기가 갱신됩니다.")
