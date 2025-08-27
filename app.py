@@ -520,56 +520,34 @@ with tab_pdf:
             st.info("조건에 맞는 결과가 없습니다. 먼저 [인덱스(Drive)]를 수행했는지 확인하세요.")
         else:
             # --- 링크 유틸 ---
-            # 클릭(새 탭)용: /view#page=n
-            # iframe(앱 내 미리보기)용: /preview#page=n
-            def make_click_url_from_vals(fid: str, page: int) -> str:
+            def click_url(fid: str, page: int) -> str:
                 fid = (fid or "").strip()
-                return f"https://drive.google.com/file/d/{fid}/view#page={int(page)}"
-
-            def make_iframe_url_from_vals(fid: str, page: int) -> str:
+                return f"https://drive.google.com/file/d/{fid}/view#page={int(page)}"      # 새 탭 뷰어
+            def iframe_url(fid: str, page: int) -> str:
                 fid = (fid or "").strip()
-                return f"https://drive.google.com/file/d/{fid}/preview#page={int(page)}"
+                return f"https://drive.google.com/file/d/{fid}/preview#page={int(page)}"   # 앱 내 임베드
 
-            # --- 표: HTML로 렌더링(의존성 없음, 링크 클릭 보장) ---
+            # --- 표: HTML로 렌더링(의존성 無, 클릭 보장) ---
             view = df[["filename", "page", "me"]].copy()
             view.rename(columns={"filename": "파일명", "page": "페이지", "me": "file_id"}, inplace=True)
-
             view["열기"] = view.apply(
-                lambda r: (
-                    f'<a href="{make_click_url_from_vals(r["file_id"], r["페이지"])}" '
-                    f'target="_blank" rel="noopener noreferrer">열기</a>'
-                ),
+                lambda r: f'<a href="{click_url(r["file_id"], r["페이지"])}" target="_blank" rel="noopener noreferrer">열기</a>',
                 axis=1,
             )
-
-            html_table = view[["파일명", "페이지", "열기"]].to_html(index=False, escape=False)
-            st.write(html_table, unsafe_allow_html=True)
+            st.write(view[["파일명", "페이지", "열기"]].to_html(index=False, escape=False), unsafe_allow_html=True)
 
             # --- 미리보기(하이라이트 + iframe) ---
             kw_list = [k.strip() for k in kw_pdf.split() if k.strip()]
-
             st.caption("행 번호를 선택해 본문 스니펫과 문서 미리보기를 확인하세요.")
             with st.expander("텍스트 미리보기 & 문서 보기 (선택한 1건)"):
-                idx = st.number_input(
-                    "행 번호(0부터)",
-                    min_value=0, max_value=len(df) - 1, value=0, step=1,
-                    key="pdf_preview_idx"
-                )
+                idx = st.number_input("행 번호(0부터)", min_value=0, max_value=len(df) - 1, value=0, step=1, key="pdf_preview_idx")
                 row = df.iloc[int(idx)]
-                st.write(
-                    f"**파일**: {row['filename']}  |  **페이지**: {int(row['page'])}  |  **file_id**: {row.get('me') or '-'}"
-                )
+                st.write(f"**파일**: {row['filename']}  |  **페이지**: {int(row['page'])}  |  **file_id**: {row.get('me') or '-'}")
+                st.markdown(highlight_html(row["text"], kw_list, width=200), unsafe_allow_html=True)
 
-                st.markdown(
-                    highlight_html(row["text"], kw_list, width=200),
-                    unsafe_allow_html=True
-                )
-
-                iframe_src = make_iframe_url_from_vals(row.get("me"), int(row["page"]))  # /preview
                 st.components.v1.html(
-                    f'<iframe src="{iframe_src}" style="width:100%; height:720px;" frameborder="0"></iframe>',
+                    f'<iframe src="{iframe_url(row.get("me"), int(row["page"]))}" style="width:100%; height:720px;" frameborder="0"></iframe>',
                     height=740,
                 )
     else:
         st.caption("먼저 [인덱스(Drive)] 버튼으로 Google Drive 내 PDF를 인덱싱하세요. 그 후 키워드로 검색할 수 있습니다.")
-
