@@ -532,7 +532,7 @@ with tab_pdf:
 
         st.write(f"결과: {len(df):,}건")
 
-        # ---- 유틸
+        # ---- 링크 유틸
         def view_url(fid: str, page: int) -> str:
             fid = (fid or "").strip()
             return f"https://drive.google.com/file/d/{fid}/view#page={int(page)}"
@@ -549,10 +549,16 @@ with tab_pdf:
 
         for i, row in df.iterrows():
             c1, c2, c3 = st.columns([7, 1, 1])
+
+            # 파일명 버튼 (내부 선택만 변경)
             if c1.button(str(row["filename"]), key=f"pick_file_{i}"):
                 st.session_state["pdf_sel_idx"] = int(i)
+
+            # 페이지 버튼 (내부 선택만 변경)
             if c2.button(str(int(row["page"])), key=f"pick_page_{i}"):
                 st.session_state["pdf_sel_idx"] = int(i)
+
+            # '열기' 박스형 버튼
             c3.markdown(
                 f'<a href="{view_url(row["me"], int(row["page"]))}" target="_blank" rel="noopener noreferrer" '
                 f'style="display:inline-block;padding:6px 12px;border:1px solid #ddd;border-radius:8px;'
@@ -570,18 +576,33 @@ with tab_pdf:
 
         st.caption("텍스트 미리보기 & 문서 보기 (선택한 1건)")
         st.write(f"**파일**: {sel_file}  |  **페이지**: {sel_page}  |  **file_id**: {fid or '-'}")
-        st.markdown(highlight_html(sel["text"], kw_list, width=200), unsafe_allow_html=True)
+        st.markdown(
+            highlight_html(sel["text"], kw_list, width=200),
+            unsafe_allow_html=True
+        )
 
-        # ---- PDF 바이트 직접 내려받아(pdf bytes) pdf.js로 렌더 (CORS/임베드 이슈 우회)
-        try:
-            import base64
-            # Google Drive에서 파일 바이트 가져오기 (공개/링크공유 파일 기준)
-            pdf_bytes = _drive_download_pdf(fid, DRIVE_API_KEY)  # 이미 app.py 상단에 정의된 함수
+        # ---- PDF 바이트 캐시 + 내려받기
+        import base64
+        cache = st.session_state.setdefault("pdf_cache", {})
+        b64 = cache.get(fid)
+        if not b64:
+            # 공개/링크공유 파일 가정
+            pdf_bytes = _drive_download_pdf(fid, DRIVE_API_KEY)
             b64 = base64.b64encode(pdf_bytes).decode("ascii")
+            cache[fid] = b64
 
-            viewer_html = f"""
+        # ---- 미리보기 컨트롤 (페이지/줌)
+        page_view = st.number_input(
+            "미리보기 페이지", 1, 9999, int(sel_page), step=1, key=f"pv_page_{fid}"
+        )
+        zoom_pct = st.slider(
+            "줌(%)", 50, 300, 100, step=10, key=f"pv_zoom_{fid}"
+        )
+
+        # ---- pdf.js로 직접 렌더 (선택 페이지로 정확히 이동)
+        viewer_html = f"""
 <div id="pdf-root" style="width:100%;height:720px;background:#fafafa;overflow:auto;">
-  <canvas id="pdf-canvas" style="display:block;margin:0 auto;"></canvas>
+  <canvas id="pdf-canvas" style="display:block;margin:0 auto;background:#fff;box-shadow:0 0 4px rgba(0,0,0,0.08)"></canvas>
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script>
@@ -598,8 +619,9 @@ with tab_pdf:
     return arr;
   }}
 
-  const pdfData = b64ToUint8Array("{b64}");
-  const targetPage = {sel_page};   // 1-based
+  const pdfData    = b64ToUint8Array("{b64}");
+  const targetPage = {int(page_view)};          // 1-based
+  const zoomScale  = {float(zoom_pct)}/100.0;   // 1.0 = 100%
 
   pdfjsLib.getDocument({{ data: pdfData }}).promise.then(function(pdf) {{
     const pageNo = Math.min(Math.max(1, targetPage), pdf.numPages);
@@ -608,13 +630,13 @@ with tab_pdf:
       const canvas = document.getElementById('pdf-canvas');
       const ctx = canvas.getContext('2d');
 
-      // 컨테이너 폭에 맞춰 자동 스케일
+      // 컨테이너 폭에 맞춰 기본 스케일 산출 + 줌 반영
       const initialViewport = page.getViewport({{scale: 1}});
-      const scale = container.clientWidth / initialViewport.width;
-      const viewport = page.getViewport({{scale: scale}});
+      const fitScale = container.clientWidth / initialViewport.width;
+      const viewport  = page.getViewport({{scale: fitScale * zoomScale}});
 
-      canvas.width  = viewport.width;
-      canvas.height = viewport.height;
+      canvas.width  = Math.floor(viewport.width);
+      canvas.height = Math.floor(viewport.height);
 
       page.render({{
         canvasContext: ctx,
@@ -628,10 +650,7 @@ with tab_pdf:
   }});
 </script>
 """
-            st.components.v1.html(viewer_html, height=740)
-        except Exception as e:
-            st.warning("PDF 미리보기를 불러오지 못했습니다. (네트워크/권한 문제일 수 있어요)")
-            st.exception(e)
+        st.components.v1.html(viewer_html, height=740)
 
     else:
         st.caption("먼저 [검색]을 실행해 결과를 보신 뒤, 파일명/페이지 버튼을 클릭하면 아래 미리보기가 갱신됩니다.")
