@@ -34,28 +34,62 @@ mark { background:#ffe2a8; }
 st.markdown('<div class="main-title">HISMEDI 인증</div>', unsafe_allow_html=True)
 
 # ------------------------------------------------------------
-# 옵션: 간단 접근 비밀번호 (최초 인증 이후 숨김)
+# 옵션: 간단 접근 비밀번호 (8자리 숫자 전용)
+#  - secrets 또는 환경변수 APP_PASSWORD 에 8자리 숫자 설정 (예: "12345678")
+#  - 5회 연속 실패 시 60초 잠금
 # ------------------------------------------------------------
 _APP_PW = (st.secrets.get("APP_PASSWORD") or os.getenv("APP_PASSWORD") or "").strip()
 
+def _is_valid_pw_format(pw: str) -> bool:
+    # 8자리 숫자만 허용
+    return bool(re.fullmatch(r"\d{8}", pw or ""))
+
 if _APP_PW:
-    # 이미 인증되었는지 확인
+    # 관리자 설정 검증 (8자리 숫자 아니면 앱 실행 중단)
+    if not _is_valid_pw_format(_APP_PW):
+        st.error("관리자 설정 오류: APP_PASSWORD 는 8자리 숫자여야 합니다. (예: 12345678)")
+        st.stop()
+
+    # 이미 인증됐는지 확인
     if not st.session_state.get("pw_ok", False):
-        # 폼을 사용하면 모바일에서 엔터로 바로 제출 가능
+        # 잠금 여부(과도한 실패 방지)
+        now = time.time()
+        locked_until = float(st.session_state.get("pw_locked_until", 0))
+        if now < locked_until:
+            st.warning(f"잠시 후 다시 시도하세요. {int(locked_until - now)}초 후 가능합니다.")
+            st.stop()
+
+        # 폼(모바일에서 Enter로 제출 가능)
         with st.form("pw_gate", clear_on_submit=False):
-            pw = st.text_input("접속 비밀번호", type="password", placeholder="비밀번호를 입력하세요")
+            pw = st.text_input("접속 비밀번호 (8자리 숫자)", type="password",
+                               max_chars=8, placeholder="예: 12345678")
             ok = st.form_submit_button("확인")
+
         if ok:
-            if pw.strip() == _APP_PW:
+            if not _is_valid_pw_format(pw):
+                st.error("비밀번호 형식이 올바르지 않습니다. 8자리 숫자만 입력하세요.")
+                st.stop()
+
+            if pw == _APP_PW:
                 st.session_state["pw_ok"] = True
+                st.session_state.pop("pw_attempts", None)
+                st.session_state.pop("pw_locked_until", None)
                 st.rerun()  # 인증 성공 후 UI 갱신
             else:
-                st.error("비밀번호가 틀렸습니다.")
+                # 실패 횟수 증가 및 잠금
+                attempts = int(st.session_state.get("pw_attempts", 0)) + 1
+                st.session_state["pw_attempts"] = attempts
+                if attempts >= 5:
+                    st.session_state["pw_locked_until"] = time.time() + 60  # 60초 잠금
+                    st.session_state["pw_attempts"] = 0
+                    st.error("비밀번호 입력 실패가 많습니다. 60초 후 다시 시도하세요.")
+                else:
+                    st.error(f"비밀번호가 틀렸습니다. (시도 {attempts}/5)")
                 st.stop()
         else:
             # 제출 전에는 아래 내용 노출 방지
             st.stop()
-    # pw_ok=True이면 폼을 더 이상 노출하지 않음 (그대로 진행)
+    # pw_ok=True 이면 더 이상 폼 노출되지 않음 (그대로 진행)
 
 # ------------------------------------------------------------
 # DB 연결 유틸
@@ -831,5 +865,6 @@ with tab_pdf:
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
         st.caption("먼저 키워드를 입력하고 **키보드 Enter**를 누르면 결과가 표시됩니다.")
+
 
 
