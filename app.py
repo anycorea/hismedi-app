@@ -506,14 +506,14 @@ with tab_pdf:
     fn_like  = st.text_input("파일명 필터(선택)", "", key="pdf_fn")
     limit_pdf = st.number_input("최대 결과", 1, 5000, 500, step=100, key="pdf_lim")
 
-    # 3-A) [검색] 누르면 결과를 세션에 저장 (이후 클릭만으로 갱신 가능)
+    # 3-A) [검색] → 결과를 세션에 저장
     if st.button("검색", key="pdf_search") and kw_pdf.strip():
         with st.spinner("검색 중..."):
             _df = search_regs(eng, kw_pdf, filename_like=fn_like, limit=int(limit_pdf))
 
-        # Drive 인덱싱 결과만 (me=file_id 존재)
         if "me" in _df.columns:
             _df = _df[_df["me"].astype(str).str.strip() != ""]
+
         _df = _df.sort_values(["filename", "page"], kind="stable").reset_index(drop=True)
 
         if _df.empty:
@@ -522,32 +522,32 @@ with tab_pdf:
             st.session_state.pop("pdf_sel_idx", None)
             st.session_state.pop("pdf_kw_list", None)
         else:
-            # 세션에 보존 → 이후 파일명 클릭만으로 렌더링
             st.session_state["pdf_results"] = _df.to_dict("records")
             st.session_state["pdf_sel_idx"] = 0
             st.session_state["pdf_kw_list"] = [k.strip() for k in kw_pdf.split() if k.strip()]
 
-    # 3-B) 세션에 저장된 결과가 있으면 항상 렌더링 (파일명 클릭만으로 갱신)
+    # 3-B) 세션 결과가 있으면 항상 렌더링 (파일명/페이지 버튼 클릭만으로 갱신)
     if "pdf_results" in st.session_state and st.session_state["pdf_results"]:
         df = pd.DataFrame(st.session_state["pdf_results"])
         kw_list = st.session_state.get("pdf_kw_list", [])
 
         st.write(f"결과: {len(df):,}건")
 
-        # ---- 유틸
+        # ---- 링크 유틸
         def view_url(fid: str, page: int) -> str:
             fid = (fid or "").strip()
-            return f"https://drive.google.com/file/d/{fid}/view#page={int(page)}"      # 새 탭 원문
+            return f"https://drive.google.com/file/d/{fid}/view#page={int(page)}"   # 새 탭 원문
         def preview_url(fid: str, page: int) -> str:
             fid = (fid or "").strip()
-            return f"https://drive.google.com/file/d/{fid}/preview#page={int(page)}"   # iframe
+            # 캐시버스터(r) + page 해시로 동일 파일 내 페이지 전환을 확실히 반영
+            return f"https://drive.google.com/file/d/{fid}/preview?r={int(page)}#page={int(page)}"
 
-        # ---- 파일명 버튼 테이블 (링크/새창 없음: 내부 선택만)
-        st.caption("표에서 **파일명 버튼**을 클릭하면 아래 미리보기가 즉시 바뀝니다.")
-        header = st.columns([7, 1, 1])
-        header[0].markdown("**파일명**")
-        header[1].markdown("**페이지**")
-        header[2].markdown("**열기**")
+        # ---- 파일명/페이지 버튼 테이블
+        st.caption("표에서 **파일명 버튼** 또는 **페이지 버튼**을 클릭하면 아래 미리보기가 즉시 바뀝니다.")
+        hdr = st.columns([7, 1, 1])
+        hdr[0].markdown("**파일명**")
+        hdr[1].markdown("**페이지**")
+        hdr[2].markdown("**열기**")
 
         if "pdf_sel_idx" not in st.session_state:
             st.session_state["pdf_sel_idx"] = 0
@@ -555,22 +555,23 @@ with tab_pdf:
         for i, row in df.iterrows():
             c1, c2, c3 = st.columns([7, 1, 1])
 
-            # 파일명 버튼: 클릭 시 선택 인덱스만 변경 → 같은 화면에서 미리보기 갱신
-            if c1.button(str(row["filename"]), key=f"pick_{i}"):
+            # 파일명 버튼 (내부 선택만 변경)
+            if c1.button(str(row["filename"]), key=f"pick_file_{i}"):
                 st.session_state["pdf_sel_idx"] = int(i)
 
-            # 페이지 표시
-            c2.write(int(row["page"]))
+            # 페이지 버튼 (내부 선택만 변경)
+            if c2.button(str(int(row["page"])), key=f"pick_page_{i}"):
+                st.session_state["pdf_sel_idx"] = int(i)
 
-            # "열기" 링크: link_button 버전 의존성 회피 → HTML 앵커로 렌더링(가장 호환)
+            # 원문 열기(새 탭)
             c3.markdown(
                 f'<a href="{view_url(row["me"], int(row["page"]))}" target="_blank" rel="noopener noreferrer">열기</a>',
                 unsafe_allow_html=True
             )
 
-        # ---- 현재 선택된 행으로 미리보기 표시
+        # ---- 현재 선택된 행으로 미리보기
         sel_idx = int(st.session_state.get("pdf_sel_idx", 0))
-        sel_idx = max(0, min(sel_idx, len(df) - 1))  # 안전 가드
+        sel_idx = max(0, min(sel_idx, len(df) - 1))
         sel = df.iloc[sel_idx]
 
         fid = (sel.get("me") or "").strip()
@@ -586,6 +587,7 @@ with tab_pdf:
         st.components.v1.html(
             f'<iframe src="{preview_url(fid, sel_page)}" style="width:100%; height:720px;" frameborder="0"></iframe>',
             height=740,
+            key=f"pdf_iframe_{fid}_{sel_page}",   # 페이지 변경 시 리렌더 보장
         )
     else:
-        st.caption("먼저 [검색]을 실행해 결과를 보신 뒤, 파일명을 클릭하면 아래 미리보기가 갱신됩니다.")
+        st.caption("먼저 [검색]을 실행해 결과를 보신 뒤, 파일명/페이지 버튼을 클릭하면 아래 미리보기가 갱신됩니다.")
