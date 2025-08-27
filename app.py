@@ -525,75 +525,53 @@ with tab_pdf:
             # --- 링크 유틸 ---
             def click_url(fid: str, page: int) -> str:
                 fid = (fid or "").strip()
-                return f"https://drive.google.com/file/d/{fid}/view#page={int(page)}"      # 새 탭
+                return f"https://drive.google.com/file/d/{fid}/view#page={int(page)}"      # 새 탭(원문 열기)
             def iframe_url(fid: str, page: int) -> str:
                 fid = (fid or "").strip()
-                return f"https://drive.google.com/file/d/{fid}/preview#page={int(page)}"   # 임베드
+                return f"https://drive.google.com/file/d/{fid}/preview#page={int(page)}"   # 임베드 미리보기
 
-            # ----- (A) 결과 표: 파일명은 '선택' 버튼으로 동작(새 창/새 탭 없음) -----
-            # 표에는 파일명/페이지/열기 링크만 보여주고, 파일 선택은 표 아래에서 라디오/버튼으로.
-            view = df[["filename", "page", "me"]].copy()
-            view.rename(columns={"filename": "파일명", "page": "페이지", "me": "file_id"}, inplace=True)
-            view["열기"] = view.apply(
-                lambda r: f'<a href="{click_url(r["file_id"], r["페이지"])}" target="_blank" rel="noopener noreferrer">열기</a>',
-                axis=1,
-            )
-            st.write(view[["파일명", "페이지", "열기"]].to_html(index=False, escape=False), unsafe_allow_html=True)
+            # --- 결과 표: Data Editor로 표시(행 선택 → 미리보기 갱신) ---
+            table_df = df[["filename", "page", "me"]].copy()
+            table_df.rename(columns={"filename": "파일명", "page": "페이지", "me": "file_id"}, inplace=True)
+            table_df["열기"] = df.apply(lambda r: click_url(r["me"], int(r["page"])), axis=1)
 
-            # ----- (B) 파일 선택 UI (드롭다운 X → 라디오/버튼 스타일) -----
-            st.caption("행 번호 대신, 아래에서 파일을 선택하고 페이지를 골라 미리보세요.")
-
-            unique_files = list(pd.unique(df["filename"]))
-            # 기본 선택 파일(이전 선택 기억)
-            default_file = st.session_state.get("pdf_sel_file", unique_files[0])
-
-            # 가로 라디오(드롭다운 제거)
-            sel_file = st.radio(
-                "파일 선택",
-                options=unique_files,
-                index=unique_files.index(default_file) if default_file in unique_files else 0,
-                horizontal=True,
-                key="pdf_sel_file",
+            st.caption("표에서 원하는 **행(파일명)** 을 클릭하면 아래 미리보기가 즉시 갱신됩니다.")
+            st.data_editor(
+                table_df[["파일명", "페이지", "열기"]],
+                hide_index=True,
+                use_container_width=True,
+                disabled=True,  # 편집 불가 (선택만)
+                column_config={
+                    "열기": st.column_config.LinkColumn("열기", display_text="열기"),
+                },
+                key="pdf_results_table",
             )
 
-            # 해당 파일의 페이지 목록
-            pages_in_file = sorted(df.loc[df["filename"] == sel_file, "page"].unique().tolist())
+            # 선택된 행 인덱스 읽기 (없으면 0)
+            sel_rows = (
+                st.session_state.get("pdf_results_table", {})
+                .get("selection", {})
+                .get("rows", [])
+            )
+            sel_idx = int(sel_rows[0]) if sel_rows else 0
+            sel_idx = max(0, min(sel_idx, len(df) - 1))  # 안전 가드
 
-            # RangeError 방지: 페이지가 0개/1개인 경우 처리
-            if not pages_in_file:
-                st.warning("선택한 파일의 페이지 목록이 비어 있습니다.")
-                st.stop()
-            elif len(pages_in_file) == 1:
-                sel_page = pages_in_file[0]
-                st.info(f"이 문서는 1페이지입니다. (페이지: {sel_page})")
-            else:
-                # 이전 선택 기억(없으면 첫 페이지)
-                default_page = st.session_state.get("pdf_sel_page", pages_in_file[0])
-                # 슬라이더 (연속 정수)
-                sel_page = st.slider(
-                    "페이지 선택",
-                    min_value=int(min(pages_in_file)),
-                    max_value=int(max(pages_in_file)),
-                    value=int(default_page) if default_page in pages_in_file else int(pages_in_file[0]),
-                    step=1,
-                    key="pdf_page_slider",
-                )
-
-            # 현재 선택 저장
-            st.session_state["pdf_sel_file"] = sel_file
-            st.session_state["pdf_sel_page"] = sel_page
-
-            # 선택 레코드
-            row = df[(df["filename"] == sel_file) & (df["page"] == sel_page)].iloc[0]
+            # 선택 레코드로 미리보기 표시
+            row = df.iloc[sel_idx]
             fid = (row.get("me") or "").strip()
+            sel_file = row["filename"]
+            sel_page = int(row["page"])
 
             # --- 텍스트 스니펫 + 문서 임베드 ---
             kw_list = [k.strip() for k in kw_pdf.split() if k.strip()]
-            st.write(f"**파일**: {sel_file}  |  **페이지**: {int(sel_page)}  |  **file_id**: {fid or '-'}")
-            st.markdown(highlight_html(row["text"], kw_list, width=200), unsafe_allow_html=True)
-
+            st.caption("텍스트 미리보기 & 문서 보기 (선택한 1건)")
+            st.write(f"**파일**: {sel_file}  |  **페이지**: {sel_page}  |  **file_id**: {fid or '-'}")
+            st.markdown(
+                highlight_html(row["text"], kw_list, width=200),
+                unsafe_allow_html=True
+            )
             st.components.v1.html(
-                f'<iframe src="{iframe_url(fid, int(sel_page))}" style="width:100%; height:720px;" frameborder="0"></iframe>',
+                f'<iframe src="{iframe_url(fid, sel_page)}" style="width:100%; height:720px;" frameborder="0"></iframe>',
                 height=740,
             )
     else:
