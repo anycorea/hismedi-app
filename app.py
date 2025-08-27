@@ -12,19 +12,50 @@ from pypdf import PdfReader
 # ------------------------------------------------------------
 # 페이지/레이아웃
 # ------------------------------------------------------------
-st.set_page_config(page_title="★★★ HISMEDI 인증 준비 ★★★", layout="wide")
-st.markdown("# HISMEDI - 지침/QnA/규정")
-# 하이라이트 색(선택)
-st.markdown("<style> mark { background: #ffe2a8; } </style>", unsafe_allow_html=True)
+st.set_page_config(page_title="★★★ HISMEDI 인증 ★★★", layout="wide")
+
+# 하이라이트 색(선택) + 모바일 친화 제목 스타일
+st.markdown("""
+<style>
+/* <mark> 스타일 */
+mark { background:#ffe2a8; }
+/* 제목(모바일에서 작게) */
+.main-title{
+  font-weight:800; font-size:26px; line-height:1.25;
+  margin:4px 0 12px;
+}
+@media (max-width: 768px){
+  .main-title{ font-size:22px; }
+}
+</style>
+""", unsafe_allow_html=True)
+
+# 큰 H1 대신 컴팩트한 커스텀 타이틀
+st.markdown('<div class="main-title">HISMEDI 인증</div>', unsafe_allow_html=True)
 
 # ------------------------------------------------------------
-# 옵션: 간단 접근 비밀번호 (Secrets에 APP_PASSWORD 넣었을 때만 작동)
+# 옵션: 간단 접근 비밀번호 (최초 인증 이후 숨김)
 # ------------------------------------------------------------
 _APP_PW = (st.secrets.get("APP_PASSWORD") or os.getenv("APP_PASSWORD") or "").strip()
+
 if _APP_PW:
-    pw = st.text_input("접속 비밀번호", type="password")
-    if pw.strip() != _APP_PW:
-        st.stop()
+    # 이미 인증되었는지 확인
+    if not st.session_state.get("pw_ok", False):
+        # 폼을 사용하면 모바일에서 엔터로 바로 제출 가능
+        with st.form("pw_gate", clear_on_submit=False):
+            pw = st.text_input("접속 비밀번호", type="password", placeholder="비밀번호를 입력하세요")
+            ok = st.form_submit_button("확인")
+        if ok:
+            if pw.strip() == _APP_PW:
+                st.session_state["pw_ok"] = True
+                st.rerun()  # 인증 성공 후 UI 갱신
+            else:
+                st.error("비밀번호가 틀렸습니다.")
+                st.stop()
+        else:
+            # 제출 전에는 아래 내용 노출 방지
+            st.stop()
+    # pw_ok=True이면 폼을 더 이상 노출하지 않음 (그대로 진행)
 
 # ------------------------------------------------------------
 # DB 연결 유틸
@@ -400,17 +431,59 @@ def search_regs(eng, keywords: str, filename_like: str = "", limit: int = 500, h
         return pd.read_sql_query(sql, con, params=params)
 
 # ------------------------------------------------------------
-# 연결 배너 (KST로 시간 표시)
+# DB 연결 (성공 시 화면에 표시하지 않음 / 실패 시만 에러 표시)
+#  - 배지를 보고 싶으면 SHOW_DB_BADGE=1 (secrets 또는 env) 로 설정
 # ------------------------------------------------------------
+from datetime import timezone, timedelta
+
+def _to_kst(dt):
+    try:
+        kst = timezone(timedelta(hours=9))
+        return (dt.astimezone(kst) if getattr(dt, "tzinfo", None) else dt.replace(tzinfo=timezone.utc).astimezone(kst))
+    except Exception:
+        return dt
+
+SHOW_DB_BADGE = str(st.secrets.get("SHOW_DB_BADGE", os.getenv("SHOW_DB_BADGE", "0"))).strip() in ("1", "true", "True")
+
 eng = get_engine()
 try:
     with eng.begin() as con:
-        user, port, now_kst = con.execute(
-            text("select current_user, inet_server_port(), (now() at time zone 'Asia/Seoul')")
+        user, port, now_utc = con.execute(
+            text("select current_user, inet_server_port(), now()")
         ).one()
-    st.success(f"DB 연결 OK | user={user} | port={port} | time={now_kst:%Y-%m-%d %H:%M:%S} (KST)")
+    now_kst = _to_kst(now_utc)
+    # 상태를 세션에 저장 (필요 시 다른 곳에서 참고)
+    st.session_state["db_status"] = {
+        "ok": True,
+        "user": user,
+        "port": port,
+        "time_kst": now_kst.strftime("%Y-%m-%d %H:%M:%S (KST)")
+    }
+
+    # --- 성공 시 기본은 '완전 숨김' ---
+    # 배지를 켜고 싶다면 SHOW_DB_BADGE=1 로 설정
+    if SHOW_DB_BADGE:
+        st.markdown(f"""
+<style>
+.db-badge {{
+  position: fixed; top: 8px; right: 10px; z-index: 9999;
+  font-size: 12px; color: #0a0; background: #f6fff6;
+  border: 1px solid #dfe3e8; border-radius: 12px; padding: 4px 8px;
+  box-shadow: 0 1px 2px rgba(0,0,0,.04);
+}}
+.db-dot {{ display:inline-block;width:8px;height:8px;border-radius:50%;background:#28a745;vertical-align:middle;margin-right:6px;}}
+@media (max-width: 768px) {{
+  .db-badge {{ top: 6px; right: 8px; font-size: 11px; }}
+}}
+</style>
+<div class="db-badge"><span class="db-dot"></span>DB OK</div>
+        """, unsafe_allow_html=True)
+
 except Exception as e:
-    st.exception(e); st.stop()
+    # 실패 시엔 명확히 표시하고 중단
+    st.error("DB 연결 실패: 앱을 사용할 수 없습니다.")
+    st.exception(e)
+    st.stop()
 
 # ------------------------------------------------------------
 # Secrets(Drive) 읽기
@@ -758,3 +831,4 @@ with tab_pdf:
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
         st.caption("먼저 키워드를 입력하고 **키보드 Enter**를 누르면 결과가 표시됩니다.")
+
