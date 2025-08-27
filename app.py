@@ -518,26 +518,30 @@ with tab_pdf:
         if df.empty:
             st.info("조건에 맞는 결과가 없습니다. 먼저 [인덱스(Drive)]를 수행했는지 확인하세요.")
         else:
-            # --- 안정적인 링크 전략 ---
+            # --- 링크 유틸 ---
             # 클릭(새 탭)용: /view#page=n
             # iframe(앱 내 미리보기)용: /preview#page=n
-            def make_click_url(row):
-                fid = (row.get("me") or "").strip()
-                page = int(row["page"])
-                return f"https://drive.google.com/file/d/{fid}/view#page={page}"
+            def make_click_url_from_vals(fid: str, page: int) -> str:
+                fid = (fid or "").strip()
+                return f"https://drive.google.com/file/d/{fid}/view#page={int(page)}"
 
-            def make_iframe_url(row):
-                fid = (row.get("me") or "").strip()
-                page = int(row["page"])
-                return f"https://drive.google.com/file/d/{fid}/preview#page={page}"
+            def make_iframe_url_from_vals(fid: str, page: int) -> str:
+                fid = (fid or "").strip()
+                return f"https://drive.google.com/file/d/{fid}/preview#page={int(page)}"
 
-            # 표: 마크다운 링크로 렌더링(가장 호환성이 좋음)
+            # --- 표: HTML로 렌더링(의존성 없음, 클릭 보장) ---
             view = df[["filename", "page", "me"]].copy()
             view.rename(columns={"filename": "파일명", "page": "페이지", "me": "file_id"}, inplace=True)
-            view["열기"] = df.apply(lambda r: f"[열기]({make_click_url(r)})", axis=1)
 
-            # DataFrame 위젯 대신 마크다운 표로 링크 클릭 보장
-            st.markdown(view[["파일명", "페이지", "열기"]].to_markdown(index=False), unsafe_allow_html=True)
+            # 열기 링크(새 탭)
+            view["열기"] = view.apply(
+                lambda r: f'<a href="{make_click_url_from_vals(r["file_id"], r["페이지"])}" '
+                          f'target="_blank" rel="noopener noreferrer">열기</a>',
+                axis=1,
+            )
+
+            html_table = view[["파일명", "페이지", "열기"]].to_html(index=False, escape=False)
+            st.write(html_table, unsafe_allow_html=True)
 
             # --- 미리보기(하이라이트 + iframe) ---
             kw_list = [k.strip() for k in kw_pdf.split() if k.strip()]
@@ -558,7 +562,7 @@ with tab_pdf:
                     unsafe_allow_html=True
                 )
 
-                iframe_src = make_iframe_url(row)  # /preview
+                iframe_src = make_iframe_url_from_vals(row.get("me"), int(row["page"]))  # /preview
                 st.components.v1.html(
                     f'<iframe src="{iframe_src}" style="width:100%; height:720px;" frameborder="0"></iframe>',
                     height=740,
