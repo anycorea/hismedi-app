@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import os, re, io, html, requests
+import os, re, io, html, time, requests
 from pathlib import Path
 from typing import List, Tuple, Dict
 from urllib.parse import quote
@@ -831,4 +831,5 @@ with tab_pdf:
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
         st.caption("먼저 키워드를 입력하고 **키보드 Enter**를 누르면 결과가 표시됩니다.")
+
 
