@@ -452,7 +452,7 @@ with tab_main:
     limit = st.number_input("최대 행수", 1, 5000, 500, step=100, key="main_lim")
     combined_kw = " ".join([s for s in [kw, f_person, f_place] if str(s).strip()]).strip()
 
-    # 카드 렌더 유틸 (HTML 이스케이프 포함)
+    # 카드 렌더 유틸
     def render_cards(df_):
         st.markdown("""
 <style>
@@ -471,18 +471,26 @@ with tab_main:
             title = _html.escape(str(r[df_.columns[0]]))
             st.markdown(f'<div class="card"><h4>{title}</h4>' + "".join(rows) + '</div>', unsafe_allow_html=True)
 
+    # 검색 실행 → 세션에 저장
     if st.button("검색", key="main_search") and combined_kw:
         with st.spinner("검색 중..."):
-            df = search_table_any(eng, main_table, combined_kw, columns=sel_cols, limit=limit)
-        st.write(f"결과: {len(df):,}건")
-        if df.empty:
+            _df = search_table_any(eng, main_table, combined_kw, columns=sel_cols, limit=limit)
+        if _df.empty:
             st.info("결과 없음")
+            st.session_state.pop("main_results", None)
         else:
-            view_mode = st.radio("보기 형식", ["카드형(모바일)", "표형"], horizontal=True, key="main_view_mode")
-            if view_mode == "표형":
-                st.dataframe(df, use_container_width=True, height=520)
-            else:
-                render_cards(df)
+            st.session_state["main_results"] = _df.to_dict("records")
+
+    # 세션 결과 렌더링(뷰 전환해도 유지)
+    if "main_results" in st.session_state and st.session_state["main_results"]:
+        df = pd.DataFrame(st.session_state["main_results"])
+        st.write(f"결과: {len(df):,}건")
+
+        view_mode = st.radio("보기 형식", ["카드형(모바일)", "표형"], horizontal=True, key="main_view_mode")
+        if view_mode == "표형":
+            st.dataframe(df, use_container_width=True, height=520)
+        else:
+            render_cards(df)
     else:
         st.caption("힌트: 조사대상/조사장소 단어는 메인 키워드와 AND로 결합되어 검색됩니다.")
 
@@ -514,18 +522,26 @@ with tab_qna:
             title = _html.escape(str(r[df_.columns[0]]))
             st.markdown(f'<div class="card"><h4>{title}</h4>' + "".join(rows) + '</div>', unsafe_allow_html=True)
 
+    # 검색 실행 → 세션에 저장
     if st.button("검색", key="qna_search") and kw_q.strip():
         with st.spinner("검색 중..."):
-            df = search_table_any(eng, qna_table, kw_q, columns=None, limit=limit_q)
-        st.write(f"결과: {len(df):,}건")
-        if df.empty:
+            _df = search_table_any(eng, qna_table, kw_q, columns=None, limit=limit_q)
+        if _df.empty:
             st.info("결과 없음")
+            st.session_state.pop("qna_results", None)
         else:
-            view_mode = st.radio("보기 형식", ["카드형(모바일)", "표형"], horizontal=True, key="qna_view_mode")
-            if view_mode == "표형":
-                st.dataframe(df, use_container_width=True, height=520)
-            else:
-                render_cards_qna(df)
+            st.session_state["qna_results"] = _df.to_dict("records")
+
+    # 세션 결과 렌더링(뷰 전환해도 유지)
+    if "qna_results" in st.session_state and st.session_state["qna_results"]:
+        df = pd.DataFrame(st.session_state["qna_results"])
+        st.write(f"결과: {len(df):,}건")
+
+        view_mode = st.radio("보기 형식", ["카드형(모바일)", "표형"], horizontal=True, key="qna_view_mode")
+        if view_mode == "표형":
+            st.dataframe(df, use_container_width=True, height=520)
+        else:
+            render_cards_qna(df)
     else:
         st.caption("필요 시 ‘임시 SQL’ 탭에서 직접 SELECT 실행 가능합니다.")
 
@@ -731,3 +747,4 @@ with tab_pdf:
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
         st.caption("먼저 [검색]을 실행해 결과를 보신 뒤, 파일명/페이지 버튼을 클릭하면 아래 미리보기가 갱신됩니다.")
+
