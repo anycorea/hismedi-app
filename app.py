@@ -520,61 +520,49 @@ with tab_pdf:
         if df.empty:
             st.info("조건에 맞는 결과가 없습니다. 먼저 [인덱스(Drive)]를 수행했는지 확인하세요.")
         else:
-            # ---- 유틸 ----
+            # ----- 유틸 -----
             def view_url(fid: str, page: int) -> str:
                 fid = (fid or "").strip()
-                return f"https://drive.google.com/file/d/{fid}/view#page={int(page)}"      # 새 탭(원문)
+                return f"https://drive.google.com/file/d/{fid}/view#page={int(page)}"      # 새 탭
             def preview_url(fid: str, page: int) -> str:
                 fid = (fid or "").strip()
                 return f"https://drive.google.com/file/d/{fid}/preview#page={int(page)}"   # iframe
 
-            # ---- 결과 표: '파일명'을 클릭하면 쿼리파람(sfn, spg)로 선택 반영 (새창 X) ----
-            tbl = df[["filename", "page", "me"]].copy()
-            tbl.rename(columns={"filename": "파일명", "page": "페이지", "me": "file_id"}, inplace=True)
+            # ----- 선택 상태(세션) 초기화 -----
+            if "pdf_sel_idx" not in st.session_state:
+                st.session_state["pdf_sel_idx"] = 0
 
-            # 파일명 클릭 → 같은 페이지에서 쿼리파람만 변경 (스트림릿은 재실행되며 아래 미리보기 갱신)
-            tbl["파일명"] = tbl.apply(
-                lambda r: f'<a href="?sfn={quote(str(r["파일명"]))}&spg={int(r["페이지"])}">{html.escape(str(r["파일명"]))}</a>',
-                axis=1,
-            )
-            # 원문 열기(새 탭)
-            tbl["열기"] = tbl.apply(
-                lambda r: f'<a href="{view_url(r["file_id"], int(r["페이지"]))}" target="_blank" rel="noopener noreferrer">열기</a>',
-                axis=1,
-            )
-            st.write(tbl[["파일명", "페이지", "열기"]].to_html(index=False, escape=False), unsafe_allow_html=True)
+            # ----- 표(파일명 = 버튼) : 클릭 시 세션에 선택 인덱스 저장 → 아래 미리보기 갱신 -----
+            st.caption("표에서 **파일명 버튼**을 클릭하면 아래 미리보기가 즉시 바뀝니다.")
+            header = st.columns([7, 1, 1])
+            header[0].markdown("**파일명**")
+            header[1].markdown("**페이지**")
+            header[2].markdown("**열기**")
 
-            # ---- 아래 미리보기: 쿼리파람(sfn, spg)으로 선택된 행을 사용 ----
-            q = st.query_params
-            sel_file = q.get("sfn")
-            sel_page = q.get("spg")
-            if sel_file is not None:
-                # 파일+페이지가 정확히 일치하는 첫 행
-                mask = (df["filename"] == sel_file)
-                if sel_page is not None:
-                    try:
-                        sel_page = int(sel_page)
-                        mask &= (df["page"] == sel_page)
-                    except Exception:
-                        pass
-                if not mask.any():
-                    sel_idx = 0
-                else:
-                    sel_idx = df[mask].index[0]
-            else:
-                sel_idx = 0  # 기본은 첫 행
+            # 행 렌더링
+            for i, row in df.iterrows():
+                c1, c2, c3 = st.columns([7, 1, 1])
+                # 파일명 버튼 (새창/링크 아님, 내부 선택만)
+                if c1.button(str(row["filename"]), key=f"pick_{i}"):
+                    st.session_state["pdf_sel_idx"] = int(i)
+                c2.write(int(row["page"]))
+                # 원문 열기(선택): 필요 없으면 이 줄 지우세요
+                c3.link_button("열기", view_url(row["me"], int(row["page"])), key=f"open_{i}")
 
-            row = df.iloc[int(sel_idx)]
-            fid = (row.get("me") or "").strip()
-            sel_file = row["filename"]
-            sel_page = int(row["page"])
+            # ----- 현재 선택된 행으로 미리보기 표시 -----
+            sel_idx = int(st.session_state.get("pdf_sel_idx", 0))
+            sel_idx = max(0, min(sel_idx, len(df) - 1))  # 안전 가드
+            sel = df.iloc[sel_idx]
 
-            # ---- 텍스트 미리보기 & 문서 보기 ----
+            fid = (sel.get("me") or "").strip()
+            sel_file = sel["filename"]
+            sel_page = int(sel["page"])
+
             kw_list = [k.strip() for k in kw_pdf.split() if k.strip()]
             st.caption("텍스트 미리보기 & 문서 보기 (선택한 1건)")
             st.write(f"**파일**: {sel_file}  |  **페이지**: {sel_page}  |  **file_id**: {fid or '-'}")
             st.markdown(
-                highlight_html(row["text"], kw_list, width=200),
+                highlight_html(sel["text"], kw_list, width=200),
                 unsafe_allow_html=True
             )
             st.components.v1.html(
