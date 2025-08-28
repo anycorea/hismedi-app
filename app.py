@@ -9,7 +9,6 @@ import streamlit as st
 from sqlalchemy import text, create_engine
 from pypdf import PdfReader
 
-
 # ------------------------------------------------------------
 # Google Drive 폴더/파일 ID 추출 유틸
 #  - URL 전체, 공유 링크, 순수 ID 입력 모두 허용
@@ -175,20 +174,76 @@ def _pick_table(eng, prefer_first: List[str]):
             return t
     return None
 
-def search_table_any(eng, table, keywords, columns=None, limit=500):
-    """공백으로 구분된 키워드 전부(AND)를, 지정된 컬럼들(OR)에서 검색"""
-    kw_list = [k.strip() for k in str(keywords).split() if k.strip()]
+# ===== 안전한 식별자 쿼팅 =====
+def _qident(name: str) -> str:
+    return '"' + str(name).replace('"', '""') + '"'
+
+# ===== (선택) 기본 검색 컬럼 목록 =====
+MAIN_DEFAULT_SEARCH_COLS = [
+    "조사장소", "조사항목", "세부항목", "기준문구", "확인방법", "근거", "비고"
+]
+QNA_DEFAULT_SEARCH_COLS = [
+    "조사위원 질문, 확인내용", "조사위원 질문", "확인내용", "조사장소"
+]
+
+def _choose_search_cols(eng, table: str) -> list[str]:
+    """
+    테이블 이름에 따라 '권장 검색 컬럼'이 실제로 존재하면 그것만 사용.
+    없으면 모든 컬럼을 반환(후속 단계에서 ::text 캐스팅으로 안전하게 검색).
+    """
+    all_cols = _list_columns(eng, table)
+    low = table.lower()
+    preferred = []
+    if low.startswith("main"):
+        preferred = [c for c in MAIN_DEFAULT_SEARCH_COLS if c in all_cols]
+    elif low.startswith("qna"):
+        preferred = [c for c in QNA_DEFAULT_SEARCH_COLS if c in all_cols]
+    # 권장 컬럼이 하나라도 있으면 그것만 사용, 아니면 전체 컬럼 사용
+    return preferred if preferred else all_cols
+
+def search_table_any(
+    eng,
+    table: str,
+    keywords: str,
+    columns=None,          # 선택: SELECT 에서 보여줄 컬럼. None이면 전체(*)
+    limit: int = 500
+):
+    """
+    공백으로 구분된 키워드(AND)를, 여러 컬럼(OR)에 대해 부분일치(ILIKE) 검색합니다.
+    - 검색 대상 컬럼: 테이블에 있는 '권장 검색 컬럼'이 우선. 없으면 모든 컬럼.
+    - 숫자/날짜 등 비문자 컬럼 에러를 피하기 위해 항상 ::text 캐스팅해서 검색합니다.
+    """
+    kw_list = [w for w in re.split(r"\s+", (keywords or "").strip()) if w]
     if not kw_list:
         return pd.DataFrame()
-    cols = columns or _list_columns(eng, table)
-    where_parts, params = [], {}
+
+    # SELECT 절
+    select_cols = "*"
+    if columns:
+        select_cols = ", ".join(_qident(c) for c in columns)
+
+    # WHERE 절(AND x OR) + 파라미터
+    search_cols = _choose_search_cols(eng, table)
+    params: dict[str, str] = {}
+    and_parts = []
     for i, kw in enumerate(kw_list):
-        ors = " OR ".join([f'"{c}" ILIKE :kw{i}' for c in cols])
-        where_parts.append(f"({ors})")
-        params[f"kw{i}"] = f"%{kw}%"
-    where_sql = " AND ".join(where_parts)
-    sql = text(f'SELECT * FROM "{table}" WHERE {where_sql} LIMIT :lim')
-    params["lim"] = int(limit)
+        or_parts = []
+        for j, col in enumerate(search_cols):
+            p = f"kw_{i}_{j}"
+            # 모든 타입 안전: ::text 로 캐스팅 + NULL 방지
+            or_parts.append(f"COALESCE({_qident(col)}::text, '') ILIKE :{p}")
+            params[p] = f"%{kw}%"
+        and_parts.append("(" + " OR ".join(or_parts) + ")")
+    where_clause = " AND ".join(and_parts)
+
+    sql = text(f"""
+        SELECT {select_cols}
+        FROM {_qident(table)}
+        WHERE {where_clause}
+        LIMIT :limit
+    """)
+    params["limit"] = int(limit)
+
     with eng.begin() as con:
         return pd.read_sql_query(sql, con, params=params)
 
@@ -1103,17 +1158,3 @@ with tab_pdf:
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
         st.caption("먼저 키워드를 입력하고 **키보드 Enter**를 누르면 결과가 표시됩니다.")
-
-
-
-
-
-
-
-
-
-
-
-
-
-
