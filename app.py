@@ -649,6 +649,20 @@ with tab_main:
         "조사대상",
     ]
 
+    # (표형) 열 너비 비율 — 숫자만 바꾸면 폭이 조정됩니다.
+    MAIN_COL_WEIGHTS = {
+        "ME": 2,
+        "조사항목": 8,
+        "항목": 1,
+        "등급": 1,
+        "조사결과": 2,
+        "조사기준의 이해": 12,
+        "조사방법1": 10,
+        "조사방법2": 5,
+        "조사장소": 4,
+        "조사대상": 4,
+    }
+
     # 테이블에 실제로 존재하는 컬럼/정렬키 확인
     existing_cols = _list_columns(eng, main_table)
     show_cols = [c for c in MAIN_COLS if c in existing_cols]
@@ -710,7 +724,7 @@ with tab_main:
             # 그대로 세션에 저장(다음 렌더에서 사용)
             st.session_state["main_results"] = results_df.to_dict("records")
 
-    # ====== 스타일(하이라이트) ======
+    # ====== 스타일(하이라이트 & 표형 기본 CSS) ======
     st.markdown("""
 <style>
 .hl-item{ color:#0d47a1; font-weight:800; }          /* 조사항목 파랑 굵게 */
@@ -722,23 +736,21 @@ with tab_main:
 .card .row{margin:4px 0;font-size:13px;color:#333;word-break:break-word}
 .card .lbl{display:inline-block;min-width:110px;color:#6c757d}
 
-/* 표형(HTML 테이블) : 자동 레이아웃 + 줄바꿈 */
+/* 표형 — colgroup 비율을 적용하기 위해 고정 레이아웃 사용 */
 .table-wrap{ overflow-x:auto; }
 .table-wrap table{
-  width:100%; border-collapse:collapse; background:#fff; table-layout:auto;
+  width:100%; border-collapse:collapse; background:#fff; table-layout:fixed;
 }
 .table-wrap th, .table-wrap td{
   border:1px solid #e9ecef; padding:8px 10px; text-align:left; vertical-align:top;
-  font-size:13px; word-break:break-word; overflow-wrap:anywhere; white-space:normal;
+  font-size:13px; line-height:1.45;
+  white-space:normal; word-break:keep-all; overflow-wrap:anywhere;
 }
 .table-wrap th{ background:#f8f9fa; font-weight:700; }
 
 /* 반응형 축소 */
 @media (max-width: 1200px){
   .table-wrap th, .table-wrap td{ font-size:12px; padding:6px 8px; }
-}
-@media (max-width: 900px){
-  .table-wrap th, .table-wrap td{ font-size:11px; padding:5px 6px; }
 }
 </style>
     """, unsafe_allow_html=True)
@@ -766,8 +778,15 @@ with tab_main:
                 rows_html.append(f'<div class="row"><span class="lbl">{html.escape(str(c))}</span> {v_html}</div>')
             st.markdown(f'<div class="card"><h4>{title_html or "-"}</h4>' + "".join(rows_html) + '</div>', unsafe_allow_html=True)
 
-    # ====== 표형 렌더러(고정 순서) ======
+    # ====== (표형) colgroup 생성 유틸 ======
+    def _build_colgroup(cols, weights):
+        w = [float(weights.get(str(c), 1)) for c in cols]
+        tot = sum(w) or 1.0
+        return "<colgroup>" + "".join(f'<col style="width:{(x/tot)*100:.3f}%">' for x in w) + "</colgroup>"
+
+    # ====== 표형 렌더러(고정 순서 + 가중치 비율) ======
     def render_table(df_: pd.DataFrame, cols_order: list[str]):
+        colgroup_html = _build_colgroup(cols_order, MAIN_COL_WEIGHTS)
         header_cells = "".join(f"<th>{html.escape(str(c))}</th>" for c in cols_order)
         body_rows = []
         for _, r in df_.iterrows():
@@ -777,6 +796,7 @@ with tab_main:
             f"""
 <div class="table-wrap">
   <table>
+    {colgroup_html}
     <thead><tr>{header_cells}</tr></thead>
     <tbody>
       {''.join(body_rows)}
@@ -1080,6 +1100,7 @@ with tab_pdf:
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
         st.caption("먼저 키워드를 입력하고 **키보드 Enter**를 누르면 결과가 표시됩니다.")
+
 
 
 
