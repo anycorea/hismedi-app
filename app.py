@@ -627,51 +627,54 @@ tab_main, tab_qna, tab_pdf = st.tabs([
 
 # --------------------- 인증기준/조사지침 (필터 포함) ----------------------------
 with tab_main:
-    # 큰 제목 제거
-    st.write("")
-
-    # 폼 제출 버튼 전역 숨김(Enter로 바로 검색)
+    st.write("")  # 큰 제목 생략
     st.markdown("<style>div[data-testid='stFormSubmitButton']{display:none!important;}</style>", unsafe_allow_html=True)
 
-    # ── 사용할 테이블 자동 선택
     main_table = _pick_table(eng, ["main_v", "main_raw"]) or "main_raw"
 
-    # ── 표준화/매칭 유틸
+    # 표준화/매칭 유틸
     def _norm_key(s: str) -> str:
         return re.sub(r"[\s,/_\-]+", "", str(s or "")).lower()
 
-    def _pick_col(cols, candidates):
+    def _pick_col_unique(cols, candidates, used):
+        """정확→정규화→부분포함 순서로, 이미 사용한 컬럼(used)은 제외."""
         # 1) 정확 일치
         for want in candidates:
             for c in cols:
+                if c in used: 
+                    continue
                 if str(c).strip() == want:
                     return c
         # 2) 정규화 일치
         wants_norm = [_norm_key(w) for w in candidates]
         for c in cols:
+            if c in used: 
+                continue
             if _norm_key(c) in wants_norm:
                 return c
-        # 3) 부분 포함
+        # 3) 부분 포함(최후의 수단)
         for want in candidates:
             w = _norm_key(want)
             for c in cols:
+                if c in used:
+                    continue
                 if w and w in _norm_key(c):
                     return c
         return None
 
-    # ── 검색 입력 (Enter 제출)
+    # 입력(Enter 제출)
     with st.form("main_search_form", clear_on_submit=False):
-        cols_top = st.columns([2, 1, 1])
-        with cols_top[0]:
+        c1, c2, c3 = st.columns([2, 1, 1])
+        with c1:
             kw = st.text_input("키워드 (공백=AND)", st.session_state.get("main_kw", ""), key="main_kw")
-        with cols_top[1]:
+        with c2:
             f_person = st.text_input("조사대상 (선택)", st.session_state.get("main_filter_person", ""), key="main_filter_person")
-        with cols_top[2]:
+        with c3:
             f_place = st.text_input("조사장소 (선택)", st.session_state.get("main_filter_place", ""), key="main_filter_place")
+        submitted_main = st.form_submit_button("검색")
         FIXED_LIMIT = 1000
-        submitted_main = st.form_submit_button("검색")  # 화면에서는 숨김 처리됨
 
-    # ── 제출 시 검색 실행 → 세션 저장
+    # 검색 실행
     combined_kw = " ".join([s for s in [
         st.session_state.get("main_kw",""),
         st.session_state.get("main_filter_person",""),
@@ -687,11 +690,11 @@ with tab_main:
         else:
             st.session_state["main_results"] = _df.to_dict("records")
 
-    # ── 강조(색) CSS
+    # 강조 색
     st.markdown("""
 <style>
-.hl-item{ color:#0d47a1; font-weight:800; }          /* 조사항목 파랑 굵게 */
-.hl-required{ color:#b10000; font-weight:800; }      /* 등급=필수 빨강 굵게 */
+.hl-item{ color:#0d47a1; font-weight:800; }
+.hl-required{ color:#b10000; font-weight:800; }
 .table-wrap{ overflow-x:auto; }
 .table-wrap table{ width:100%; border-collapse:collapse; background:#fff; table-layout:auto; }
 .table-wrap th, .table-wrap td{
@@ -703,7 +706,7 @@ with tab_main:
 </style>
     """, unsafe_allow_html=True)
 
-    # ── 셀 포맷(강조 적용)
+    # 셀 포맷(강조)
     def _fmt_cell(colname: str, value, item_col, grade_col) -> str:
         s = html.escape("" if value is None else str(value))
         def _is_required(val: str) -> bool:
@@ -715,26 +718,24 @@ with tab_main:
             return f'<span class="hl-required">{s}</span>'
         return s
 
-    # ── 표형 렌더러(지정 순서 그대로)
-    def render_table_ordered(df_show: pd.DataFrame, item_col, grade_col):
-        cols = list(df_show.columns)
-        header_cells = "".join(f"<th>{html.escape(str(c))}</th>" for c in cols)
-        body_rows = []
-        for _, r in df_show.iterrows():
-            cells = "".join(f"<td>{_fmt_cell(c, r[c], item_col, grade_col)}</td>" for c in cols)
-            body_rows.append(f"<tr>{cells}</tr>")
-        table_html = f"""
+    # 표형 렌더러(지정 순서 유지)
+    def render_table_ordered(df_show: pd.DataFrame, item_src, grade_src):
+        header = "".join(f"<th>{html.escape(str(c))}</th>" for c in df_show.columns)
+        body = []
+        for _, row in df_show.iterrows():
+            tds = "".join(f"<td>{_fmt_cell(c, row[c], item_src, grade_src)}</td>" for c in df_show.columns)
+            body.append(f"<tr>{tds}</tr>")
+        st.markdown(f"""
 <div class="table-wrap">
   <table>
-    <thead><tr>{header_cells}</tr></thead>
-    <tbody>{''.join(body_rows)}</tbody>
+    <thead><tr>{header}</tr></thead>
+    <tbody>{''.join(body)}</tbody>
   </table>
 </div>
-"""
-        st.markdown(table_html, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
 
-    # ── 카드 렌더러(지정 순서 그대로)
-    def render_cards_ordered(df_show: pd.DataFrame, item_col, grade_col):
+    # 카드형 렌더러(지정 순서 유지)
+    def render_cards_ordered(df_show: pd.DataFrame, item_src, grade_src):
         st.markdown("""
 <style>
 .card{border:1px solid #e9ecef;border-radius:10px;padding:12px 14px;margin:8px 0;background:#fff}
@@ -745,50 +746,55 @@ with tab_main:
         """, unsafe_allow_html=True)
         for _, r in df_show.iterrows():
             title_val = r[df_show.columns[0]]
-            title_html = _fmt_cell(df_show.columns[0], title_val, item_col, grade_col)
+            title_html = _fmt_cell(df_show.columns[0], title_val, item_src, grade_src)
             rows_html = []
             for c in df_show.columns:
-                v_html = _fmt_cell(c, r[c], item_col, grade_col)
-                rows_html.append(f'<div class="row"><span class="lbl">{html.escape(str(c))}</span> {v_html}</div>')
+                rows_html.append(
+                    f'<div class="row"><span class="lbl">{html.escape(str(c))}</span> '
+                    f'{_fmt_cell(c, r[c], item_src, grade_src)}</div>'
+                )
             st.markdown(f'<div class="card"><h4>{title_html}</h4>' + "".join(rows_html) + '</div>', unsafe_allow_html=True)
 
-    # ── 결과 렌더링
+    # 결과 렌더링
     if "main_results" in st.session_state and st.session_state["main_results"]:
         df_raw = pd.DataFrame(st.session_state["main_results"])
         cols_all = list(df_raw.columns)
 
-        # 원하는 표시 순서(고정)
-        want_order = [
-            ("ME",                 ["ME","me"]),
-            ("조사항목",           ["조사항목"]),
-            ("항목",               ["항목"]),
-            ("등급",               ["등급"]),
-            ("조사결과",           ["조사결과"]),
-            ("조사기준의 이해",    ["조사기준의 이해","조사기준의이해","기준이해"]),
-            ("조사방법1",          ["조사방법1","조사방법 1","방법1"]),
-            ("조사방법2",          ["조사방법2","조사방법 2","방법2"]),
-            ("조사장소",           ["조사장소","장소","부서/장소","부서"]),
-            ("조사대상",           ["조사대상","대상"]),
+        # 원하는 표시 순서(라벨 → 후보명들)
+        want = [
+            ("ME",               ["ME","me","Me","아이디","ID"]),
+            ("조사항목",         ["조사항목","조사 항목","대항목","대 제목","대분류"]),
+            ("항목",             ["항목","세부항목","소항목","세부 항목","항목명"]),
+            ("등급",             ["등급","grade","필수여부","중요도","구분"]),
+            ("조사결과",         ["조사결과","평가기준","기준문구","확인사항","결과"]),
+            ("조사기준의 이해",  ["조사기준의 이해","조사 기준의 이해","기준이해","규정이해"]),
+            ("조사방법1",        ["조사방법1","조사방법 1","방법1"]),
+            ("조사방법2",        ["조사방법2","조사방법 2","방법2"]),
+            ("조사장소",         ["조사장소","장소","부서/장소","부서"]),
+            ("조사대상",         ["조사대상","대상","대상자"]),
         ]
 
-        # 실제 컬럼 매핑
-        mapped = []
-        for label, cands in want_order:
-            col = _pick_col(cols_all, cands)
+        # 매핑(중복 방지)
+        used = set()
+        mapping = []  # (라벨, 실제컬럼 or None)
+        for label, cands in want:
+            col = _pick_col_unique(cols_all, cands, used)
             if col:
-                mapped.append((label, col))
+                used.add(col)
+            mapping.append((label, col))
 
-        # 보여줄 DF 구성 (라벨 → 실제 컬럼 값 복사)
+        # 보여줄 DF(순서 고정, 없으면 빈칸)
         df_show = pd.DataFrame()
-        for label, src in mapped:
-            df_show[label] = df_raw[src]
+        for label, src in mapping:
+            df_show[label] = (df_raw[src] if src else "")
 
-        # 강조 기준 컬럼(실제 컬럼명 기준) 찾기
-        item_src  = _pick_col(cols_all, ["조사항목"])
-        grade_src = _pick_col(cols_all, ["등급"])
+        # 강조 기준 컬럼(실제 컬럼명)
+        item_src  = next((src for lab, src in mapping if lab == "조사항목"), None)
+        grade_src = next((src for lab, src in mapping if lab == "등급"), None)
 
         st.write(f"결과: {len(df_show):,}건")
-        view_mode = st.radio("보기 형식", ["표형", "카드형(모바일)"], horizontal=True, key="main_view_mode")
+        # ✅ 기본값을 '카드형(모바일)'로
+        view_mode = st.radio("보기 형식", ["카드형(모바일)", "표형"], horizontal=True, key="main_view_mode")
         if view_mode == "표형":
             render_table_ordered(df_show, item_src, grade_src)
         else:
@@ -1126,5 +1132,6 @@ with tab_pdf:
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
         st.caption("먼저 키워드를 입력하고 **키보드 Enter**를 누르면 결과가 표시됩니다.")
+
 
 
