@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import os, re, io, html, time, requests
+import os, re, io, html, time, requests, urllib.parse
 from pathlib import Path
 from typing import List, Tuple, Dict
 from urllib.parse import quote
@@ -8,6 +8,39 @@ import pandas as pd
 import streamlit as st
 from sqlalchemy import text, create_engine
 from pypdf import PdfReader
+
+
+# ------------------------------------------------------------
+# Google Drive 폴더/파일 ID 추출 유틸
+#  - URL 전체, 공유 링크, 순수 ID 입력 모두 허용
+# ------------------------------------------------------------
+def _extract_drive_id(value: str) -> str:
+    """Google Drive 폴더/파일 URL, 공유 링크, 순수 ID 입력 모두에서 ID만 추출"""
+    v = (value or "").strip()
+    if not v:
+        return ""
+    # 이미 ID 형태면 그대로 반환
+    if re.fullmatch(r"[A-Za-z0-9_\-]{20,}", v):
+        return v
+    # URL에서 /folders/{id} 또는 /file/d/{id} 패턴 추출
+    try:
+        parsed = urllib.parse.urlparse(v)
+        m = re.search(r"/folders/([A-Za-z0-9_\-]{20,})", parsed.path)
+        if not m:
+            m = re.search(r"/file/d/([A-Za-z0-9_\-]{20,})", parsed.path)
+        if m:
+            return m.group(1)
+        # ?id={id} 케이스
+        qs = urllib.parse.parse_qs(parsed.query)
+        if "id" in qs and qs["id"]:
+            cand = qs["id"][0]
+            if re.fullmatch(r"[A-Za-z0-9_\-]{20,}", cand):
+                return cand
+    except Exception:
+        pass
+    # 마지막 방어: 쿼리스트링/공백 제거 후 영문자/숫자/_-만 필터
+    v = re.sub(r"[^A-Za-z0-9_\-]", "", v)
+    return v
 
 # ------------------------------------------------------------
 # 페이지/레이아웃
@@ -520,10 +553,13 @@ except Exception as e:
     st.stop()
 
 # ------------------------------------------------------------
-# Secrets(Drive) 읽기
+# Secrets(Drive) 읽기  (URL/ID 모두 허용)
 # ------------------------------------------------------------
-DRIVE_API_KEY = (st.secrets.get("DRIVE_API_KEY") or os.getenv("DRIVE_API_KEY") or "").strip()
-DRIVE_FOLDER_ID = (st.secrets.get("DRIVE_FOLDER_ID") or os.getenv("DRIVE_FOLDER_ID") or "").strip()
+_raw_api_key = (st.secrets.get("DRIVE_API_KEY") or os.getenv("DRIVE_API_KEY") or "").strip()
+_raw_folder  = (st.secrets.get("DRIVE_FOLDER_ID") or os.getenv("DRIVE_FOLDER_ID") or "").strip()
+
+DRIVE_API_KEY   = _raw_api_key
+DRIVE_FOLDER_ID = _extract_drive_id(_raw_folder)
 
 # ------------------------------------------------------------
 # 탭 UI
@@ -1075,6 +1111,7 @@ with tab_pdf:
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
         st.caption("먼저 키워드를 입력하고 **키보드 Enter**를 누르면 결과가 표시됩니다.")
+
 
 
 
