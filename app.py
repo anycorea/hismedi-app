@@ -591,15 +591,7 @@ with tab_main:
         with cols_top[2]:
             f_place = st.text_input("조사장소 (선택)", st.session_state.get("main_filter_place", ""), key="main_filter_place")
 
-        mode = st.radio("검색 대상", ["전체 열", "특정 열 선택", "ME만"], horizontal=True, key="main_mode")
-        if mode == "특정 열 선택":
-            sel_cols = st.multiselect("검색할 열 선택", options=all_cols,
-                                      default=st.session_state.get("main_cols", all_cols), key="main_cols")
-        elif mode == "ME만":
-            sel_cols = ["ME"] if "ME" in all_cols else all_cols[:1]
-            if "ME" not in all_cols:
-                st.info("ME 칼럼이 없어 첫 칼럼으로 대체합니다.")
-        else:
+            # 열 선택/모드 제거 → 항상 전체 열 검색
             sel_cols = None
 
         FIXED_LIMIT = 1000  # 내부 고정 제한 (UI 노출 없음)
@@ -1111,6 +1103,7 @@ with tab_pdf:
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
         st.caption("먼저 키워드를 입력하고 **키보드 Enter**를 누르면 결과가 표시됩니다.")
+
 
 
 
