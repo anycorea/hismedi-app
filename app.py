@@ -925,8 +925,8 @@ with tab_pdf:
         cols1 = st.columns([1, 2, 1])
         with cols1[1]:
             if st.button("인덱스(Drive)", key="pdf_reindex_drive"):
-                if not (DRIVE_API_KEY and DRIVE_FOLDER_ID and "?" not in DRIVE_FOLDER_ID):
-                    st.error("Secrets에 DRIVE_API_KEY / DRIVE_FOLDER_ID(쿼리스트링 제거) 를 설정하세요.")
+                if not (DRIVE_API_KEY and DRIVE_FOLDER_ID):
+                    st.error("Secrets에 DRIVE_API_KEY / DRIVE_FOLDER_ID를 설정하세요.")
                 else:
                     with st.spinner("Google Drive 인덱싱 중..."):
                         _ = index_pdfs_from_drive(eng, DRIVE_FOLDER_ID, DRIVE_API_KEY)
@@ -1111,6 +1111,7 @@ with tab_pdf:
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
         st.caption("먼저 키워드를 입력하고 **키보드 Enter**를 누르면 결과가 표시됩니다.")
+
 
 
 
