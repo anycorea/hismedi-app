@@ -807,33 +807,14 @@ with tab_main:
 
 # --------------------- 조사위원 질문 -----------------------------
 with tab_qna:
-    st.write("")  # 큰 제목은 생략
-    st.markdown("<style>div[data-testid='stFormSubmitButton']{display:none!important;}</style>", unsafe_allow_html=True)
+    st.write("")  # 큰 제목 여백만
 
-    qna_table = _pick_table(eng, ["qna_v", "qna_raw"]) or "qna_raw"
+    # 제출 버튼 숨김(Enter로 검색)
+    st.markdown("<style>div[data-testid='stFormSubmitButton']{display:none!important;}</style>",
+                unsafe_allow_html=True)
 
-    # 표준화 유틸
-    def _norm_key(s: str) -> str:
-        return re.sub(r"[\s,/_\-]+", "", str(s or "")).lower()
-
-    def _pick_col(cols, candidates):
-        # 1) 정확 일치
-        for want in candidates:
-            for c in cols:
-                if str(c).strip() == want:
-                    return c
-        # 2) 정규화 일치
-        wants_norm = [_norm_key(w) for w in candidates]
-        for c in cols:
-            if _norm_key(c) in wants_norm:
-                return c
-        # 3) 부분 포함
-        for want in candidates:
-            w = _norm_key(want)
-            for c in cols:
-                if w and w in _norm_key(c):
-                    return c
-        return None
+    # 데이터 소스 우선순위: qna_sheet_v → qna_v → qna_raw
+    qna_table = _pick_table(eng, ["qna_sheet_v", "qna_v", "qna_raw"]) or "qna_sheet_v"
 
     # 입력폼 (Enter 제출)
     with st.form("qna_search_form", clear_on_submit=False):
@@ -843,97 +824,61 @@ with tab_qna:
             key="qna_kw",
             placeholder="예) 낙상, 환자확인, 수술 체크리스트 등"
         )
-        FIXED_LIMIT_QNA = 1000
-        submitted_qna = st.form_submit_button("검색")
+        submitted_qna = st.form_submit_button("검색")  # 화면엔 숨김
 
-    # 검색
+    FIXED_LIMIT_QNA = 1000  # 내부 고정 제한
+
+    # 검색 실행
     if submitted_qna and kw_q.strip():
         with st.spinner("검색 중..."):
-            df_q = search_table_any(eng, qna_table, kw_q, columns=None, limit=FIXED_LIMIT_QNA)
+            # 두 컬럼만 대상으로 AND 검색
+            cols_for_search = ["조사장소", "조사위원 질문(확인) 내용"]
+            df_q = search_table_any(eng, qna_table, kw_q, columns=cols_for_search, limit=FIXED_LIMIT_QNA)
+
         if df_q.empty:
             st.info("결과 없음")
             st.session_state.pop("qna_results", None)
         else:
-            st.session_state["qna_results"] = df_q.to_dict("records")
+            # 정렬키가 뷰(qna_sheet_v)에 있으면 우선 정렬
+            if {"sort1", "sort2"}.issubset(set(df_q.columns)):
+                df_q = df_q.sort_values(["sort1", "sort2"], kind="stable")
+            # 화면에는 두 컬럼만
+            keep_cols = [c for c in ["조사장소", "조사위원 질문(확인) 내용"] if c in df_q.columns]
+            st.session_state["qna_results"] = df_q[keep_cols].to_dict("records")
 
-    # 카드 렌더러(두 컬럼만, 지정 순서)
-    def render_qna_cards(df_show: pd.DataFrame):
+    # ===== 카드 렌더러 (표형 없음, No. 미표시) =====
+    def render_qna_cards(df_: pd.DataFrame):
         st.markdown("""
 <style>
 .qcard{border:1px solid #e9ecef;border-radius:12px;padding:12px 14px;margin:10px 0;background:#fff}
 .qtitle{font-size:15px;font-weight:800;margin-bottom:8px;word-break:break-word;color:#0d47a1}
 .qbody{font-size:13px;color:#333}
-.qline{margin:6px 0;word-break:break-word}
-.qlbl{display:inline-block;min-width:140px;color:#6c757d;font-weight:700}
+.qlbl{display:inline-block;min-width:150px;color:#6c757d;font-weight:700}
 @media (max-width: 900px){ .qlbl{min-width:120px} }
 </style>
         """, unsafe_allow_html=True)
 
         import html as _html
-        for _, r in df_show.iterrows():
-            place   = _html.escape("" if pd.isna(r["조사장소"]) else str(r["조사장소"]))
-            content = _html.escape("" if pd.isna(r["조사위원 질문(확인) 내용"]) else str(r["조사위원 질문(확인) 내용"]))
+        for _, r in df_.iterrows():
+            place = _html.escape(str(r.get("조사장소", "")).strip() or "조사장소 미지정")
+            content = _html.escape(str(r.get("조사위원 질문(확인) 내용", "")).strip() or "-")
             st.markdown(
                 f"""
 <div class="qcard">
-  <div class="qtitle">{place if place else "조사장소 미지정"}</div>
+  <div class="qtitle">{place}</div>
   <div class="qbody">
-    <div class="qline"><span class="qlbl">조사위원 질문(확인) 내용</span> {content if content else "-"}</div>
+    <div class="qline"><span class="qlbl">조사위원 질문(확인) 내용</span> {content}</div>
   </div>
 </div>
                 """,
                 unsafe_allow_html=True
             )
 
-    # 결과 표시
+    # ===== 결과 표시 (카드형만) =====
     if "qna_results" in st.session_state and st.session_state["qna_results"]:
-        df_raw = pd.DataFrame(st.session_state["qna_results"])
-
-        # 자동 인덱스/번호류 제거
-        drop_like = [c for c in df_raw.columns if _norm_key(c) in ("no", "번호", "순번")]
-        if drop_like:
-            df_raw = df_raw.drop(columns=drop_like)
-
-        # 반드시 이 두 컬럼만 화면에, 이 순서로!
-        col_place = _pick_col(df_raw.columns, ["조사장소","장소","부서","부서/장소"])
-        # 우선 목표: '조사위원 질문(확인) 내용' 1개 컬럼
-        col_content = _pick_col(
-            df_raw.columns,
-            [
-                "조사위원 질문(확인) 내용","조사위원 질문(확인)내용","조사위원질문(확인)내용",
-                "조사위원 질문 확인 내용","조사위원 질문/확인 내용","질문, 확인내용","질문/확인내용"
-            ]
-        )
-
-        # 없으면 '질문' + '확인내용'을 결합해 하나로 생성
-        if not col_content:
-            col_q = _pick_col(df_raw.columns, ["조사위원 질문","조사위원질문","질문","QnA","질문사항"])
-            col_c = _pick_col(df_raw.columns, ["확인내용","확인 내용","확인사항","확인 내역"])
-            if col_q or col_c:
-                tmp = []
-                for _, r in df_raw.iterrows():
-                    q = "" if (col_q is None or pd.isna(r.get(col_q))) else str(r.get(col_q))
-                    c = "" if (col_c is None or pd.isna(r.get(col_c))) else str(r.get(col_c))
-                    q = re.sub(r"\s+"," ",q).strip()
-                    c = re.sub(r"\s+"," ",c).strip()
-                    if q and c:
-                        tmp.append(f"{q} / {c}")
-                    elif q:
-                        tmp.append(q)
-                    elif c:
-                        tmp.append(c)
-                    else:
-                        tmp.append("")
-                df_raw["__content__"] = tmp
-                col_content = "__content__"
-
-        # 화면에 보일 DF (두 컬럼만)
-        df_show = pd.DataFrame()
-        df_show["조사장소"] = df_raw[col_place] if col_place else ""
-        df_show["조사위원 질문(확인) 내용"] = df_raw[col_content] if col_content else ""
-
-        st.write(f"결과: {len(df_show):,}건")
-        render_qna_cards(df_show)
+        df = pd.DataFrame(st.session_state["qna_results"])
+        st.write(f"결과: {len(df):,}건")
+        render_qna_cards(df)
 
 # --------------------- 규정검색(PDF파일/본문) (Google Drive 전용) -------
 with tab_pdf:
@@ -1135,6 +1080,7 @@ with tab_pdf:
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
         st.caption("먼저 키워드를 입력하고 **키보드 Enter**를 누르면 결과가 표시됩니다.")
+
 
 
 
