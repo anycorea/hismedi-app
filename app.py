@@ -633,10 +633,33 @@ with tab_main:
     # 폼 제출 버튼 전역 숨김(Enter로 바로 검색)
     st.markdown("<style>div[data-testid='stFormSubmitButton']{display:none!important;}</style>", unsafe_allow_html=True)
 
+    # ── 사용할 테이블 자동 선택
     main_table = _pick_table(eng, ["main_v", "main_raw"]) or "main_raw"
-    all_cols = _list_columns(eng, main_table)
 
-    # --- Enter로 제출되는 폼 ---
+    # ── 표준화/매칭 유틸
+    def _norm_key(s: str) -> str:
+        return re.sub(r"[\s,/_\-]+", "", str(s or "")).lower()
+
+    def _pick_col(cols, candidates):
+        # 1) 정확 일치
+        for want in candidates:
+            for c in cols:
+                if str(c).strip() == want:
+                    return c
+        # 2) 정규화 일치
+        wants_norm = [_norm_key(w) for w in candidates]
+        for c in cols:
+            if _norm_key(c) in wants_norm:
+                return c
+        # 3) 부분 포함
+        for want in candidates:
+            w = _norm_key(want)
+            for c in cols:
+                if w and w in _norm_key(c):
+                    return c
+        return None
+
+    # ── 검색 입력 (Enter 제출)
     with st.form("main_search_form", clear_on_submit=False):
         cols_top = st.columns([2, 1, 1])
         with cols_top[0]:
@@ -645,11 +668,10 @@ with tab_main:
             f_person = st.text_input("조사대상 (선택)", st.session_state.get("main_filter_person", ""), key="main_filter_person")
         with cols_top[2]:
             f_place = st.text_input("조사장소 (선택)", st.session_state.get("main_filter_place", ""), key="main_filter_place")
-
-        FIXED_LIMIT = 1000  # 내부 고정 제한 (UI 노출 없음)
+        FIXED_LIMIT = 1000
         submitted_main = st.form_submit_button("검색")  # 화면에서는 숨김 처리됨
 
-    # ---- 검색 실행 → 세션 저장 ----
+    # ── 제출 시 검색 실행 → 세션 저장
     combined_kw = " ".join([s for s in [
         st.session_state.get("main_kw",""),
         st.session_state.get("main_filter_person",""),
@@ -665,19 +687,11 @@ with tab_main:
         else:
             st.session_state["main_results"] = _df.to_dict("records")
 
-    # ===== 하이라이트/탐지 규칙 =====
+    # ── 강조(색) CSS
     st.markdown("""
 <style>
 .hl-item{ color:#0d47a1; font-weight:800; }          /* 조사항목 파랑 굵게 */
 .hl-required{ color:#b10000; font-weight:800; }      /* 등급=필수 빨강 굵게 */
-
-/* 카드 */
-.card{border:1px solid #e9ecef;border-radius:10px;padding:12px 14px;margin:8px 0;background:#fff}
-.card h4{margin:0 0 8px 0;font-size:16px;line-height:1.3;word-break:break-word}
-.card .row{margin:4px 0;font-size:13px;color:#333;word-break:break-word}
-.card .lbl{display:inline-block;min-width:96px;color:#6c757d}
-
-/* 표형(HTML 테이블) */
 .table-wrap{ overflow-x:auto; }
 .table-wrap table{ width:100%; border-collapse:collapse; background:#fff; table-layout:auto; }
 .table-wrap th, .table-wrap td{
@@ -685,41 +699,29 @@ with tab_main:
   font-size:13px; word-break:break-word; overflow-wrap:anywhere; white-space:normal;
 }
 .table-wrap th{ background:#f8f9fa; font-weight:700; }
-@media (max-width: 1400px){ .table-wrap th, .table-wrap td{ font-size:12px; padding:6px 8px; } }
-@media (max-width: 1200px){ .table-wrap th, .table-wrap td{ font-size:11.5px; padding:5px 7px; } }
 @media (max-width: 1024px){ .table-wrap th, .table-wrap td{ font-size:11px; padding:5px 6px; } }
-@media (max-width: 900px){ .table-wrap th, .table-wrap td{ font-size:10.5px; padding:4px 5px; } }
-@media (max-width: 768px){ .table-wrap th, .table-wrap td{ font-size:10px; padding:3px 4px; } }
 </style>
     """, unsafe_allow_html=True)
 
-    def _fmt_cell(colname: str, value) -> str:
+    # ── 셀 포맷(강조 적용)
+    def _fmt_cell(colname: str, value, item_col, grade_col) -> str:
         s = html.escape("" if value is None else str(value))
         def _is_required(val: str) -> bool:
             t = (val or "").strip().replace(" ", "").lower()
             return t in ("필수", "必須")
-        if colname == "조사항목" and s:
+        if item_col and colname == item_col and s:
             return f'<span class="hl-item">{s}</span>'
-        if colname == "등급" and _is_required(s):
+        if grade_col and colname == grade_col and _is_required(s):
             return f'<span class="hl-required">{s}</span>'
         return s
 
-    def render_cards(df_: pd.DataFrame):
-        for _, r in df_.iterrows():
-            title_val = r[df_.columns[0]]
-            title_html = _fmt_cell(df_.columns[0], title_val)
-            rows_html = []
-            for c in df_.columns:
-                v_html = _fmt_cell(c, r[c])
-                rows_html.append(f'<div class="row"><span class="lbl">{html.escape(str(c))}</span> {v_html}</div>')
-            st.markdown(f'<div class="card"><h4>{title_html}</h4>' + "".join(rows_html) + '</div>', unsafe_allow_html=True)
-
-    def render_table(df_: pd.DataFrame):
-        cols = list(df_.columns)
+    # ── 표형 렌더러(지정 순서 그대로)
+    def render_table_ordered(df_show: pd.DataFrame, item_col, grade_col):
+        cols = list(df_show.columns)
         header_cells = "".join(f"<th>{html.escape(str(c))}</th>" for c in cols)
         body_rows = []
-        for _, r in df_.iterrows():
-            cells = "".join(f"<td>{_fmt_cell(c, r[c])}</td>" for c in cols)
+        for _, r in df_show.iterrows():
+            cells = "".join(f"<td>{_fmt_cell(c, r[c], item_col, grade_col)}</td>" for c in cols)
             body_rows.append(f"<tr>{cells}</tr>")
         table_html = f"""
 <div class="table-wrap">
@@ -731,7 +733,77 @@ with tab_main:
 """
         st.markdown(table_html, unsafe_allow_html=True)
 
-    # ====== 컬럼 표준화/정렬 도우미 ======
+    # ── 카드 렌더러(지정 순서 그대로)
+    def render_cards_ordered(df_show: pd.DataFrame, item_col, grade_col):
+        st.markdown("""
+<style>
+.card{border:1px solid #e9ecef;border-radius:10px;padding:12px 14px;margin:8px 0;background:#fff}
+.card h4{margin:0 0 8px 0;font-size:16px;line-height:1.3;word-break:break-word}
+.card .row{margin:4px 0;font-size:13px;color:#333;word-break:break-word}
+.card .lbl{display:inline-block;min-width:96px;color:#6c757d}
+</style>
+        """, unsafe_allow_html=True)
+        for _, r in df_show.iterrows():
+            title_val = r[df_show.columns[0]]
+            title_html = _fmt_cell(df_show.columns[0], title_val, item_col, grade_col)
+            rows_html = []
+            for c in df_show.columns:
+                v_html = _fmt_cell(c, r[c], item_col, grade_col)
+                rows_html.append(f'<div class="row"><span class="lbl">{html.escape(str(c))}</span> {v_html}</div>')
+            st.markdown(f'<div class="card"><h4>{title_html}</h4>' + "".join(rows_html) + '</div>', unsafe_allow_html=True)
+
+    # ── 결과 렌더링
+    if "main_results" in st.session_state and st.session_state["main_results"]:
+        df_raw = pd.DataFrame(st.session_state["main_results"])
+        cols_all = list(df_raw.columns)
+
+        # 원하는 표시 순서(고정)
+        want_order = [
+            ("ME",                 ["ME","me"]),
+            ("조사항목",           ["조사항목"]),
+            ("항목",               ["항목"]),
+            ("등급",               ["등급"]),
+            ("조사결과",           ["조사결과"]),
+            ("조사기준의 이해",    ["조사기준의 이해","조사기준의이해","기준이해"]),
+            ("조사방법1",          ["조사방법1","조사방법 1","방법1"]),
+            ("조사방법2",          ["조사방법2","조사방법 2","방법2"]),
+            ("조사장소",           ["조사장소","장소","부서/장소","부서"]),
+            ("조사대상",           ["조사대상","대상"]),
+        ]
+
+        # 실제 컬럼 매핑
+        mapped = []
+        for label, cands in want_order:
+            col = _pick_col(cols_all, cands)
+            if col:
+                mapped.append((label, col))
+
+        # 보여줄 DF 구성 (라벨 → 실제 컬럼 값 복사)
+        df_show = pd.DataFrame()
+        for label, src in mapped:
+            df_show[label] = df_raw[src]
+
+        # 강조 기준 컬럼(실제 컬럼명 기준) 찾기
+        item_src  = _pick_col(cols_all, ["조사항목"])
+        grade_src = _pick_col(cols_all, ["등급"])
+
+        st.write(f"결과: {len(df_show):,}건")
+        view_mode = st.radio("보기 형식", ["표형", "카드형(모바일)"], horizontal=True, key="main_view_mode")
+        if view_mode == "표형":
+            render_table_ordered(df_show, item_src, grade_src)
+        else:
+            render_cards_ordered(df_show, item_src, grade_src)
+    else:
+        st.caption("힌트: 조사대상/조사장소 단어는 메인 키워드와 AND로 결합되어 검색됩니다.")
+
+# --------------------- 조사위원 질문 -----------------------------
+with tab_qna:
+    st.write("")  # 큰 제목은 생략
+    st.markdown("<style>div[data-testid='stFormSubmitButton']{display:none!important;}</style>", unsafe_allow_html=True)
+
+    qna_table = _pick_table(eng, ["qna_v", "qna_raw"]) or "qna_raw"
+
+    # 표준화 유틸
     def _norm_key(s: str) -> str:
         return re.sub(r"[\s,/_\-]+", "", str(s or "")).lower()
 
@@ -742,69 +814,19 @@ with tab_main:
                 if str(c).strip() == want:
                     return c
         # 2) 정규화 일치
-        wants = [_norm_key(w) for w in candidates]
+        wants_norm = [_norm_key(w) for w in candidates]
         for c in cols:
-            if _norm_key(c) in wants:
+            if _norm_key(c) in wants_norm:
                 return c
         # 3) 부분 포함
-        for want in wants:
+        for want in candidates:
+            w = _norm_key(want)
             for c in cols:
-                if want and want in _norm_key(c):
+                if w and w in _norm_key(c):
                     return c
         return None
 
-    # 원하는 "표시명 → 원본 후보" 스펙
-    MAIN_VIEW_SPEC = [
-        ("ME",             ["ME", "me"]),
-        ("조사항목",        ["조사항목", "항목명", "item"]),
-        ("항목",           ["항목", "세부항목"]),
-        ("등급",           ["등급", "grade"]),
-        ("조사결과",        ["조사결과", "결과"]),
-        ("조사기준의 이해",  ["조사기준의 이해", "기준문구", "기준"]),
-        ("조사방법1",       ["조사방법1", "확인방법", "확인방법1"]),
-        ("조사방법2",       ["조사방법2", "확인방법2"]),
-        ("조사장소",        ["조사장소", "장소", "부서/장소", "부서"]),
-        ("조사대상",        ["조사대상", "대상"]),
-    ]
-
-    def to_display_main(df_raw: pd.DataFrame) -> pd.DataFrame:
-        src_cols, out_labels = [], []
-        for label, cands in MAIN_VIEW_SPEC:
-            c = _pick_col(df_raw.columns, [label] + cands)
-            if c:    # 존재하는 것만 사용
-                src_cols.append(c)
-                out_labels.append(label)
-        if not src_cols:
-            return df_raw  # 안전망
-        out = df_raw[src_cols].copy()
-        out.columns = out_labels     # 표준 표시명으로 교체
-        return out
-
-    # ---- 결과 렌더링 ----
-    if "main_results" in st.session_state and st.session_state["main_results"]:
-        df_raw = pd.DataFrame(st.session_state["main_results"])
-        df = to_display_main(df_raw)            # ▶ 고정 순서/표시명 적용
-
-        st.write(f"결과: {len(df):,}건")
-        view_mode = st.radio("보기 형식", ["카드형(모바일)", "표형"], horizontal=True, key="main_view_mode")
-        if view_mode == "표형":
-            render_table(df)
-        else:
-            render_cards(df)
-    else:
-        st.caption("힌트: 조사대상/조사장소 단어는 메인 키워드와 AND로 결합되어 검색됩니다.")
-
-# --------------------- 조사위원 질문 -----------------------------
-with tab_qna:
-    # 큰 제목은 생략
-    st.write("")
-
-    # 폼 제출 버튼 숨김(Enter로 검색)
-    st.markdown("<style>div[data-testid='stFormSubmitButton']{display:none!important;}</style>", unsafe_allow_html=True)
-
-    qna_table = _pick_table(eng, ["qna_v", "qna_raw"]) or "qna_raw"
-
-    # ====== 입력폼 (Enter 제출) ======
+    # 입력폼 (Enter 제출)
     with st.form("qna_search_form", clear_on_submit=False):
         kw_q = st.text_input(
             "키워드 (공백=AND)",
@@ -812,10 +834,10 @@ with tab_qna:
             key="qna_kw",
             placeholder="예) 낙상, 환자확인, 수술 체크리스트 등"
         )
-        FIXED_LIMIT_QNA = 1000   # 내부 고정 제한
-        submitted_qna = st.form_submit_button("검색")  # 화면엔 숨김
+        FIXED_LIMIT_QNA = 1000
+        submitted_qna = st.form_submit_button("검색")
 
-    # ====== 검색 실행 ======
+    # 검색
     if submitted_qna and kw_q.strip():
         with st.spinner("검색 중..."):
             df_q = search_table_any(eng, qna_table, kw_q, columns=None, limit=FIXED_LIMIT_QNA)
@@ -825,114 +847,84 @@ with tab_qna:
         else:
             st.session_state["qna_results"] = df_q.to_dict("records")
 
-    # ====== 컬럼 자동 매핑 헬퍼 ======
-    def _norm_key(s: str) -> str:
-        return re.sub(r"[\s,/_\-]+", "", str(s or "")).lower()
-
-    def _pick_col(cols, candidates):
-        # 1) 정확 일치
-        for want in candidates:
-            for c in cols:
-                if str(c).strip() == want:
-                    return c
-        # 2) 정규화 일치
-        wants_norm = [_norm_key(want) for want in candidates]
-        for c in cols:
-            if _norm_key(c) in wants_norm:
-                return c
-        # 3) 부분 포함(느슨)
-        for want in wants_norm:
-            for c in cols:
-                if want and want in _norm_key(c):
-                    return c
-        return None
-
-    # ====== 카드 렌더러 (표형 없음) ======
-    def render_qna_cards(df_: pd.DataFrame, col_place, col_combined, col_q=None, col_c=None):
+    # 카드 렌더러(두 컬럼만, 지정 순서)
+    def render_qna_cards(df_show: pd.DataFrame):
         st.markdown("""
 <style>
 .qcard{border:1px solid #e9ecef;border-radius:12px;padding:12px 14px;margin:10px 0;background:#fff}
 .qtitle{font-size:15px;font-weight:800;margin-bottom:8px;word-break:break-word;color:#0d47a1}
 .qbody{font-size:13px;color:#333}
 .qline{margin:6px 0;word-break:break-word}
-.qlbl{display:inline-block;min-width:160px;color:#6c757d;font-weight:700}
-@media (max-width: 900px){ .qlbl{min-width:130px} }
+.qlbl{display:inline-block;min-width:140px;color:#6c757d;font-weight:700}
+@media (max-width: 900px){ .qlbl{min-width:120px} }
 </style>
         """, unsafe_allow_html=True)
 
         import html as _html
-
-        for _, r in df_.iterrows():
-            place_raw = "" if pd.isna(r.get(col_place)) else str(r.get(col_place))
-
-            if col_combined is not None:
-                content_raw = "" if pd.isna(r.get(col_combined)) else str(r.get(col_combined))
-            else:
-                # 질문/확인내용 두 컬럼을 합쳐 한 줄
-                q_raw = "" if (col_q is None or pd.isna(r.get(col_q))) else str(r.get(col_q))
-                c_raw = "" if (col_c is None or pd.isna(r.get(col_c))) else str(r.get(col_c))
-                qn = re.sub(r"\s+", " ", q_raw or "").strip()
-                cn = re.sub(r"\s+", " ", c_raw or "").strip()
-                if qn and cn:
-                    content_raw = qn if _norm_key(qn) == _norm_key(cn) else f"{qn} / {cn}"
-                elif qn:
-                    content_raw = qn
-                elif cn:
-                    content_raw = cn
-                else:
-                    content_raw = "-"
-
-            place = _html.escape(place_raw)
-            content = _html.escape(content_raw)
-
+        for _, r in df_show.iterrows():
+            place   = _html.escape("" if pd.isna(r["조사장소"]) else str(r["조사장소"]))
+            content = _html.escape("" if pd.isna(r["조사위원 질문(확인) 내용"]) else str(r["조사위원 질문(확인) 내용"]))
             st.markdown(
                 f"""
 <div class="qcard">
   <div class="qtitle">{place if place else "조사장소 미지정"}</div>
   <div class="qbody">
-    <div class="qline"><span class="qlbl">조사위원 질문(확인) 내용</span> {content}</div>
+    <div class="qline"><span class="qlbl">조사위원 질문(확인) 내용</span> {content if content else "-"}</div>
   </div>
 </div>
                 """,
                 unsafe_allow_html=True
             )
 
-    # ====== 결과 표시 (카드형만) ======
+    # 결과 표시
     if "qna_results" in st.session_state and st.session_state["qna_results"]:
-        df = pd.DataFrame(st.session_state["qna_results"])
+        df_raw = pd.DataFrame(st.session_state["qna_results"])
 
-        # "No./번호/순번" 유사 식별자 컬럼은 제거 (표시 안 함)
-        drop_like = [c for c in df.columns if _norm_key(c) in ("no", "번호", "순번")]
+        # 자동 인덱스/번호류 제거
+        drop_like = [c for c in df_raw.columns if _norm_key(c) in ("no", "번호", "순번")]
         if drop_like:
-            df = df.drop(columns=drop_like)
+            df_raw = df_raw.drop(columns=drop_like)
 
-        # ① 조사장소 컬럼 찾기
-        COL_PLACE = _pick_col(df.columns, ["조사장소", "장소", "부서/장소", "부서", "조사 장소", "조사 부서"])
+        # 반드시 이 두 컬럼만 화면에, 이 순서로!
+        col_place = _pick_col(df_raw.columns, ["조사장소","장소","부서","부서/장소"])
+        # 우선 목표: '조사위원 질문(확인) 내용' 1개 컬럼
+        col_content = _pick_col(
+            df_raw.columns,
+            [
+                "조사위원 질문(확인) 내용","조사위원 질문(확인)내용","조사위원질문(확인)내용",
+                "조사위원 질문 확인 내용","조사위원 질문/확인 내용","질문, 확인내용","질문/확인내용"
+            ]
+        )
 
-        # ② '조사위원 질문, 확인내용' 단일 컬럼(우선)
-        COL_COMBINED = _pick_col(df.columns, [
-            "조사위원 질문, 확인내용","조사위원질문, 확인내용",
-            "조사위원 질문,확인내용","조사위원질문,확인내용",
-            "질문, 확인내용","질문/확인내용","질문확인내용","조사위원질문확인내용"
-        ])
+        # 없으면 '질문' + '확인내용'을 결합해 하나로 생성
+        if not col_content:
+            col_q = _pick_col(df_raw.columns, ["조사위원 질문","조사위원질문","질문","QnA","질문사항"])
+            col_c = _pick_col(df_raw.columns, ["확인내용","확인 내용","확인사항","확인 내역"])
+            if col_q or col_c:
+                tmp = []
+                for _, r in df_raw.iterrows():
+                    q = "" if (col_q is None or pd.isna(r.get(col_q))) else str(r.get(col_q))
+                    c = "" if (col_c is None or pd.isna(r.get(col_c))) else str(r.get(col_c))
+                    q = re.sub(r"\s+"," ",q).strip()
+                    c = re.sub(r"\s+"," ",c).strip()
+                    if q and c:
+                        tmp.append(f"{q} / {c}")
+                    elif q:
+                        tmp.append(q)
+                    elif c:
+                        tmp.append(c)
+                    else:
+                        tmp.append("")
+                df_raw["__content__"] = tmp
+                col_content = "__content__"
 
-        # ③ 없으면 질문/확인내용을 각각 찾아서 합치기
-        COL_Q = None
-        COL_C = None
-        if COL_COMBINED is None:
-            COL_Q = _pick_col(df.columns, ["조사위원 질문", "조사위원질문", "질문", "QnA", "질문사항"])
-            COL_C = _pick_col(df.columns, ["확인내용", "확인 내용", "확인사항", "확인 내역", "확인내용(기록)", "확인 근거"])
+        # 화면에 보일 DF (두 컬럼만)
+        df_show = pd.DataFrame()
+        df_show["조사장소"] = df_raw[col_place] if col_place else ""
+        df_show["조사위원 질문(확인) 내용"] = df_raw[col_content] if col_content else ""
 
-        # 필수 보정
-        if COL_PLACE is None:
-            COL_PLACE = df.columns[0]
-        if COL_COMBINED is None and COL_Q is None and COL_C is None:
-            COL_COMBINED = df.columns[-1]
-
-        st.write(f"결과: {len(df):,}건")
-        render_qna_cards(df, COL_PLACE, COL_COMBINED, COL_Q, COL_C)
-    # else: 별도 힌트는 생략
-
+        st.write(f"결과: {len(df_show):,}건")
+        render_qna_cards(df_show)
 
 # --------------------- 규정검색(PDF파일/본문) (Google Drive 전용) -------
 with tab_pdf:
@@ -1134,4 +1126,5 @@ with tab_pdf:
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
         st.caption("먼저 키워드를 입력하고 **키보드 Enter**를 누르면 결과가 표시됩니다.")
+
 
