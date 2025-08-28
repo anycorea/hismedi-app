@@ -653,12 +653,12 @@ with tab_main:
     MAIN_COL_WEIGHTS = {
         "ME": 2,
         "조사항목": 8,
-        "항목": 1,
-        "등급": 1,
+        "항목": 2,
+        "등급": 2,
         "조사결과": 2,
         "조사기준의 이해": 12,
         "조사방법1": 10,
-        "조사방법2": 5,
+        "조사방법2": 3,
         "조사장소": 4,
         "조사대상": 4,
     }
@@ -1100,6 +1100,7 @@ with tab_pdf:
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
         st.caption("먼저 키워드를 입력하고 **키보드 Enter**를 누르면 결과가 표시됩니다.")
+
 
 
 
