@@ -456,38 +456,31 @@ with st.container():
     st.markdown("""
 <style>
 .sync-wrap{border:1px solid #e9ecef;border-radius:12px;padding:12px;background:#fff;margin:8px 0;}
-.sync-title{font-size:15px;font-weight:700;margin:0 0 8px 0;line-height:1.25;}
-/* 버튼과 안내문을 한 줄로 */
-.sync-row{display:flex;align-items:center;gap:16px;flex-wrap:wrap;}
-.sync-btn .stButton{margin:0;} /* 기본 하단 여백 제거 */
+/* 버튼 스타일 */
+.sync-btn .stButton{margin:0;}
 .sync-btn .stButton>button{
   padding:14px 18px;border:1px solid #e9ecef;border-radius:10px;background:#fff;
-  font-size:15px;font-weight:800;box-shadow:none;
+  font-size:15px;font-weight:800;box-shadow:none;width:100%;
 }
 .sync-btn .stButton>button:hover{background:#f8f9fa;border-color:#dee2e6;}
-.sync-info{color:#6c757d;font-size:12px;line-height:1.4;flex:1 1 auto;}
-/* 작은 화면에서는 세로로 쌓이도록 */
-@media (max-width: 768px){
-  .sync-row{flex-direction:column;align-items:stretch;gap:10px;}
-}
+/* 버튼 바로 아래 안내문 */
+.sync-info{color:#6c757d;font-size:12px;line-height:1.4;margin-top:6px;}
 </style>
     """, unsafe_allow_html=True)
 
     st.markdown('<div class="sync-wrap">', unsafe_allow_html=True)
-    st.markdown('<div class="sync-title">데이터 전체 동기화</div>', unsafe_allow_html=True)
 
-    # 버튼(왼쪽) + 안내문(오른쪽)
-    col_btn, col_info = st.columns([1, 3])
-    with col_btn:
-        st.markdown('<div class="sync-btn">', unsafe_allow_html=True)
-        run_all = st.button("데이터 전체 동기화", key="btn_sync_all_in_one", use_container_width=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-    with col_info:
-        st.markdown(
-            '<div class="sync-info">한 번 누르면 Main+QnA 동기화, '
-            'PDF 키가 있으면 인덱싱까지 수행합니다.</div>',
-            unsafe_allow_html=True
-        )
+    # 버튼 (제목 텍스트 없음)
+    st.markdown('<div class="sync-btn">', unsafe_allow_html=True)
+    run_all = st.button("데이터 전체 동기화", key="btn_sync_all_in_one", use_container_width=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # 버튼 바로 아래 안내문
+    st.markdown(
+        '<div class="sync-info">한 번 누르면 Main+QnA 동기화, '
+        'PDF 키가 있으면 인덱싱까지 수행합니다.</div>',
+        unsafe_allow_html=True
+    )
 
     st.markdown('</div>', unsafe_allow_html=True)  # .sync-wrap
 
@@ -1017,5 +1010,6 @@ with tab_pdf:
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
         st.caption("먼저 키워드를 입력하고 **Enter**를 누르세요. (PDF 인덱스가 필요하다면 상단의 **데이터 전체 동기화** 버튼을 사용하세요.)")
+
 
 
