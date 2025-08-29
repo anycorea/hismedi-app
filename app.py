@@ -8,10 +8,9 @@ import streamlit as st
 from sqlalchemy import text, create_engine
 from pypdf import PdfReader
 
-
-# =========================
+# ====================================================================================
 # Edge Function 즉시 동기화
-# =========================
+# ====================================================================================
 # App settings → Secrets 에 아래 키 필요
 #   SUPABASE_FUNC_BASE = "https://<PROJECT-REF>.supabase.co/functions/v1"
 #   SUPABASE_ANON_KEY  = "<anon public token>"
@@ -35,10 +34,9 @@ def _trigger_edge_func(slug: str) -> dict:
     except Exception:
         return {"ok": True, "raw": r.text}
 
-
-# ============================
+# ====================================================================================
 # 한 번에 동기화(전체/선택 포함)
-# ============================
+# ====================================================================================
 def _do_sync_all(include_pdf: bool = True) -> tuple[int, int, int]:
     """
     Main + QnA를 Edge Function으로 즉시 동기화하고,
@@ -66,10 +64,9 @@ def _do_sync_all(include_pdf: bool = True) -> tuple[int, int, int]:
 
     return (c_main, c_qna, c_pdf)
 
-
-# ================================
+# ====================================================================================
 # Google Drive 폴더/파일 ID 추출기
-# ================================
+# ====================================================================================
 def _extract_drive_id(value: str) -> str:
     """URL/공유링크/순수ID 입력 모두에서 구글 드라이브 ID만 추출."""
     v = (value or "").strip()
@@ -93,10 +90,9 @@ def _extract_drive_id(value: str) -> str:
         pass
     return re.sub(r"[^A-Za-z0-9_\-]", "", v)
 
-
-# =================
+# ====================================================================================
 # 페이지 / 레이아웃
-# =================
+# ====================================================================================
 st.set_page_config(page_title="★★★ HISMEDI 인증 ★★★", layout="wide")
 st.markdown("""
 <style>
@@ -107,10 +103,9 @@ mark { background:#ffe2a8; }
 """, unsafe_allow_html=True)
 st.markdown('<div class="main-title">HISMEDI 인증</div>', unsafe_allow_html=True)
 
-
-# =========================
+# ====================================================================================
 # 간단 접근 비밀번호(선택)
-# =========================
+# ====================================================================================
 _APP_PW = (st.secrets.get("APP_PASSWORD") or os.getenv("APP_PASSWORD") or "").strip()
 
 def _is_valid_pw_format(pw: str) -> bool:
@@ -151,10 +146,9 @@ if _APP_PW:
         else:
             st.stop()
 
-
-# ===========
+# ====================================================================================
 # DB 연결 유틸
-# ===========
+# ====================================================================================
 def _load_database_url() -> str:
     url = st.secrets.get("DATABASE_URL") or os.getenv("DATABASE_URL")
     if not url:
@@ -245,10 +239,9 @@ def run_select_query(eng, sql_text, params=None):
     with eng.begin() as con:
         return pd.read_sql_query(text(q), con, params=params or {})
 
-
-# ==========================
+# ====================================================================================
 # PDF 인덱싱/검색 (Drive 전용)
-# ==========================
+# ====================================================================================
 REQUIRED_REG_COLUMNS = ["id", "filename", "page", "text", "file_mtime", "me"]
 
 def ensure_reg_table(eng):
@@ -414,10 +407,9 @@ def search_regs(eng, keywords: str, filename_like: str = "", limit: int = 500, h
     with eng.begin() as con:
         return pd.read_sql_query(sql, con, params=params)
 
-
-# ============
+# ====================================================================================
 # DB 상태 표시
-# ============
+# ====================================================================================
 from datetime import timezone, timedelta
 def _to_kst(dt):
     try:
@@ -448,20 +440,18 @@ except Exception as e:
     st.exception(e)
     st.stop()
 
-
-# ------------------------------------------------------------
+# ====================================================================================
 # Secrets(Drive) 읽기  (URL/ID 모두 허용)
-# ------------------------------------------------------------
+# ====================================================================================
 _raw_api_key = (st.secrets.get("DRIVE_API_KEY") or os.getenv("DRIVE_API_KEY") or "").strip()
 _raw_folder  = (st.secrets.get("DRIVE_FOLDER_ID") or os.getenv("DRIVE_FOLDER_ID") or "").strip()
 DRIVE_API_KEY   = _raw_api_key
 DRIVE_FOLDER_ID = _extract_drive_id(_raw_folder)
 
-
-# ------------------------------------------------------------
+# ====================================================================================
 # 로그인 직후 상단: 단일 버튼 "데이터 전체 동기화"
 #  - Main + QnA + (가능하면) PDF 인덱스
-# ------------------------------------------------------------
+# ====================================================================================
 with st.container():
     st.markdown("""
 <style>
@@ -521,14 +511,14 @@ with st.container():
     if need_rerun:
         st.rerun()
 
-
-# =====
+# ====================================================================================
 # 탭 UI
-# =====
+# ====================================================================================
 tab_main, tab_qna, tab_pdf = st.tabs(["인증기준/조사지침", "조사위원 질문", "규정검색(PDF파일/본문)"])
 
-
-# --------------------- 인증기준/조사지침 (필터 포함) ----------------------------
+# ====================================================================================
+# 인증기준/조사지침 (필터 포함)
+# ====================================================================================
 with tab_main:
     st.write("")  # 큰 제목 제거
     st.markdown("<style>div[data-testid='stFormSubmitButton']{display:none!important;}</style>", unsafe_allow_html=True)
@@ -700,10 +690,10 @@ with tab_main:
             render_cards(df, cols_order)
     else:
         st.caption("힌트: 조사장소/조사대상은 메인 키워드와 AND 조건으로 결합되어 검색됩니다.")
-# -----------------------------------------------------------------
 
-
-# --------------------- 조사위원 질문 -----------------------------
+# ====================================================================================
+# 조사위원 질문
+# ====================================================================================
 with tab_qna:
     st.write("")  # 큰 제목 생략
     st.markdown("<style>div[data-testid='stFormSubmitButton']{display:none!important;}</style>", unsafe_allow_html=True)
@@ -850,10 +840,10 @@ with tab_qna:
         render_qna_cards(df)
     else:
         st.caption("키워드를 입력하고 **Enter** 를 누르면 결과가 표시됩니다.")
-# -----------------------------------------------------------------
 
-
-# --------------------- 규정검색(PDF파일/본문) (Google Drive 전용) -------
+# ====================================================================================
+# 규정검색(PDF파일/본문) (Google Drive 전용)
+# ====================================================================================
 with tab_pdf:
     st.write("")  # 큰 제목 제거
     st.markdown("<style>div[data-testid='stFormSubmitButton']{display:none!important;}</style>", unsafe_allow_html=True)
@@ -1035,4 +1025,3 @@ with tab_pdf:
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
         st.caption("먼저 키워드를 입력하고 **Enter**를 누르세요. (PDF 인덱스가 필요하다면 상단의 **데이터 전체 동기화** 버튼을 사용하세요.)")
-# -----------------------------------------------------------------
