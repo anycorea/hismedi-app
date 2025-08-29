@@ -655,7 +655,7 @@ with tab_qna:
             key="qna_kw",
             placeholder="예) 낙상, 환자확인, 고객, 수술 체크리스트 등"
         )
-        FIXED_LIMIT_QNA = 1000
+        FIXED_LIMIT_QNA = 2000
         submitted_qna = st.form_submit_button("검색")
 
     # ====== 검색 실행 ======
@@ -964,3 +964,4 @@ with tab_pdf:
     else:
         st.caption("먼저 키워드를 입력하고 **Enter**를 누르세요. (입력 없이 Enter=전체 조회)")
 # =================================================================
+
