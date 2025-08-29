@@ -465,7 +465,7 @@ with st.container():
 .sync-btn .stButton>button:hover{ background:#f8f9fa; border-color:#dee2e6; }
 
 /* 안내문: 버튼 바로 밑에 타이트하게 붙이기 */
-.sync-note{ color:#6c757d; font-size:12px; line-height:1.35; margin-top:4px; }
+.sync-note{ color:#6c757d; font-size:12px; line-height:1.45; margin-top:14px; }
 
 /* 혹시 남아있던 빈 입력박스가 있으면 숨기기(라벨 비어있는 경우) */
 div[data-testid="stTextInput"]:has(label:empty){ display:none !important; }
@@ -1009,3 +1009,4 @@ with tab_pdf:
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
         st.caption("먼저 키워드를 입력하고 **Enter**를 누르세요. (PDF 인덱스가 필요하다면 상단의 **데이터 전체 동기화** 버튼을 사용하세요.)")
+
