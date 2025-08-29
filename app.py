@@ -604,58 +604,123 @@ with tab_main:
     else:
         st.caption("힌트: 조사장소/조사대상은 메인 키워드와 AND로 결합되어 검색됩니다.")
 
-# -------------------
-# 조사위원 질문 (QnA)
-# -------------------
+# --------------------- 조사위원 질문 -----------------------------
 with tab_qna:
-    st.write("")
-    st.markdown("<style>div[data-testid='stFormSubmitButton']{display:none!important;}</style>", unsafe_allow_html=True)
-
-    # 상단 동기화 바 (QnA)
+    # ---- QnA 즉시 동기화 스트립 (상단) ----
     render_sync_strip(label="QnA 시트", slug="sync_qna", state_key="last_sync_qna")
+
+    st.write("")  # 큰 제목 생략용
+    st.markdown("<style>div[data-testid='stFormSubmitButton']{display:none!important;}</style>", unsafe_allow_html=True)
 
     qna_table = _pick_table(eng, ["qna_v", "qna_raw"]) or "qna_raw"
 
+    # ====== 입력폼 (Enter 제출) ======
     with st.form("qna_search_form", clear_on_submit=False):
-        kw_q = st.text_input("키워드 (공백=AND)", st.session_state.get("qna_kw", ""), key="qna_kw",
-                             placeholder="예) 낙상, 환자확인, 수술 체크리스트 등")
+        kw_q = st.text_input(
+            "키워드 (공백=AND)",
+            st.session_state.get("qna_kw", ""),
+            key="qna_kw",
+            placeholder="예) 낙상, 환자확인, 수술 체크리스트 등"
+        )
         FIXED_LIMIT_QNA = 1000
         submitted_qna = st.form_submit_button("검색")
 
+    # ====== 검색 실행 ======
     if submitted_qna and kw_q.strip():
         with st.spinner("검색 중..."):
             df_q = search_table_any(eng, qna_table, kw_q, columns=None, limit=FIXED_LIMIT_QNA)
         if df_q.empty:
-            st.info("결과 없음"); st.session_state.pop("qna_results", None)
+            st.info("결과 없음")
+            st.session_state.pop("qna_results", None)
         else:
             st.session_state["qna_results"] = df_q.to_dict("records")
 
-    def render_qna_cards(df_: pd.DataFrame):
+    # ====== 유연한 컬럼 매핑 유틸 ======
+    def _norm_key(s: str) -> str:
+        # 공백/구분자/괄호 등 제거 + 소문자
+        return re.sub(r"[\s,/_\-()\[\]{}:]+", "", str(s or "")).lower()
+
+    def _pick_col(cols, candidates):
+        # 1) 정확 일치
+        for want in candidates:
+            for c in cols:
+                if str(c).strip() == want:
+                    return c
+        # 2) 정규화 일치
+        wants_norm = [_norm_key(want) for want in candidates]
+        for c in cols:
+            if _norm_key(c) in wants_norm:
+                return c
+        # 3) 부분 포함(정규화 기준)
+        for want in wants_norm:
+            for c in cols:
+                if want and want in _norm_key(c):
+                    return c
+        return None
+
+    # ===== 카드 렌더러 =====
+    def render_qna_cards(df_: pd.DataFrame, col_place: str, col_content: str):
         st.markdown("""
 <style>
 .qcard{border:1px solid #e9ecef;border-radius:12px;padding:12px 14px;margin:10px 0;background:#fff}
 .qtitle{font-size:15px;font-weight:800;margin-bottom:8px;word-break:break-word;color:#0d47a1}
 .qbody{font-size:13px;color:#333}
 .qlbl{display:inline-block;min-width:150px;color:#6c757d;font-weight:700}
-@media (max-width:900px){ .qlbl{min-width:120px} }
+@media (max-width: 900px){ .qlbl{min-width:120px} }
 </style>
-""", unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
+
         import html as _html
         for _, r in df_.iterrows():
-            place   = _html.escape(str(r.get("조사장소", "")).strip() or "조사장소 미지정")
-            content = _html.escape(str(r.get("조사위원 질문(확인) 내용", "")).strip() or "-")
-            st.markdown(f"""
+            place = _html.escape(str(r.get(col_place, "") or "").strip() or "조사장소 미지정")
+            content = _html.escape(str(r.get(col_content, "") or "").strip() or "-")
+            st.markdown(
+                f"""
 <div class="qcard">
   <div class="qtitle">{place}</div>
-  <div class="qbody"><div class="qline"><span class="qlbl">조사위원 질문(확인) 내용</span> {content}</div></div>
+  <div class="qbody">
+    <div class="qline"><span class="qlbl">조사위원 질문(확인) 내용</span> {content}</div>
+  </div>
 </div>
-""", unsafe_allow_html=True)
+                """,
+                unsafe_allow_html=True
+            )
 
+    # ===== 결과 표시 =====
     if "qna_results" in st.session_state and st.session_state["qna_results"]:
         df = pd.DataFrame(st.session_state["qna_results"])
-        # No. / 번호류는 표시하지 않음 (뷰에서 제외되었을 가능성 높음)
+
+        # 불필요한 식별자 컬럼 제거(예: No./번호/순번 등)
+        drop_like = [c for c in df.columns if _norm_key(c) in ("no", "no.", "번호", "순번")]
+        if drop_like:
+            df = df.drop(columns=drop_like)
+
+        # 장소/내용 컬럼 자동 탐색
+        COL_PLACE = _pick_col(df.columns, ["조사장소", "장소", "부서/장소", "부서"])
+        COL_CONTENT = _pick_col(
+            df.columns,
+            [
+                "조사위원 질문(확인) 내용",
+                "조사위원질문(확인)내용",
+                "조사위원 질문", "확인내용",
+                "질문(확인)내용", "질문확인내용", "내용"
+            ]
+        )
+
+        # 최후의 보정(없으면 첫/마지막 컬럼 사용)
+        if COL_PLACE is None:
+            COL_PLACE = df.columns[0]
+        if COL_CONTENT is None:
+            COL_CONTENT = df.columns[-1]
+
         st.write(f"결과: {len(df):,}건")
-        render_qna_cards(df)
+        render_qna_cards(df, COL_PLACE, COL_CONTENT)
+
+        # (선택) 컬럼 진단용: 필요할 때만 펼쳐서 확인
+        with st.expander("디버그: 감지된 컬럼 보기", expanded=False):
+            st.write("선택된 장소 컬럼:", COL_PLACE)
+            st.write("선택된 내용 컬럼:", COL_CONTENT)
+            st.write("모든 컬럼:", list(df.columns))
 
 # -------------------------------------
 # 규정검색 (PDF 본문, Google Drive 전용)
@@ -822,4 +887,5 @@ with tab_pdf:
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
         st.caption("먼저 키워드를 입력하고 **Enter**를 누르세요.")
+
 
