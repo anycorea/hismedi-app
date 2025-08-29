@@ -501,13 +501,97 @@ except Exception as e:
     st.exception(e)
     st.stop()
 
-# =======================
-# Secrets (Drive) 읽기
-# =======================
+# ------------------------------------------------------------
+# Secrets(Drive) 읽기  (URL/ID 모두 허용)
+#   ※ 이미 위쪽에 _extract_drive_id()가 있어야 합니다.
+# ------------------------------------------------------------
 _raw_api_key = (st.secrets.get("DRIVE_API_KEY") or os.getenv("DRIVE_API_KEY") or "").strip()
 _raw_folder  = (st.secrets.get("DRIVE_FOLDER_ID") or os.getenv("DRIVE_FOLDER_ID") or "").strip()
+
 DRIVE_API_KEY   = _raw_api_key
 DRIVE_FOLDER_ID = _extract_drive_id(_raw_folder)
+
+# ------------------------------------------------------------
+# 로그인 직후 상단: 전체 동기화 패널 (Main+QnA / +PDF 인덱스)
+#   - 다음 유틸이 이미 위쪽에 정의되어 있어야 합니다:
+#       _trigger_edge_func(), _do_sync_all(), index_pdfs_from_drive()
+#   - PDF 인덱싱 버튼은 DRIVE_API_KEY/DRIVE_FOLDER_ID 없으면 비활성화
+# ------------------------------------------------------------
+with st.container():
+    st.markdown("""
+<style>
+.sync-strip{border:1px solid #e9ecef;border-radius:12px;padding:10px 12px;margin:8px 0;background:#fff}
+.sync-strip h4{margin:0 0 8px 0;font-size:15px;line-height:1.25}
+@media (max-width: 768px){ .sync-strip h4{font-size:14px} }
+</style>
+    """, unsafe_allow_html=True)
+
+    st.markdown('<div class="sync-strip"><h4>데이터 전체 동기화</h4>', unsafe_allow_html=True)
+
+    c1, c2, c3 = st.columns([1, 1, 3])
+
+    # ① Main+QnA 동기화
+    with c1:
+        if st.button("전체 동기화 (Main+QnA)", key="btn_sync_all"):
+            try:
+                with st.spinner("Main+QnA 동기화 중..."):
+                    cnt_main, cnt_qna, _ = _do_sync_all(include_pdf=False)
+                st.session_state["sync_all_last"] = {"main": cnt_main, "qna": cnt_qna, "ts": time.time()}
+                # 캐시/세션 정리
+                st.cache_data.clear()
+                st.session_state.pop("main_results", None)
+                st.session_state.pop("qna_results", None)
+                st.success(f"완료: Main {cnt_main:,} · QnA {cnt_qna:,}")
+                st.rerun()
+            except Exception as e:
+                st.error(f"동기화 실패: {e}")
+
+    # ② Main+QnA+PDF 인덱스까지
+    with c2:
+        pdf_disabled = not (DRIVE_API_KEY and DRIVE_FOLDER_ID)
+        if st.button("전체+PDF 인덱스", key="btn_sync_all_pdf", disabled=pdf_disabled):
+            try:
+                with st.spinner("Main+QnA 동기화 및 PDF 인덱싱 중..."):
+                    cnt_main, cnt_qna, cnt_pdf = _do_sync_all(include_pdf=True)
+                st.session_state["sync_all_pdf_last"] = {
+                    "main": cnt_main, "qna": cnt_qna, "pdf": cnt_pdf, "ts": time.time()
+                }
+                st.cache_data.clear()
+                st.session_state.pop("main_results", None)
+                st.session_state.pop("qna_results", None)
+                st.success(f"완료: Main {cnt_main:,} · QnA {cnt_qna:,} · PDF {cnt_pdf:,}")
+                st.rerun()
+            except Exception as e:
+                st.error(f"동기화 실패: {e}")
+
+        if pdf_disabled:
+            st.caption("※ PDF 인덱스 버튼을 쓰려면 DRIVE_API_KEY / DRIVE_FOLDER_ID 시크릿을 설정하세요.")
+
+    # ③ 최근 동기화 이력 표시
+    with c3:
+        def _fmt_ts(ts: float) -> str:
+            try:
+                from datetime import datetime, timezone, timedelta
+                kst = timezone(timedelta(hours=9))
+                return datetime.fromtimestamp(ts, tz=kst).strftime("%Y-%m-%d %H:%M:%S (KST)")
+            except Exception:
+                return "-"
+
+        lines = []
+        last_all = st.session_state.get("sync_all_last")
+        last_pdf = st.session_state.get("sync_all_pdf_last")
+
+        if last_all:
+            lines.append(
+                f"- Main+QnA: **Main {last_all['main']:,} · QnA {last_all['qna']:,}** · {_fmt_ts(last_all['ts'])}"
+            )
+        if last_pdf:
+            lines.append(
+                f"- +PDF: **Main {last_pdf['main']:,} · QnA {last_pdf['qna']:,} · PDF {last_pdf['pdf']:,}** · {_fmt_ts(last_pdf['ts'])}"
+            )
+
+        st.caption("\n\n".join(lines) if lines else "아직 전체 동기화 실행 이력이 없습니다.")
+    st.markdown("</div>", unsafe_allow_html=True)
 
 # =====
 # 탭 UI
@@ -947,6 +1031,7 @@ with tab_pdf:
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
         st.caption("먼저 키워드를 입력하고 **Enter**를 누르세요.")
+
 
 
 
