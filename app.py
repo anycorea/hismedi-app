@@ -787,6 +787,19 @@ with tab_pdf:
     st.write("")
     st.markdown("<style>div[data-testid='stFormSubmitButton']{display:none!important;}</style>", unsafe_allow_html=True)
 
+    # ---- (1) 라디오/폼 만들기 전에 점프 플래그 처리 ----
+    # 기본 모드 없으면 기본값
+    if "pdf_mode" not in st.session_state:
+        st.session_state["pdf_mode"] = "파일 목록"
+
+    # 파일 목록에서 '페이지로 보기' 눌렀을 때 다음 렌더에서 모드/필터를 미리 셋업
+    if st.session_state.get("_pdf_jump_to_pages"):
+        st.session_state["pdf_mode"] = "페이지별 결과"
+        if "pdf_fn_prefill" in st.session_state and st.session_state["pdf_fn_prefill"]:
+            st.session_state["pdf_fn"] = st.session_state.pop("pdf_fn_prefill")
+        # 플래그 제거
+        st.session_state.pop("_pdf_jump_to_pages", None)
+
     # --- 검색 모드 선택: 페이지/파일 ---
     pdf_mode = st.radio(
         "검색 모드",
@@ -1051,12 +1064,11 @@ with tab_pdf:
             label = f"{name}  —  {pages}p" + (f" / 히트 {hits}p" if "hits" in row else "")
             c1.write(label)
 
-            # 페이지 모드로 전환 + 해당 파일만 필터 설정
+            # 페이지 모드로 전환은 '플래그'만 세팅하고 즉시 리런
             if c2.button("페이지로 보기", key=f"to_page_mode_{i}"):
-                st.session_state["pdf_mode"] = "페이지별 결과"
-                st.session_state["pdf_fn"] = name  # 파일명 필터 자동 설정
-                st.session_state.pop("pdf_file_results", None)
-                st.experimental_rerun()
+                st.session_state["pdf_fn_prefill"] = name
+                st.session_state["_pdf_jump_to_pages"] = True
+                st.rerun()
 
             # 구글 드라이브 열기
             me = (row.get("me") or "").strip()
