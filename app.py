@@ -450,66 +450,82 @@ DRIVE_FOLDER_ID = _extract_drive_id(_raw_folder)
 
 # ====================================================================================
 # 로그인 직후 상단: 단일 버튼 "데이터 전체 동기화"
-#  - Main + QnA + (가능하면) PDF 인덱스
+#  - 박스 전체가 버튼으로 동작 (Main + QnA + PDF 인덱스)
 # ====================================================================================
 with st.container():
+    # 스타일: 큰 카드형 버튼
     st.markdown("""
 <style>
-.sync-strip{border:1px solid #e9ecef;border-radius:12px;padding:10px 12px;margin:8px 0;background:#fff}
-.sync-strip h4{margin:0 0 8px 0;font-size:15px;line-height:1.25}
-@media (max-width: 768px){ .sync-strip h4{font-size:14px} }
+.big-sync-btn .stButton>button{
+  width:100%; text-align:left; padding:18px 20px;
+  border:1px solid #e9ecef; border-radius:12px;
+  background:#fff; font-size:16px; font-weight:800;
+  box-shadow:none;
+}
+.big-sync-btn .stButton>button:hover{
+  background:#f8f9fa; border-color:#dee2e6;
+}
+@media (max-width: 768px){
+  .big-sync-btn .stButton>button{ font-size:15px; padding:16px 18px; }
+}
+.info-line{ margin-top:8px; color:#6c757d; font-size:12px; }
 </style>
     """, unsafe_allow_html=True)
 
-    st.markdown('<div class="sync-strip"><h4>데이터 전체 동기화</h4>', unsafe_allow_html=True)
+    # 박스형 버튼(=카드)
+    st.markdown('<div class="big-sync-btn">', unsafe_allow_html=True)
+    clicked = st.button("데이터 전체 동기화", key="btn_sync_all_card", use_container_width=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
-    c1, c2 = st.columns([1, 5])
-    need_rerun = False
+    # 최근 실행 이력 안내
+    def _fmt_ts(ts: float) -> str:
+        try:
+            from datetime import datetime, timezone, timedelta
+            kst = timezone(timedelta(hours=9))
+            return datetime.fromtimestamp(ts, tz=kst).strftime("%Y-%m-%d %H:%M:%S (KST)")
+        except Exception:
+            return "-"
 
-    with c1:
-        if st.button("전체 동기화 (Main+QnA+PDF)", key="btn_sync_all_once"):
-            try:
-                with st.spinner("동기화 중... (Main+QnA)"):
-                    cnt_main, cnt_qna, _ = _do_sync_all(include_pdf=False)
+    last = st.session_state.get("sync_all_once_last")
+    if last:
+        st.markdown(
+            f'<div class="info-line">최근: Main {last["main"]:,} · QnA {last["qna"]:,} · PDF {last["pdf"]:,}  —  {_fmt_ts(last["ts"])}</div>',
+            unsafe_allow_html=True
+        )
+    else:
+        st.markdown('<div class="info-line">한 번 누르면 Main+QnA 동기화, PDF 키가 있으면 인덱싱까지 수행합니다.</div>',
+                    unsafe_allow_html=True)
 
-                # PDF 키가 있으면 인덱싱도 바로
+    # 클릭 시 처리
+    if clicked:
+        try:
+            with st.spinner("동기화 중... (Main + QnA)"):
+                # PDF 가능 여부 판단
+                do_pdf = bool(DRIVE_API_KEY and DRIVE_FOLDER_ID)
+                cnt_main, cnt_qna, cnt_pdf = _do_sync_all(include_pdf=do_pdf)
+
+            if not (DRIVE_API_KEY and DRIVE_FOLDER_ID):
+                st.info("DRIVE_API_KEY / DRIVE_FOLDER_ID 미설정 → PDF 인덱싱은 생략되었습니다.")
                 cnt_pdf = 0
-                if DRIVE_API_KEY and DRIVE_FOLDER_ID:
-                    with st.spinner("PDF 인덱싱(Drive) 중..."):
-                        _, _, cnt_pdf = _do_sync_all(include_pdf=True)
-                else:
-                    st.info("DRIVE_API_KEY / DRIVE_FOLDER_ID 미설정 → PDF 인덱싱 생략.")
 
-                st.session_state["sync_all_once_last"] = {
-                    "main": cnt_main, "qna": cnt_qna, "pdf": cnt_pdf, "ts": time.time()
-                }
-                st.success(f"완료: Main {cnt_main:,} · QnA {cnt_qna:,} · PDF {cnt_pdf:,}")
-                need_rerun = True
-            except Exception as e:
-                if e.__class__.__name__ in ("RerunData", "RerunException"):
-                    raise
-                st.error(f"동기화 실패: {e}")
+            # 이력 저장
+            st.session_state["sync_all_once_last"] = {
+                "main": cnt_main, "qna": cnt_qna, "pdf": cnt_pdf, "ts": time.time()
+            }
 
-    with c2:
-        def _fmt_ts(ts: float) -> str:
-            try:
-                from datetime import datetime, timezone, timedelta
-                kst = timezone(timedelta(hours=9))
-                return datetime.fromtimestamp(ts, tz=kst).strftime("%Y-%m-%d %H:%M:%S (KST)")
-            except Exception:
-                return "-"
-        last = st.session_state.get("sync_all_once_last")
-        if last:
-            st.caption(
-                f"최근 실행: **Main {last['main']:,} · QnA {last['qna']:,} · PDF {last['pdf']:,}**  —  {_fmt_ts(last['ts'])}"
-            )
-        else:
-            st.caption("아직 전체 동기화 실행 이력이 없습니다.")
+            # 캐시/세션 정리 후 안내
+            st.cache_data.clear()
+            for k in ("main_results", "qna_results", "pdf_results", "pdf_sel_idx", "pdf_kw_list"):
+                st.session_state.pop(k, None)
 
-    st.markdown("</div>", unsafe_allow_html=True)
+            st.success(f"완료: Main {cnt_main:,} · QnA {cnt_qna:,} · PDF {cnt_pdf:,}")
+            st.rerun()
 
-    if need_rerun:
-        st.rerun()
+        except Exception as e:
+            # Streamlit rerun 계열은 그대로 전달
+            if e.__class__.__name__ in ("RerunData", "RerunException"):
+                raise
+            st.error(f"동기화 실패: {e}")
 
 # ====================================================================================
 # 탭 UI
@@ -1025,3 +1041,4 @@ with tab_pdf:
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
         st.caption("먼저 키워드를 입력하고 **Enter**를 누르세요. (PDF 인덱스가 필요하다면 상단의 **데이터 전체 동기화** 버튼을 사용하세요.)")
+
