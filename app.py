@@ -665,6 +665,19 @@ with tab_main:
     # 폼 제출 버튼 숨김(Enter로 바로 검색)
     st.markdown("<style>div[data-testid='stFormSubmitButton']{display:none!important;}</style>", unsafe_allow_html=True)
 
+    # 0) 즉시 동기화 버튼
+    with st.expander("데이터 동기화", expanded=False):
+        if st.button("즉시 동기화 (Main 시트 → DB)", key="sync_main_now"):
+            try:
+                with st.spinner("동기화 중..."):
+                    resp = _trigger_edge_func("sync_main")
+                st.success(f"동기화 완료: {resp.get('count', '?')}건")
+                st.cache_data.clear()
+                st.session_state.pop("main_results", None)
+                st.rerun()
+            except Exception as e:
+                st.error(f"동기화 실패: {e}")
+
     # 1) 사용할 테이블(뷰) 우선순위: main_sheet_v → main_v → main_raw
     main_table = _pick_table(eng, ["main_sheet_v", "main_v", "main_raw"]) or "main_raw"
 
@@ -686,14 +699,14 @@ with tab_main:
     MAIN_COL_WEIGHTS = {
         "ME": 2,
         "조사항목": 8,
-        "항목": 2,
-        "등급": 2,
-        "조사결과": 3,
-        "조사기준의 이해": 17,
-        "조사방법1": 12,
-        "조사방법2": 4,
-        "조사장소": 6,
-        "조사대상": 5,
+        "항목": 1,
+        "등급": 1,
+        "조사결과": 2,
+        "조사기준의 이해": 12,
+        "조사방법1": 10,
+        "조사방법2": 5,
+        "조사장소": 4,
+        "조사대상": 4,
     }
 
     # 테이블에 실제로 존재하는 컬럼/정렬키 확인
@@ -843,9 +856,7 @@ with tab_main:
     # ====== 결과 출력 ======
     if "main_results" in st.session_state and st.session_state["main_results"]:
         df = pd.DataFrame(st.session_state["main_results"])
-
-        # 고정 순서대로만 표시(없는 칼럼은 무시)
-        cols_order = [c for c in MAIN_COLS if c in df.columns]
+        cols_order = [c for c in MAIN_COLS if c in df.columns]  # 고정 순서
 
         st.write(f"결과: {len(df):,}건")
         view_mode = st.radio("보기 형식", ["카드형(모바일)", "표형"], index=0, horizontal=True, key="main_view_mode")
@@ -1133,6 +1144,7 @@ with tab_pdf:
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
         st.caption("먼저 키워드를 입력하고 **키보드 Enter**를 누르면 결과가 표시됩니다.")
+
 
 
 
