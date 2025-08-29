@@ -9,6 +9,7 @@ import streamlit as st
 from sqlalchemy import text, create_engine
 from pypdf import PdfReader
 
+
 # =========================
 # Edge Function 즉시 동기화
 # =========================
@@ -78,7 +79,7 @@ def render_sync_strip(label: str, slug: str, state_key: str):
             rerun_needed = True
 
         except Exception as e:
-            # Streamlit이 내부적으로 사용하는 Rerun 예외는 다시 던져야 함
+            # Streamlit 내부 Rerun 예외는 다시 던져야 함
             if e.__class__.__name__ in ("RerunData", "RerunException"):
                 raise
             err = e
@@ -87,8 +88,43 @@ def render_sync_strip(label: str, slug: str, state_key: str):
             st.error(f"동기화 실패: {err}")
 
         if rerun_needed:
-            # try/except 밖에서 안전하게 재실행
             st.rerun()
+
+
+# ============================
+# 한 번에 동기화(전체/선택 포함)
+# ============================
+def _do_sync_all(include_pdf: bool = False) -> tuple[int, int, int]:
+    """
+    Main + QnA를 Edge Function으로 즉시 동기화하고,
+    include_pdf=True면 Google Drive 규정(PDF) 인덱싱까지 수행합니다.
+    반환값: (main_count, qna_count, pdf_count)
+
+    주의: 아래에서 참조하는 전역(eng, index_pdfs_from_drive, DRIVE_API_KEY, DRIVE_FOLDER_ID)
+         는 파일 뒷부분에서 정의됩니다. 함수 정의 위치는 상관없습니다.
+    """
+    # 1) Main
+    resp_main = _trigger_edge_func("sync_main")
+    c_main = int(resp_main.get("count", 0))
+
+    # 2) QnA
+    resp_qna = _trigger_edge_func("sync_qna")
+    c_qna = int(resp_qna.get("count", 0))
+
+    # 3) (선택) PDF 인덱싱
+    c_pdf = 0
+    if include_pdf:
+        if not (DRIVE_API_KEY and DRIVE_FOLDER_ID):
+            raise RuntimeError("PDF 인덱싱 실패: DRIVE_API_KEY / DRIVE_FOLDER_ID가 필요합니다.")
+        res = index_pdfs_from_drive(eng, DRIVE_FOLDER_ID, DRIVE_API_KEY)
+        c_pdf = int(res.get("indexed", 0))
+
+    # 캐시/세션 청소 (최신 데이터 바로 보이게)
+    st.cache_data.clear()
+    for k in ("main_results", "qna_results", "pdf_results", "pdf_sel_idx", "pdf_kw_list"):
+        st.session_state.pop(k, None)
+
+    return (c_main, c_qna, c_pdf)
 
 # ================================
 # Google Drive 폴더/파일 ID 추출기
@@ -911,6 +947,7 @@ with tab_pdf:
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
         st.caption("먼저 키워드를 입력하고 **Enter**를 누르세요.")
+
 
 
 
