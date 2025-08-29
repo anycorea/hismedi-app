@@ -169,21 +169,52 @@ def _choose_search_cols(eng, table: str) -> List[str]:
         pref = []
     return pref if pref else all_cols
 
-def search_table_any(eng, table: str, keywords: str, columns: List[str] = None, limit: int = 500) -> pd.DataFrame:
+def search_table_any(
+    eng,
+    table: str,
+    keywords: str,
+    columns=None,          # 선택: SELECT 에서 보여줄 컬럼. None이면 전체(*)
+    limit: int = 500
+):
+    """
+    공백으로 구분된 키워드(AND)를, 여러 컬럼(OR)에 대해 부분일치(ILIKE) 검색합니다.
+    **키워드가 비어 있으면 전체 조회( LIMIT 적용 )**.
+    """
     kw_list = [w for w in re.split(r"\s+", (keywords or "").strip()) if w]
-    if not kw_list: return pd.DataFrame()
+
+    # SELECT 절
     select_cols = "*"
-    if columns: select_cols = ", ".join(_qident(c) for c in columns)
+    if columns:
+        select_cols = ", ".join(_qident(c) for c in columns)
+
+    # 키워드가 없으면 전체 조회
+    if not kw_list:
+        sql = text(f"SELECT {select_cols} FROM {_qident(table)} LIMIT :limit")
+        with eng.begin() as con:
+            return pd.read_sql_query(sql, con, params={"limit": int(limit)})
+
+    # WHERE 절(AND x OR) + 파라미터
     search_cols = _choose_search_cols(eng, table)
-    params: Dict[str, str] = {}; and_parts = []
+    params: dict[str, str] = {}
+    and_parts = []
     for i, kw in enumerate(kw_list):
         or_parts = []
         for j, col in enumerate(search_cols):
-            p = f"kw_{i}_{j}"; or_parts.append(f"COALESCE({_qident(col)}::text, '') ILIKE :{p}")
+            p = f"kw_{i}_{j}"
+            # 모든 타입 안전: ::text 로 캐스팅 + NULL 방지
+            or_parts.append(f"COALESCE({_qident(col)}::text, '') ILIKE :{p}")
             params[p] = f"%{kw}%"
         and_parts.append("(" + " OR ".join(or_parts) + ")")
-    sql = text(f"SELECT {select_cols} FROM {_qident(table)} WHERE {' AND '.join(and_parts)} LIMIT :limit")
+    where_clause = " AND ".join(and_parts)
+
+    sql = text(f"""
+        SELECT {select_cols}
+        FROM {_qident(table)}
+        WHERE {where_clause}
+        LIMIT :limit
+    """)
     params["limit"] = int(limit)
+
     with eng.begin() as con:
         return pd.read_sql_query(sql, con, params=params)
 
@@ -326,17 +357,31 @@ def highlight_html(src_text: str, kw_list: List[str], width: int = 200) -> str:
     return esc
 
 def search_regs(eng, keywords: str, filename_like: str = "", limit: int = 500, hide_ipynb_chk: bool = True):
-    kw_list = [k.strip() for k in str(keywords).split() if k.strip()]
-    if not kw_list: return pd.DataFrame()
+    """PDF 본문 검색. 키워드가 비어 있으면 전체 조회(옵션 필터만 적용)."""
+    kw_list = [k.strip() for k in str(keywords or "").split() if k.strip()]
+
     where_parts, params = [], {}
-    for i, kw in enumerate(kw_list):
-        where_parts.append(f"(text ILIKE :kw{i})"); params[f"kw{i}"] = f"%{kw}%"
-    if filename_like.strip(): where_parts.append("filename ILIKE :fn"); params["fn"] = f"%{filename_like.strip()}%"
-    if hide_ipynb_chk: where_parts.append(r"(filename !~* '(^|[\\/])\.ipynb_checkpoints([\\/]|$)')")
+
+    # (A) 키워드 AND
+    if kw_list:
+        for i, kw in enumerate(kw_list):
+            where_parts.append(f"(text ILIKE :kw{i})")
+            params[f"kw{i}"] = f"%{kw}%"
+
+    # (B) 파일명 필터(선택)
+    if filename_like.strip():
+        where_parts.append("filename ILIKE :fn")
+        params["fn"] = f"%{filename_like.strip()}%"
+
+    # (C) .ipynb_checkpoints 숨기기
+    if hide_ipynb_chk:
+        where_parts.append(r"(filename !~* '(^|[\\/])\.ipynb_checkpoints([\\/]|$)')")
+
+    where_sql = " AND ".join(where_parts) if where_parts else "TRUE"
     sql = text(f"""
         select filename, page, me, text
           from regulations
-         where {' AND '.join(where_parts)}
+         where {where_sql}
          order by filename, page
          limit :lim
     """)
@@ -439,15 +484,21 @@ with tab_main:
     has_sort = all(x in existing_cols for x in ["sort1","sort2","sort3"])
 
     with st.form("main_search_form", clear_on_submit=False):
-        c1, c2, c3 = st.columns([2,1,1])
-        kw = c1.text_input("키워드 (공백=AND)",  st.session_state.get("main_kw",""), key="main_kw")
-        f_place = c2.text_input("조사장소 (선택)",  st.session_state.get("main_filter_place",""), key="main_filter_place")
-        f_target= c3.text_input("조사대상 (선택)",  st.session_state.get("main_filter_target",""), key="main_filter_target")
+        c1, c2, c3 = st.columns([2, 1, 1])
+        with c1:
+            # ← 라벨 변경
+            kw = st.text_input("키워드 (입력 없이 Enter=전체조회, 공백=AND)",
+                               st.session_state.get("main_kw", ""), key="main_kw")
+        with c2:
+            f_place = st.text_input("조사장소 (선택)", st.session_state.get("main_filter_place", ""), key="main_filter_place")
+        with c3:
+            f_target = st.text_input("조사대상 (선택)", st.session_state.get("main_filter_target", ""), key="main_filter_target")
+
         FIXED_LIMIT = 1000
-        submitted_main = st.form_submit_button("검색")
+        submitted_main = st.form_submit_button("검색")  # 화면에는 숨김
 
     results_df = pd.DataFrame()
-    if submitted_main and (kw.strip() or f_place.strip() or f_target.strip()):
+   if submitted_main:  # 키워드가 비어도 전체 조회
         kw_list = [k.strip() for k in kw.split() if k.strip()]
         where_parts, params = [], {}
         if kw_list and show_cols:
@@ -527,12 +578,16 @@ with tab_qna:
     qna_table = _pick_table(eng, ["qna_sheet_v", "qna_v", "qna_raw"]) or "qna_raw"
 
     with st.form("qna_search_form", clear_on_submit=False):
-        kw_q = st.text_input("키워드 (공백=AND)", st.session_state.get("qna_kw",""),
-                             key="qna_kw", placeholder="예) 낙상, 환자확인, 고객, 수술 체크리스트 등")
+        kw_q = st.text_input(
+            "키워드 (입력 없이 Enter=전체조회, 공백=AND)",
+            st.session_state.get("qna_kw", ""),
+            key="qna_kw",
+            placeholder="예) 낙상, 환자확인, 고객, 수술 체크리스트 등"
+        )
         FIXED_LIMIT_QNA = 1000
-        submitted_qna = st.form_submit_button("검색")
+        submitted_qna = st.form_submit_button("검색")  # 화면엔 숨김
 
-    if submitted_qna and kw_q.strip():
+    if submitted_qna:  # 키워드가 비어도 전체 조회
         with st.spinner("검색 중..."):
             df_q = search_table_any(eng, qna_table, kw_q, columns=None, limit=FIXED_LIMIT_QNA)
         if df_q.empty:
@@ -629,11 +684,11 @@ with tab_pdf:
 
     FIXED_LIMIT = 1000
     with st.form("pdf_search_form", clear_on_submit=False):
-        kw_pdf  = st.text_input("키워드 (공백=AND)", "", key="pdf_kw")
+        kw_pdf  = st.text_input("키워드 (입력 없이 Enter=전체조회, 공백=AND)", "", key="pdf_kw")
         fn_like = st.text_input("파일명 필터(선택)", "", key="pdf_fn")
-        submitted_pdf = st.form_submit_button("검색")
+        submitted_pdf = st.form_submit_button("검색")  # 화면에는 숨김
 
-    if submitted_pdf and kw_pdf.strip():
+    if submitted_pdf:  # 키워드가 비어도 전체 조회
         with st.spinner("검색 중..."):
             _df = search_regs(eng, kw_pdf, filename_like=fn_like, limit=FIXED_LIMIT)
         if "me" in _df.columns: _df = _df[_df["me"].astype(str).str.strip() != ""]
@@ -758,5 +813,6 @@ with tab_pdf:
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
         st.caption("먼저 키워드를 입력하고 **Enter**를 누르세요.")
+
 
 
