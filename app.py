@@ -637,7 +637,7 @@ with tab_qna:
 
     # ---------------- 유틸: 정규화 ----------------
     def _norm_key(s: str) -> str:
-        # NBSP 제거, 공백/구분자/괄호/마침표 제거 + 소문자
+        # NBSP 제거, 공백/구분자 제거 + 소문자
         return re.sub(r"[\s,/_\-.\(\)\[\]{}:]+", "", str(s or "").replace("\u00A0", " ")).lower()
 
     def _clean_text(v) -> str:
@@ -647,8 +647,9 @@ with tab_qna:
 
     # ---------------- 카드 렌더러 ----------------
     def render_qna_cards(df_: pd.DataFrame):
-        # 1) 컬럼명 정규화(보이지 않는 공백 제거)
+        # 1) 열 이름 정리
         df_.columns = [str(c).replace("\u00A0", " ").strip() for c in df_.columns]
+        cols = list(df_.columns)
 
         st.markdown("""
 <style>
@@ -661,7 +662,6 @@ with tab_qna:
         """, unsafe_allow_html=True)
 
         import html as _html
-        cols = list(df_.columns)
 
         # 2) 장소 컬럼 찾기
         place_col = None
@@ -671,16 +671,14 @@ with tab_qna:
                     place_col = c; break
             if place_col: break
         if not place_col:
-            # 정규화 일치
             wants_n = [_norm_key(w) for w in ["조사장소","장소","부서/장소","부서","조사 장소","조사 부서"]]
             for c in cols:
                 if _norm_key(c) in wants_n:
                     place_col = c; break
         if not place_col:
-            place_col = cols[0]  # 마지막 안전장치
+            place_col = cols[0]
 
-        # 3) 내용 컬럼 후보(우선순위 높은 순으로 검사)
-        #    다양한 표기를 모두 커버 + 동기화로 컬럼명이 변해도 잡히도록 함
+        # 3) 내용 컬럼 후보
         content_candidates_exact = [
             "조사위원 질문(확인) 내용",
             "조사위원 질문, 확인내용",
@@ -690,39 +688,41 @@ with tab_qna:
             "질문, 확인내용",
             "질문/확인내용",
             "질문확인내용",
+            "조사위원 질문",
+            "확인내용",
             "질문"
         ]
-        # 실제 존재하는 것만 남김(정확 일치 → 정규화 일치)
         cands = []
         for w in content_candidates_exact:
             for c in cols:
                 if str(c).strip() == w:
                     cands.append(c); break
             else:
-                # 정규화 일치
                 wn = _norm_key(w)
                 for c in cols:
                     if _norm_key(c) == wn:
                         cands.append(c); break
 
         def pick_content_from_row(r: pd.Series) -> str:
-            # 3-1) 후보들 중 첫 비공백 값
+            # 3-1) 후보들 중 첫 비공백
             for c in cands:
                 s = _clean_text(r.get(c))
                 if s:
                     return s
-            # 3-2) 그래도 비면, 장소/번호 제외한 "가장 긴 텍스트" 자동 선택
+            # 3-2) 최후의 보루: 장소/번호/타임스탬프 제외하고
+            #      "한글/영문이 하나라도 들어있는" 가장 긴 텍스트를 선택
             longest = ""
             for c, v in r.items():
                 if c == place_col:
                     continue
                 nk = _norm_key(c)
-                if nk in ("no", "no.", "번호", "순번"):
+                if nk in ("no", "no.", "번호", "순번", "imported_at"):
                     continue
                 s = _clean_text(v)
                 if not s:
                     continue
-                if len(s) < 2 or re.fullmatch(r"[\d\W_]+", s):
+                # ✅ 한글/영문 글자가 하나도 없으면(숫자/기호뿐) 건너뜀
+                if not re.search(r"[A-Za-z가-힣]", s):
                     continue
                 if len(s) > len(longest):
                     longest = s
@@ -745,7 +745,7 @@ with tab_qna:
                 unsafe_allow_html=True
             )
 
-        # (선택) 진단용
+        # (선택) 디버그
         with st.expander("디버그: 감지된 컬럼 보기", expanded=False):
             st.write("장소 컬럼:", place_col)
             st.write("내용 후보(존재하는 것):", cands)
@@ -754,8 +754,8 @@ with tab_qna:
     # ===== 결과 표시 (카드형만) =====
     if "qna_results" in st.session_state and st.session_state["qna_results"]:
         df = pd.DataFrame(st.session_state["qna_results"])
-        # 식별자류 제거 + 열 이름 정리
         df.columns = [str(c).replace("\u00A0", " ").strip() for c in df.columns]
+        # 번호류 컬럼은 제거
         rm = [c for c in df.columns if _norm_key(c) in ("no", "no.", "번호", "순번")]
         if rm:
             df = df.drop(columns=rm)
@@ -927,6 +927,7 @@ with tab_pdf:
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
         st.caption("먼저 키워드를 입력하고 **Enter**를 누르세요.")
+
 
 
 
