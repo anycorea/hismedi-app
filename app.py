@@ -609,39 +609,48 @@ with tab_qna:
     # (선택) 즉시 동기화 버튼
     render_sync_strip(label="QnA 시트", slug="sync_qna", state_key="last_sync_qna")
 
-    st.write("")  # 큰 제목 생략
+    st.write("")
     st.markdown("<style>div[data-testid='stFormSubmitButton']{display:none!important;}</style>", unsafe_allow_html=True)
 
     qna_table = _pick_table(eng, ["qna_v", "qna_raw"]) or "qna_raw"
-    existing = set(_list_columns(eng, qna_table))
+    existing_cols = _list_columns(eng, qna_table)
 
-    # 1) 장소/내용 후보 목록(있는 것만 사용)
+    # --- 칼럼명 정규화(공백/NBSP/기호 제거, 소문자) → 실제명 매핑
+    def _norm(s: str) -> str:
+        # 공백류(스페이스/탭/NBSP)와 흔한 구분기호 제거
+        return re.sub(r"[\s\u00A0,/_\-()]+", "", (s or "").lower())
+
+    norm2real = { _norm(c): c for c in existing_cols }
+
+    # 후보 세트(있는 것만 사용)
     place_candidates = ["조사장소", "장소", "부서/장소", "부서", "조사 장소", "조사 부서"]
     content_candidates = [
-        "조사위원 질문(확인) 내용",
-        "조사위원 질문, 확인내용",
-        "조사위원 질문/확인내용",
-        "조사위원질문확인내용",
-        "질문, 확인내용",
-        "질문/확인내용",
-        "질문확인내용",
-        "조사위원 질문",
-        "확인내용",
-        "질문",
+        "조사위원 질문(확인) 내용", "조사위원 질문, 확인내용", "조사위원 질문/확인내용",
+        "조사위원질문확인내용", "질문, 확인내용", "질문/확인내용", "질문확인내용",
+        "조사위원 질문", "확인내용", "질문",
     ]
 
-    def _coalesce_expr(cands: list[str]) -> str:
-        cols = [c for c in cands if c in existing]
-        # 하나도 없으면 빈 문자열
+    def _resolve(cands: list[str]) -> list[str]:
+        cols = []
+        for w in cands:
+            real = norm2real.get(_norm(w))
+            if real:
+                cols.append(real)
+        return cols
+
+    place_cols   = _resolve(place_candidates)
+    content_cols = _resolve(content_candidates)
+
+    # COALESCE 표현식 만들기(없으면 '' 처리)
+    def _coalesce_expr(cols: list[str]) -> str:
         if not cols:
             return "''"
-        # 어떤 타입이든 텍스트로 안전 캐스팅
         return "COALESCE(" + ", ".join(f"{_qident(c)}::text" for c in cols) + ", '')"
 
-    place_expr   = _coalesce_expr(place_candidates)
-    content_expr = _coalesce_expr(content_candidates)
+    place_expr   = _coalesce_expr(place_cols)
+    content_expr = _coalesce_expr(content_cols)
 
-    # 2) 검색 폼
+    # ------- 검색 폼 -------
     with st.form("qna_search_form", clear_on_submit=False):
         kw_q = st.text_input(
             "키워드 (공백=AND)",
@@ -652,32 +661,40 @@ with tab_qna:
         FIXED_LIMIT_QNA = 1000
         submitted_qna = st.form_submit_button("검색")
 
-    # 3) 실행: place/content 두 컬럼만 뽑아서 검색
-    df_q = pd.DataFrame()
+    # ------- 실행 -------
     if submitted_qna and kw_q.strip():
         kw_list = [k.strip() for k in kw_q.split() if k.strip()]
-        params, and_parts = {}, []
+        params: dict[str, str] = {}
+        # 서브쿼리: place/content 두 컬럼만 뽑음
+        inner_sql = f"""
+            SELECT
+              {place_expr}   AS place,
+              {content_expr} AS content
+            FROM {_qident(qna_table)}
+        """
+        # 바깥 WHERE: place/content 둘 중 하나라도 매칭(AND 결합)
+        and_parts = []
         for i, k in enumerate(kw_list):
             params[f"k{i}"] = f"%{k}%"
-            # 각 키워드는 place 또는 content 중 하나에라도 매칭(AND 결합)
-            and_parts.append(f"(({place_expr}) ILIKE :k{i} OR ({content_expr}) ILIKE :k{i})")
+            and_parts.append(f"(place ILIKE :k{i} OR content ILIKE :k{i})")
         where_sql = " AND ".join(and_parts) if and_parts else "TRUE"
 
         sql = text(f"""
-            WITH rows AS (
-              SELECT
-                {place_expr}   AS place,
-                {content_expr} AS content
-              FROM {_qident(qna_table)}
-            )
             SELECT place, content
-            FROM rows
+            FROM ({inner_sql}) AS t
             WHERE {where_sql}
             LIMIT :lim
         """)
         params["lim"] = FIXED_LIMIT_QNA
-        with eng.begin() as con:
-            df_q = pd.read_sql_query(sql, con, params=params)
+
+        try:
+            with eng.begin() as con:
+                df_q = pd.read_sql_query(sql, con, params=params)
+        except Exception as e:
+            st.error("QnA 조회 중 오류가 발생했습니다.")
+            st.caption(f"(디버그) place_cols={place_cols}, content_cols={content_cols}")
+            st.exception(e)
+            df_q = pd.DataFrame()
 
         if df_q.empty:
             st.info("결과 없음")
@@ -685,7 +702,7 @@ with tab_qna:
         else:
             st.session_state["qna_results"] = df_q.to_dict("records")
 
-    # 4) 카드 렌더러(장소/내용만)
+    # ------- 카드 렌더러(장소/내용만) -------
     def render_qna_cards(df_: pd.DataFrame):
         st.markdown("""
 <style>
@@ -713,7 +730,7 @@ with tab_qna:
                 unsafe_allow_html=True
             )
 
-    # 5) 결과 표시
+    # ------- 결과 표시 -------
     if "qna_results" in st.session_state and st.session_state["qna_results"]:
         df_show = pd.DataFrame(st.session_state["qna_results"])
         st.write(f"결과: {len(df_show):,}건")
@@ -884,6 +901,7 @@ with tab_pdf:
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
         st.caption("먼저 키워드를 입력하고 **Enter**를 누르세요.")
+
 
 
 
