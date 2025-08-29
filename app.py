@@ -606,135 +606,145 @@ with tab_main:
 
 # --------------------- 조사위원 질문 -----------------------------
 with tab_qna:
-    # (선택) 즉시 동기화 버튼
-    render_sync_strip(label="QnA 시트", slug="sync_qna", state_key="last_sync_qna")
+    # 0) QnA 동기화 버튼 (필요 없으면 이 줄만 주석 처리)
+    render_sync_strip(label="QnA 시트 → DB", slug="sync_qna", state_key="last_sync_qna")
 
-    st.write("")
-    st.markdown("<style>div[data-testid='stFormSubmitButton']{display:none!important;}</style>", unsafe_allow_html=True)
+    # 1) 검색 폼
+    st.write("")  # 큰 제목 생략
+    st.markdown("<style>div[data-testid='stFormSubmitButton']{display:none!important;}</style>",
+                unsafe_allow_html=True)
 
-    qna_table = _pick_table(eng, ["qna_v", "qna_raw"]) or "qna_raw"
-    existing_cols = _list_columns(eng, qna_table)
+    qna_table = _pick_table(eng, ["qna_sheet_v", "qna_v", "qna_raw"]) or "qna_raw"
 
-    # --- 칼럼명 정규화(공백/NBSP/기호 제거, 소문자) → 실제명 매핑
-    def _norm(s: str) -> str:
-        # 공백류(스페이스/탭/NBSP)와 흔한 구분기호 제거
-        return re.sub(r"[\s\u00A0,/_\-()]+", "", (s or "").lower())
-
-    norm2real = { _norm(c): c for c in existing_cols }
-
-    # 후보 세트(있는 것만 사용)
-    place_candidates = ["조사장소", "장소", "부서/장소", "부서", "조사 장소", "조사 부서"]
-    content_candidates = [
-        "조사위원 질문(확인) 내용", "조사위원 질문, 확인내용", "조사위원 질문/확인내용",
-        "조사위원질문확인내용", "질문, 확인내용", "질문/확인내용", "질문확인내용",
-        "조사위원 질문", "확인내용", "질문",
-    ]
-
-    def _resolve(cands: list[str]) -> list[str]:
-        cols = []
-        for w in cands:
-            real = norm2real.get(_norm(w))
-            if real:
-                cols.append(real)
-        return cols
-
-    place_cols   = _resolve(place_candidates)
-    content_cols = _resolve(content_candidates)
-
-    # COALESCE 표현식 만들기(없으면 '' 처리)
-    def _coalesce_expr(cols: list[str]) -> str:
-        if not cols:
-            return "''"
-        return "COALESCE(" + ", ".join(f"{_qident(c)}::text" for c in cols) + ", '')"
-
-    place_expr   = _coalesce_expr(place_cols)
-    content_expr = _coalesce_expr(content_cols)
-
-    # ------- 검색 폼 -------
     with st.form("qna_search_form", clear_on_submit=False):
-        kw_q = st.text_input(
-            "키워드 (공백=AND)",
-            st.session_state.get("qna_kw", ""),
-            key="qna_kw",
-            placeholder="예) 낙상, 환자확인, 수술 체크리스트 등",
-        )
-        FIXED_LIMIT_QNA = 1000
+        kw_q = st.text_input("키워드 (공백=AND)", st.session_state.get("qna_kw", ""), key="qna_kw",
+                             placeholder="예) 낙상, 환자확인, 고객, 수술 체크리스트 등")
         submitted_qna = st.form_submit_button("검색")
 
-    # ------- 실행 -------
+    # 2) 검색 실행 (결과를 세션에 저장)
     if submitted_qna and kw_q.strip():
-        kw_list = [k.strip() for k in kw_q.split() if k.strip()]
-        params: dict[str, str] = {}
-        # 서브쿼리: place/content 두 컬럼만 뽑음
-        inner_sql = f"""
-            SELECT
-              {place_expr}   AS place,
-              {content_expr} AS content
-            FROM {_qident(qna_table)}
-        """
-        # 바깥 WHERE: place/content 둘 중 하나라도 매칭(AND 결합)
-        and_parts = []
-        for i, k in enumerate(kw_list):
-            params[f"k{i}"] = f"%{k}%"
-            and_parts.append(f"(place ILIKE :k{i} OR content ILIKE :k{i})")
-        where_sql = " AND ".join(and_parts) if and_parts else "TRUE"
-
-        sql = text(f"""
-            SELECT place, content
-            FROM ({inner_sql}) AS t
-            WHERE {where_sql}
-            LIMIT :lim
-        """)
-        params["lim"] = FIXED_LIMIT_QNA
-
-        try:
-            with eng.begin() as con:
-                df_q = pd.read_sql_query(sql, con, params=params)
-        except Exception as e:
-            st.error("QnA 조회 중 오류가 발생했습니다.")
-            st.caption(f"(디버그) place_cols={place_cols}, content_cols={content_cols}")
-            st.exception(e)
-            df_q = pd.DataFrame()
-
+        with st.spinner("검색 중..."):
+            df_q = search_table_any(eng, qna_table, kw_q, columns=None, limit=1000)
         if df_q.empty:
             st.info("결과 없음")
             st.session_state.pop("qna_results", None)
         else:
             st.session_state["qna_results"] = df_q.to_dict("records")
 
-    # ------- 카드 렌더러(장소/내용만) -------
-    def render_qna_cards(df_: pd.DataFrame):
+    # 3) 컬럼 탐색 유틸 (이름이 조금 달라도 자동 매핑)
+    def _norm_key(s: str) -> str:
+        # 공백/구두점/괄호/기호 제거 + 소문자
+        return re.sub(r"[ \t\r\n,/_\-:;()\[\]{}<>·•｜|]+", "", str(s or "").lower())
+
+    def _pick_col(cols, candidates):
+        """cols 중 candidates와 '정확 일치' → '정규화 일치' → '부분 포함' 순으로 선택"""
+        # 1) 정확 일치
+        for want in candidates:
+            if want in cols:
+                return want
+        # 2) 정규화 일치
+        wants_norm = [_norm_key(w) for w in candidates]
+        for c in cols:
+            if _norm_key(c) in wants_norm:
+                return c
+        # 3) 부분 포함(아주 느슨)
+        for want in candidates:
+            w = _norm_key(want)
+            for c in cols:
+                if w and w in _norm_key(c):
+                    return c
+        return None
+
+    def _guess_long_text_col(df: pd.DataFrame, exclude: set[str]) -> str | None:
+        """텍스트 길이가 가장 긴(평균) 컬럼을 추정. 번호/날짜처럼 짧은 컬럼은 자동 배제."""
+        cand_cols = [c for c in df.columns if c not in exclude]
+        if not cand_cols:
+            return None
+        # 앞 50행만 샘플링해 평균 길이 계산
+        samp = df.head(50)
+        best_col, best_score = None, -1.0
+        for c in cand_cols:
+            # 숫자/날짜 칼럼 등을 길이 0 취급
+            try:
+                vals = samp[c].astype(str).fillna("")
+            except Exception:
+                vals = samp[c].map(lambda x: "" if x is None else str(x))
+            lens = vals.map(lambda s: len(s.strip()))
+            score = lens.mean()
+            if score > best_score:
+                best_col, best_score = c, score
+        return best_col
+
+    # 4) 결과 렌더
+    if "qna_results" in st.session_state and st.session_state["qna_results"]:
+        df = pd.DataFrame(st.session_state["qna_results"])
+        st.write(f"결과: {len(df):,}건")
+
+        # (A) 조사장소 / (B) 내용 컬럼 자동 매핑
+        cols = list(df.columns)
+
+        PLACE_CAND = ["조사장소", "장소", "부서/장소", "부서", "조사 장소", "조사 부서"]
+        CONTENT_CAND = [
+            "조사위원 질문(확인) 내용", "조사위원 질문(확인)내용",
+            "조사위원 질문, 확인내용", "질문(확인) 내용",
+            "질문/확인내용", "질문 확인내용", "조사위원 질문", "확인내용"
+        ]
+
+        place_col = _pick_col(cols, PLACE_CAND)
+        content_col = _pick_col(cols, CONTENT_CAND)
+
+        # 내용 컬럼을 못 찾으면, '가장 긴 텍스트' 컬럼을 추정해서 사용 (번호/장소/정렬키 등 제외)
+        exclude = set([place_col, "No", "no", "번호", "순번", "sort1", "sort2", "sort3"])
+        content_col = content_col or _guess_long_text_col(df, exclude)
+
+        # UI 스타일(제목=장소, 본문=내용 한 줄)
         st.markdown("""
 <style>
 .qcard{border:1px solid #e9ecef;border-radius:12px;padding:12px 14px;margin:10px 0;background:#fff}
-.qtitle{font-size:15px;font-weight:800;margin-bottom:8px;word-break:break-word;color:#0d47a1}
-.qbody{font-size:13px;color:#333}
-.qlbl{display:inline-block;min-width:150px;color:#6c757d;font-weight:700}
-@media (max-width: 900px){ .qlbl{min-width:120px} }
+.qtitle{font-size:15px;font-weight:800;margin-bottom:6px;word-break:break-word;color:#0d47a1}
+.qbody{font-size:13px;color:#333;word-break:break-word}
 </style>
         """, unsafe_allow_html=True)
 
         import html as _html
-        for _, r in df_.iterrows():
-            place   = _html.escape(str(r.get("place") or "").strip() or "조사장소 미지정")
-            content = _html.escape(str(r.get("content") or "").strip() or "-")
+
+        for _, r in df.iterrows():
+            # 장소
+            place = r.get(place_col, "") if place_col else ""
+            place = "" if pd.isna(place) else str(place).strip()
+            if not place:
+                place = "조사장소 미지정"
+
+            # 내용(우선 지정 컬럼 → 없으면 '가장 긴 텍스트' 컬럼 → 그래도 없으면 행 전체에서 가장 긴 값)
+            content = r.get(content_col, "") if content_col else ""
+            content = "" if pd.isna(content) else str(content).strip()
+            if not content:
+                # 행 전체에서 가장 긴 문자열 한 개 고르기(번호/장소/정렬키 제외)
+                best_val, best_len = "", -1
+                for c in cols:
+                    if c in exclude:
+                        continue
+                    v = r.get(c, "")
+                    if pd.isna(v):
+                        continue
+                    s = str(v).strip()
+                    if len(s) > best_len:
+                        best_val, best_len = s, len(s)
+                content = best_val
+
+            # 카드 렌더 (라벨 없이 내용만)
             st.markdown(
                 f"""
 <div class="qcard">
-  <div class="qtitle">{place}</div>
-  <div class="qbody">
-    <div class="qline"><span class="qlbl">조사위원 질문(확인) 내용</span> {content}</div>
-  </div>
+  <div class="qtitle">{_html.escape(place)}</div>
+  <div class="qbody">{_html.escape(content) if content else "-"}</div>
 </div>
                 """,
                 unsafe_allow_html=True
             )
-
-    # ------- 결과 표시 -------
-    if "qna_results" in st.session_state and st.session_state["qna_results"]:
-        df_show = pd.DataFrame(st.session_state["qna_results"])
-        st.write(f"결과: {len(df_show):,}건")
-        render_qna_cards(df_show)
+    else:
+        st.caption("키워드를 입력하고 **Enter** 를 누르면 결과가 표시됩니다.")
+# -----------------------------------------------------------------
 
 # -------------------------------------
 # 규정검색 (PDF 본문, Google Drive 전용)
@@ -901,6 +911,7 @@ with tab_pdf:
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
         st.caption("먼저 키워드를 입력하고 **Enter**를 누르세요.")
+
 
 
 
