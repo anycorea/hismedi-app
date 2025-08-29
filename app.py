@@ -2,7 +2,6 @@
 import os, re, io, html, time, requests, urllib.parse
 from pathlib import Path
 from typing import List, Dict
-from urllib.parse import quote
 
 import pandas as pd
 import streamlit as st
@@ -36,72 +35,15 @@ def _trigger_edge_func(slug: str) -> dict:
     except Exception:
         return {"ok": True, "raw": r.text}
 
-def render_sync_strip(label: str, slug: str, state_key: str):
-    """
-    상단 얇은 동기화 바.
-      label    : 버튼 라벨(예: 'Main 시트', 'QnA 시트')
-      slug     : Edge Function 슬러그(예: 'sync_main', 'sync_qna')
-      state_key: 최근 동기화 건수 표시용 세션 키
-    """
-    box = st.container()
-    with box:
-        c1, c2 = st.columns([1, 3])
-
-        with c1:
-            clicked = st.button(f"즉시 동기화 ({label} → DB)", key=f"sync_{slug}")
-
-        with c2:
-            last = st.session_state.get(state_key)
-            if last is not None:
-                st.caption(f"최근 동기화 건수: **{last:,}건**")
-            else:
-                st.caption("아직 동기화 이력이 없습니다.")
-
-    # 버튼 눌렀을 때 처리
-    if clicked:
-        rerun_needed = False
-        err: Exception | None = None
-
-        try:
-            with st.spinner("동기화 중..."):
-                res = _trigger_edge_func(slug)
-
-            cnt = int(res.get("count", 0)) if isinstance(res, dict) else 0
-            st.session_state[state_key] = cnt
-            st.success(f"동기화 완료: {cnt:,}건")
-
-            # 캐시/세션 정리
-            st.cache_data.clear()
-            st.session_state.pop("main_results", None)
-            st.session_state.pop("qna_results", None)
-
-            # 여기서는 예외를 삼키지 않고, 함수 끝에서 rerun 호출
-            rerun_needed = True
-
-        except Exception as e:
-            # Streamlit 내부 Rerun 예외는 다시 던져야 함
-            if e.__class__.__name__ in ("RerunData", "RerunException"):
-                raise
-            err = e
-
-        if err:
-            st.error(f"동기화 실패: {err}")
-
-        if rerun_needed:
-            st.rerun()
-
 
 # ============================
 # 한 번에 동기화(전체/선택 포함)
 # ============================
-def _do_sync_all(include_pdf: bool = False) -> tuple[int, int, int]:
+def _do_sync_all(include_pdf: bool = True) -> tuple[int, int, int]:
     """
     Main + QnA를 Edge Function으로 즉시 동기화하고,
-    include_pdf=True면 Google Drive 규정(PDF) 인덱싱까지 수행합니다.
-    반환값: (main_count, qna_count, pdf_count)
-
-    주의: 아래에서 참조하는 전역(eng, index_pdfs_from_drive, DRIVE_API_KEY, DRIVE_FOLDER_ID)
-         는 파일 뒷부분에서 정의됩니다. 함수 정의 위치는 상관없습니다.
+    include_pdf=True면 Google Drive 규정(PDF) 인덱싱까지 수행.
+    반환값: (main_count, qna_count, pdf_indexed)
     """
     # 1) Main
     resp_main = _trigger_edge_func("sync_main")
@@ -113,9 +55,7 @@ def _do_sync_all(include_pdf: bool = False) -> tuple[int, int, int]:
 
     # 3) (선택) PDF 인덱싱
     c_pdf = 0
-    if include_pdf:
-        if not (DRIVE_API_KEY and DRIVE_FOLDER_ID):
-            raise RuntimeError("PDF 인덱싱 실패: DRIVE_API_KEY / DRIVE_FOLDER_ID가 필요합니다.")
+    if include_pdf and DRIVE_API_KEY and DRIVE_FOLDER_ID:
         res = index_pdfs_from_drive(eng, DRIVE_FOLDER_ID, DRIVE_API_KEY)
         c_pdf = int(res.get("indexed", 0))
 
@@ -125,6 +65,7 @@ def _do_sync_all(include_pdf: bool = False) -> tuple[int, int, int]:
         st.session_state.pop(k, None)
 
     return (c_main, c_qna, c_pdf)
+
 
 # ================================
 # Google Drive 폴더/파일 ID 추출기
@@ -152,6 +93,7 @@ def _extract_drive_id(value: str) -> str:
         pass
     return re.sub(r"[^A-Za-z0-9_\-]", "", v)
 
+
 # =================
 # 페이지 / 레이아웃
 # =================
@@ -164,6 +106,7 @@ mark { background:#ffe2a8; }
 </style>
 """, unsafe_allow_html=True)
 st.markdown('<div class="main-title">HISMEDI 인증</div>', unsafe_allow_html=True)
+
 
 # =========================
 # 간단 접근 비밀번호(선택)
@@ -207,6 +150,7 @@ if _APP_PW:
                 st.stop()
         else:
             st.stop()
+
 
 # ===========
 # DB 연결 유틸
@@ -300,6 +244,7 @@ def run_select_query(eng, sql_text, params=None):
         raise ValueError("SELECT/WITH/EXPLAIN만 실행할 수 있습니다.")
     with eng.begin() as con:
         return pd.read_sql_query(text(q), con, params=params or {})
+
 
 # ==========================
 # PDF 인덱싱/검색 (Drive 전용)
@@ -469,6 +414,7 @@ def search_regs(eng, keywords: str, filename_like: str = "", limit: int = 500, h
     with eng.begin() as con:
         return pd.read_sql_query(sql, con, params=params)
 
+
 # ============
 # DB 상태 표시
 # ============
@@ -485,6 +431,7 @@ eng = get_engine()
 try:
     with eng.begin() as con:
         user, port, now_utc = con.execute(text("select current_user, inet_server_port(), now()")).one()
+    from datetime import datetime
     now_kst = _to_kst(now_utc)
     st.session_state["db_status"] = {"ok": True, "user": user, "port": port, "time_kst": now_kst.strftime("%Y-%m-%d %H:%M:%S (KST)")}
     if SHOW_DB_BADGE:
@@ -501,18 +448,19 @@ except Exception as e:
     st.exception(e)
     st.stop()
 
+
 # ------------------------------------------------------------
 # Secrets(Drive) 읽기  (URL/ID 모두 허용)
-#   ※ 이미 위쪽에 _extract_drive_id()가 있어야 합니다.
 # ------------------------------------------------------------
 _raw_api_key = (st.secrets.get("DRIVE_API_KEY") or os.getenv("DRIVE_API_KEY") or "").strip()
 _raw_folder  = (st.secrets.get("DRIVE_FOLDER_ID") or os.getenv("DRIVE_FOLDER_ID") or "").strip()
-
 DRIVE_API_KEY   = _raw_api_key
 DRIVE_FOLDER_ID = _extract_drive_id(_raw_folder)
 
+
 # ------------------------------------------------------------
-# 로그인 직후 상단: 전체 동기화 패널 (Main+QnA / +PDF 인덱스)
+# 로그인 직후 상단: 단일 버튼 "데이터 전체 동기화"
+#  - Main + QnA + (가능하면) PDF 인덱스
 # ------------------------------------------------------------
 with st.container():
     st.markdown("""
@@ -525,65 +473,34 @@ with st.container():
 
     st.markdown('<div class="sync-strip"><h4>데이터 전체 동기화</h4>', unsafe_allow_html=True)
 
-    c1, c2, c3 = st.columns([1, 1, 3])
-
-    # rerun은 try/except 바깥에서 호출하기 위해 플래그 사용
+    c1, c2 = st.columns([1, 5])
     need_rerun = False
 
-    # ① Main+QnA 동기화
     with c1:
-        if st.button("전체 동기화 (Main+QnA)", key="btn_sync_all"):
+        if st.button("전체 동기화 (Main+QnA+PDF)", key="btn_sync_all_once"):
             try:
-                with st.spinner("Main+QnA 동기화 중..."):
+                with st.spinner("동기화 중... (Main+QnA)"):
                     cnt_main, cnt_qna, _ = _do_sync_all(include_pdf=False)
 
-                st.session_state["sync_all_last"] = {
-                    "main": cnt_main, "qna": cnt_qna, "ts": time.time()
-                }
+                # PDF 키가 있으면 인덱싱도 바로
+                cnt_pdf = 0
+                if DRIVE_API_KEY and DRIVE_FOLDER_ID:
+                    with st.spinner("PDF 인덱싱(Drive) 중..."):
+                        _, _, cnt_pdf = _do_sync_all(include_pdf=True)
+                else:
+                    st.info("DRIVE_API_KEY / DRIVE_FOLDER_ID 미설정 → PDF 인덱싱 생략.")
 
-                # 캐시/세션 정리
-                st.cache_data.clear()
-                st.session_state.pop("main_results", None)
-                st.session_state.pop("qna_results", None)
-
-                st.success(f"완료: Main {cnt_main:,} · QnA {cnt_qna:,}")
-                need_rerun = True  # ← try 바깥에서 rerun
-
-            except Exception as e:
-                # Streamlit의 rerun 예외는 다시 던져야 함(실패 아님)
-                if e.__class__.__name__ in ("RerunData", "RerunException"):
-                    raise
-                st.error(f"동기화 실패: {e}")
-
-    # ② Main+QnA+PDF 인덱스까지
-    with c2:
-        pdf_disabled = not (DRIVE_API_KEY and DRIVE_FOLDER_ID)
-        if st.button("전체+PDF 인덱스", key="btn_sync_all_pdf", disabled=pdf_disabled):
-            try:
-                with st.spinner("Main+QnA 동기화 및 PDF 인덱싱 중..."):
-                    cnt_main, cnt_qna, cnt_pdf = _do_sync_all(include_pdf=True)
-
-                st.session_state["sync_all_pdf_last"] = {
+                st.session_state["sync_all_once_last"] = {
                     "main": cnt_main, "qna": cnt_qna, "pdf": cnt_pdf, "ts": time.time()
                 }
-
-                st.cache_data.clear()
-                st.session_state.pop("main_results", None)
-                st.session_state.pop("qna_results", None)
-
                 st.success(f"완료: Main {cnt_main:,} · QnA {cnt_qna:,} · PDF {cnt_pdf:,}")
-                need_rerun = True  # ← try 바깥에서 rerun
-
+                need_rerun = True
             except Exception as e:
                 if e.__class__.__name__ in ("RerunData", "RerunException"):
                     raise
                 st.error(f"동기화 실패: {e}")
 
-        if pdf_disabled:
-            st.caption("※ PDF 인덱스 버튼을 쓰려면 DRIVE_API_KEY / DRIVE_FOLDER_ID 시크릿을 설정하세요.")
-
-    # ③ 최근 동기화 이력 표시
-    with c3:
+    with c2:
         def _fmt_ts(ts: float) -> str:
             try:
                 from datetime import datetime, timezone, timedelta
@@ -591,37 +508,29 @@ with st.container():
                 return datetime.fromtimestamp(ts, tz=kst).strftime("%Y-%m-%d %H:%M:%S (KST)")
             except Exception:
                 return "-"
-
-        lines = []
-        last_all = st.session_state.get("sync_all_last")
-        last_pdf = st.session_state.get("sync_all_pdf_last")
-
-        if last_all:
-            lines.append(
-                f"- Main+QnA: **Main {last_all['main']:,} · QnA {last_all['qna']:,}** · {_fmt_ts(last_all['ts'])}"
+        last = st.session_state.get("sync_all_once_last")
+        if last:
+            st.caption(
+                f"최근 실행: **Main {last['main']:,} · QnA {last['qna']:,} · PDF {last['pdf']:,}**  —  {_fmt_ts(last['ts'])}"
             )
-        if last_pdf:
-            lines.append(
-                f"- +PDF: **Main {last_pdf['main']:,} · QnA {last_pdf['qna']:,} · PDF {last_pdf['pdf']:,}** · {_fmt_ts(last_pdf['ts'])}"
-            )
+        else:
+            st.caption("아직 전체 동기화 실행 이력이 없습니다.")
 
-        st.caption("\n\n".join(lines) if lines else "아직 전체 동기화 실행 이력이 없습니다.")
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # ← 여기서 안전하게 rerun (예외로 처리되지 않음)
     if need_rerun:
         st.rerun()
+
 
 # =====
 # 탭 UI
 # =====
 tab_main, tab_qna, tab_pdf = st.tabs(["인증기준/조사지침", "조사위원 질문", "규정검색(PDF파일/본문)"])
 
+
 # --------------------- 인증기준/조사지침 (필터 포함) ----------------------------
 with tab_main:
-    # 큰 제목 제거
-    st.write("")
-    # 폼 제출 버튼 숨김(Enter로 바로 검색)
+    st.write("")  # 큰 제목 제거
     st.markdown("<style>div[data-testid='stFormSubmitButton']{display:none!important;}</style>", unsafe_allow_html=True)
 
     # 1) 사용할 테이블(뷰) 우선순위: main_sheet_v → main_v → main_raw
@@ -632,15 +541,13 @@ with tab_main:
         "ME", "조사항목", "항목", "등급", "조사결과",
         "조사기준의 이해", "조사방법1", "조사방법2", "조사장소", "조사대상",
     ]
-
-    # (표형) 열 너비 비율 — 숫자만 바꾸면 폭이 조정됩니다.
+    # (표형) 열 너비 비율
     MAIN_COL_WEIGHTS = {
         "ME": 2, "조사항목": 8, "항목": 1, "등급": 1, "조사결과": 2,
         "조사기준의 이해": 12, "조사방법1": 10, "조사방법2": 5,
         "조사장소": 4, "조사대상": 4,
     }
 
-    # 테이블에 실제로 존재하는 컬럼/정렬키 확인
     existing_cols = _list_columns(eng, main_table)
     show_cols = [c for c in MAIN_COLS if c in existing_cols]
     has_sort = all(x in existing_cols for x in ["sort1", "sort2", "sort3"])
@@ -655,8 +562,8 @@ with tab_main:
         with c3:
             f_target = st.text_input("조사대상 (선택)", st.session_state.get("main_filter_target", ""), key="main_filter_target")
 
-        FIXED_LIMIT = 1000  # 내부 고정 제한
-        submitted_main = st.form_submit_button("검색")  # 화면에는 숨김
+        FIXED_LIMIT = 1000
+        submitted_main = st.form_submit_button("검색")
 
     # ====== 검색 실행 ======
     results_df = pd.DataFrame()
@@ -664,14 +571,12 @@ with tab_main:
         kw_list = [k.strip() for k in kw.split() if k.strip()]
         where_parts, params = [], {}
 
-        # 키워드(AND) → 각 키워드가 show_cols(OR) 중 하나에 매칭
         if kw_list and show_cols:
             for i, token in enumerate(kw_list):
                 ors = " OR ".join([f'"{c}" ILIKE :kw{i}' for c in show_cols])
                 where_parts.append(f"({ors})")
                 params[f"kw{i}"] = f"%{token}%"
 
-        # 조사장소/조사대상 개별 필터(선택)
         if f_place.strip() and "조사장소" in existing_cols:
             where_parts.append('"조사장소" ILIKE :place')
             params["place"] = f"%{f_place.strip()}%"
@@ -680,7 +585,6 @@ with tab_main:
             params["target"] = f"%{f_target.strip()}%"
 
         where_sql = " AND ".join(where_parts) if where_parts else "TRUE"
-
         select_cols_sql = ", ".join([f'"{c}"' for c in show_cols])
         order_sql = "ORDER BY sort1, sort2, sort3" if has_sort else ""
         sql = text(f"""
@@ -798,6 +702,7 @@ with tab_main:
         st.caption("힌트: 조사장소/조사대상은 메인 키워드와 AND 조건으로 결합되어 검색됩니다.")
 # -----------------------------------------------------------------
 
+
 # --------------------- 조사위원 질문 -----------------------------
 with tab_qna:
     st.write("")  # 큰 제목 생략
@@ -866,7 +771,6 @@ with tab_qna:
                 vals = samp[c].astype(str)
             except Exception:
                 vals = samp[c].map(lambda x: "" if x is None else str(x))
-            # 명백한 숫자/날짜 패턴은 배점 낮게
             lens = []
             for s in vals:
                 s = ("" if s is None else str(s)).strip()
@@ -948,12 +852,10 @@ with tab_qna:
         st.caption("키워드를 입력하고 **Enter** 를 누르면 결과가 표시됩니다.")
 # -----------------------------------------------------------------
 
+
 # --------------------- 규정검색(PDF파일/본문) (Google Drive 전용) -------
 with tab_pdf:
-    # 큰 제목 제거 + 상단 라인 제거
-    st.write("")
-
-    # 폼 제출 버튼 전역 숨김
+    st.write("")  # 큰 제목 제거
     st.markdown("<style>div[data-testid='stFormSubmitButton']{display:none!important;}</style>", unsafe_allow_html=True)
 
     # 검색 조건 (Enter 제출 폼)
@@ -961,19 +863,18 @@ with tab_pdf:
     with st.form("pdf_search_form", clear_on_submit=False):
         kw_pdf  = st.text_input("키워드 (공백=AND)", "", key="pdf_kw")
         fn_like = st.text_input("파일명 필터(선택)", "", key="pdf_fn")
-        submitted_pdf = st.form_submit_button("검색")  # 화면에는 숨김
+        submitted_pdf = st.form_submit_button("검색")
 
     # 제출 시 검색 → 세션 저장
     if submitted_pdf and kw_pdf.strip():
         with st.spinner("검색 중..."):
             _df = search_regs(eng, kw_pdf, filename_like=fn_like, limit=FIXED_LIMIT)
-
         if "me" in _df.columns:
             _df = _df[_df["me"].astype(str).str.strip() != ""]
         _df = _df.sort_values(["filename", "page"], kind="stable").reset_index(drop=True)
 
         if _df.empty:
-            st.info("조건에 맞는 결과가 없습니다. 상단의 **데이터 전체 동기화** 패널에서 **전체+PDF 인덱스**를 먼저 실행하세요.")
+            st.info("조건에 맞는 결과가 없습니다. 상단의 **데이터 전체 동기화** 버튼으로 PDF 인덱싱을 먼저 실행하세요.")
             st.session_state.pop("pdf_results", None)
             st.session_state.pop("pdf_sel_idx", None)
             st.session_state.pop("pdf_kw_list", None)
@@ -1133,6 +1034,5 @@ with tab_pdf:
 """
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
-        st.caption("먼저 키워드를 입력하고 **Enter**를 누르세요. (PDF 인덱스가 필요하다면 상단의 **전체+PDF 인덱스** 버튼을 사용하세요.)")
+        st.caption("먼저 키워드를 입력하고 **Enter**를 누르세요. (PDF 인덱스가 필요하다면 상단의 **데이터 전체 동기화** 버튼을 사용하세요.)")
 # -----------------------------------------------------------------
-
