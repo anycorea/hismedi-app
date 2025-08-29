@@ -513,9 +513,6 @@ DRIVE_FOLDER_ID = _extract_drive_id(_raw_folder)
 
 # ------------------------------------------------------------
 # 로그인 직후 상단: 전체 동기화 패널 (Main+QnA / +PDF 인덱스)
-#   - 다음 유틸이 이미 위쪽에 정의되어 있어야 합니다:
-#       _trigger_edge_func(), _do_sync_all(), index_pdfs_from_drive()
-#   - PDF 인덱싱 버튼은 DRIVE_API_KEY/DRIVE_FOLDER_ID 없으면 비활성화
 # ------------------------------------------------------------
 with st.container():
     st.markdown("""
@@ -530,20 +527,32 @@ with st.container():
 
     c1, c2, c3 = st.columns([1, 1, 3])
 
+    # rerun은 try/except 바깥에서 호출하기 위해 플래그 사용
+    need_rerun = False
+
     # ① Main+QnA 동기화
     with c1:
         if st.button("전체 동기화 (Main+QnA)", key="btn_sync_all"):
             try:
                 with st.spinner("Main+QnA 동기화 중..."):
                     cnt_main, cnt_qna, _ = _do_sync_all(include_pdf=False)
-                st.session_state["sync_all_last"] = {"main": cnt_main, "qna": cnt_qna, "ts": time.time()}
+
+                st.session_state["sync_all_last"] = {
+                    "main": cnt_main, "qna": cnt_qna, "ts": time.time()
+                }
+
                 # 캐시/세션 정리
                 st.cache_data.clear()
                 st.session_state.pop("main_results", None)
                 st.session_state.pop("qna_results", None)
+
                 st.success(f"완료: Main {cnt_main:,} · QnA {cnt_qna:,}")
-                st.rerun()
+                need_rerun = True  # ← try 바깥에서 rerun
+
             except Exception as e:
+                # Streamlit의 rerun 예외는 다시 던져야 함(실패 아님)
+                if e.__class__.__name__ in ("RerunData", "RerunException"):
+                    raise
                 st.error(f"동기화 실패: {e}")
 
     # ② Main+QnA+PDF 인덱스까지
@@ -553,15 +562,21 @@ with st.container():
             try:
                 with st.spinner("Main+QnA 동기화 및 PDF 인덱싱 중..."):
                     cnt_main, cnt_qna, cnt_pdf = _do_sync_all(include_pdf=True)
+
                 st.session_state["sync_all_pdf_last"] = {
                     "main": cnt_main, "qna": cnt_qna, "pdf": cnt_pdf, "ts": time.time()
                 }
+
                 st.cache_data.clear()
                 st.session_state.pop("main_results", None)
                 st.session_state.pop("qna_results", None)
+
                 st.success(f"완료: Main {cnt_main:,} · QnA {cnt_qna:,} · PDF {cnt_pdf:,}")
-                st.rerun()
+                need_rerun = True  # ← try 바깥에서 rerun
+
             except Exception as e:
+                if e.__class__.__name__ in ("RerunData", "RerunException"):
+                    raise
                 st.error(f"동기화 실패: {e}")
 
         if pdf_disabled:
@@ -592,6 +607,10 @@ with st.container():
 
         st.caption("\n\n".join(lines) if lines else "아직 전체 동기화 실행 이력이 없습니다.")
     st.markdown("</div>", unsafe_allow_html=True)
+
+    # ← 여기서 안전하게 rerun (예외로 처리되지 않음)
+    if need_rerun:
+        st.rerun()
 
 # =====
 # 탭 UI
@@ -1031,6 +1050,7 @@ with tab_pdf:
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
         st.caption("먼저 키워드를 입력하고 **Enter**를 누르세요.")
+
 
 
 
