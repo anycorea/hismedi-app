@@ -671,12 +671,13 @@ with tab_main:
             try:
                 with st.spinner("동기화 중..."):
                     resp = _trigger_edge_func("sync_main")
+            except Exception as e:
+                st.error(f"동기화 실패: {e}")
+            else:        
                 st.success(f"동기화 완료: {resp.get('count', '?')}건")
                 st.cache_data.clear()
                 st.session_state.pop("main_results", None)
                 st.rerun()
-            except Exception as e:
-                st.error(f"동기화 실패: {e}")
 
     # 1) 사용할 테이블(뷰) 우선순위: main_sheet_v → main_v → main_raw
     main_table = _pick_table(eng, ["main_sheet_v", "main_v", "main_raw"]) or "main_raw"
@@ -1144,16 +1145,6 @@ with tab_pdf:
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
         st.caption("먼저 키워드를 입력하고 **키보드 Enter**를 누르면 결과가 표시됩니다.")
-
-
-
-
-
-
-
-
-
-
 
 
 
