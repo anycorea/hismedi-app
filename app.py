@@ -455,45 +455,52 @@ DRIVE_FOLDER_ID = _extract_drive_id(_raw_folder)
 with st.container():
     st.markdown("""
 <style>
-/* 버튼을 가로 전체로, 또렷하게 */
-.sync-btn .stButton{margin:0;}
-.sync-btn .stButton>button{
-  width:100%; padding:14px 18px;
-  border:1px solid #e9ecef; border-radius:10px; background:#fff;
-  font-size:15px; font-weight:800; box-shadow:none;
+.sync-bar{ margin: -6px 0 8px 0; }  /* 위쪽 빈 공간 줄이고 아래 살짝 */
+.sync-cta .stButton>button{
+  width:100%;
+  padding:12px 16px;
+  border:1px solid #f1b0b7;
+  background:#fff;
+  color:#c92a2a;
+  border-radius:9px;
+  font-weight:800;
+  letter-spacing:.2px;
 }
-.sync-btn .stButton>button:hover{ background:#f8f9fa; border-color:#dee2e6; }
-
-/* 안내문: 버튼 바로 밑에 타이트하게 붙이기 */
-.sync-note{ color:#6c757d; font-size:12px; line-height:1.45; margin-top:10px; }
-
-/* 혹시 남아있던 빈 입력박스가 있으면 숨기기(라벨 비어있는 경우) */
-div[data-testid="stTextInput"]:has(label:empty){ display:none !important; }
+.sync-cta .stButton>button:hover{
+  background:#fff5f5;
+  border-color:#ffa8a8;
+}
 </style>
     """, unsafe_allow_html=True)
 
-    # 버튼 (HTML 래퍼로 감싸지 말고, Streamlit 위젯만 사용)
-    st.markdown('<div class="sync-btn">', unsafe_allow_html=True)
-    run_all = st.button("데이터 전체 동기화", key="btn_sync_all_in_one", use_container_width=True)
+    st.markdown('<div class="sync-bar">', unsafe_allow_html=True)
+
+    # 버튼만 중앙 폭으로 표시 (왼쪽 1칸, 버튼 3칸)
+    left_pad, btn_col = st.columns([1, 3])
+    need_rerun = False
+
+    with btn_col:
+        st.markdown('<div class="sync-cta">', unsafe_allow_html=True)
+        if st.button("데이터 전체 동기화", key="btn_sync_all_one"):
+            try:
+                do_pdf = bool(DRIVE_API_KEY and DRIVE_FOLDER_ID)  # 키가 있으면 PDF까지
+                with st.spinner("동기화 중..."):
+                    c_main, c_qna, c_pdf = _do_sync_all(include_pdf=do_pdf)
+                if do_pdf:
+                    st.success(f"완료: Main {c_main:,} · QnA {c_qna:,} · PDF {c_pdf:,}")
+                else:
+                    st.success(f"완료: Main {c_main:,} · QnA {c_qna:,}")
+                need_rerun = True
+            except Exception as e:
+                if e.__class__.__name__ in ("RerunData", "RerunException"):
+                    raise
+                st.error(f"동기화 실패: {e}")
+        st.markdown('</div>', unsafe_allow_html=True)
+
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # 버튼 바로 아래 안내문
-    st.markdown(
-        '<div class="sync-note">한 번 누르면 Main+QnA 동기화, PDF 키가 있으면 인덱싱까지 수행합니다.</div>',
-        unsafe_allow_html=True
-    )
-
-    # 실행
-    if run_all:
-        try:
-            with st.spinner("동기화 중..."):
-                c_main, c_qna, c_pdf = _do_sync_all(include_pdf=True)
-            st.success(f"완료: Main {c_main:,} · QnA {c_qna:,} · PDF {c_pdf:,}")
-            st.rerun()
-        except Exception as e:
-            if e.__class__.__name__ in ("RerunData", "RerunException"):
-                raise
-            st.error(f"동기화 실패: {e}")
+    if need_rerun:
+        st.rerun()
 
 # ====================================================================================
 # 탭 UI
@@ -1009,5 +1016,6 @@ with tab_pdf:
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
         st.caption("먼저 키워드를 입력하고 **Enter**를 누르세요. (PDF 인덱스가 필요하다면 상단의 **데이터 전체 동기화** 버튼을 사용하세요.)")
+
 
 
