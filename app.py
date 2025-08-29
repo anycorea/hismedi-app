@@ -25,6 +25,7 @@ def _trigger_edge_func(slug: str) -> dict:
     """
     if not SUPABASE_FUNC_BASE or not SUPABASE_ANON_KEY:
         raise RuntimeError("SUPABASE_FUNC_BASE / SUPABASE_ANON_KEY 시크릿이 설정되어야 합니다.")
+
     url = f"{SUPABASE_FUNC_BASE}/{slug}"
     r = requests.post(
         url,
@@ -37,32 +38,43 @@ def _trigger_edge_func(slug: str) -> dict:
     if r.status_code >= 400:
         # 에러 본문 일부를 보여줌(최대 500자)
         raise RuntimeError(f"동기화 실패 {r.status_code}: {r.text[:500]}")
+
     try:
         return r.json()
     except Exception:
+        # 함수가 단순 텍스트를 반환하는 경우 대비
         return {"ok": True, "raw": r.text}
+
 
 # ------------------------------------------------------------
 # Google Drive 폴더/파일 ID 추출 유틸
 #  - URL 전체, 공유 링크, 순수 ID 입력 모두 허용
+#    (폴더: https://drive.google.com/drive/folders/<ID>
+#     파일:  https://drive.google.com/file/d/<ID>/view  등)
 # ------------------------------------------------------------
 def _extract_drive_id(value: str) -> str:
-    """Google Drive 폴더/파일 URL, 공유 링크, 순수 ID 입력 모두에서 ID만 추출"""
+    """Google Drive 폴더/파일 URL, 공유 링크, 순수 ID 입력 모두에서 ID만 추출."""
     v = (value or "").strip()
     if not v:
         return ""
+
     # 이미 ID 형태면 그대로 반환
     if re.fullmatch(r"[A-Za-z0-9_\-]{20,}", v):
         return v
-    # URL에서 /folders/{id} 또는 /file/d/{id} 패턴 추출
+
+    # URL이면 path/query에서 추출
     try:
         parsed = urllib.parse.urlparse(v)
+
+        # /folders/{id}
         m = re.search(r"/folders/([A-Za-z0-9_\-]{20,})", parsed.path)
         if not m:
+            # /file/d/{id}
             m = re.search(r"/file/d/([A-Za-z0-9_\-]{20,})", parsed.path)
         if m:
             return m.group(1)
-        # ?id={id} 케이스
+
+        # ?id={id}
         qs = urllib.parse.parse_qs(parsed.query)
         if "id" in qs and qs["id"]:
             cand = qs["id"][0]
@@ -70,6 +82,7 @@ def _extract_drive_id(value: str) -> str:
                 return cand
     except Exception:
         pass
+
     # 마지막 방어: 쿼리스트링/공백 제거 후 영문자/숫자/_-만 필터
     v = re.sub(r"[^A-Za-z0-9_\-]", "", v)
     return v
@@ -1145,6 +1158,7 @@ with tab_pdf:
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
         st.caption("먼저 키워드를 입력하고 **키보드 Enter**를 누르면 결과가 표시됩니다.")
+
 
 
 
