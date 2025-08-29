@@ -15,21 +15,28 @@ from datetime import timezone, timedelta, datetime
 st.set_page_config(page_title="★★★ HISMEDI 인증 ★★★", layout="wide")
 st.markdown("""
 <style>
-/* 전체 여백 타이트 */
-section.main > div.block-container{padding-top:14px;padding-bottom:40px;}
+/* 전체 여백: 제목이 가려지지 않도록 상단 살짝 확보 */
+section.main > div.block-container{padding-top:28px;padding-bottom:40px;}
+@media (max-width:768px){
+  section.main > div.block-container{padding-top:36px;}  /* 모바일은 더 확보 */
+}
+
+/* 요소 간 간격은 그대로 타이트 */
 div[data-testid="stVerticalBlock"]{gap:.6rem;}
 div[data-testid="stHorizontalBlock"]{gap:.6rem;}
 h1, h2, h3, h4, h5, h6{margin:.2rem 0 .6rem 0}
 
 /* 제목 */
-.main-title{font-weight:800;font-size:26px;line-height:1.25;margin:0 0 8px}
-@media (max-width:768px){.main-title{font-size:22px}}
+.main-title{
+  font-weight:800; font-size:26px; line-height:1.25;
+  margin:4px 0 8px; color:#111;
+}
+@media (max-width:768px){ .main-title{font-size:22px} }
 
-/* 동기화 버튼(기본 버튼을 약간 강조) */
+/* 동기화 버튼 등 나머지 스타일은 기존 그대로… */
 .stButton > button.sync-all{
   width:100%; border:1px solid #ffd5d5; border-radius:12px;
-  background:#fff; color:#d6336c; font-weight:800;
-  padding:10px 12px;
+  background:#fff; color:#d6336c; font-weight:800; padding:10px 12px;
 }
 .stButton > button.sync-all:hover{background:#fff5f5;border-color:#ffb3b3}
 
@@ -39,7 +46,7 @@ h1, h2, h3, h4, h5, h6{margin:.2rem 0 .6rem 0}
 .card .row{margin:4px 0;font-size:13px;color:#333;word-break:break-word}
 .card .lbl{display:inline-block;min-width:110px;color:#6c757d}
 
-/* 표형 — colgroup 비율을 적용하기 위해 고정 레이아웃 */
+/* 표형 */
 .table-wrap{overflow-x:auto;}
 .table-wrap table{width:100%;border-collapse:collapse;background:#fff;table-layout:fixed;}
 .table-wrap th, .table-wrap td{
@@ -47,8 +54,6 @@ h1, h2, h3, h4, h5, h6{margin:.2rem 0 .6rem 0}
   font-size:13px;line-height:1.45;white-space:normal;word-break:keep-all;overflow-wrap:anywhere;
 }
 .table-wrap th{background:#f8f9fa;font-weight:700}
-
-/* 모바일 폰트/패딩 소폭 축소 */
 @media (max-width:1200px){
   .table-wrap th, .table-wrap td{font-size:12px;padding:6px 8px}
 }
@@ -745,3 +750,4 @@ with tab_pdf:
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
         st.caption("먼저 키워드를 입력하고 **Enter**를 누르세요.")
+
