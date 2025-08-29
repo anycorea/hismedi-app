@@ -455,42 +455,33 @@ DRIVE_FOLDER_ID = _extract_drive_id(_raw_folder)
 with st.container():
     st.markdown("""
 <style>
-/* 상단 동기화 박스 */
-.sync-wrap{
-  border:1px solid #e9ecef; border-radius:12px; padding:10px;
-  background:#fff; margin:8px 0;
-}
-/* 버튼 */
+/* 버튼을 가로 전체로, 또렷하게 */
 .sync-btn .stButton{margin:0;}
 .sync-btn .stButton>button{
-  padding:14px 18px; border:1px solid #e9ecef; border-radius:10px; background:#fff;
-  font-size:15px; font-weight:800; box-shadow:none; width:100%;
+  width:100%; padding:14px 18px;
+  border:1px solid #e9ecef; border-radius:10px; background:#fff;
+  font-size:15px; font-weight:800; box-shadow:none;
 }
 .sync-btn .stButton>button:hover{ background:#f8f9fa; border-color:#dee2e6; }
-/* 버튼 바로 아래 안내문 — 간격을 아주 작게 */
-.sync-info{ color:#6c757d; font-size:12px; line-height:1.35; margin-top:2px; }
 
-/* ▶ 빈 입력박스 강제 제거 (라벨이 비어있는 TextInput 전체를 숨김) */
-div[data-testid="stTextInput"]:has(label:empty){
-  display:none !important; height:0 !important; margin:0 !important; padding:0 !important;
-}
+/* 안내문: 버튼 바로 밑에 타이트하게 붙이기 */
+.sync-note{ color:#6c757d; font-size:12px; line-height:1.35; margin-top:4px; }
+
+/* 혹시 남아있던 빈 입력박스가 있으면 숨기기(라벨 비어있는 경우) */
+div[data-testid="stTextInput"]:has(label:empty){ display:none !important; }
 </style>
     """, unsafe_allow_html=True)
 
-    st.markdown('<div class="sync-wrap">', unsafe_allow_html=True)
-
-    # 버튼
+    # 버튼 (HTML 래퍼로 감싸지 말고, Streamlit 위젯만 사용)
     st.markdown('<div class="sync-btn">', unsafe_allow_html=True)
     run_all = st.button("데이터 전체 동기화", key="btn_sync_all_in_one", use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # 버튼 바로 아래 안내문(버튼과 바짝)
+    # 버튼 바로 아래 안내문
     st.markdown(
-        '<div class="sync-info">한 번 누르면 Main+QnA 동기화, PDF 키가 있으면 인덱싱까지 수행합니다.</div>',
+        '<div class="sync-note">한 번 누르면 Main+QnA 동기화, PDF 키가 있으면 인덱싱까지 수행합니다.</div>',
         unsafe_allow_html=True
     )
-
-    st.markdown('</div>', unsafe_allow_html=True)  # .sync-wrap 끝
 
     # 실행
     if run_all:
@@ -1018,8 +1009,3 @@ with tab_pdf:
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
         st.caption("먼저 키워드를 입력하고 **Enter**를 누르세요. (PDF 인덱스가 필요하다면 상단의 **데이터 전체 동기화** 버튼을 사용하세요.)")
-
-
-
-
-
