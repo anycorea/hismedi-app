@@ -10,6 +10,39 @@ from sqlalchemy import text, create_engine
 from pypdf import PdfReader
 
 # ------------------------------------------------------------
+# Edge Function 즉시 동기화 유틸 (sync_main / sync_qna 호출용)
+#  - App settings → Secrets 에 아래 키가 있어야 합니다.
+#    SUPABASE_FUNC_BASE = "https://<PROJECT-REF>.supabase.co/functions/v1"
+#    SUPABASE_ANON_KEY  = "<anon public>"
+# ------------------------------------------------------------
+SUPABASE_FUNC_BASE = (st.secrets.get("SUPABASE_FUNC_BASE") or os.getenv("SUPABASE_FUNC_BASE") or "").rstrip("/")
+SUPABASE_ANON_KEY  = (st.secrets.get("SUPABASE_ANON_KEY")  or os.getenv("SUPABASE_ANON_KEY")  or "").strip()
+
+def _trigger_edge_func(slug: str) -> dict:
+    """
+    Supabase Edge Function을 즉시 호출합니다.
+      예) _trigger_edge_func("sync_main"), _trigger_edge_func("sync_qna")
+    """
+    if not SUPABASE_FUNC_BASE or not SUPABASE_ANON_KEY:
+        raise RuntimeError("SUPABASE_FUNC_BASE / SUPABASE_ANON_KEY 시크릿이 설정되어야 합니다.")
+    url = f"{SUPABASE_FUNC_BASE}/{slug}"
+    r = requests.post(
+        url,
+        headers={
+            "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
+            "Content-Type": "application/json",
+        },
+        json={}, timeout=60,
+    )
+    if r.status_code >= 400:
+        # 에러 본문 일부를 보여줌(최대 500자)
+        raise RuntimeError(f"동기화 실패 {r.status_code}: {r.text[:500]}")
+    try:
+        return r.json()
+    except Exception:
+        return {"ok": True, "raw": r.text}
+
+# ------------------------------------------------------------
 # Google Drive 폴더/파일 ID 추출 유틸
 #  - URL 전체, 공유 링크, 순수 ID 입력 모두 허용
 # ------------------------------------------------------------
@@ -1100,6 +1133,7 @@ with tab_pdf:
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
         st.caption("먼저 키워드를 입력하고 **키보드 Enter**를 누르면 결과가 표시됩니다.")
+
 
 
 
