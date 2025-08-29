@@ -45,26 +45,50 @@ def render_sync_strip(label: str, slug: str, state_key: str):
     box = st.container()
     with box:
         c1, c2 = st.columns([1, 3])
+
         with c1:
-            if st.button(f"즉시 동기화 ({label} → DB)", key=f"sync_{slug}"):
-                try:
-                    with st.spinner("동기화 중..."):
-                        res = _trigger_edge_func(slug)
-                    cnt = int(res.get("count", 0)) if isinstance(res, dict) else 0
-                    st.session_state[state_key] = cnt
-                    st.success(f"동기화 완료: {cnt:,}건")
-                    st.cache_data.clear()
-                    st.session_state.pop("main_results", None)
-                    st.session_state.pop("qna_results", None)
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"동기화 실패: {e}")
+            clicked = st.button(f"즉시 동기화 ({label} → DB)", key=f"sync_{slug}")
+
         with c2:
             last = st.session_state.get(state_key)
             if last is not None:
                 st.caption(f"최근 동기화 건수: **{last:,}건**")
             else:
                 st.caption("아직 동기화 이력이 없습니다.")
+
+    # 버튼 눌렀을 때 처리
+    if clicked:
+        rerun_needed = False
+        err: Exception | None = None
+
+        try:
+            with st.spinner("동기화 중..."):
+                res = _trigger_edge_func(slug)
+
+            cnt = int(res.get("count", 0)) if isinstance(res, dict) else 0
+            st.session_state[state_key] = cnt
+            st.success(f"동기화 완료: {cnt:,}건")
+
+            # 캐시/세션 정리
+            st.cache_data.clear()
+            st.session_state.pop("main_results", None)
+            st.session_state.pop("qna_results", None)
+
+            # 여기서는 예외를 삼키지 않고, 함수 끝에서 rerun 호출
+            rerun_needed = True
+
+        except Exception as e:
+            # Streamlit이 내부적으로 사용하는 Rerun 예외는 다시 던져야 함
+            if e.__class__.__name__ in ("RerunData", "RerunException"):
+                raise
+            err = e
+
+        if err:
+            st.error(f"동기화 실패: {err}")
+
+        if rerun_needed:
+            # try/except 밖에서 안전하게 재실행
+            st.rerun()
 
 # ================================
 # Google Drive 폴더/파일 ID 추출기
@@ -798,3 +822,4 @@ with tab_pdf:
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
         st.caption("먼저 키워드를 입력하고 **Enter**를 누르세요.")
+
