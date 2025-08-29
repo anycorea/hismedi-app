@@ -469,76 +469,123 @@ if counts and when:
 # =====
 tab_main, tab_qna, tab_pdf = st.tabs(["인증기준/조사지침", "조사위원 질문", "규정검색(PDF파일/본문)"])
 
-# --------------------- 인증기준/조사지침 ----------------------------
+# ========================== 인증기준/조사지침 탭 ==========================
 with tab_main:
-    # 폼 제출 버튼 숨김(Enter로 바로 검색)
+    # 큰 제목 여백 제거 + 폼 제출 버튼 숨김(Enter로 바로 검색)
+    st.write("")
     st.markdown("<style>div[data-testid='stFormSubmitButton']{display:none!important;}</style>", unsafe_allow_html=True)
 
+    # 1) 사용할 테이블(뷰) 우선순위: main_sheet_v → main_v → main_raw
     main_table = _pick_table(eng, ["main_sheet_v", "main_v", "main_raw"]) or "main_raw"
 
-    MAIN_COLS = ["ME","조사항목","항목","등급","조사결과","조사기준의 이해","조사방법1","조사방법2","조사장소","조사대상"]
-    MAIN_COL_WEIGHTS = {"ME":2,"조사항목":8,"항목":1,"등급":1,"조사결과":2,"조사기준의 이해":12,"조사방법1":10,"조사방법2":5,"조사장소":4,"조사대상":4}
+    # 2) 고정 표시 순서(구글시트 원본 순서)
+    MAIN_COLS = [
+        "ME", "조사항목", "항목", "등급", "조사결과",
+        "조사기준의 이해", "조사방법1", "조사방법2", "조사장소", "조사대상",
+    ]
 
+    # 표형 열 너비 비율
+    MAIN_COL_WEIGHTS = {
+        "ME": 2, "조사항목": 8, "항목": 1, "등급": 1, "조사결과": 2,
+        "조사기준의 이해": 12, "조사방법1": 10, "조사방법2": 5,
+        "조사장소": 4, "조사대상": 4,
+    }
+
+    # 테이블에 실제로 존재하는 컬럼/정렬키 확인
     existing_cols = _list_columns(eng, main_table)
     show_cols = [c for c in MAIN_COLS if c in existing_cols]
-    has_sort = all(x in existing_cols for x in ["sort1","sort2","sort3"])
+    has_sort = all(x in existing_cols for x in ["sort1", "sort2", "sort3"])
 
+    # ====== 입력폼 (Enter 제출) ======
     with st.form("main_search_form", clear_on_submit=False):
         c1, c2, c3 = st.columns([2, 1, 1])
         with c1:
-            # ← 라벨 변경
             kw = st.text_input("키워드 (입력 없이 Enter=전체조회, 공백=AND)",
                                st.session_state.get("main_kw", ""), key="main_kw")
         with c2:
-            f_place = st.text_input("조사장소 (선택)", st.session_state.get("main_filter_place", ""), key="main_filter_place")
+            f_place = st.text_input("조사장소 (선택)",
+                                    st.session_state.get("main_filter_place", ""), key="main_filter_place")
         with c3:
-            f_target = st.text_input("조사대상 (선택)", st.session_state.get("main_filter_target", ""), key="main_filter_target")
-
+            f_target = st.text_input("조사대상 (선택)",
+                                     st.session_state.get("main_filter_target", ""), key="main_filter_target")
         FIXED_LIMIT = 1000
-        submitted_main = st.form_submit_button("검색")  # 화면에는 숨김
+        submitted_main = st.form_submit_button("검색")
 
+    # ====== 검색 실행 ======
     results_df = pd.DataFrame()
-   if submitted_main:  # 키워드가 비어도 전체 조회
-        kw_list = [k.strip() for k in kw.split() if k.strip()]
+    if submitted_main:  # 키워드 없이 Enter여도 전체 조회
+        kw_list = [k.strip() for k in (kw or "").split() if k.strip()]
         where_parts, params = [], {}
+
+        # 키워드(AND) → 각 키워드가 show_cols(OR) 중 하나에 매칭
         if kw_list and show_cols:
             for i, token in enumerate(kw_list):
                 ors = " OR ".join([f'"{c}" ILIKE :kw{i}' for c in show_cols])
-                where_parts.append(f"({ors})"); params[f"kw{i}"] = f"%{token}%"
+                where_parts.append(f"({ors})")
+                params[f"kw{i}"] = f"%{token}%"
+
+        # 조사장소/조사대상 개별 필터(선택)
         if f_place.strip() and "조사장소" in existing_cols:
-            where_parts.append('"조사장소" ILIKE :place'); params["place"] = f"%{f_place.strip()}%"
+            where_parts.append('"조사장소" ILIKE :place')
+            params["place"] = f"%{f_place.strip()}%"
         if f_target.strip() and "조사대상" in existing_cols:
-            where_parts.append('"조사대상" ILIKE :target'); params["target"] = f"%{f_target.strip()}%"
+            where_parts.append('"조사대상" ILIKE :target')
+            params["target"] = f"%{f_target.strip()}%"
+
         where_sql = " AND ".join(where_parts) if where_parts else "TRUE"
+
         select_cols_sql = ", ".join([f'"{c}"' for c in show_cols])
         order_sql = "ORDER BY sort1, sort2, sort3" if has_sort else ""
-        sql = text(f"""SELECT {select_cols_sql} FROM "{main_table}" WHERE {where_sql} {order_sql} LIMIT :lim""")
+        sql = text(f"""
+            SELECT {select_cols_sql}
+            FROM "{main_table}"
+            WHERE {where_sql}
+            {order_sql}
+            LIMIT :lim
+        """)
         params["lim"] = FIXED_LIMIT
         with eng.begin() as con:
             results_df = pd.read_sql_query(sql, con, params=params)
+
         if results_df.empty:
-            st.info("결과 없음"); st.session_state.pop("main_results", None)
+            st.info("결과 없음 (키워드 없이 Enter=전체 조회)")
+            st.session_state.pop("main_results", None)
         else:
             st.session_state["main_results"] = results_df.to_dict("records")
 
+    # ====== 스타일(하이라이트 & 표형 기본 CSS) ======
     st.markdown("""
 <style>
-.hl-item{color:#0d47a1;font-weight:800}
-.hl-required{color:#b10000;font-weight:800}
+.hl-item{ color:#0d47a1; font-weight:800; }          /* 조사항목 파랑 굵게 */
+.hl-required{ color:#b10000; font-weight:800; }      /* 등급=필수 빨강 굵게 */
+.card{border:1px solid #e9ecef;border-radius:10px;padding:12px 14px;margin:8px 0;background:#fff}
+.card h4{margin:0 0 8px 0;font-size:16px;line-height:1.3;word-break:break-word}
+.card .row{margin:4px 0;font-size:13px;color:#333;word-break:break-word}
+.card .lbl{display:inline-block;min-width:110px;color:#6c757d}
+.table-wrap{ overflow-x:auto; }
+.table-wrap table{ width:100%; border-collapse:collapse; background:#fff; table-layout:fixed; }
+.table-wrap th, .table-wrap td{
+  border:1px solid #e9ecef; padding:8px 10px; text-align:left; vertical-align:top;
+  font-size:13px; line-height:1.45; white-space:normal; word-break:keep-all; overflow-wrap:anywhere;
+}
+.table-wrap th{ background:#f8f9fa; font-weight:700; }
+@media (max-width: 1200px){ .table-wrap th, .table-wrap td{ font-size:12px; padding:6px 8px; } }
 </style>
-""", unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
 
+    # ====== 셀 포맷 ======
     def _fmt_cell(colname: str, value) -> str:
         s = html.escape("" if value is None else str(value))
-        def _is_required(val: str) -> bool: return (val or "").strip().replace(" ","").lower() in ("필수","必須")
-        if colname == "조사항목" and s: return f'<span class="hl-item">{s}</span>'
-        if colname == "등급" and _is_required(s): return f'<span class="hl-required">{s}</span>'
+        def _is_required(val: str) -> bool:
+            t = (val or "").strip().replace(" ", "").lower()
+            return t in ("필수", "必須")
+        if colname == "조사항목" and s:
+            return f'<span class="hl-item">{s}</span>'
+        if colname == "등급" and _is_required(s):
+            return f'<span class="hl-required">{s}</span>'
         return s
 
-    def _build_colgroup(cols, weights):
-        w = [float(weights.get(str(c),1)) for c in cols]; tot = sum(w) or 1.0
-        return "<colgroup>" + "".join(f'<col style="width:{(x/tot)*100:.3f}%">' for x in w) + "</colgroup>"
-
+    # ====== 카드 렌더러(고정 순서) ======
     def render_cards(df_: pd.DataFrame, cols_order: list[str]):
         for _, r in df_.iterrows():
             title_html = _fmt_cell("조사항목", r.get("조사항목"))
@@ -548,6 +595,13 @@ with tab_main:
                 rows_html.append(f'<div class="row"><span class="lbl">{html.escape(str(c))}</span> {v_html}</div>')
             st.markdown(f'<div class="card"><h4>{title_html or "-"}</h4>' + "".join(rows_html) + '</div>', unsafe_allow_html=True)
 
+    # ====== (표형) colgroup 생성 유틸 ======
+    def _build_colgroup(cols, weights):
+        w = [float(weights.get(str(c), 1)) for c in cols]
+        tot = sum(w) or 1.0
+        return "<colgroup>" + "".join(f'<col style="width:{(x/tot)*100:.3f}%">' for x in w) + "</colgroup>"
+
+    # ====== 표형 렌더러(고정 순서 + 가중치 비율) ======
     def render_table(df_: pd.DataFrame, cols_order: list[str]):
         colgroup_html = _build_colgroup(cols_order, MAIN_COL_WEIGHTS)
         header_cells = "".join(f"<th>{html.escape(str(c))}</th>" for c in cols_order)
@@ -555,28 +609,45 @@ with tab_main:
         for _, r in df_.iterrows():
             cells = "".join(f"<td>{_fmt_cell(c, r.get(c))}</td>" for c in cols_order)
             body_rows.append(f"<tr>{cells}</tr>")
-        st.markdown(f"""
-<div class="table-wrap"><table>
-{colgroup_html}
-<thead><tr>{header_cells}</tr></thead>
-<tbody>{''.join(body_rows)}</tbody>
-</table></div>
-""", unsafe_allow_html=True)
+        st.markdown(
+            f"""
+<div class="table-wrap">
+  <table>
+    {colgroup_html}
+    <thead><tr>{header_cells}</tr></thead>
+    <tbody>
+      {''.join(body_rows)}
+    </tbody>
+  </table>
+</div>
+""",
+            unsafe_allow_html=True
+        )
 
+    # ====== 결과 출력 ======
     if "main_results" in st.session_state and st.session_state["main_results"]:
         df = pd.DataFrame(st.session_state["main_results"])
-        cols_order = [c for c in MAIN_COLS if c in df.columns]
+        cols_order = [c for c in MAIN_COLS if c in df.columns]  # 고정 순서
+
         st.write(f"결과: {len(df):,}건")
         view_mode = st.radio("보기 형식", ["카드형(모바일)", "표형"], index=0, horizontal=True, key="main_view_mode")
-        render_table(df, cols_order) if view_mode == "표형" else render_cards(df, cols_order)
+        if view_mode == "표형":
+            render_table(df, cols_order)
+        else:
+            render_cards(df, cols_order)
     else:
         st.caption("힌트: 조사장소/조사대상은 메인 키워드와 AND 조건으로 결합되어 검색됩니다.")
+# =================================================================
 
-# --------------------- 조사위원 질문 -----------------------------
+# ============================ 조사위원 질문 탭 ============================
 with tab_qna:
+    st.write("")  # 큰 제목 생략
     st.markdown("<style>div[data-testid='stFormSubmitButton']{display:none!important;}</style>", unsafe_allow_html=True)
+
+    # 뷰가 있으면 우선, 없으면 원본 테이블
     qna_table = _pick_table(eng, ["qna_sheet_v", "qna_v", "qna_raw"]) or "qna_raw"
 
+    # ====== 입력폼 (Enter 제출) ======
     with st.form("qna_search_form", clear_on_submit=False):
         kw_q = st.text_input(
             "키워드 (입력 없이 Enter=전체조회, 공백=AND)",
@@ -585,46 +656,66 @@ with tab_qna:
             placeholder="예) 낙상, 환자확인, 고객, 수술 체크리스트 등"
         )
         FIXED_LIMIT_QNA = 1000
-        submitted_qna = st.form_submit_button("검색")  # 화면엔 숨김
+        submitted_qna = st.form_submit_button("검색")
 
-    if submitted_qna:  # 키워드가 비어도 전체 조회
+    # ====== 검색 실행 ======
+    if submitted_qna:  # 키워드 없이 Enter여도 전체 조회
         with st.spinner("검색 중..."):
-            df_q = search_table_any(eng, qna_table, kw_q, columns=None, limit=FIXED_LIMIT_QNA)
+            df_q = search_table_any(eng, qna_table, kw_q or "", columns=None, limit=FIXED_LIMIT_QNA)
         if df_q.empty:
-            st.info("결과 없음"); st.session_state.pop("qna_results", None)
+            st.info("결과 없음 (키워드 없이 Enter=전체 조회)")
+            st.session_state.pop("qna_results", None)
         else:
             st.session_state["qna_results"] = df_q.to_dict("records")
 
-    def _norm_col(s: str) -> str: return re.sub(r"[ \t\r\n/_\-:;.,(){}\[\]<>·•｜|]+","",str(s or "")).lower()
+    # ===== 유틸: 컬럼 이름 느슨 매칭 + 최후보루 =====
+    import html as _html
+    def _norm_col(s: str) -> str:
+        s = str(s or "")
+        s = re.sub(r"[ \t\r\n/_\-:;.,(){}\[\]<>·•｜|]+", "", s)
+        return s.lower()
 
     def _pick_col(cols: list[str], candidates: list[str]) -> str | None:
+        # 1) 정확
         for w in candidates:
-            if w in cols: return w
+            if w in cols:
+                return w
+        # 2) 정규화 일치
         wants = [_norm_col(w) for w in candidates]
         for c in cols:
-            if _norm_col(c) in wants: return c
+            if _norm_col(c) in wants:
+                return c
+        # 3) 부분 포함
         for w in wants:
             for c in cols:
-                if w and w in _norm_col(c): return c
+                if w and w in _norm_col(c):
+                    return c
         return None
 
     def _guess_long_text_col(df: pd.DataFrame, exclude: set[str]) -> str | None:
         cand = [c for c in df.columns if c not in exclude]
-        if not cand: return None
+        if not cand:
+            return None
         samp = df.head(50)
         best_col, best_len = None, -1.0
         for c in cand:
-            try: vals = samp[c].astype(str)
-            except Exception: vals = samp[c].map(lambda x: "" if x is None else str(x))
+            try:
+                vals = samp[c].astype(str)
+            except Exception:
+                vals = samp[c].map(lambda x: "" if x is None else str(x))
             lens = []
             for s in vals:
                 s = ("" if s is None else str(s)).strip()
-                if not s or re.fullmatch(r"\d{1,4}([./-]\d{1,2}([./-]\d{1,2})?)?$", s): lens.append(0)
-                else: lens.append(len(s))
-            avg = (sum(lens) / max(1,len(lens)))
-            if avg > best_len: best_col, best_len = c, avg
+                if not s or re.fullmatch(r"\d{1,4}([./-]\d{1,2}([./-]\d{1,2})?)?$", s):  # 날짜/숫자
+                    lens.append(0)
+                else:
+                    lens.append(len(s))
+            avg = (sum(lens) / max(1, len(lens)))
+            if avg > best_len:
+                best_col, best_len = c, avg
         return best_col
 
+    # ===== 카드 렌더러 (라벨 최소화) =====
     def render_qna_cards(df_: pd.DataFrame):
         st.markdown("""
 <style>
@@ -635,122 +726,179 @@ with tab_qna:
         """, unsafe_allow_html=True)
 
         cols = list(df_.columns)
-        PLACE_CAND = ["조사장소","장소","부서/장소","부서","조사 장소","조사 부서"]
-        CONTENT_CAND = ["조사위원 질문(확인) 내용","조사위원 질문(확인)내용","조사위원 질문, 확인내용",
-                        "질문(확인) 내용","질문/확인내용","질문 확인내용","조사위원 질문","확인내용"]
 
-        place_col   = _pick_col(cols, PLACE_CAND)
+        PLACE_CAND = ["조사장소", "장소", "부서/장소", "부서", "조사 장소", "조사 부서"]
+        CONTENT_CAND = [
+            "조사위원 질문(확인) 내용", "조사위원 질문(확인)내용",
+            "조사위원 질문, 확인내용", "질문(확인) 내용",
+            "질문/확인내용", "질문 확인내용", "조사위원 질문", "확인내용"
+        ]
+
+        place_col = _pick_col(cols, PLACE_CAND)
         content_col = _pick_col(cols, CONTENT_CAND)
-        exclude = set([place_col, "No","no","번호","순번","sort1","sort2","sort3"])
+
+        # 내용 컬럼을 못 찾으면: '가장 긴 텍스트' 컬럼을 추정
+        exclude = set([place_col, "No", "no", "번호", "순번", "sort1", "sort2", "sort3"])
         content_col = content_col or _guess_long_text_col(df_, exclude)
 
         for _, r in df_.iterrows():
             place = r.get(place_col, "") if place_col else ""
             place = "" if pd.isna(place) else str(place).strip()
-            if not place: place = "조사장소 미지정"
+            if not place:
+                place = "조사장소 미지정"
 
             content = r.get(content_col, "") if content_col else ""
             content = "" if pd.isna(content) else str(content).strip()
             if not content:
                 best_val, best_len = "", -1
                 for c in cols:
-                    if c in exclude: continue
+                    if c in exclude:
+                        continue
                     v = r.get(c, "")
-                    if pd.isna(v): continue
+                    if pd.isna(v):
+                        continue
                     s = str(v).strip()
-                    if len(s) > best_len: best_val, best_len = s, len(s)
+                    if len(s) > best_len:
+                        best_val, best_len = s, len(s)
                 content = best_val
 
             st.markdown(
                 f"""
 <div class="qcard">
-  <div class="qtitle">{html.escape(place)}</div>
-  <div class="qbody">{html.escape(content) if content else "-"}</div>
+  <div class="qtitle">{_html.escape(place)}</div>
+  <div class="qbody">{_html.escape(content) if content else "-"}</div>
 </div>
                 """,
                 unsafe_allow_html=True
             )
 
+    # ===== 결과 표시 =====
     if "qna_results" in st.session_state and st.session_state["qna_results"]:
         df = pd.DataFrame(st.session_state["qna_results"])
         st.write(f"결과: {len(df):,}건")
         render_qna_cards(df)
     else:
-        st.caption("키워드를 입력하고 **Enter** 를 누르면 결과가 표시됩니다.")
+        st.caption("키워드를 입력하고 **Enter** 를 누르면 결과가 표시됩니다. (입력 없이 Enter=전체 조회)")
+# =================================================================
 
-# --------------------- 규정검색(PDF파일/본문) -----------------------
+# ======================= 규정검색(PDF파일/본문) 탭 =======================
 with tab_pdf:
+    st.write("")
     st.markdown("<style>div[data-testid='stFormSubmitButton']{display:none!important;}</style>", unsafe_allow_html=True)
 
     FIXED_LIMIT = 1000
     with st.form("pdf_search_form", clear_on_submit=False):
         kw_pdf  = st.text_input("키워드 (입력 없이 Enter=전체조회, 공백=AND)", "", key="pdf_kw")
         fn_like = st.text_input("파일명 필터(선택)", "", key="pdf_fn")
-        submitted_pdf = st.form_submit_button("검색")  # 화면에는 숨김
+        submitted_pdf = st.form_submit_button("검색")
 
-    if submitted_pdf:  # 키워드가 비어도 전체 조회
+    # 제출 시 검색 → 세션 저장 (키워드 없이 Enter여도 전체 조회)
+    if submitted_pdf:
         with st.spinner("검색 중..."):
-            _df = search_regs(eng, kw_pdf, filename_like=fn_like, limit=FIXED_LIMIT)
-        if "me" in _df.columns: _df = _df[_df["me"].astype(str).str.strip() != ""]
-        _df = _df.sort_values(["filename","page"], kind="stable").reset_index(drop=True)
+            _df = search_regs(eng, kw_pdf or "", filename_like=fn_like, limit=FIXED_LIMIT)
+
+        if "me" in _df.columns:
+            _df = _df[_df["me"].astype(str).str.strip() != ""]
+        _df = _df.sort_values(["filename", "page"], kind="stable").reset_index(drop=True)
+
         if _df.empty:
-            st.info("조건에 맞는 결과가 없습니다. (필요시 상단의 '데이터 전체 동기화' 실행)")
-            st.session_state.pop("pdf_results", None); st.session_state.pop("pdf_sel_idx", None); st.session_state.pop("pdf_kw_list", None)
+            st.info("조건에 맞는 결과가 없습니다. (입력 없이 Enter=전체 조회)")
+            st.session_state.pop("pdf_results", None)
+            st.session_state.pop("pdf_sel_idx", None)
+            st.session_state.pop("pdf_kw_list", None)
         else:
             st.session_state["pdf_results"] = _df.to_dict("records")
             st.session_state["pdf_sel_idx"] = 0
-            st.session_state["pdf_kw_list"] = [k.strip() for k in kw_pdf.split() if k.strip()]
+            st.session_state["pdf_kw_list"] = [k.strip() for k in (kw_pdf or "").split() if k.strip()]
 
+    # 결과 렌더링
     if "pdf_results" in st.session_state and st.session_state["pdf_results"]:
-        df = pd.DataFrame(st.session_state["pdf_results"]); kw_list = st.session_state.get("pdf_kw_list", [])
+        df = pd.DataFrame(st.session_state["pdf_results"])
+        kw_list = st.session_state.get("pdf_kw_list", [])
         st.write(f"결과: {len(df):,}건")
 
-        def view_url(fid: str, page: int) -> str: return f"https://drive.google.com/file/d/{(fid or '').strip()}/view#page={int(page)}"
+        def view_url(fid: str, page: int) -> str:
+            fid = (fid or "").strip()
+            return f"https://drive.google.com/file/d/{fid}/view#page={int(page)}"
 
+        # 보기 형식 선택
         view_mode_pdf = st.radio("보기 형식", ["카드형(모바일)", "표형(간단)"], horizontal=True, key="pdf_view_mode")
+
         if view_mode_pdf.endswith("간단)"):
             st.caption("파일명/페이지 버튼을 클릭하면 아래 미리보기가 바뀝니다.")
-            hdr = st.columns([7,1,1]); hdr[0].markdown("**파일명**"); hdr[1].markdown("**페이지**"); hdr[2].markdown("**열기**")
-            if "pdf_sel_idx" not in st.session_state: st.session_state["pdf_sel_idx"] = 0
+            hdr = st.columns([7, 1, 1])
+            hdr[0].markdown("**파일명**")
+            hdr[1].markdown("**페이지**")
+            hdr[2].markdown("**열기**")
+
+            if "pdf_sel_idx" not in st.session_state:
+                st.session_state["pdf_sel_idx"] = 0
+
             for i, row in df.iterrows():
-                c1, c2, c3 = st.columns([7,1,1])
-                if c1.button(str(row["filename"]), key=f"pick_file_{i}"): st.session_state["pdf_sel_idx"] = int(i)
-                if c2.button(str(int(row["page"])), key=f"pick_page_{i}"): st.session_state["pdf_sel_idx"] = int(i)
+                c1, c2, c3 = st.columns([7, 1, 1])
+                if c1.button(str(row["filename"]), key=f"pick_file_{i}"):
+                    st.session_state["pdf_sel_idx"] = int(i)
+                if c2.button(str(int(row["page"])), key=f"pick_page_{i}"):
+                    st.session_state["pdf_sel_idx"] = int(i)
                 c3.markdown(
-                    f'<a href="{view_url(row["me"], int(row["page"]))}" target="_blank" '
-                    f'rel="noopener noreferrer" style="display:inline-block;padding:6px 12px;'
-                    f'border:1px solid #ddd;border-radius:8px;background:#f8f9fa;text-decoration:none;'
-                    f'color:#0d6efd;font-weight:600;">열기</a>', unsafe_allow_html=True
+                    f'<a href="{view_url(row["me"], int(row["page"]))}" target="_blank" rel="noopener noreferrer" '
+                    f'style="display:inline-block;padding:6px 12px;border:1px solid #ddd;border-radius:8px;'
+                    f'background:#f8f9fa;text-decoration:none;color:#0d6efd;font-weight:600;">열기</a>',
+                    unsafe_allow_html=True
                 )
         else:
             st.markdown("""
 <style>
 .pcard{border:1px solid #e9ecef;border-radius:12px;padding:12px 14px;margin:10px 0;background:#fff}
 .pcard .title{font-size:15px;font-weight:700;margin-bottom:10px;word-break:break-all}
-.pbtn{display:inline-block;padding:8px 12px;border:1px solid #dee2e6;border-radius:10px;background:#f8f9fa;text-decoration:none;color:#0d6efd;font-weight:600}
+.pbtn{display:inline-block;padding:8px 12px;border:1px solid #dee2e6;border-radius:10px;background:#f8f9fa;
+      text-decoration:none;color:#0d6efd;font-weight:600}
+.pbtn + .pbtn{margin-left:8px}
 .pmeta{font-size:12px;color:#6c757d;margin-top:6px}
+.rowbtn{display:flex;gap:8px;flex-wrap:wrap}
+.rowbtn .stButton>button{width:100%}
 </style>
             """, unsafe_allow_html=True)
-            if "pdf_sel_idx" not in st.session_state: st.session_state["pdf_sel_idx"] = 0
-            for i, row in df.iterrows():
-                fid_i = (row.get("me") or "").strip(); fname = html.escape(str(row["filename"])); pagei = int(row["page"])
-                st.markdown(f'<div class="pcard"><div class="title">{fname}</div>', unsafe_allow_html=True)
-                colA, colB = st.columns(2)
-                if colA.button(f"페이지 {pagei}", key=f"pick_page_card_{i}", use_container_width=True):
-                    st.session_state["pdf_sel_idx"] = int(i)
-                colB.markdown(
-                    f'<a class="pbtn" href="{view_url(fid_i, pagei)}" target="_blank" '
-                    f'rel="noopener noreferrer" style="display:block;text-align:center;">열기</a>',
-                    unsafe_allow_html=True
-                )
-                st.markdown(f'<div class="pmeta">file_id: {fid_i or "-"}</div></div>', unsafe_allow_html=True)
 
-        sel_idx = int(st.session_state.get("pdf_sel_idx", 0)); sel_idx = max(0, min(sel_idx, len(df)-1))
-        sel = df.iloc[sel_idx]; fid = (sel.get("me") or "").strip(); sel_file = sel["filename"]; sel_page = int(sel["page"])
+            if "pdf_sel_idx" not in st.session_state:
+                st.session_state["pdf_sel_idx"] = 0
+
+            import html as _html
+            for i, row in df.iterrows():
+                fid_i = (row.get("me") or "").strip()
+                fname = _html.escape(str(row["filename"]))
+                pagei = int(row["page"])
+                col1, = st.columns(1)
+                with col1:
+                    st.markdown(f'<div class="pcard"><div class="title">{fname}</div>', unsafe_allow_html=True)
+                    if st.button("이 파일 미리보기", key=f"pick_file_card_{i}", use_container_width=True):
+                        st.session_state["pdf_sel_idx"] = int(i)
+                    cA, cB = st.columns(2)
+                    with cA:
+                        if st.button(f"페이지 {pagei}", key=f"pick_page_card_{i}", use_container_width=True):
+                            st.session_state["pdf_sel_idx"] = int(i)
+                    with cB:
+                        st.markdown(
+                            f'<a class="pbtn" href="{view_url(fid_i, pagei)}" target="_blank" rel="noopener noreferrer" '
+                            f'style="display:block;text-align:center;padding:9px 12px;">열기</a>',
+                            unsafe_allow_html=True
+                        )
+                    st.markdown(f'<div class="pmeta">file_id: {fid_i or "-"}</div></div>', unsafe_allow_html=True)
+
+        # ---- 선택된 행으로 미리보기 (pdf.js 렌더)
+        sel_idx = int(st.session_state.get("pdf_sel_idx", 0))
+        sel_idx = max(0, min(sel_idx, len(df) - 1))
+        sel = df.iloc[sel_idx]
+        fid = (sel.get("me") or "").strip()
+        sel_file = sel["filename"]
+        sel_page = int(sel["page"])
+
         st.caption("텍스트 미리보기 & 문서 보기 (선택한 1건)")
         st.write(f"**파일**: {sel_file}  |  **페이지**: {sel_page}  |  **file_id**: {fid or '-'}")
         st.markdown(highlight_html(sel["text"], kw_list, width=200), unsafe_allow_html=True)
 
+        # ---- PDF 바이트 캐시 + 내려받기
+        import base64
         cache = st.session_state.setdefault("pdf_cache", {})
         b64 = cache.get(fid)
         if not b64:
@@ -758,10 +906,12 @@ with tab_pdf:
             b64 = base64.b64encode(pdf_bytes).decode("ascii")
             cache[fid] = b64
 
+        # ---- 미리보기 컨트롤
         page_view = st.number_input("미리보기 페이지", 1, 9999, int(sel_page), step=1, key=f"pv_page_{fid}")
         zoom_pct  = st.slider("줌(%)", 30, 200, 80, step=5, key=f"pv_zoom_{fid}")
         height_px = st.slider("미리보기 높이(px)", 480, 1200, 640, step=40, key=f"pv_h_{fid}")
 
+        # ---- pdf.js 렌더
         max_fit_width = 900
         viewer_html = f"""
 <div id="pdf-root" style="width:100%;height:{height_px}px;max-height:80vh;background:#fafafa;overflow:auto;">
@@ -812,7 +962,5 @@ with tab_pdf:
 """
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
-        st.caption("먼저 키워드를 입력하고 **Enter**를 누르세요.")
-
-
-
+        st.caption("먼저 키워드를 입력하고 **Enter**를 누르세요. (입력 없이 Enter=전체 조회)")
+# =================================================================
