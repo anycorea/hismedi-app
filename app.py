@@ -15,16 +15,24 @@ from datetime import timezone, timedelta, datetime
 st.set_page_config(page_title="★★★ HISMEDI 인증 ★★★", layout="wide")
 st.markdown("""
 <style>
-/* 전체 여백: 제목이 가려지지 않도록 상단 살짝 확보 */
-section.main > div.block-container{padding-top:28px;padding-bottom:40px;}
+/* 상단 여백: 제목이 가려지지 않도록 넉넉히 확보 (+ iOS safe-area 반영) */
+section.main > div.block-container{
+  padding-top: calc(env(safe-area-inset-top, 0px) + 56px);
+  padding-bottom: 40px;
+}
 @media (max-width:768px){
-  section.main > div.block-container{padding-top:36px;}  /* 모바일은 더 확보 */
+  section.main > div.block-container{
+    padding-top: calc(env(safe-area-inset-top, 0px) + 64px);
+  }
 }
 
-/* 요소 간 간격은 그대로 타이트 */
+/* 요소 간 간격은 타이트 유지 */
 div[data-testid="stVerticalBlock"]{gap:.6rem;}
 div[data-testid="stHorizontalBlock"]{gap:.6rem;}
 h1, h2, h3, h4, h5, h6{margin:.2rem 0 .6rem 0}
+
+/* 스크롤 시 앵커가려짐 방지(혹시 모를 내부 링크용) */
+h1, h2, h3, .main-title{ scroll-margin-top: 80px; }
 
 /* 제목 */
 .main-title{
@@ -33,14 +41,14 @@ h1, h2, h3, h4, h5, h6{margin:.2rem 0 .6rem 0}
 }
 @media (max-width:768px){ .main-title{font-size:22px} }
 
-/* 동기화 버튼 등 나머지 스타일은 기존 그대로… */
+/* 동기화 버튼 */
 .stButton > button.sync-all{
   width:100%; border:1px solid #ffd5d5; border-radius:12px;
   background:#fff; color:#d6336c; font-weight:800; padding:10px 12px;
 }
 .stButton > button.sync-all:hover{background:#fff5f5;border-color:#ffb3b3}
 
-/* 표/카드 공통 */
+/* 카드/표 공통 */
 .card{border:1px solid #e9ecef;border-radius:10px;padding:12px 14px;margin:8px 0;background:#fff}
 .card h4{margin:0 0 8px 0;font-size:16px;line-height:1.3;word-break:break-word}
 .card .row{margin:4px 0;font-size:13px;color:#333;word-break:break-word}
@@ -750,4 +758,5 @@ with tab_pdf:
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
         st.caption("먼저 키워드를 입력하고 **Enter**를 누르세요.")
+
 
