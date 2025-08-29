@@ -635,86 +635,21 @@ with tab_qna:
         else:
             st.session_state["qna_results"] = df_q.to_dict("records")
 
-    # ---------------- 유연 매핑 & 자동-대체 유틸 ----------------
+    # ---------------- 유틸: 정규화 ----------------
     def _norm_key(s: str) -> str:
-        # 공백/구분자/괄호/마침표 등 제거 + 소문자
-        return re.sub(r"[\s,/_\-.\(\)\[\]{}:]+", "", str(s or "")).lower()
+        # NBSP 제거, 공백/구분자/괄호/마침표 제거 + 소문자
+        return re.sub(r"[\s,/_\-.\(\)\[\]{}:]+", "", str(s or "").replace("\u00A0", " ")).lower()
 
-    def _pick_place_col(cols):
-        wants = ["조사장소", "장소", "부서/장소", "부서", "조사 장소", "조사 부서"]
-        # 정확 일치 → 정규화 일치 → 부분 포함
-        for want in wants:
-            for c in cols:
-                if str(c).strip() == want:
-                    return c
-        wn = [_norm_key(w) for w in wants]
-        for c in cols:
-            if _norm_key(c) in wn:
-                return c
-        for w in wn:
-            for c in cols:
-                if w and w in _norm_key(c):
-                    return c
-        return None
-
-    def _score_content_name(colname: str) -> int:
-        """내용 컬럼 우선순위 스코어 (높을수록 먼저 시도)"""
-        n = _norm_key(colname)
-        # 가장 강한 후보들
-        if n in ("조사위원질문(확인)내용", "조사위원질문확인내용"):
-            return 100
-        score = 0
-        if "조사위원질문" in n: score += 50
-        if "확인내용" in n:   score += 40
-        if "질문확인내용" in n: score += 45
-        if "질문" in n:      score += 25
-        if "내용" in n:      score += 20
-        return score
-
-    def _candidate_content_cols(cols, place_col):
-        # 장소/No 등은 제외하고, 이름 패턴으로 스코어링
-        ban = {"no", "no.", "번호", "순번"}
-        cands = []
-        for c in cols:
-            if c == place_col:
-                continue
-            if _norm_key(c) in ban:
-                continue
-            sc = _score_content_name(c)
-            if sc > 0:
-                cands.append((sc, c))
-        # 점수 높은 순
-        cands.sort(reverse=True, key=lambda x: x[0])
-        return [c for _, c in cands]
-
-    def _first_nonempty_text(r, cols):
-        for c in cols:
-            v = r.get(c)
-            s = "" if (v is None or (isinstance(v, float) and pd.isna(v))) else str(v).strip()
-            if s:
-                return s
-        return ""
-
-    def _fallback_longest_text(r, exclude_cols):
-        """모든 텍스트형 컬럼 중 가장 긴 내용(짧은/숫자류 제외) 선택"""
-        best = ""
-        for c, v in r.items():
-            if c in exclude_cols:
-                continue
-            s = "" if (v is None or (isinstance(v, float) and pd.isna(v))) else str(v).strip()
-            if not s:
-                continue
-            # 너무 짧거나 전부 숫자/기호면 패스
-            if len(s) < 2:
-                continue
-            if re.fullmatch(r"[\d\W_]+", s):
-                continue
-            if len(s) > len(best):
-                best = s
-        return best
+    def _clean_text(v) -> str:
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            return ""
+        return str(v).replace("\u00A0", " ").strip()
 
     # ---------------- 카드 렌더러 ----------------
     def render_qna_cards(df_: pd.DataFrame):
+        # 1) 컬럼명 정규화(보이지 않는 공백 제거)
+        df_.columns = [str(c).replace("\u00A0", " ").strip() for c in df_.columns]
+
         st.markdown("""
 <style>
 .qcard{border:1px solid #e9ecef;border-radius:12px;padding:12px 14px;margin:10px 0;background:#fff}
@@ -727,17 +662,76 @@ with tab_qna:
 
         import html as _html
         cols = list(df_.columns)
-        place_col = _pick_place_col(cols) or cols[0]
-        content_candidates = _candidate_content_cols(cols, place_col)
 
+        # 2) 장소 컬럼 찾기
+        place_col = None
+        for want in ["조사장소", "장소", "부서/장소", "부서", "조사 장소", "조사 부서"]:
+            for c in cols:
+                if str(c).strip() == want:
+                    place_col = c; break
+            if place_col: break
+        if not place_col:
+            # 정규화 일치
+            wants_n = [_norm_key(w) for w in ["조사장소","장소","부서/장소","부서","조사 장소","조사 부서"]]
+            for c in cols:
+                if _norm_key(c) in wants_n:
+                    place_col = c; break
+        if not place_col:
+            place_col = cols[0]  # 마지막 안전장치
+
+        # 3) 내용 컬럼 후보(우선순위 높은 순으로 검사)
+        #    다양한 표기를 모두 커버 + 동기화로 컬럼명이 변해도 잡히도록 함
+        content_candidates_exact = [
+            "조사위원 질문(확인) 내용",
+            "조사위원 질문, 확인내용",
+            "조사위원 질문/확인내용",
+            "조사위원질문(확인)내용",
+            "조사위원질문확인내용",
+            "질문, 확인내용",
+            "질문/확인내용",
+            "질문확인내용",
+            "질문"
+        ]
+        # 실제 존재하는 것만 남김(정확 일치 → 정규화 일치)
+        cands = []
+        for w in content_candidates_exact:
+            for c in cols:
+                if str(c).strip() == w:
+                    cands.append(c); break
+            else:
+                # 정규화 일치
+                wn = _norm_key(w)
+                for c in cols:
+                    if _norm_key(c) == wn:
+                        cands.append(c); break
+
+        def pick_content_from_row(r: pd.Series) -> str:
+            # 3-1) 후보들 중 첫 비공백 값
+            for c in cands:
+                s = _clean_text(r.get(c))
+                if s:
+                    return s
+            # 3-2) 그래도 비면, 장소/번호 제외한 "가장 긴 텍스트" 자동 선택
+            longest = ""
+            for c, v in r.items():
+                if c == place_col:
+                    continue
+                nk = _norm_key(c)
+                if nk in ("no", "no.", "번호", "순번"):
+                    continue
+                s = _clean_text(v)
+                if not s:
+                    continue
+                if len(s) < 2 or re.fullmatch(r"[\d\W_]+", s):
+                    continue
+                if len(s) > len(longest):
+                    longest = s
+            return longest
+
+        # 4) 렌더
         for _, r in df_.iterrows():
-            # 1) 우선 후보들 중 첫 비어있지 않은 값
-            content = _first_nonempty_text(r, content_candidates)
-            # 2) 그래도 비면 전체 텍스트 중 가장 긴 것으로 대체
-            if not content:
-                content = _fallback_longest_text(r, exclude_cols={place_col})
-
-            place = _html.escape(str(r.get(place_col, "") or "").strip() or "조사장소 미지정")
+            place = _html.escape(_clean_text(r.get(place_col)) or "조사장소 미지정")
+            content = pick_content_from_row(r)
             content_html = _html.escape(content or "-")
             st.markdown(
                 f"""
@@ -751,16 +745,17 @@ with tab_qna:
                 unsafe_allow_html=True
             )
 
-        # 필요 시 진단용
+        # (선택) 진단용
         with st.expander("디버그: 감지된 컬럼 보기", expanded=False):
             st.write("장소 컬럼:", place_col)
-            st.write("내용 후보:", content_candidates)
+            st.write("내용 후보(존재하는 것):", cands)
             st.write("모든 컬럼:", cols)
 
     # ===== 결과 표시 (카드형만) =====
     if "qna_results" in st.session_state and st.session_state["qna_results"]:
         df = pd.DataFrame(st.session_state["qna_results"])
-        # 식별자류 제거
+        # 식별자류 제거 + 열 이름 정리
+        df.columns = [str(c).replace("\u00A0", " ").strip() for c in df.columns]
         rm = [c for c in df.columns if _norm_key(c) in ("no", "no.", "번호", "순번")]
         if rm:
             df = df.drop(columns=rm)
@@ -932,6 +927,7 @@ with tab_pdf:
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
         st.caption("먼저 키워드를 입력하고 **Enter**를 누르세요.")
+
 
 
 
