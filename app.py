@@ -885,16 +885,16 @@ with tab_main:
 
 # --------------------- 조사위원 질문 -----------------------------
 with tab_qna:
-    st.write("")  # 큰 제목 여백만
+    # ---- QnA 즉시 동기화 스트립 (상단) ----
+    render_sync_strip(label="QnA 시트", slug="sync_qna", state_key="last_sync_qna")
 
-    # 제출 버튼 숨김(Enter로 검색)
-    st.markdown("<style>div[data-testid='stFormSubmitButton']{display:none!important;}</style>",
-                unsafe_allow_html=True)
+    # (이하 기존 QnA 검색/표시 코드 계속)
+    st.write("")  # 큰 제목 생략용
+    st.markdown("<style>div[data-testid='stFormSubmitButton']{display:none!important;}</style>", unsafe_allow_html=True)
 
-    # 데이터 소스 우선순위: qna_sheet_v → qna_v → qna_raw
-    qna_table = _pick_table(eng, ["qna_sheet_v", "qna_v", "qna_raw"]) or "qna_sheet_v"
+    qna_table = _pick_table(eng, ["qna_v", "qna_raw"]) or "qna_raw"
 
-    # 입력폼 (Enter 제출)
+    # ====== 입력폼 (Enter 제출) ======
     with st.form("qna_search_form", clear_on_submit=False):
         kw_q = st.text_input(
             "키워드 (공백=AND)",
@@ -902,27 +902,18 @@ with tab_qna:
             key="qna_kw",
             placeholder="예) 낙상, 환자확인, 수술 체크리스트 등"
         )
+        FIXED_LIMIT_QNA = 1000   # 내부 고정 제한
         submitted_qna = st.form_submit_button("검색")  # 화면엔 숨김
 
-    FIXED_LIMIT_QNA = 1000  # 내부 고정 제한
-
-    # 검색 실행
+    # ====== 검색 실행 ======
     if submitted_qna and kw_q.strip():
         with st.spinner("검색 중..."):
-            # 두 컬럼만 대상으로 AND 검색
-            cols_for_search = ["조사장소", "조사위원 질문(확인) 내용"]
-            df_q = search_table_any(eng, qna_table, kw_q, columns=cols_for_search, limit=FIXED_LIMIT_QNA)
-
+            df_q = search_table_any(eng, qna_table, kw_q, columns=None, limit=FIXED_LIMIT_QNA)
         if df_q.empty:
             st.info("결과 없음")
             st.session_state.pop("qna_results", None)
         else:
-            # 정렬키가 뷰(qna_sheet_v)에 있으면 우선 정렬
-            if {"sort1", "sort2"}.issubset(set(df_q.columns)):
-                df_q = df_q.sort_values(["sort1", "sort2"], kind="stable")
-            # 화면에는 두 컬럼만
-            keep_cols = [c for c in ["조사장소", "조사위원 질문(확인) 내용"] if c in df_q.columns]
-            st.session_state["qna_results"] = df_q[keep_cols].to_dict("records")
+            st.session_state["qna_results"] = df_q.to_dict("records")
 
     # ===== 카드 렌더러 (표형 없음, No. 미표시) =====
     def render_qna_cards(df_: pd.DataFrame):
@@ -1158,6 +1149,7 @@ with tab_pdf:
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
         st.caption("먼저 키워드를 입력하고 **키보드 Enter**를 누르면 결과가 표시됩니다.")
+
 
 
 
