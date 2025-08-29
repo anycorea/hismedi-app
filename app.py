@@ -783,43 +783,118 @@ with tab_qna:
 
 # ======================= 규정검색(PDF파일/본문) 탭 =======================
 with tab_pdf:
+    # 여백 최소화 + 폼 제출 버튼 숨김
     st.write("")
     st.markdown("<style>div[data-testid='stFormSubmitButton']{display:none!important;}</style>", unsafe_allow_html=True)
 
+    # --- 검색 모드 선택: 페이지/파일 ---
+    pdf_mode = st.radio(
+        "검색 모드",
+        ["페이지별 결과", "파일 목록"],
+        horizontal=True,
+        key="pdf_mode",
+        help="페이지별 결과: 키워드 또는 파일명 필터 필요 / 파일 목록: 빈 검색 가능(전체 파일)"
+    )
+
     FIXED_LIMIT = 1000
+
+    # 라벨을 모드에 따라 다르게 안내
+    kw_label = "키워드 (공백=AND)"
+    if pdf_mode == "파일 목록":
+        kw_label = "키워드 (선택, 입력 없이 Enter=전체목록, 공백=AND)"
+
+    # --- 입력 폼 ---
     with st.form("pdf_search_form", clear_on_submit=False):
-        kw_pdf  = st.text_input("키워드 (입력 없이 Enter=전체조회, 공백=AND)", "", key="pdf_kw")
-        fn_like = st.text_input("파일명 필터(선택)", "", key="pdf_fn")
+        kw_pdf  = st.text_input(kw_label, st.session_state.get("pdf_kw", ""), key="pdf_kw")
+        fn_like = st.text_input("파일명 필터(선택)", st.session_state.get("pdf_fn", ""), key="pdf_fn")
         submitted_pdf = st.form_submit_button("검색")
 
-    # 제출 시 검색 → 세션 저장 (키워드 없이 Enter여도 전체 조회)
+    # 공통: 간단 링크 생성기
+    def _view_url(fid: str, page: int) -> str:
+        fid = (fid or "").strip()
+        return f"https://drive.google.com/file/d/{fid}/view#page={int(page)}"
+
+    # ===================== 모드별 검색 실행 =====================
     if submitted_pdf:
-        with st.spinner("검색 중..."):
-            _df = search_regs(eng, kw_pdf or "", filename_like=fn_like, limit=FIXED_LIMIT)
-
-        if "me" in _df.columns:
-            _df = _df[_df["me"].astype(str).str.strip() != ""]
-        _df = _df.sort_values(["filename", "page"], kind="stable").reset_index(drop=True)
-
-        if _df.empty:
-            st.info("조건에 맞는 결과가 없습니다. (입력 없이 Enter=전체 조회)")
+        if pdf_mode == "페이지별 결과" and not ((kw_pdf or "").strip() or (fn_like or "").strip()):
+            # 페이지 모드에서의 전체 조회는 UX 폭주를 막기 위해 금지
+            st.info("페이지 모드에서는 키워드 또는 파일명 필터 중 하나는 입력해 주세요. 전체 목록은 '파일 목록' 모드를 사용하세요.")
             st.session_state.pop("pdf_results", None)
-            st.session_state.pop("pdf_sel_idx", None)
-            st.session_state.pop("pdf_kw_list", None)
+            st.session_state.pop("pdf_file_results", None)
         else:
-            st.session_state["pdf_results"] = _df.to_dict("records")
-            st.session_state["pdf_sel_idx"] = 0
-            st.session_state["pdf_kw_list"] = [k.strip() for k in (kw_pdf or "").split() if k.strip()]
+            if pdf_mode == "페이지별 결과":
+                # ---- 페이지별 결과 (키워드 없으면 빈 문자열 전달해 전체/필터 조합 처리)
+                with st.spinner("검색 중..."):
+                    _df = search_regs(eng, kw_pdf or "", filename_like=fn_like, limit=FIXED_LIMIT)
 
-    # 결과 렌더링
-    if "pdf_results" in st.session_state and st.session_state["pdf_results"]:
+                # 불필요/깨진 파일 제거 + 정렬
+                if "me" in _df.columns:
+                    _df = _df[_df["me"].astype(str).str.strip() != ""]
+                _df = _df.sort_values(["filename", "page"], kind="stable").reset_index(drop=True)
+
+                if _df.empty:
+                    st.info("조건에 맞는 결과가 없습니다.")
+                    st.session_state.pop("pdf_results", None)
+                else:
+                    st.session_state["pdf_results"] = _df.to_dict("records")
+                # 파일 목록 결과는 비움
+                st.session_state.pop("pdf_file_results", None)
+
+            else:
+                # ---- 파일 목록 (집계) : 빈 검색 허용
+                kw_list = [k.strip() for k in (kw_pdf or "").split() if k.strip()]
+                where_parts = []
+                params = {}
+
+                # 파일명 필터
+                if (fn_like or "").strip():
+                    where_parts.append("filename ILIKE :fn")
+                    params["fn"] = f"%{fn_like.strip()}%"
+
+                # ipynb 체크포인트 숨김
+                where_parts.append(r"(filename !~* '(^|[\\/])\.ipynb_checkpoints([\\/]|$)')")
+
+                where_sql = " AND ".join(where_parts) if where_parts else "TRUE"
+
+                # 키워드 AND 조건 생성 (히트 집계에 사용)
+                kw_cond = " AND ".join([f"text ILIKE :kw{i}" for i, _ in enumerate(kw_list)]) if kw_list else None
+                for i, k in enumerate(kw_list):
+                    params[f"kw{i}"] = f"%{k}%"
+
+                hits_expr = f"SUM(CASE WHEN ({kw_cond}) THEN 1 ELSE 0 END)" if kw_cond else "0"
+
+                sql = text(f"""
+                    SELECT
+                        filename,
+                        MIN(me) AS me,
+                        COUNT(*) AS pages,
+                        {hits_expr}::int AS hits
+                    FROM regulations
+                    WHERE {where_sql}
+                    GROUP BY filename
+                    {"HAVING " + hits_expr + " > 0" if kw_cond else ""}
+                    ORDER BY filename
+                    LIMIT :lim
+                """)
+                params["lim"] = FIXED_LIMIT
+
+                with eng.begin() as con:
+                    df_files = pd.read_sql_query(sql, con, params=params)
+
+                if df_files.empty:
+                    st.info("조건에 맞는 파일이 없습니다.")
+                    st.session_state.pop("pdf_file_results", None)
+                else:
+                    st.session_state["pdf_file_results"] = df_files.to_dict("records")
+                # 페이지 결과는 비움
+                st.session_state.pop("pdf_results", None)
+
+    # ===================== 모드별 결과 렌더 =====================
+    # ---- 페이지별 결과 렌더 (기존 UI 유지)
+    if pdf_mode == "페이지별 결과" and "pdf_results" in st.session_state and st.session_state["pdf_results"]:
         df = pd.DataFrame(st.session_state["pdf_results"])
-        kw_list = st.session_state.get("pdf_kw_list", [])
+        kw_list = [k.strip() for k in (st.session_state.get("pdf_kw") or "").split() if k.strip()]
         st.write(f"결과: {len(df):,}건")
-
-        def view_url(fid: str, page: int) -> str:
-            fid = (fid or "").strip()
-            return f"https://drive.google.com/file/d/{fid}/view#page={int(page)}"
 
         # 보기 형식 선택
         view_mode_pdf = st.radio("보기 형식", ["카드형(모바일)", "표형(간단)"], horizontal=True, key="pdf_view_mode")
@@ -841,7 +916,7 @@ with tab_pdf:
                 if c2.button(str(int(row["page"])), key=f"pick_page_{i}"):
                     st.session_state["pdf_sel_idx"] = int(i)
                 c3.markdown(
-                    f'<a href="{view_url(row["me"], int(row["page"]))}" target="_blank" rel="noopener noreferrer" '
+                    f'<a href="{_view_url(row["me"], int(row["page"]))}" target="_blank" rel="noopener noreferrer" '
                     f'style="display:inline-block;padding:6px 12px;border:1px solid #ddd;border-radius:8px;'
                     f'background:#f8f9fa;text-decoration:none;color:#0d6efd;font-weight:600;">열기</a>',
                     unsafe_allow_html=True
@@ -879,7 +954,7 @@ with tab_pdf:
                             st.session_state["pdf_sel_idx"] = int(i)
                     with cB:
                         st.markdown(
-                            f'<a class="pbtn" href="{view_url(fid_i, pagei)}" target="_blank" rel="noopener noreferrer" '
+                            f'<a class="pbtn" href="{_view_url(fid_i, pagei)}" target="_blank" rel="noopener noreferrer" '
                             f'style="display:block;text-align:center;padding:9px 12px;">열기</a>',
                             unsafe_allow_html=True
                         )
@@ -895,7 +970,7 @@ with tab_pdf:
 
         st.caption("텍스트 미리보기 & 문서 보기 (선택한 1건)")
         st.write(f"**파일**: {sel_file}  |  **페이지**: {sel_page}  |  **file_id**: {fid or '-'}")
-        st.markdown(highlight_html(sel["text"], kw_list, width=200), unsafe_allow_html=True)
+        st.markdown(highlight_html(sel["text"], [k.strip() for k in (st.session_state.get("pdf_kw") or '').split() if k.strip()], width=200), unsafe_allow_html=True)
 
         # ---- PDF 바이트 캐시 + 내려받기
         import base64
@@ -961,7 +1036,41 @@ with tab_pdf:
 </script>
 """
         st.components.v1.html(viewer_html, height=height_px + 40)
-    else:
-        st.caption("먼저 키워드를 입력하고 **Enter**를 누르세요. (입력 없이 Enter=전체 조회)")
-# =================================================================
 
+    # ---- 파일 목록 렌더
+    elif pdf_mode == "파일 목록" and "pdf_file_results" in st.session_state and st.session_state["pdf_file_results"]:
+        df_files = pd.DataFrame(st.session_state["pdf_file_results"])
+        st.write(f"파일: {len(df_files):,}건")
+
+        # 행별 액션: 페이지로 보기 / 열기
+        for i, row in df_files.iterrows():
+            c1, c2, c3 = st.columns([8, 1, 1])
+            name = str(row["filename"])
+            pages = int(row.get("pages", 0))
+            hits  = int(row.get("hits", 0))
+            label = f"{name}  —  {pages}p" + (f" / 히트 {hits}p" if "hits" in row else "")
+            c1.write(label)
+
+            # 페이지 모드로 전환 + 해당 파일만 필터 설정
+            if c2.button("페이지로 보기", key=f"to_page_mode_{i}"):
+                st.session_state["pdf_mode"] = "페이지별 결과"
+                st.session_state["pdf_fn"] = name  # 파일명 필터 자동 설정
+                st.session_state.pop("pdf_file_results", None)
+                st.experimental_rerun()
+
+            # 구글 드라이브 열기
+            me = (row.get("me") or "").strip()
+            c3.markdown(
+                f'<a href="{_view_url(me, 1)}" target="_blank" rel="noopener noreferrer" '
+                f'style="display:inline-block;padding:6px 12px;border:1px solid #ddd;border-radius:8px;'
+                f'background:#f8f9fa;text-decoration:none;color:#0d6efd;font-weight:600;">열기</a>',
+                unsafe_allow_html=True
+            )
+
+    else:
+        # 제출 전/후 공통 안내
+        if pdf_mode == "페이지별 결과":
+            st.caption("키워드 또는 파일명 필터를 입력하고 **Enter**를 누르세요. (전체 목록은 '파일 목록' 모드를 사용)")
+        else:
+            st.caption("키워드 없이 **Enter**를 누르면 인덱싱된 **모든 파일** 목록을 보여줍니다. (공백=AND)")
+# =================================================================
