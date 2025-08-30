@@ -389,9 +389,7 @@ def search_regs(eng, keywords: str, filename_like: str = "", limit: int = 500, h
     with eng.begin() as con:
         return pd.read_sql_query(sql, con, params=params)
 
-# ============
-# DB 연결 확인
-# ============
+# ============  DB 연결 확인 ============
 eng = get_engine()
 try:
     with eng.begin() as con:
@@ -424,7 +422,7 @@ DRIVE_FOLDER_ID = _extract_drive_id(st.secrets.get("DRIVE_FOLDER_ID") or os.gete
 # ------------------------------------------------------------
 show_sync_btn = (not _APP_PW) or st.session_state.get("pw_ok", False)  # 비번이 있으면 인증 후에만 노출
 if show_sync_btn:
-    clicked = st.button("데이터 전체 동기화", key="btn_sync_all_pdf", type="secondary", help="Main+QnA 동기화, PDF 키가 있으면 인덱싱까지 수행합니다.", kwargs=None)
+    clicked = st.button("데이터 전체 동기화", key="btn_sync_all_pdf", help="Main+QnA 동기화, PDF 키가 있으면 인덱싱까지 수행합니다.")
     if clicked:
         try:
             # 1) Main + QnA
@@ -455,7 +453,6 @@ def _fmt_ts(ts: float) -> str:
     except Exception:
         return "-"
 
-info_lines = []
 counts = st.session_state.get("last_sync_counts")
 when   = st.session_state.get("last_sync_ts")
 if counts and when:
@@ -637,47 +634,45 @@ with tab_main:
             render_cards(df, cols_order)
     else:
         st.caption("힌트: 조사장소/조사대상은 메인 키워드와 AND 조건으로 결합되어 검색됩니다.")
-    # >>> [ADD] Main: 검색 후에도 키워드 입력칸에 자동 포커스 유지
-import streamlit as st  # (이미 상단에 있으면 중복 import 무시됨)
 
-# 키워드 라벨 문자열이 코드와 정확히 같아야 합니다.
-# 현재 Main 탭의 입력 라벨: "키워드 (입력 없이 Enter=전체조회, 공백=AND)"
-st.components.v1.html("""
+    # ====== (중요) Main: 엔터 후에도 입력칸 포커스 & 스크롤 고정 ======
+    # Streamlit 렌더가 끝난 뒤에도 여러 번 재시도하여 최종 스크롤 위치를 '입력칸'으로 고정합니다.
+    st.components.v1.html("""
 <script>
 (function(){
-  // 라벨 텍스트로 해당 input 찾기
   const LABEL = '키워드 (입력 없이 Enter=전체조회, 공백=AND)';
-  setTimeout(function(){
+  function focusAndScroll(){
     const doc = window.parent?.document || document;
-    let input = null;
-
-    // 1) label 텍스트로 탐색
-    const labels = Array.from(doc.querySelectorAll('label'));
-    for (const lb of labels){
-      if ((lb.textContent || '').trim().startsWith(LABEL)){
-        input = lb.parentElement?.querySelector('input');
-        if (input) break;
+    let input = doc.querySelector('input[aria-label="'+LABEL+'"]');
+    if(!input){
+      const labels = Array.from(doc.querySelectorAll('label'));
+      for(const lb of labels){
+        if((lb.textContent || '').trim().startsWith(LABEL)){
+          input = lb.parentElement?.querySelector('input'); break;
+        }
       }
     }
-    // 2) aria-label 대체 탐색
-    if (!input){
-      input = doc.querySelector('input[aria-label="'+LABEL+'"]');
-    }
-
-    if (input){
+    if(input){
       input.focus();
-      // 커서를 맨 뒤로 이동
-      const len = input.value?.length || 0;
-      try { input.setSelectionRange(len, len); } catch(e) {}
-      // 화면도 입력칸으로 끌어올리기
-      try { input.scrollIntoView({block:'center'}); } catch(e) {}
+      try{
+        const len = input.value?.length || 0;
+        input.setSelectionRange(len, len);
+      }catch(e){}
+      try{ input.scrollIntoView({block:'center', behavior:'auto'}); }catch(e){}
+      return true;
     }
-  }, 120); // 렌더가 끝난 직후 약간 지연 후 실행
+    return false;
+  }
+  let tries = 0, MAX = 14, INTERVAL = 120;
+  const t = setInterval(()=>{
+    const ok = focusAndScroll();
+    tries++;
+    if(ok && tries >= 3){ clearInterval(t); }
+    if(tries >= MAX){ clearInterval(t); }
+  }, INTERVAL);
 })();
 </script>
 """, height=0)
-# <<< [ADD] Main: 자동 포커스 끝
-# =================================================================
 
 # ============================ 조사위원 질문 탭 ============================
 with tab_qna:
@@ -706,7 +701,7 @@ with tab_qna:
     def _norm_col(s: str) -> str:
         """공백/기호 삭제 + 소문자(한글은 그대로)"""
         s = str(s or "")
-        s = re.sub(r"[ \t\r\n/_\-:;.,(){}\[\]<>·•｜|]+", "", s)
+        s = re.sub(r"[ \t\r\n/_\\-:;.,(){}\\[\\]<>·•｜|]+", "", s)
         return s.lower()
 
     def _pick_col(cols: list[str], candidates: list[str]) -> str | None:
@@ -875,7 +870,6 @@ with tab_qna:
         render_qna_cards(df)
     else:
         st.caption("키워드를 입력하고 **Enter** 를 누르면 결과가 표시됩니다. (입력 없이 Enter=전체 조회)")
-# =================================================================
 
 # ============================ 규정검색(PDF파일/본문) 탭 ============================
 with tab_pdf:
@@ -935,7 +929,7 @@ with tab_pdf:
 
     # ====== 결과 + 페이지네이션 ======
     if "pdf_results" in st.session_state and st.session_state["pdf_results"]:
-        import math, base64, html as _html
+        import math, html as _html
 
         df_all   = pd.DataFrame(st.session_state["pdf_results"])
         kw_list  = st.session_state.get("pdf_kw_list", [])
@@ -952,7 +946,6 @@ with tab_pdf:
         start = (page - 1) * page_size
         end   = min(start + page_size, total)
         df    = df_all.iloc[start:end].reset_index(drop=False)  # drop=False로 전역 인덱스 유지
-        # df['index'] 가 원래 df_all의 전역 인덱스
 
         st.write(f"결과: {total:,}건  ·  페이지 {page}/{total_pages}  ·  표시 {start+1}–{end}")
 
@@ -960,7 +953,6 @@ with tab_pdf:
         cA, cB, cC = st.columns([1.5, 2, 2])
         with cA:
             new_size = st.selectbox("페이지당 표시", [20, 30, 50, 100], index=[20,30,50,100].index(page_size), key=SIZE_KEY, help="한 페이지에 표시할 결과 개수")
-            # 크기 변경 시 1페이지로
             if new_size != page_size:
                 st.session_state[PAGE_KEY] = 1
                 st.rerun()
@@ -1053,7 +1045,6 @@ with tab_pdf:
         st.markdown(highlight_html(sel["text"], kw_list, width=200), unsafe_allow_html=True)
 
         # ---- PDF 바이트 캐시 + 내려받기
-        import base64
         cache = st.session_state.setdefault("pdf_cache", {})
         b64 = cache.get(fid)
         if not b64:
@@ -1118,4 +1109,3 @@ with tab_pdf:
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
         st.caption("키워드를 입력하고 **Enter**를 누르면 결과가 표시됩니다. (입력 없이 Enter=전체 조회)")
-# =================================================================
