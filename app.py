@@ -266,8 +266,10 @@ def ensure_reg_table(eng):
 
 def _clean_text(s: str) -> str: return re.sub(r"\s+", " ", s or "").strip()
 
+# ---------- (패치된) Drive 전체 목록: modifiedTime 포함 ----------
 @st.cache_data(ttl=600, show_spinner=False)
 def _drive_list_all(folder_id: str, api_key: str):
+    """folder_id 이하 모든 파일/폴더 메타데이터(id,name,mimeType,parents,modifiedTime,md5Checksum) 재귀 수집"""
     files = []
     def list_children(pid):
         page_token = None
@@ -275,7 +277,7 @@ def _drive_list_all(folder_id: str, api_key: str):
             params = {
                 "q": f"'{pid}' in parents and trashed=false",
                 "pageSize": 1000,
-                "fields": "nextPageToken, files(id,name,mimeType,parents)",
+                "fields": "nextPageToken, files(id,name,mimeType,parents,modifiedTime,md5Checksum)",
                 "key": api_key,
             }
             if page_token: params["pageToken"] = page_token
@@ -312,33 +314,115 @@ def _drive_download_pdf(file_id: str, api_key: str) -> bytes:
     r.raise_for_status()
     return r.content
 
+# ---------- (패치된) 인덱서: 신규/수정/삭제 처리 + 삭제 파일 개수 리턴 ----------
 def index_pdfs_from_drive(eng, folder_id: str, api_key: str, limit_files: int = 0):
+    """
+    Drive 폴더에서 PDF 인덱싱.
+    - 새 파일: 인덱싱
+    - 수정된 파일(modifiedTime 변화): 재인덱싱
+    - 삭제된 파일(Drive에 없음): DB에서 제거 (삭제된 '파일 개수' 반환)
+    """
     ensure_reg_table(eng)
+
+    # 최신 목록을 보기 위해 캐시된 리스트를 사용하지 않도록, 이 함수 외부에서 st.cache_data.clear() 호출 권장
     by_id, id_to_rel, rel_to_id = _drive_path_map(folder_id, api_key)
-    indexed = skipped = errors = 0; done_files = []
+
+    def _mtime_epoch(fid: str) -> int:
+        """RFC3339 modifiedTime → epoch(int) 변환 (없으면 0)"""
+        try:
+            s = (by_id.get(fid) or {}).get("modifiedTime")  # e.g. "2025-08-29T00:12:34.000Z"
+            if not s:
+                return 0
+            return int(datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp())
+        except Exception:
+            return 0
+
+    indexed = skipped = updated = errors = 0
+    deleted_files_count = 0
+    done_files = []
+
+    present_names = list(rel_to_id.keys())  # Drive에 현재 존재하는 (상대)파일경로들
+
     with eng.begin() as con:
+        # (A) 삭제 정리: DB에는 있는데 Drive엔 없는 파일은 파일 단위로 삭제
+        existing_files = [r[0] for r in con.execute(
+            text("select distinct filename from regulations where me is not null")
+        ).fetchall()]
+        to_delete = sorted(set(existing_files) - set(present_names))
+        deleted_files_count = len(to_delete)
+        if to_delete:
+            # filename IN (:d0, :d1, ...)
+            placeholders = ", ".join([f":d{i}" for i in range(len(to_delete))])
+            params_del = {f"d{i}": fn for i, fn in enumerate(to_delete)}
+            con.execute(text(f"delete from regulations where filename in ({placeholders})"), params_del)
+
+        # (B) 추가/수정 처리
         for rel, fid in rel_to_id.items():
             try:
-                row = con.execute(text("select count(*) from regulations where filename=:fn"), {"fn": rel}).scalar()
-                if row and row > 0: skipped += 1; done_files.append((rel, "skip")); continue
+                mt = _mtime_epoch(fid)
+
+                # DB의 기존 mtime 확인
+                cur_mt = con.execute(
+                    text("select max(file_mtime) from regulations where filename=:fn"),
+                    {"fn": rel},
+                ).scalar() or 0
+
+                # 같으면 스킵 (수정 없음)
+                if cur_mt == mt and cur_mt != 0:
+                    skipped += 1
+                    done_files.append((rel, "skip"))
+                    continue
+
+                # 재인덱싱(수정/신규 모두 동일 처리): 기존 레코드 제거 후 적재
                 con.execute(text("delete from regulations where filename=:fn"), {"fn": rel})
-                reader = PdfReader(io.BytesIO(_drive_download_pdf(fid, api_key)))
+
+                pdf_bytes = _drive_download_pdf(fid, api_key)
+                reader = PdfReader(io.BytesIO(pdf_bytes))
                 rows = []
                 for pno, page in enumerate(reader.pages, start=1):
-                    try: txt = page.extract_text() or ""
-                    except Exception: txt = ""
+                    try:
+                        txt = page.extract_text() or ""
+                    except Exception:
+                        txt = ""
                     txt = _clean_text(txt)
-                    if not txt: continue
-                    rows.append({"filename": rel, "page": pno, "text": txt, "file_mtime": 0, "me": fid})
+                    if not txt:
+                        continue
+                    rows.append({
+                        "filename": rel,
+                        "page": pno,
+                        "text": txt,
+                        "file_mtime": mt,   # ← Drive modifiedTime 저장
+                        "me": fid           # ← Drive file id
+                    })
+
                 if rows:
                     pd.DataFrame(rows).to_sql("regulations", con, if_exists="append", index=False)
-                    indexed += 1; done_files.append((rel, f"indexed {len(rows)}p"))
+                    # 신규/수정 카운트 구분
+                    if cur_mt == 0:
+                        indexed += 1
+                        done_files.append((rel, f"indexed {len(rows)}p"))
+                    else:
+                        updated += 1
+                        done_files.append((rel, f"reindexed {len(rows)}p"))
                 else:
                     done_files.append((rel, "no-text"))
+
+                if limit_files and (indexed + updated) >= limit_files:
+                    break
+
             except Exception as e:
-                errors += 1; done_files.append((rel, f"error: {type(e).__name__}"))
-            if limit_files and indexed >= limit_files: break
-    return {"indexed": indexed, "skipped": skipped, "errors": errors, "files": done_files}
+                errors += 1
+                done_files.append((rel, f"error: {type(e).__name__}"))
+
+    # 리턴에 updated/deleted도 포함(토스트 표시용)
+    return {
+        "indexed": indexed,
+        "updated": updated,
+        "deleted": deleted_files_count,
+        "skipped": skipped,
+        "errors": errors,
+        "files": done_files
+    }
 
 def make_snippet(text_: str, kw_list: List[str], width: int = 160) -> str:
     if not text_: return ""
@@ -389,7 +473,9 @@ def search_regs(eng, keywords: str, filename_like: str = "", limit: int = 500, h
     with eng.begin() as con:
         return pd.read_sql_query(sql, con, params=params)
 
-# ============  DB 연결 확인 ============
+# ============
+# DB 연결 확인
+# ============
 eng = get_engine()
 try:
     with eng.begin() as con:
@@ -422,24 +508,40 @@ DRIVE_FOLDER_ID = _extract_drive_id(st.secrets.get("DRIVE_FOLDER_ID") or os.gete
 # ------------------------------------------------------------
 show_sync_btn = (not _APP_PW) or st.session_state.get("pw_ok", False)  # 비번이 있으면 인증 후에만 노출
 if show_sync_btn:
-    clicked = st.button("데이터 전체 동기화", key="btn_sync_all_pdf", help="Main+QnA 동기화, PDF 키가 있으면 인덱싱까지 수행합니다.")
+    # 버튼
+    clicked = st.button("데이터 전체 동기화", key="btn_sync_all_pdf", type="secondary",
+                        help="Main+QnA 동기화, PDF 키가 있으면 인덱싱까지 수행합니다.")
     if clicked:
         try:
+            # 0) Drive 목록 캐시 무효화(최신 목록 보장)
+            st.cache_data.clear()
+
             # 1) Main + QnA
             r1 = _trigger_edge_func("sync_main"); cnt_main = int(r1.get("count", 0))
             r2 = _trigger_edge_func("sync_qna");  cnt_qna  = int(r2.get("count", 0))
+
             # 2) PDF (있을 때만)
-            cnt_pdf = 0
+            pdf_new = pdf_upd = pdf_del = 0
             if DRIVE_API_KEY and DRIVE_FOLDER_ID:
                 res = index_pdfs_from_drive(eng, DRIVE_FOLDER_ID, DRIVE_API_KEY)
-                cnt_pdf = int(res.get("indexed", 0))
+                pdf_new = int(res.get("indexed", 0))
+                pdf_upd = int(res.get("updated", 0))
+                pdf_del = int(res.get("deleted", 0))
+
             # 캐시/세션 클리어
             st.cache_data.clear()
             for k in ("main_results","qna_results","pdf_results","pdf_sel_idx","pdf_kw_list"): st.session_state.pop(k, None)
+
             # 최근 동기화 시간/건수 저장
             st.session_state["last_sync_ts"] = time.time()
-            st.session_state["last_sync_counts"] = {"main": cnt_main, "qna": cnt_qna, "pdf": cnt_pdf}
-            st.success(f"완료: Main {cnt_main:,} · QnA {cnt_qna:,}" + (f" · PDF {cnt_pdf:,}" if cnt_pdf else ""))
+            st.session_state["last_sync_counts"] = {"main": cnt_main, "qna": cnt_qna, "pdf_new": pdf_new, "pdf_upd": pdf_upd, "pdf_del": pdf_del}
+
+            # ---- 성공 토스트(신규/수정/삭제 표시)
+            if DRIVE_API_KEY and DRIVE_FOLDER_ID:
+                st.success(f"완료: Main {cnt_main:,} · QnA {cnt_qna:,} · PDF 신규 {pdf_new:,} / 수정 {pdf_upd:,} / 삭제 {pdf_del:,}")
+            else:
+                st.success(f"완료: Main {cnt_main:,} · QnA {cnt_qna:,} (PDF 키 미설정)")
+
             st.rerun()
         except Exception as e:
             if e.__class__.__name__ in ("RerunData","RerunException"): raise
@@ -457,7 +559,8 @@ counts = st.session_state.get("last_sync_counts")
 when   = st.session_state.get("last_sync_ts")
 if counts and when:
     line = f"최근 동기화: Main {counts.get('main',0):,} · QnA {counts.get('qna',0):,}"
-    if counts.get("pdf",0): line += f" · PDF {counts['pdf']:,}"
+    if any(counts.get(k,0) for k in ("pdf_new","pdf_upd","pdf_del")):
+        line += f" · PDF 신규 {counts.get('pdf_new',0):,} / 수정 {counts.get('pdf_upd',0):,} / 삭제 {counts.get('pdf_del',0):,}"
     line += f" · {_fmt_ts(when)}"
     st.caption(line)
 
@@ -472,26 +575,29 @@ with tab_main:
     st.write("")
     st.markdown("<style>div[data-testid='stFormSubmitButton']{display:none!important;}</style>", unsafe_allow_html=True)
 
-    # 1) 사용할 테이블(뷰) 우선순위: main_sheet_v → main_v → main_raw
+    # 1) 사용할 테이블(뷰) 우선순위
     main_table = _pick_table(eng, ["main_sheet_v", "main_v", "main_raw"]) or "main_raw"
 
-    # 2) 고정 표시 순서(구글시트 원본 순서)
-    MAIN_COLS = [
+    # 2) 기본 표시 순서(우선순위) + 동적 확장(추가 컬럼 자동 포함)
+    MAIN_COLS_BASE = [
         "ME", "조사항목", "항목", "등급", "조사결과",
         "조사기준의 이해", "조사방법1", "조사방법2", "조사장소", "조사대상",
     ]
+    TECH_COLS = {"sort1","sort2","sort3"}  # 내부 정렬용
 
-    # 표형 열 너비 비율
+    existing_cols = _list_columns(eng, main_table)
+    base_cols = [c for c in MAIN_COLS_BASE if c in existing_cols]
+    extra_cols = [c for c in existing_cols if (c not in base_cols and c not in TECH_COLS)]
+    show_cols = base_cols + extra_cols  # ← 새로 생긴 컬럼도 자동 표시/검색
+
+    has_sort = all(x in existing_cols for x in ["sort1", "sort2", "sort3"])
+
+    # 표형 열 너비 비율(새 컬럼은 기본 1배)
     MAIN_COL_WEIGHTS = {
         "ME": 2, "조사항목": 8, "항목": 1, "등급": 1, "조사결과": 2,
         "조사기준의 이해": 12, "조사방법1": 10, "조사방법2": 5,
         "조사장소": 4, "조사대상": 4,
     }
-
-    # 테이블에 실제로 존재하는 컬럼/정렬키 확인
-    existing_cols = _list_columns(eng, main_table)
-    show_cols = [c for c in MAIN_COLS if c in existing_cols]
-    has_sort = all(x in existing_cols for x in ["sort1", "sort2", "sort3"])
 
     # ====== 입력폼 (Enter 제출) ======
     with st.form("main_search_form", clear_on_submit=False):
@@ -624,7 +730,7 @@ with tab_main:
     # ====== 결과 출력 ======
     if "main_results" in st.session_state and st.session_state["main_results"]:
         df = pd.DataFrame(st.session_state["main_results"])
-        cols_order = [c for c in MAIN_COLS if c in df.columns]  # 고정 순서
+        cols_order = [c for c in show_cols if c in df.columns]  # 동적 확장 반영
 
         st.write(f"결과: {len(df):,}건")
         view_mode = st.radio("보기 형식", ["카드형(모바일)", "표형"], index=0, horizontal=True, key="main_view_mode")
@@ -634,45 +740,6 @@ with tab_main:
             render_cards(df, cols_order)
     else:
         st.caption("힌트: 조사장소/조사대상은 메인 키워드와 AND 조건으로 결합되어 검색됩니다.")
-
-    # ====== (중요) Main: 엔터 후에도 입력칸 포커스 & 스크롤 고정 ======
-    # Streamlit 렌더가 끝난 뒤에도 여러 번 재시도하여 최종 스크롤 위치를 '입력칸'으로 고정합니다.
-    st.components.v1.html("""
-<script>
-(function(){
-  const LABEL = '키워드 (입력 없이 Enter=전체조회, 공백=AND)';
-  function focusAndScroll(){
-    const doc = window.parent?.document || document;
-    let input = doc.querySelector('input[aria-label="'+LABEL+'"]');
-    if(!input){
-      const labels = Array.from(doc.querySelectorAll('label'));
-      for(const lb of labels){
-        if((lb.textContent || '').trim().startsWith(LABEL)){
-          input = lb.parentElement?.querySelector('input'); break;
-        }
-      }
-    }
-    if(input){
-      input.focus();
-      try{
-        const len = input.value?.length || 0;
-        input.setSelectionRange(len, len);
-      }catch(e){}
-      try{ input.scrollIntoView({block:'center', behavior:'auto'}); }catch(e){}
-      return true;
-    }
-    return false;
-  }
-  let tries = 0, MAX = 14, INTERVAL = 120;
-  const t = setInterval(()=>{
-    const ok = focusAndScroll();
-    tries++;
-    if(ok && tries >= 3){ clearInterval(t); }
-    if(tries >= MAX){ clearInterval(t); }
-  }, INTERVAL);
-})();
-</script>
-""", height=0)
 
 # ============================ 조사위원 질문 탭 ============================
 with tab_qna:
@@ -701,7 +768,7 @@ with tab_qna:
     def _norm_col(s: str) -> str:
         """공백/기호 삭제 + 소문자(한글은 그대로)"""
         s = str(s or "")
-        s = re.sub(r"[ \t\r\n/_\\-:;.,(){}\\[\\]<>·•｜|]+", "", s)
+        s = re.sub(r"[ \t\r\n/_\-:;.,(){}\[\]<>·•｜|]+", "", s)
         return s.lower()
 
     def _pick_col(cols: list[str], candidates: list[str]) -> str | None:
@@ -746,13 +813,11 @@ with tab_qna:
                 best_col, best_len = c, avg
         return best_col
 
-    # 3) 검색 실행 (여기서 직접 WHERE 구성해서 3개 필드 동시 검색)
+    # 3) 검색 실행: No./장소/내용 3개 컬럼 동시 검색(없으면 유연 매핑)
     if submitted_qna:  # 키워드 없이 Enter여도 전체 조회
         with st.spinner("검색 중..."):
-            # 현재 테이블의 실제 컬럼 목록
             existing_cols = _list_columns(eng, qna_table)
 
-            # 우리가 찾고자 하는 컬럼 후보들(다양한 표기 허용)
             NUM_CAND = ["No.", "No", "no", "번호", "순번"]
             PLACE_CAND = ["조사장소", "장소", "부서/장소", "부서", "조사 장소", "조사 부서"]
             CONTENT_CAND = [
@@ -767,13 +832,11 @@ with tab_qna:
 
             # 내용 컬럼을 못 찾으면: '가장 긴 텍스트' 컬럼을 추정
             exclude = set([place_col, num_col, "sort1", "sort2", "sort3"])
-            content_col = content_col or _guess_long_text_col(
-                # 전체를 훑을 샘플이 필요하므로, 잠시 한 번 전체 SELECT (LIMIT 200) 로 df 생성
-                pd.read_sql_query(text(f'SELECT * FROM "{qna_table}" LIMIT 200'), eng),
-                exclude
-            )
+            if content_col is None:
+                # 샘플을 위해 임시 전체 select
+                df_probe = pd.read_sql_query(text(f'SELECT * FROM "{qna_table}" LIMIT 200'), eng)
+                content_col = _guess_long_text_col(df_probe, exclude)
 
-            # 실제 검색에 사용할 컬럼(없으면 전체 컬럼 사용)
             search_cols = [c for c in [num_col, place_col, content_col] if c] or existing_cols
 
             kw_list = [w for w in re.split(r"\s+", (kw_q or "").strip()) if w]
@@ -952,7 +1015,9 @@ with tab_pdf:
         # 컨트롤 바 (페이지 크기 / 이전·다음 / 보기 형식)
         cA, cB, cC = st.columns([1.5, 2, 2])
         with cA:
-            new_size = st.selectbox("페이지당 표시", [20, 30, 50, 100], index=[20,30,50,100].index(page_size), key=SIZE_KEY, help="한 페이지에 표시할 결과 개수")
+            new_size = st.selectbox("페이지당 표시", [20, 30, 50, 100],
+                                    index=[20,30,50,100].index(page_size),
+                                    key=SIZE_KEY, help="한 페이지에 표시할 결과 개수")
             if new_size != page_size:
                 st.session_state[PAGE_KEY] = 1
                 st.rerun()
