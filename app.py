@@ -642,12 +642,15 @@ with tab_main:
 # ============================ 조사위원 질문 탭 ============================
 with tab_qna:
     st.write("")  # 큰 제목 생략
-    st.markdown("<style>div[data-testid='stFormSubmitButton']{display:none!important;}</style>", unsafe_allow_html=True)
+    st.markdown(
+        "<style>div[data-testid='stFormSubmitButton']{display:none!important;}</style>",
+        unsafe_allow_html=True
+    )
 
-    # 뷰가 있으면 우선, 없으면 원본 테이블
+    # 1) 사용할 테이블 (뷰 우선)
     qna_table = _pick_table(eng, ["qna_sheet_v", "qna_v", "qna_raw"]) or "qna_raw"
 
-    # ====== 입력폼 (Enter 제출) ======
+    # 2) 입력 폼
     with st.form("qna_search_form", clear_on_submit=False):
         kw_q = st.text_input(
             "키워드 (입력 없이 Enter=전체조회, 공백=AND)",
@@ -656,26 +659,18 @@ with tab_qna:
             placeholder="예) 낙상, 환자확인, 고객, 수술 체크리스트 등"
         )
         FIXED_LIMIT_QNA = 2000
-        submitted_qna = st.form_submit_button("검색")
-
-    # ====== 검색 실행 ======
-    if submitted_qna:  # 키워드 없이 Enter여도 전체 조회
-        with st.spinner("검색 중..."):
-            df_q = search_table_any(eng, qna_table, kw_q or "", columns=None, limit=FIXED_LIMIT_QNA)
-        if df_q.empty:
-            st.info("결과 없음 (키워드 없이 Enter=전체 조회)")
-            st.session_state.pop("qna_results", None)
-        else:
-            st.session_state["qna_results"] = df_q.to_dict("records")
+        submitted_qna = st.form_submit_button("검색")  # 화면엔 숨김
 
     # ===== 유틸: 컬럼 이름 느슨 매칭 + 최후보루 =====
     import html as _html
     def _norm_col(s: str) -> str:
+        """공백/기호 삭제 + 소문자(한글은 그대로)"""
         s = str(s or "")
         s = re.sub(r"[ \t\r\n/_\-:;.,(){}\[\]<>·•｜|]+", "", s)
         return s.lower()
 
     def _pick_col(cols: list[str], candidates: list[str]) -> str | None:
+        """정확 일치 → 정규화 일치 → 부분 포함(정규화) 순으로 매칭"""
         # 1) 정확
         for w in candidates:
             if w in cols:
@@ -693,6 +688,7 @@ with tab_qna:
         return None
 
     def _guess_long_text_col(df: pd.DataFrame, exclude: set[str]) -> str | None:
+        """숫자/번호/정렬키 제외하고 평균 글자수 가장 긴 컬럼 추정"""
         cand = [c for c in df.columns if c not in exclude]
         if not cand:
             return None
@@ -715,7 +711,65 @@ with tab_qna:
                 best_col, best_len = c, avg
         return best_col
 
-    # ===== 카드 렌더러 (라벨 최소화) =====
+    # 3) 검색 실행 (여기서 직접 WHERE 구성해서 3개 필드 동시 검색)
+    if submitted_qna:  # 키워드 없이 Enter여도 전체 조회
+        with st.spinner("검색 중..."):
+            # 현재 테이블의 실제 컬럼 목록
+            existing_cols = _list_columns(eng, qna_table)
+
+            # 우리가 찾고자 하는 컬럼 후보들(다양한 표기 허용)
+            NUM_CAND = ["No.", "No", "no", "번호", "순번"]
+            PLACE_CAND = ["조사장소", "장소", "부서/장소", "부서", "조사 장소", "조사 부서"]
+            CONTENT_CAND = [
+                "조사위원 질문(확인) 내용", "조사위원 질문(확인)내용",
+                "조사위원 질문, 확인내용", "질문(확인) 내용",
+                "질문/확인내용", "질문 확인내용", "조사위원 질문", "확인내용"
+            ]
+
+            num_col     = _pick_col(existing_cols, NUM_CAND)
+            place_col   = _pick_col(existing_cols, PLACE_CAND)
+            content_col = _pick_col(existing_cols, CONTENT_CAND)
+
+            # 내용 컬럼을 못 찾으면: '가장 긴 텍스트' 컬럼을 추정
+            exclude = set([place_col, num_col, "sort1", "sort2", "sort3"])
+            content_col = content_col or _guess_long_text_col(
+                # 전체를 훑을 샘플이 필요하므로, 잠시 한 번 전체 SELECT (LIMIT 200) 로 df 생성
+                pd.read_sql_query(text(f'SELECT * FROM "{qna_table}" LIMIT 200'), eng),
+                exclude
+            )
+
+            # 실제 검색에 사용할 컬럼(없으면 전체 컬럼 사용)
+            search_cols = [c for c in [num_col, place_col, content_col] if c] or existing_cols
+
+            kw_list = [w for w in re.split(r"\s+", (kw_q or "").strip()) if w]
+            params: Dict[str, str] = {}
+            if kw_list:
+                and_parts = []
+                for i, kw in enumerate(kw_list):
+                    or_parts = []
+                    for j, col in enumerate(search_cols):
+                        p = f"kw_{i}_{j}"
+                        or_parts.append(f"COALESCE(\"{col}\"::text,'') ILIKE :{p}")
+                        params[p] = f"%{kw}%"
+                    and_parts.append("(" + " OR ".join(or_parts) + ")")
+                where_sql = " AND ".join(and_parts)
+                sql = text(f'SELECT * FROM "{qna_table}" WHERE {where_sql} LIMIT :lim')
+                params["lim"] = FIXED_LIMIT_QNA
+            else:
+                # 전체 조회
+                sql = text(f'SELECT * FROM "{qna_table}" LIMIT :lim')
+                params = {"lim": FIXED_LIMIT_QNA}
+
+            with eng.begin() as con:
+                df_q = pd.read_sql_query(sql, con, params=params)
+
+        if df_q.empty:
+            st.info("결과 없음 (키워드 없이 Enter=전체 조회)")
+            st.session_state.pop("qna_results", None)
+        else:
+            st.session_state["qna_results"] = df_q.to_dict("records")
+
+    # 4) 카드 렌더러 (라벨 최소화)
     def render_qna_cards(df_: pd.DataFrame):
         st.markdown("""
 <style>
@@ -733,12 +787,14 @@ with tab_qna:
             "조사위원 질문, 확인내용", "질문(확인) 내용",
             "질문/확인내용", "질문 확인내용", "조사위원 질문", "확인내용"
         ]
+        NUM_CAND = ["No.", "No", "no", "번호", "순번"]
 
-        place_col = _pick_col(cols, PLACE_CAND)
+        num_col     = _pick_col(cols, NUM_CAND)
+        place_col   = _pick_col(cols, PLACE_CAND)
         content_col = _pick_col(cols, CONTENT_CAND)
 
         # 내용 컬럼을 못 찾으면: '가장 긴 텍스트' 컬럼을 추정
-        exclude = set([place_col, "No", "no", "번호", "순번", "sort1", "sort2", "sort3"])
+        exclude = set([place_col, num_col, "sort1", "sort2", "sort3"])
         content_col = content_col or _guess_long_text_col(df_, exclude)
 
         for _, r in df_.iterrows():
@@ -772,7 +828,7 @@ with tab_qna:
                 unsafe_allow_html=True
             )
 
-    # ===== 결과 표시 =====
+    # 5) 결과 표시
     if "qna_results" in st.session_state and st.session_state["qna_results"]:
         df = pd.DataFrame(st.session_state["qna_results"])
         st.write(f"결과: {len(df):,}건")
