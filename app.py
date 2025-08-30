@@ -637,6 +637,46 @@ with tab_main:
             render_cards(df, cols_order)
     else:
         st.caption("힌트: 조사장소/조사대상은 메인 키워드와 AND 조건으로 결합되어 검색됩니다.")
+    # >>> [ADD] Main: 검색 후에도 키워드 입력칸에 자동 포커스 유지
+import streamlit as st  # (이미 상단에 있으면 중복 import 무시됨)
+
+# 키워드 라벨 문자열이 코드와 정확히 같아야 합니다.
+# 현재 Main 탭의 입력 라벨: "키워드 (입력 없이 Enter=전체조회, 공백=AND)"
+st.components.v1.html("""
+<script>
+(function(){
+  // 라벨 텍스트로 해당 input 찾기
+  const LABEL = '키워드 (입력 없이 Enter=전체조회, 공백=AND)';
+  setTimeout(function(){
+    const doc = window.parent?.document || document;
+    let input = null;
+
+    // 1) label 텍스트로 탐색
+    const labels = Array.from(doc.querySelectorAll('label'));
+    for (const lb of labels){
+      if ((lb.textContent || '').trim().startsWith(LABEL)){
+        input = lb.parentElement?.querySelector('input');
+        if (input) break;
+      }
+    }
+    // 2) aria-label 대체 탐색
+    if (!input){
+      input = doc.querySelector('input[aria-label="'+LABEL+'"]');
+    }
+
+    if (input){
+      input.focus();
+      // 커서를 맨 뒤로 이동
+      const len = input.value?.length || 0;
+      try { input.setSelectionRange(len, len); } catch(e) {}
+      // 화면도 입력칸으로 끌어올리기
+      try { input.scrollIntoView({block:'center'}); } catch(e) {}
+    }
+  }, 120); // 렌더가 끝난 직후 약간 지연 후 실행
+})();
+</script>
+""", height=0)
+# <<< [ADD] Main: 자동 포커스 끝
 # =================================================================
 
 # ============================ 조사위원 질문 탭 ============================
