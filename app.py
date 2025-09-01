@@ -467,7 +467,7 @@ if counts and when:
 # =====
 # 탭 UI
 # =====
-tab_main, tab_qna, tab_pdf = st.tabs(["인증기준/조사지침", "조사위원 질문", "규정검색(PDF파일/본문)"])
+tab_main, tab_qna, tab_pdf, tab_edu = st.tabs(["기준 지침", "Q n A", "규정 검색", "교육 영상"])
 
 # ========================== 인증기준/조사지침 탭 ==========================
 with tab_main:
@@ -1145,4 +1145,109 @@ with tab_pdf:
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
         st.caption("파일명/본문 중 아무거나 입력하고 **Enter**를 누르세요. (둘 다 비우고 Enter=전체 조회)")
+# =================================================================
+
+# ============================ 인증교육자료(동영상) 탭 ============================
+with tab_edu:
+    # 여백을 최소화합니다. (Main/QnA와 동일한 밀도)
+    st.markdown("""
+<style>
+.vlist .row{display:flex;align-items:center;gap:.5rem;margin:.35rem 0;}
+.vlist .name{flex:1 1 auto; word-break:break-all; font-size:14px;}
+.vlist .open a{display:inline-block; padding:6px 10px; border:1px solid #dee2e6; border-radius:8px; text-decoration:none;}
+.vlist .open a:hover{background:#f8f9fa}
+.vbar{display:flex;justify-content:space-between;align-items:center;margin:.25rem 0 .5rem 0}
+.vbar .left{display:flex;gap:.5rem;align-items:center}
+.vbar .right{opacity:.75;font-size:12px}
+</style>
+    """, unsafe_allow_html=True)
+
+    # --------- 시크릿/설정 읽기 ----------
+    EDU_FOLDER_RAW = (st.secrets.get("EDU_FOLDER_ID") or os.getenv("EDU_FOLDER_ID") or "").strip()
+    EDU_FOLDER_ID  = _extract_drive_id(EDU_FOLDER_RAW) if ' _extract_drive_id' in globals() else re.sub(r"[^A-Za-z0-9_-]", "", EDU_FOLDER_RAW)
+    API_KEY        = (st.secrets.get("DRIVE_API_KEY") or os.getenv("DRIVE_API_KEY") or "").strip()
+
+    # 상단 바: 새로고침 버튼 + 안내
+    cL, cR = st.columns([1, 3])
+    with cL:
+        if st.button("목록 새로고침", key="edu_refresh", use_container_width=True):
+            # Drive 캐시만 비우는 간단한 방법: 캐시 전체 클리어(앱 전체 캐시를 사용 중이라면 허용 가능한 수준)
+            st.cache_data.clear()
+            st.experimental_rerun()
+    with cR:
+        st.caption("공유폴더에 파일이 추가/삭제/이동되면 위 버튼으로 새 목록을 불러오세요.")
+
+    # 유효성 검사
+    if not API_KEY or not EDU_FOLDER_ID:
+        st.warning("교육자료 폴더를 불러오려면 **DRIVE_API_KEY / EDU_FOLDER_ID** 시크릿이 필요합니다.")
+        st.stop()
+
+    # --------- 목록 불러오기 ----------
+    # _drive_list_all(folder_id, api_key)는 상단(PDF 탭에서) 이미 정의되어 있습니다. (ttl=600 캐시)
+    try:
+        nodes = _drive_list_all(EDU_FOLDER_ID, API_KEY)  # 모든 하위 파일/폴더 재귀 수집
+    except Exception as e:
+        st.error("Google Drive 목록을 불러오지 못했습니다.")
+        st.exception(e)
+        st.stop()
+
+    by_id = {n["id"]: n for n in nodes}
+
+    # 상대 경로 계산(루트부터 이름 누적)
+    def _path_of(fid: str) -> str:
+        p, cur = [], by_id.get(fid)
+        while cur:
+            p.append(cur.get("name") or "")
+            parents = cur.get("parents") or []
+            cur = by_id.get(parents[0]) if parents else None
+        return "/".join([x for x in reversed(p) if x])
+
+    # 비디오 파일만 필터
+    VIDEO_EXT_RE = re.compile(r"\.(mp4|m4v|mov|avi|wmv|mkv|webm)$", re.I)
+    items = []
+    for n in nodes:
+        mt = (n.get("mimeType") or "")
+        name = (n.get("name") or "")
+        if mt == "application/vnd.google-apps.folder":
+            continue
+        if mt.startswith("video/") or VIDEO_EXT_RE.search(name):
+            items.append({"id": n["id"], "path": _path_of(n["id"]), "name": name})
+
+    # 정렬(경로 기준)
+    items.sort(key=lambda x: x["path"].lower())
+
+    # 간단 검색(파일명/경로)
+    q = st.text_input(
+        "파일명 검색 (입력 없이 Enter=전체조회, 공백=AND)",
+        value=st.session_state.get("edu_kw", ""),
+        key="edu_kw",
+        placeholder="예) 1.1, 환자 확인, 손위생, 낙상 예방 등"
+    ).strip()
+
+    if q:
+        tokens = [t for t in re.split(r"\s+", q) if t]
+        def _match(it):
+            hay = (it["path"] + " " + it["name"]).lower()
+            return all(tok.lower() in hay for tok in tokens)
+        items = [it for it in items if _match(it)]
+
+    st.write(f"총 {len(items):,}개")
+
+    if not items:
+        st.info("표시할 동영상이 없습니다. (검색어를 비워 전체 목록을 보세요)")
+    else:
+        # 렌더(아주 심플한 링크 리스트)
+        st.markdown('<div class="vlist">', unsafe_allow_html=True)
+        for it in items:
+            url_view = f"https://drive.google.com/file/d/{it['id']}/view"
+            # url_dl  = f"https://drive.google.com/uc?export=download&id={it['id']}"  # 필요 시 다운로드 링크
+            st.markdown(
+                f'''
+<div class="row">
+  <div class="name">📺 <a href="{url_view}" target="_blank" rel="noopener noreferrer">{html.escape(it["path"])}</a></div>
+  <div class="open"><a href="{url_view}" target="_blank" rel="noopener noreferrer">열기</a></div>
+</div>''',
+                unsafe_allow_html=True
+            )
+        st.markdown('</div>', unsafe_allow_html=True)
 # =================================================================
