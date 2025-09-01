@@ -1170,19 +1170,30 @@ with tab_pdf:
 
 # ====================== PDF 탭 (END) ============================
 
-# ============================ 인증교육자료(동영상) 탭 ============================
+# ============================ 인증교육자료(동영상) 탭 (START) ============================
 with tab_edu:
+    # — 간단 새로고침/안내 (유지)
+    cL, cR = st.columns([1, 3])
+    with cL:
+        if st.button("목록 새로고침", key="edu_refresh", use_container_width=True):
+            st.cache_data.clear()
+            st.rerun()
+    with cR:
+        st.caption("카드를 탭/클릭하면 새 창에서 바로 재생됩니다. (Google Drive 미리보기)")
+
     API_KEY = DRIVE_API_KEY
     if not API_KEY or not EDU_FOLDER_ID:
         st.warning("교육자료 폴더를 불러오려면 **DRIVE_API_KEY / EDU_FOLDER_ID** 시크릿이 필요합니다.")
     else:
-        # 목록 불러오기
         try:
             nodes = _drive_list_all(EDU_FOLDER_ID, API_KEY)
         except Exception as e:
-            st.error("Google Drive 목록을 불러오지 못했습니다."); st.exception(e); st.stop()
+            st.error("Google Drive 목록을 불러오지 못했습니다.")
+            st.exception(e)
+            st.stop()
 
         by_id = {n["id"]: n for n in nodes}
+
         def _path_of(fid: str) -> str:
             p, cur = [], by_id.get(fid)
             while cur:
@@ -1191,44 +1202,74 @@ with tab_edu:
                 cur = by_id.get(parents[0]) if parents else None
             return "/".join([x for x in reversed(p) if x])
 
-        # 동영상만 추출
+        # 동영상만 선별
         VIDEO_EXT_RE = re.compile(r"\.(mp4|m4v|mov|avi|wmv|mkv|webm)$", re.I)
         items = []
         for n in nodes:
-            mt = (n.get("mimeType") or ""); name = (n.get("name") or "")
+            mt = (n.get("mimeType") or "")
+            name = (n.get("name") or "")
             if mt == "application/vnd.google-apps.folder":
                 continue
             if mt.startswith("video/") or VIDEO_EXT_RE.search(name):
-                items.append({"id": n["id"], "path": _path_of(n["id"]), "name": name})
+                items.append({
+                    "id": n["id"],
+                    "path": _path_of(n["id"]),
+                    "name": name,
+                    "ext": (os.path.splitext(name)[1] or "").lstrip(".").upper()
+                })
         items.sort(key=lambda x: x["path"].lower())
 
-        st.markdown(f"총 **{len(items):,}개**")
+        st.write(f"총 {len(items):,}개")
 
+        # ---- 카드형 그리드 스타일
+        st.markdown("""
+<style>
+/* 반응형 그리드: 모바일 1열, 태블릿 2열, PC 3열 */
+.vgrid{display:grid;grid-template-columns:repeat(1,minmax(0,1fr));gap:10px;}
+@media (min-width:640px){ .vgrid{grid-template-columns:repeat(2,1fr);} }
+@media (min-width:1024px){ .vgrid{grid-template-columns:repeat(3,1fr);} }
+
+/* 카드 전체가 링크(밑줄/파란색 제거) */
+a.vcard{
+  display:block; text-decoration:none; color:#111;
+  border:1px solid #e9ecef; border-radius:12px; background:#fff;
+  padding:12px 14px;
+  transition: box-shadow .15s ease, border-color .15s ease, transform .02s ease;
+}
+a.vcard:hover{ border-color:#cfe2ff; box-shadow:0 6px 16px rgba(0,0,0,.06); }
+a.vcard:active{ transform:translateY(1px); }
+
+/* 제목(2줄 말줄임) */
+.vtitle{
+  font-weight:800; font-size:14px; line-height:1.35; word-break:break-all;
+  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
+}
+
+/* 보조 메타(확장자 표시) */
+.vmeta{ margin-top:6px; font-size:12px; color:#6c757d; }
+
+/* 여백 균형: 모바일에서도 너무 붙지 않도록 */
+.vwrap{ margin-top:.4rem; }
+</style>
+        """, unsafe_allow_html=True)
+
+        # ---- 렌더
         if not items:
             st.info("표시할 동영상이 없습니다.")
         else:
-            # 링크의 파란 밑줄/색 제거 + 박스형 아이템
-            st.markdown("""
-<style>
-.vbox a{
-  display:block; border:1px solid #e9ecef; border-radius:12px;
-  padding:10px 12px; margin:6px 0; background:#fff;
-  text-decoration:none !important; color:inherit !important;
-}
-.vbox a:hover{ box-shadow:0 2px 8px rgba(0,0,0,.06); background:#fdfdfd; }
-.vbox .name{ font-size:14px; font-weight:600; word-break:break-all; }
-</style>
-            """, unsafe_allow_html=True)
-
-            # 파일명만 클릭 → 새 창에서 바로 재생(/view)
-            st.markdown('<div class="vbox">', unsafe_allow_html=True)
+            st.markdown('<div class="vwrap"><div class="vgrid">', unsafe_allow_html=True)
             for it in items:
-                url_view = f"https://drive.google.com/file/d/{it['id']}/view"
+                url_preview = f"https://drive.google.com/file/d/{it['id']}/preview"
+                title_html  = html.escape(it["path"])
+                meta_html   = f"{it['ext'] or 'VIDEO'}"
                 st.markdown(
-                    f'<a href="{url_view}" target="_blank" rel="noopener noreferrer">'
-                    f'  <div class="name">{html.escape(it["path"])}</div>'
-                    f'</a>',
+                    f"""
+<a class="vcard" href="{url_preview}" target="_blank" rel="noopener noreferrer">
+  <div class="vtitle">{title_html}</div>
+  <div class="vmeta">{meta_html}</div>
+</a>
+""",
                     unsafe_allow_html=True
                 )
-            st.markdown('</div>', unsafe_allow_html=True)
-# ============================ 인증교육자료(동영상) 탭 끝 ============================
+            st.markdown('</div></div>', unsafe_allow_html=True)
+# ============================ 인증교육자료(동영상) 탭 (END) ============================
