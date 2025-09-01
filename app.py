@@ -497,21 +497,30 @@ with tab_main:
     has_sort = all(x in existing_cols for x in ["sort1", "sort2", "sort3"])
 
     # ====== 입력폼 (Enter 제출) ======
+    # 라벨의 안내 문구와 placeholder(회색 예시 텍스트)를 둘 다 제공합니다.
     with st.form("main_search_form", clear_on_submit=False):
         c1, c2, c3 = st.columns([2, 1, 1])
         with c1:
-            kw = st.text_input("키워드 (입력 없이 Enter=전체조회, 공백=AND)",
-                               st.session_state.get("main_kw", ""), key="main_kw")
+            kw = st.text_input(
+                "키워드 (입력 없이 Enter=전체조회, 공백=AND)",
+                st.session_state.get("main_kw", ""),
+                key="main_kw",
+                placeholder="예) 환자확인, 낙상, 치료계획, 환자안전 등"
+            )
         with c2:
-            f_place = st.text_input("조사장소 (선택)",
-                                    st.session_state.get("main_filter_place", ""),
-                                    key="main_filter_place",
-                                    placeholder="예) 전 부서, 병동, 외래, 수술실, 검사실 등")
+            f_place = st.text_input(
+                "조사장소 (선택)",
+                st.session_state.get("main_filter_place", ""),
+                key="main_filter_place",
+                placeholder="예) 전 부서, 병동, 외래, 수술실, 검사실 등"
+            )
         with c3:
-            f_target = st.text_input("조사대상 (선택)",
-                                     st.session_state.get("main_filter_target", ""),
-                                     key="main_filter_target",
-                                     placeholder="예) 전 직원, 의사, 간호사, 의료기사, 원무 등")
+            f_target = st.text_input(
+                "조사대상 (선택)",
+                st.session_state.get("main_filter_target", ""),
+                key="main_filter_target",
+                placeholder="예) 전 직원, 의사, 간호사, 의료기사, 원무 등"
+            )
         FIXED_LIMIT = 1000
         submitted_main = st.form_submit_button("검색")
 
@@ -634,23 +643,21 @@ with tab_main:
         cols_order = [c for c in MAIN_COLS if c in df.columns]  # 고정 순서
 
         st.write(f"결과: {len(df):,}건")
-        # 👉 보기 형식 순서/기본값 변경: 표형(PC) 기본
+        # 보기 형식: 표형(PC) 기본
         view_mode = st.radio("보기 형식", ["표형(PC)", "카드형(모바일)"], index=0, horizontal=True, key="main_view_mode")
         if view_mode == "표형(PC)":
             render_table(df, cols_order)
         else:
             render_cards(df, cols_order)
 
-        # 👉 메인 탭: 결과 렌더 후 반드시 상단으로 스크롤 + 키워드 입력에 포커스
+        # 결과 렌더 후: 최상단으로 스크롤 + 키워드 입력에 포커스(화면 아래로 내려가는 현상 방지)
         st.components.v1.html("""
 <script>
 (function(){
   const LABEL = '키워드 (입력 없이 Enter=전체조회, 공백=AND)';
   const doc = window.parent?.document || document;
   function refocus(){
-    // 스크롤 최상단
     try { window.scrollTo({top: 0, behavior: 'auto'}); } catch(e){ window.scrollTo(0,0); }
-    // 키워드 input 찾기
     let input = null;
     const labels = Array.from(doc.querySelectorAll('label'));
     for (const lb of labels){
@@ -665,13 +672,13 @@ with tab_main:
       try { input.setSelectionRange(len, len); } catch(e) {}
     }
   }
-  // 렌더 직후 약간의 지연 후 실행
   setTimeout(refocus, 80);
 })();
 </script>
 """, height=0)
     else:
         st.caption("힌트: 조사장소/조사대상은 메인 키워드와 AND 조건으로 결합되어 검색됩니다.")
+# =================================================================
 
 # ============================ 조사위원 질문 탭 ============================
 with tab_qna:
