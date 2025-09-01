@@ -472,7 +472,6 @@ tab_main, tab_qna, tab_pdf = st.tabs(["인증기준/조사지침", "조사위원
 # ========================== 인증기준/조사지침 탭 ==========================
 with tab_main:
     # 큰 제목 여백 제거 + 폼 제출 버튼 숨김(Enter로 바로 검색)
-    st.write("")
     st.markdown("<style>div[data-testid='stFormSubmitButton']{display:none!important;}</style>", unsafe_allow_html=True)
 
     # 1) 사용할 테이블(뷰) 우선순위: main_sheet_v → main_v → main_raw
@@ -682,7 +681,6 @@ with tab_main:
 
 # ============================ 조사위원 질문 탭 ============================
 with tab_qna:
-    st.write("")  # 큰 제목 생략
     st.markdown(
         "<style>div[data-testid='stFormSubmitButton']{display:none!important;}</style>",
         unsafe_allow_html=True
