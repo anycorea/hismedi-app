@@ -759,19 +759,19 @@ with tab_qna:
     else:
         st.caption("키워드를 입력하고 **Enter** 를 누르면 결과가 표시됩니다. (입력 없이 Enter=전체 조회)")
 
-# ====================== PDF 탭 ============================
+# ====================== PDF 탭 (START) ============================
 with tab_pdf:
     # 폼 제출 버튼 숨김 + 이 탭 전용 컴팩트/모바일 친화 CSS
     st.markdown("""
 <style>
-/* 컨트롤을 컴팩트하게 */
+/* 컨트롤 컴팩트 */
 .pdf-compact .stButton>button{
   padding:4px 10px !important; font-size:12px !important; border-radius:8px !important;
 }
 .pdf-compact [data-baseweb="select"]>div{
   min-height:30px !important; padding-top:2px !important; padding-bottom:2px !important;
 }
-/* 라벨-입력 간격 타이트 */
+/* 라벨-입력 간격 */
 .stTextInput > label{ margin-bottom:6px !important; }
 
 /* 모바일 카드 스타일(파일/페이지 공통) */
@@ -820,7 +820,7 @@ with tab_pdf:
 
     # ====== 쿼리 유틸 ======
     def _query_pages(name_kw: str, body_kw: str, limit: int = 2000, hide_ipynb_chk: bool = True) -> pd.DataFrame:
-        """페이지 단위 결과(본문 하이라이트/미리보기 가능). 파일명 토큰은 AND 필터로만 사용."""
+        """페이지 단위 결과(본문 AND, 파일명 AND 필터)."""
         name_tokens = [t for t in re.split(r"\s+", (name_kw or "").strip()) if t]
         body_tokens = [t for t in re.split(r"\s+", (body_kw or "").strip()) if t]
         where_parts, params = [], {}
@@ -850,18 +850,21 @@ with tab_pdf:
             return pd.read_sql_query(sql, con, params=params)
 
     def _query_files(name_kw: str, hide_ipynb_chk: bool = True) -> pd.DataFrame:
-        """파일명 전용: '파일' 리스트(중복 제거). name_kw 비어도 전체 파일 목록 반환."""
+        """파일명 전용: '파일' 목록(중복 제거). name_kw 비어도 전체 파일 목록."""
         name_tokens = [t for t in re.split(r"\s+", (name_kw or "").strip()) if t]
         where_parts, params = [], {}
+
         # 파일명 AND(선택)
         for j, kw in enumerate(name_tokens):
             where_parts.append(f"(filename ILIKE :n{j})")
             params[f"n{j}"] = f"%{kw}%"
+
         if hide_ipynb_chk:
             where_parts.append(r"(filename !~* '(^|[\\/])\.ipynb_checkpoints([\\/]|$)')")
+
         where_sql = " AND ".join(where_parts) if where_parts else "TRUE"  # ← 비어도 전체 파일
 
-        # 파일별 1행 + 총 페이지 수까지
+        # 파일별 1행 + 첫 페이지 + 총 페이지 수
         sql = text(f"""
             SELECT filename,
                    MIN(page)    AS first_page,
@@ -881,7 +884,7 @@ with tab_pdf:
         body_tokens = [t for t in re.split(r"\s+", (body_kw or "").strip()) if t]
 
         if body_tokens:
-            # 본문 검색 모드(파일명은 AND 필터)
+            # 본문 검색 모드(페이지 단위)
             with st.spinner("검색 중..."):
                 _df = _query_pages(name_kw, body_kw, limit=FIXED_LIMIT)
             if "me" in _df.columns:
@@ -889,7 +892,7 @@ with tab_pdf:
             _df = _df.sort_values(["filename", "page"], kind="stable").reset_index(drop=True)
 
             if _df.empty:
-                st.info("결과 없음 (파일명/본문 둘 다 비워서 Enter=전체 조회 가능합니다 — 파일 목록 모드)")
+                st.info("결과 없음 (파일명/본문 둘 다 비워서 Enter=전체 파일 목록)")
                 for k in ("pdf_results", "pdf_mode", "pdf_sel_idx", "pdf_body_tokens", "pdf_name_tokens",
                           "pdf_page", "pdf_page_size_label", "pdf_view_mode"):
                     st.session_state.pop(k, None)
@@ -901,10 +904,9 @@ with tab_pdf:
                 st.session_state["pdf_name_tokens"]  = name_tokens
                 st.session_state["pdf_page"]         = 1
                 st.session_state.setdefault("pdf_page_size_label", "10개/page")
-                st.session_state["pdf_view_mode"]    = "표형(PC)"  # PC 미리보기 기본
-
+                # 여기서 pdf_view_mode를 직접 세팅하지 않습니다(위젯 충돌 방지).
         else:
-            # 파일명 모드: name_kw 유무와 상관없이 "파일 목록" (비어 있으면 전체 파일)
+            # 파일명 모드: name_kw 유무와 무관하게 전체/필터된 "파일 목록" 반환
             with st.spinner("목록 불러오는 중..."):
                 _df = _query_files(name_kw)
             _df = _df.reset_index(drop=True)
@@ -926,7 +928,7 @@ with tab_pdf:
     if "pdf_results" in st.session_state and st.session_state["pdf_results"]:
         import math, html as _html, base64 as _b64
 
-        mode = st.session_state.get("pdf_mode", "files")  # 기본 files(파일목록) 쪽이 자연스러움
+        mode = st.session_state.get("pdf_mode", "files")  # 기본 files
         df_all = pd.DataFrame(st.session_state["pdf_results"])
         total = len(df_all)
 
@@ -974,10 +976,12 @@ with tab_pdf:
 
         with rowR:
             if mode == "pages":
-                view_mode_pdf = st.radio(
+                # ← 위젯 충돌 방지: 기본값을 session_state에만 넣고, radio에는 index를 넘기지 않음
+                if "pdf_view_mode" not in st.session_state:
+                    st.session_state["pdf_view_mode"] = "표형(PC)"  # 최초 기본값
+                st.radio(
                     "보기",
                     ["카드형(모바일)", "표형(PC)"],
-                    index=0 if st.session_state.get("pdf_view_mode","표형(PC)")=="카드형(모바일)" else 1,
                     key="pdf_view_mode",
                     horizontal=True
                 )
@@ -1007,7 +1011,7 @@ with tab_pdf:
         end   = min(start + page_size, total)
         df    = df_all.iloc[start:end].reset_index(drop=False)
 
-        # 상단 카운터(모드별 레이블 다르게)
+        # 상단 카운터(모드별 레이블)
         if mode == "files":
             st.write(f"결과: {total:,}개 파일  ·  페이지 {page}/{total_pages}  ·  표시 {start+1}–{end}  ·  페이지당 {page_size:,}개")
         else:
@@ -1064,6 +1068,7 @@ with tab_pdf:
                         unsafe_allow_html=True
                     )
                 st.markdown('</div>', unsafe_allow_html=True)
+
             else:
                 # 표형(PC): 파일명/페이지 버튼으로 '선택 1건 미리보기' 지원
                 hdr = st.columns([7, 1, 1])
@@ -1098,6 +1103,7 @@ with tab_pdf:
                     sel_file = sel["filename"]; sel_page = int(sel["page"])
                     st.caption("텍스트 미리보기 & 문서 보기 (선택한 1건)")
                     st.write(f"**파일**: {sel_file}  |  **페이지**: {sel_page}  |  **file_id**: {fid or '-'}")
+                    # highlight_html()은 기존 공용 유틸 사용
                     st.markdown(highlight_html(sel["text"], body_tok, width=200), unsafe_allow_html=True)
 
                     # pdf.js 미리보기
@@ -1162,7 +1168,7 @@ with tab_pdf:
     else:
         st.caption("파일명/본문 중 아무거나 입력하고 **Enter**를 누르세요. (아무것도 입력 안 하고 Enter=**전체 파일 목록**)")
 
-# =================================================================
+# ====================== PDF 탭 (END) ============================
 
 # ============================ 인증교육자료(동영상) 탭 ============================
 with tab_edu:
