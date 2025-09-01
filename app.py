@@ -850,7 +850,7 @@ with tab_pdf:
             return pd.read_sql_query(sql, con, params=params)
 
     def _query_files(name_kw: str, hide_ipynb_chk: bool = True) -> pd.DataFrame:
-        """파일명 전용: 파일 리스트만(중복 제거). 페이지/본문 UI 불필요."""
+        """파일명 전용: '파일' 리스트만(중복 제거). 페이지/본문 UI 불필요."""
         name_tokens = [t for t in re.split(r"\s+", (name_kw or "").strip()) if t]
         where_parts, params = [], {}
         for j, kw in enumerate(name_tokens):
@@ -859,12 +859,15 @@ with tab_pdf:
         if hide_ipynb_chk:
             where_parts.append(r"(filename !~* '(^|[\\/])\.ipynb_checkpoints([\\/]|$)')")
         where_sql = " AND ".join(where_parts) if where_parts else "TRUE"
-        # 파일별 대표 페이지(최소 page)와 file_id(me) 동반
+
+        # ⚠️ 파일명만 기준으로 1행씩 (동일 파일명이 여러 ID에 있을 경우 임의 1개를 대표로 선택)
         sql = text(f"""
-            SELECT filename, MIN(page) AS first_page, MIN(me) AS me
+            SELECT filename,
+                   MIN(page) AS first_page,
+                   MIN(me)   AS me
               FROM regulations
              WHERE {where_sql}
-          GROUP BY filename, me
+          GROUP BY filename
           ORDER BY filename
         """)
         with eng.begin() as con:
@@ -916,7 +919,7 @@ with tab_pdf:
                 st.session_state["pdf_page"] = 1
                 st.session_state.setdefault("pdf_page_size_label", "10개/page")
         else:
-            # 둘 다 비었으면 전체 페이지 조회(기존 동작)
+            # 둘 다 비었으면 전체 페이지 조회(기본)
             with st.spinner("검색 중..."):
                 _df = _query_pages("", "", limit=FIXED_LIMIT)
             if "me" in _df.columns:
@@ -1029,20 +1032,19 @@ with tab_pdf:
             fid = (fid or "").strip()
             return f"https://drive.google.com/file/d/{fid}/view#page={int(p)}"
 
-        # ===== (A) 파일명 전용 모드 — 파일 목록 + 열기만 =====
+        # ===== (A) 파일명 전용 모드 — 파일 1개당 1행 + 열기만 =====
         if mode == "files":
-            # 카드형(모바일) 스타일로 심플 표출
             st.markdown('<div class="pdf-compact">', unsafe_allow_html=True)
             for _, row in df.iterrows():
-                fname = str(row["filename"])
-                fid_i = (row.get("me") or "").strip()
-                first_p = int(row.get("first_page", 1) or 1)
+                fname  = str(row["filename"])
+                fid_i  = (row.get("me") or "").strip()
+                firstp = int(row.get("first_page", 1) or 1)
                 st.markdown(
                     f"""
 <div class="pdf-card">
   <div class="fname">{_html.escape(fname)}</div>
   <div class="rowbtn">
-    <a class="open-btn" href="{view_url(fid_i, first_p)}" target="_blank" rel="noopener noreferrer">열기</a>
+    <a class="open-btn" href="{view_url(fid_i, firstp)}" target="_blank" rel="noopener noreferrer">열기</a>
   </div>
 </div>
 """,
@@ -1050,12 +1052,12 @@ with tab_pdf:
                 )
             st.markdown('</div>', unsafe_allow_html=True)
 
-        # ===== (B) 본문 검색 모드 — 페이지 단위 + 미리보기 =====
+        # ===== (B) 본문 검색 모드 — 페이지 단위 + (PC에서만) 미리보기 =====
         else:
             body_tok = st.session_state.get("pdf_body_tokens", [])
 
             if st.session_state.get("pdf_view_mode") == "카드형(모바일)":
-                # 카드형(모바일)
+                # 카드형(모바일): 페이지별 간단 카드 + 열기 버튼만
                 st.markdown('<div class="pdf-compact">', unsafe_allow_html=True)
                 for _, row in df.iterrows():
                     fname = str(row["filename"])
@@ -1075,7 +1077,7 @@ with tab_pdf:
                     )
                 st.markdown('</div>', unsafe_allow_html=True)
             else:
-                # 표형(PC)
+                # 표형(PC): 파일명/페이지 버튼으로 '선택 1건 미리보기' 지원
                 hdr = st.columns([7, 1, 1])
                 hdr[0].markdown("**파일명**")
                 hdr[1].markdown("**페이지**")
@@ -1098,31 +1100,31 @@ with tab_pdf:
                         unsafe_allow_html=True
                     )
 
-            # ===== 선택 행 미리보기(본문 검색 모드에서만 노출) =====
-            df_all_pages = df_all  # 가독성
-            sel_idx = int(st.session_state.get("pdf_sel_idx", 0))
-            sel_idx = max(0, min(sel_idx, len(df_all_pages) - 1))
-            sel = df_all_pages.iloc[sel_idx] if len(df_all_pages) else None
-            if sel is not None:
-                fid = (sel.get("me") or "").strip()
-                sel_file = sel["filename"]; sel_page = int(sel["page"])
-                st.caption("텍스트 미리보기 & 문서 보기 (선택한 1건)")
-                st.write(f"**파일**: {sel_file}  |  **페이지**: {sel_page}  |  **file_id**: {fid or '-'}")
-                st.markdown(highlight_html(sel["text"], body_tok, width=200), unsafe_allow_html=True)
+                # ---- 선택 행 미리보기(PC에서만)
+                df_all_pages = df_all
+                sel_idx = int(st.session_state.get("pdf_sel_idx", 0))
+                sel_idx = max(0, min(sel_idx, len(df_all_pages) - 1))
+                sel = df_all_pages.iloc[sel_idx] if len(df_all_pages) else None
+                if sel is not None:
+                    fid = (sel.get("me") or "").strip()
+                    sel_file = sel["filename"]; sel_page = int(sel["page"])
+                    st.caption("텍스트 미리보기 & 문서 보기 (선택한 1건)")
+                    st.write(f"**파일**: {sel_file}  |  **페이지**: {sel_page}  |  **file_id**: {fid or '-'}")
+                    st.markdown(highlight_html(sel["text"], body_tok, width=200), unsafe_allow_html=True)
 
-                # pdf.js 미리보기
-                cache = st.session_state.setdefault("pdf_cache", {})
-                b64 = cache.get(fid)
-                if not b64:
-                    pdf_bytes = _drive_download_pdf(fid, DRIVE_API_KEY)
-                    b64 = _b64.b64encode(pdf_bytes).decode("ascii")
-                    cache[fid] = b64
+                    # pdf.js 미리보기
+                    cache = st.session_state.setdefault("pdf_cache", {})
+                    b64 = cache.get(fid)
+                    if not b64:
+                        pdf_bytes = _drive_download_pdf(fid, DRIVE_API_KEY)
+                        b64 = _b64.b64encode(pdf_bytes).decode("ascii")
+                        cache[fid] = b64
 
-                page_view = st.number_input("미리보기 페이지", 1, 9999, int(sel_page), step=1, key=f"pv_page_{fid}")
-                zoom_pct  = st.slider("줌(%)", 30, 200, 80, step=5, key=f"pv_zoom_{fid}")
-                height_px = st.slider("미리보기 높이(px)", 480, 1200, 640, step=40, key=f"pv_h_{fid}")
+                    page_view = st.number_input("미리보기 페이지", 1, 9999, int(sel_page), step=1, key=f"pv_page_{fid}")
+                    zoom_pct  = st.slider("줌(%)", 30, 200, 80, step=5, key=f"pv_zoom_{fid}")
+                    height_px = st.slider("미리보기 높이(px)", 480, 1200, 640, step=40, key=f"pv_h_{fid}")
 
-                viewer_html = f"""
+                    viewer_html = f"""
 <div id="pdf-root" style="width:100%;height:{height_px}px;max-height:80vh;background:#fafafa;overflow:auto;">
   <canvas id="pdf-canvas" style="display:block;margin:0 auto;background:#fff;box-shadow:0 0 4px rgba(0,0,0,0.08)"></canvas>
 </div>
@@ -1168,7 +1170,7 @@ with tab_pdf:
   }});
 </script>
 """
-                st.components.v1.html(viewer_html, height=height_px + 40)
+                    st.components.v1.html(viewer_html, height=height_px + 40)
     else:
         st.caption("파일명/본문 중 아무거나 입력하고 **Enter**를 누르세요. (둘 다 비우고 Enter=전체 조회)")
 # =================================================================
