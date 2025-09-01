@@ -417,47 +417,74 @@ tab_main, tab_qna, tab_pdf, tab_edu = st.tabs(["기준/지침", "Q/n/A", "규정
 
 # ========================== 메인 탭 ==========================
 with tab_main:
-    # 탭 상단 앵커(보기 전환 시 상단 고정용)
+    # 탭 상단 앵커: 검색/보기 전환 후 항상 이 위치로 고정
     st.markdown('<div id="main-tab-top"></div>', unsafe_allow_html=True)
+
+    # 폼 제출 버튼 숨김(Enter로 제출)
     st.markdown("<style>div[data-testid='stFormSubmitButton']{display:none!important;}</style>", unsafe_allow_html=True)
 
+    # 1) 사용할 테이블(뷰 우선)
     main_table = _pick_table(eng, ["main_sheet_v", "main_v", "main_raw"]) or "main_raw"
+
+    # 2) 표시 순서 및 너비 비율
     MAIN_COLS = ["ME","조사항목","항목","등급","조사결과","조사기준의 이해","조사방법1","조사방법2","조사장소","조사대상"]
-    MAIN_COL_WEIGHTS = {"ME":2,"조사장소":4,"조사대상":4,"조사방법1":10,"조사방법2":5,"조사기준의 이해":12,"조사항목":8,"항목":1,"등급":1,"조사결과":2}
+    MAIN_COL_WEIGHTS = {
+        "ME":2,"조사장소":4,"조사대상":4,"조사방법1":10,"조사방법2":5,
+        "조사기준의 이해":12,"조사항목":8,"항목":1,"등급":1,"조사결과":2
+    }
 
     existing_cols = _list_columns(eng, main_table)
     show_cols = [c for c in MAIN_COLS if c in existing_cols]
     has_sort = all(x in existing_cols for x in ["sort1","sort2","sort3"])
 
+    # ====== 입력 폼 (Enter 제출) ======
     with st.form("main_search_form", clear_on_submit=False):
         c1, c2, c3 = st.columns([2,1,1])
         with c1:
-            kw = st.text_input("키워드 (입력 없이 Enter=전체조회, 공백=AND)",
-                               st.session_state.get("main_kw", ""), key="main_kw",
-                               placeholder="예) 낙상, 환자 확인, 환자안전 지표 등")
+            kw = st.text_input(
+                "키워드 (입력 없이 Enter=전체조회, 공백=AND)",
+                st.session_state.get("main_kw", ""),
+                key="main_kw",
+                placeholder="예) 낙상, 환자 확인, 환자안전 지표 등"
+            )
         with c2:
-            f_place = st.text_input("조사장소 (선택)",
-                                    st.session_state.get("main_filter_place", ""), key="main_filter_place",
-                                    placeholder="예) 전 부서, 병동, 외래, 수술실, 검사실 등")
+            f_place = st.text_input(
+                "조사장소 (선택)",
+                st.session_state.get("main_filter_place", ""),
+                key="main_filter_place",
+                placeholder="예) 전 부서, 병동, 외래, 수술실, 검사실 등"
+            )
         with c3:
-            f_target = st.text_input("조사대상 (선택)",
-                                     st.session_state.get("main_filter_target", ""), key="main_filter_target",
-                                     placeholder="예) 전 직원, 의사, 간호사, 의료기사, 원무 등")
+            f_target = st.text_input(
+                "조사대상 (선택)",
+                st.session_state.get("main_filter_target", ""),
+                key="main_filter_target",
+                placeholder="예) 전 직원, 의사, 간호사, 의료기사, 원무 등"
+            )
         FIXED_LIMIT = 1000
         submitted_main = st.form_submit_button("검색")
 
+    # ====== 검색 실행 ======
     results_df = pd.DataFrame()
-    if submitted_main:
+    if submitted_main:  # 키워드 없이 Enter여도 전체 조회
         kw_list = [k.strip() for k in (kw or "").split() if k.strip()]
         where_parts, params = [], {}
+
+        # 키워드(AND) → 각 키워드가 show_cols(OR) 중 하나에 매칭
         if kw_list and show_cols:
             for i, token in enumerate(kw_list):
                 ors = " OR ".join([f'"{c}" ILIKE :kw{i}' for c in show_cols])
-                where_parts.append(f"({ors})"); params[f"kw{i}"] = f"%{token}%"
+                where_parts.append(f"({ors})")
+                params[f"kw{i}"] = f"%{token}%"
+
+        # 조사장소/조사대상 개별 필터(선택)
         if f_place.strip() and "조사장소" in existing_cols:
-            where_parts.append('"조사장소" ILIKE :place'); params["place"] = f"%{f_place.strip()}%"
+            where_parts.append('"조사장소" ILIKE :place')
+            params["place"] = f"%{f_place.strip()}%"
         if f_target.strip() and "조사대상" in existing_cols:
-            where_parts.append('"조사대상" ILIKE :target'); params["target"] = f"%{f_target.strip()}%"
+            where_parts.append('"조사대상" ILIKE :target')
+            params["target"] = f"%{f_target.strip()}%"
+
         where_sql = " AND ".join(where_parts) if where_parts else "TRUE"
 
         select_cols_sql = ", ".join([f'"{c}"' for c in show_cols])
@@ -478,8 +505,11 @@ with tab_main:
             st.session_state.pop("main_results", None)
         else:
             st.session_state["main_results"] = results_df.to_dict("records")
-        st.session_state["main_should_focus"] = True  # 검색 직후 1회 포커스
 
+        # ▶ 검색 직후 '무조건' 상단 고정 + 입력칸 포커스 (첫 검색 하단 튐 방지)
+        st.session_state["main_scroll_and_focus"] = True
+
+    # ====== 스타일(하이라이트) ======
     st.markdown("""
 <style>
 .hl-item{ color:#0d47a1; font-weight:800; }
@@ -487,6 +517,7 @@ with tab_main:
 </style>
     """, unsafe_allow_html=True)
 
+    # ====== 렌더 유틸 ======
     def _fmt_cell(colname: str, value) -> str:
         s = html.escape("" if value is None else str(value))
         def _is_required(val: str) -> bool:
@@ -527,13 +558,14 @@ with tab_main:
 </div>
 """, unsafe_allow_html=True)
 
-    # 보기 형식 라디오 (전환 시 상단 고정)
+    # 보기 형식 전환 시에도 상단 고정 + 포커스
     def _on_main_view_change():
-        st.session_state["main_view_changed"] = True
+        st.session_state["main_scroll_and_focus"] = True
 
     if "main_view_mode" not in st.session_state:
         st.session_state["main_view_mode"] = "표형(PC)"
 
+    # ====== 결과 출력 ======
     if "main_results" in st.session_state and st.session_state["main_results"]:
         df = pd.DataFrame(st.session_state["main_results"])
         cols_order = [c for c in MAIN_COLS if c in df.columns]
@@ -547,62 +579,47 @@ with tab_main:
     else:
         st.caption("힌트: 조사장소/조사대상은 메인 키워드와 AND 조건으로 결합되어 검색됩니다.")
 
-    # 검색 직후 포커스(스크롤 이동 없음)
-    if st.session_state.pop("main_should_focus", False):
+    # ====== (핵심) 검색/보기전환 이후 상단 고정 + 입력칸 포커스 ======
+    if st.session_state.pop("main_scroll_and_focus", False):
         st.components.v1.html("""
 <script>
 (function(){
-  const LABEL = '키워드 (입력 없이 Enter=전체조회, 공백=AND)';
-  setTimeout(function(){
-    const doc = window.parent?.document || document;
+  const doc = window.parent?.document || document;
+
+  // 1) 상단 앵커로 즉시 스크롤(하단 튐 방지)
+  try{
+    var el = doc.getElementById('main-tab-top');
+    var top = 0;
+    if(el){
+      var rect = el.getBoundingClientRect();
+      var scrollTop = (window.parent ? window.parent.pageYOffset : window.pageYOffset);
+      top = rect.top + scrollTop - 90; // 상단 고정바 여유
+    }
+    if (window.parent) window.parent.scrollTo({top: top, left: 0, behavior: 'auto'});
+    else window.scrollTo({top: top, left: 0, behavior: 'auto'});
+  }catch(e){}
+
+  // 2) 키워드 입력칸 포커스(+커서 끝)
+  try{
+    const LABEL = '키워드 (입력 없이 Enter=전체조회, 공백=AND)';
     let input = null;
     const labels = Array.from(doc.querySelectorAll('label'));
     for (const lb of labels){
-      if ((lb.textContent || '').trim().startsWith(LABEL)){
-        input = lb.parentElement?.querySelector('input'); if (input) break;
+      if ((lb.textContent||'').trim().startsWith(LABEL)){
+        input = lb.parentElement?.querySelector('input'); if(input) break;
       }
     }
     if (!input){ input = doc.querySelector('input[aria-label="'+LABEL+'"]'); }
     if (input){
       input.focus();
-      const len = input.value?.length || 0;
-      try { input.setSelectionRange(len, len); } catch(e){}
-    }
-  }, 80);
-})();
-</script>
-        """, height=0)
-
-    # 보기 형식 변경 시 상단 고정 + 포커스 (하단 튐 방지)
-    if st.session_state.pop("main_view_changed", False):
-        st.components.v1.html("""
-<script>
-(function(){
-  try{
-    var doc = window.parent && window.parent.document ? window.parent.document : document;
-    var el = doc.getElementById('main-tab-top');
-    if(el){
-      var top = (el.getBoundingClientRect().top + (window.parent ? window.parent.pageYOffset : window.pageYOffset)) - 90;
-      if(window.parent) window.parent.scrollTo({top: top, left: 0, behavior: 'auto'});
-      else window.scrollTo({top: top, left: 0, behavior: 'auto'});
-    }
-    var LABEL = '키워드 (입력 없이 Enter=전체조회, 공백=AND)';
-    var labels = Array.from(doc.querySelectorAll('label'));
-    var input = null;
-    for (const lb of labels){
-      if ((lb.textContent||'').trim().startsWith(LABEL)){
-        input = lb.parentElement && lb.parentElement.querySelector('input'); if(input) break;
-      }
-    }
-    if(!input) input = doc.querySelector('input[aria-label="'+LABEL+'"]');
-    if(input){
-      input.focus();
-      var len = (input.value||'').length; try{input.setSelectionRange(len, len);}catch(e){}
+      const len = (input.value||'').length;
+      try{ input.setSelectionRange(len, len); }catch(e){}
     }
   }catch(e){}
 })();
 </script>
         """, height=0)
+# ========================== 메인 탭 끝 ==========================
 
 # ============================ QnA 탭 ============================
 with tab_qna:
@@ -934,14 +951,11 @@ with tab_pdf:
 
 # ============================ 인증교육자료(동영상) 탭 ============================
 with tab_edu:
-    # 필요 시 목록 새로고침(심플 유지)
-    if st.button("목록 새로고침", key="edu_refresh"):
-        st.cache_data.clear(); st.rerun()
-
     API_KEY = DRIVE_API_KEY
     if not API_KEY or not EDU_FOLDER_ID:
         st.warning("교육자료 폴더를 불러오려면 **DRIVE_API_KEY / EDU_FOLDER_ID** 시크릿이 필요합니다.")
     else:
+        # 목록 불러오기
         try:
             nodes = _drive_list_all(EDU_FOLDER_ID, API_KEY)
         except Exception as e:
@@ -956,26 +970,44 @@ with tab_edu:
                 cur = by_id.get(parents[0]) if parents else None
             return "/".join([x for x in reversed(p) if x])
 
+        # 동영상만 추출
         VIDEO_EXT_RE = re.compile(r"\.(mp4|m4v|mov|avi|wmv|mkv|webm)$", re.I)
         items = []
         for n in nodes:
             mt = (n.get("mimeType") or ""); name = (n.get("name") or "")
-            if mt == "application/vnd.google-apps.folder": continue
+            if mt == "application/vnd.google-apps.folder":
+                continue
             if mt.startswith("video/") or VIDEO_EXT_RE.search(name):
                 items.append({"id": n["id"], "path": _path_of(n["id"]), "name": name})
         items.sort(key=lambda x: x["path"].lower())
 
         st.markdown(f"총 **{len(items):,}개**")
+
         if not items:
             st.info("표시할 동영상이 없습니다.")
         else:
-            # 파일명만 링크: /view (새 탭에서 바로 재생)
-            st.markdown('<div class="vlist">', unsafe_allow_html=True)
+            # 링크의 파란 밑줄/색 제거 + 박스형 아이템
+            st.markdown("""
+<style>
+.vbox a{
+  display:block; border:1px solid #e9ecef; border-radius:12px;
+  padding:10px 12px; margin:6px 0; background:#fff;
+  text-decoration:none !important; color:inherit !important;
+}
+.vbox a:hover{ box-shadow:0 2px 8px rgba(0,0,0,.06); background:#fdfdfd; }
+.vbox .name{ font-size:14px; font-weight:600; word-break:break-all; }
+</style>
+            """, unsafe_allow_html=True)
+
+            # 파일명만 클릭 → 새 창에서 바로 재생(/view)
+            st.markdown('<div class="vbox">', unsafe_allow_html=True)
             for it in items:
                 url_view = f"https://drive.google.com/file/d/{it['id']}/view"
                 st.markdown(
-                    f'<div class="row"><div class="name"><a href="{url_view}" target="_blank" rel="noopener noreferrer">{html.escape(it["path"])}</a></div></div>',
+                    f'<a href="{url_view}" target="_blank" rel="noopener noreferrer">'
+                    f'  <div class="name">{html.escape(it["path"])}</div>'
+                    f'</a>',
                     unsafe_allow_html=True
                 )
             st.markdown('</div>', unsafe_allow_html=True)
-# =================================================================
+# ============================ 인증교육자료(동영상) 탭 끝 ============================
