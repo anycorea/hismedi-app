@@ -879,14 +879,25 @@ with tab_qna:
 
 # ============================ 규정검색(PDF파일/본문) 탭 ============================
 with tab_pdf:
-    # 상단 여백 최소화 + 폼 제출 버튼 숨김
     st.write("")
     st.markdown("<style>div[data-testid='stFormSubmitButton']{display:none!important;}</style>", unsafe_allow_html=True)
 
-    # ====== 검색 폼 (파일명 / 본문을 분리, 둘 다 AND 검색, 비어있으면 전체조회) ======
-    FIXED_LIMIT = 2000  # 로드 상한 (페이지네이션 있으므로 넉넉히)
+    # --- 컴팩트 UI 전용 스타일(이 탭 컨트롤만 작게) ---
+    st.markdown("""
+<style>
+.compact .stButton>button{
+  padding:4px 10px !important; font-size:12px !important; border-radius:8px !important;
+}
+.compact [data-baseweb="select"]>div{
+  min-height:30px !important; padding-top:2px !important; padding-bottom:2px !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+    # ====== 검색 폼: 파일명 / 본문 분리 ======
+    FIXED_LIMIT = 2000
     with st.form("pdf_search_form", clear_on_submit=False):
-        c1, c2, c3 = st.columns([2, 2, 0.7])
+        c1, c2, c3 = st.columns([2, 2, 0.6])
         with c1:
             name_kw = st.text_input(
                 "파일명 검색 (입력 없이 Enter=전체조회, 공백=AND)",
@@ -904,24 +915,19 @@ with tab_pdf:
         with c3:
             submitted_pdf = st.form_submit_button("검색")
 
-    # ====== 쿼리 실행 유틸 (파일명/본문 각각 AND, 둘 다 비면 전체) ======
+    # ====== 쿼리 유틸 ======
     def _query_regs(name_kw: str, body_kw: str, limit: int = 2000, hide_ipynb_chk: bool = True) -> pd.DataFrame:
         name_tokens = [t for t in re.split(r"\s+", (name_kw or "").strip()) if t]
         body_tokens = [t for t in re.split(r"\s+", (body_kw or "").strip()) if t]
 
         where_parts, params = [], {}
-
-        # (A) 본문 AND
         for i, kw in enumerate(body_tokens):
             where_parts.append(f"(text ILIKE :b{i})")
             params[f"b{i}"] = f"%{kw}%"
-
-        # (B) 파일명 AND
         for j, kw in enumerate(name_tokens):
             where_parts.append(f"(filename ILIKE :n{j})")
             params[f"n{j}"] = f"%{kw}%"
 
-        # (C) 체크포인트 숨김
         if hide_ipynb_chk:
             where_parts.append(r"(filename !~* '(^|[\\/])\.ipynb_checkpoints([\\/]|$)')")
 
@@ -937,28 +943,29 @@ with tab_pdf:
         with eng.begin() as con:
             return pd.read_sql_query(sql, con, params=params)
 
-    # ====== 제출 시 검색 → 세션 저장 ======
+    # ====== 검색 실행 ======
     if submitted_pdf:
         with st.spinner("검색 중..."):
             _df = _query_regs(name_kw, body_kw, limit=FIXED_LIMIT)
 
-        # file_id(me) 없는 행 제외 + 정렬
         if "me" in _df.columns:
             _df = _df[_df["me"].astype(str).str.strip() != ""]
         _df = _df.sort_values(["filename", "page"], kind="stable").reset_index(drop=True)
 
         if _df.empty:
             st.info("조건에 맞는 결과가 없습니다. (둘 다 비워서 Enter = 전체 조회)")
-            for k in ("pdf_results", "pdf_sel_idx", "pdf_body_tokens", "pdf_name_tokens", "pdf_page"):
+            for k in ("pdf_results", "pdf_sel_idx", "pdf_body_tokens", "pdf_name_tokens", "pdf_page", "pdf_page_size_choice"):
                 st.session_state.pop(k, None)
         else:
-            st.session_state["pdf_results"]    = _df.to_dict("records")
-            st.session_state["pdf_sel_idx"]    = 0
-            st.session_state["pdf_body_tokens"] = [t for t in re.split(r"\s+", (body_kw or "").strip()) if t]
-            st.session_state["pdf_name_tokens"] = [t for t in re.split(r"\s+", (name_kw or "").strip()) if t]
-            st.session_state["pdf_page"]       = 1  # 페이지네이션 초기화
+            st.session_state["pdf_results"]      = _df.to_dict("records")
+            st.session_state["pdf_sel_idx"]      = 0
+            st.session_state["pdf_body_tokens"]  = [t for t in re.split(r"\s+", (body_kw or "").strip()) if t]
+            st.session_state["pdf_name_tokens"]  = [t for t in re.split(r"\s+", (name_kw or "").strip()) if t]
+            st.session_state["pdf_page"]         = 1
+            # 페이지당 기본값 10으로 초기화(없을 때만)
+            st.session_state.setdefault("pdf_page_size_choice", 10)
 
-    # ====== 결과 + 간단 페이지네이션 + 미리보기 ======
+    # ====== 결과 + 페이지네이션 ======
     if "pdf_results" in st.session_state and st.session_state["pdf_results"]:
         import math, html as _html, base64 as _b64
 
@@ -966,44 +973,74 @@ with tab_pdf:
         body_tok = st.session_state.get("pdf_body_tokens", [])
         total    = len(df_all)
 
-        # 페이지 상태
+        # --- 페이지 상태
         PAGE_KEY = "pdf_page"
-        SIZE_KEY = "pdf_page_size"
-        page_size = int(st.session_state.get(SIZE_KEY, 30))
-        page      = int(st.session_state.get(PAGE_KEY, 1))
-        total_pages = max(1, math.ceil(total / max(1, page_size)))
-        page = min(max(1, page), total_pages)
+        SIZE_KEY = "pdf_page_size_choice"   # 값: 10/30/50 또는 '전체'
+        prev_choice = st.session_state.get(SIZE_KEY, 10)
+
+        # 선택옵션(표시 텍스트 그대로 저장)
+        size_options = [10, 30, 50, "전체"]
+        # 이전 선택을 index로 환산
+        if prev_choice == "전체":
+            idx_default = size_options.index("전체")
+        else:
+            idx_default = size_options.index(prev_choice) if prev_choice in size_options else 0
+
+        page_choice_container = st.container()
+        with page_choice_container:
+            st.markdown('<div class="compact">', unsafe_allow_html=True)
+            # 상단 컨트롤 바 (아주 컴팩트)
+            cA, cB, cC = st.columns([1.0, 1.0, 3])
+            with cA:
+                new_choice = st.selectbox("페이지당", size_options, index=idx_default, key=SIZE_KEY)
+            with cB:
+                col_prev, col_next = st.columns(2)
+                page = int(st.session_state.get(PAGE_KEY, 1))
+                if col_prev.button("◀", key="pdf_prev_btn", use_container_width=True) and page > 1:
+                    st.session_state[PAGE_KEY] = page - 1
+                    st.rerun()
+                if col_next.button("▶", key="pdf_next_btn", use_container_width=True):
+                    # 총 페이지 계산 후 체크
+                    if prev_choice == "전체":
+                        total_pages = 1
+                    else:
+                        ps = int(prev_choice) if prev_choice != "전체" else total
+                        total_pages = max(1, math.ceil(total / max(1, ps)))
+                    if page < total_pages:
+                        st.session_state[PAGE_KEY] = page + 1
+                        st.rerun()
+            with cC:
+                st.caption("※ 파일명/본문을 동시에 입력하면 AND 조건으로 모두 만족하는 페이지만 표시합니다.")
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        # 페이지당 값 변경 시 1페이지로
+        if new_choice != prev_choice:
+            st.session_state[PAGE_KEY] = 1
+            st.rerun()
+
+        # 실제 page_size/total_pages 계산
+        if new_choice == "전체":
+            page_size = max(1, total)
+            total_pages = 1
+            page = 1
+        else:
+            page_size = int(new_choice)
+            page      = int(st.session_state.get(PAGE_KEY, 1))
+            total_pages = max(1, math.ceil(total / max(1, page_size)))
+            page = min(max(1, page), total_pages)
 
         start = (page - 1) * page_size
         end   = min(start + page_size, total)
-        df    = df_all.iloc[start:end].reset_index(drop=False)  # drop=False로 전역 인덱스 유지(index 컬럼)
+        df    = df_all.iloc[start:end].reset_index(drop=False)
 
         st.write(f"결과: {total:,}건  ·  페이지 {page}/{total_pages}  ·  표시 {start+1}–{end}")
 
-        # 상단 컨트롤바(컴팩트)
-        cA, cB, cC = st.columns([1.2, 1.2, 3])
-        with cA:
-            new_size = st.selectbox("페이지당", [20, 30, 50, 100], index=[20, 30, 50, 100].index(page_size), key=SIZE_KEY)
-            if new_size != page_size:
-                st.session_state[PAGE_KEY] = 1
-                st.rerun()
-        with cB:
-            col_prev, col_next = st.columns(2)
-            if col_prev.button("◀ 이전", use_container_width=True) and page > 1:
-                st.session_state[PAGE_KEY] = page - 1
-                st.rerun()
-            if col_next.button("다음 ▶", use_container_width=True) and page < total_pages:
-                st.session_state[PAGE_KEY] = page + 1
-                st.rerun()
-        with cC:
-            st.caption("※ 파일명/본문을 동시에 입력하면 AND 조건으로 모두 만족하는 페이지만 표시합니다.")
-
         # 링크 생성
-        def view_url(fid: str, page: int) -> str:
+        def view_url(fid: str, p: int) -> str:
             fid = (fid or "").strip()
-            return f"https://drive.google.com/file/d/{fid}/view#page={int(page)}"
+            return f"https://drive.google.com/file/d/{fid}/view#page={int(p)}"
 
-        # ===== 목록(심플 표형만) =====
+        # ===== 목록(심플 표형) =====
         hdr = st.columns([6, 1, 1, 6])
         hdr[0].markdown("**파일명**")
         hdr[1].markdown("**페이지**")
@@ -1017,15 +1054,12 @@ with tab_pdf:
             global_i = int(row["index"])
             c1, c2, c3, c4 = st.columns([6, 1, 1, 6])
 
-            # 파일명/페이지 버튼: 미리보기 선택
             if c1.button(str(row["filename"]), key=f"pick_name_{global_i}"):
                 st.session_state["pdf_sel_idx"] = global_i
                 st.rerun()
             if c2.button(str(int(row["page"])), key=f"pick_page_{global_i}"):
                 st.session_state["pdf_sel_idx"] = global_i
                 st.rerun()
-
-            # 열기 링크
             c3.markdown(
                 f'<a href="{view_url(row["me"], int(row["page"]))}" target="_blank" rel="noopener noreferrer" '
                 f'style="display:inline-block;padding:6px 12px;border:1px solid #ddd;border-radius:8px;'
@@ -1033,11 +1067,11 @@ with tab_pdf:
                 unsafe_allow_html=True
             )
 
-            # 본문 스니펫(본문 키워드가 있으면 하이라이트)
-            snippet_html = highlight_html(str(row.get("text","")), body_tok, width=120) if body_tok else _html.escape(str(row.get("text",""))[:120]) + ("..." if len(str(row.get("text",""))) > 120 else "")
+            snippet_html = highlight_html(str(row.get("text","")), body_tok, width=120) if body_tok \
+                else _html.escape(str(row.get("text",""))[:120]) + ("..." if len(str(row.get("text",""))) > 120 else "")
             c4.markdown(snippet_html, unsafe_allow_html=True)
 
-        # ====== 선택 행 미리보기 ======
+        # ===== 선택 행 미리보기 =====
         sel_idx = int(st.session_state.get("pdf_sel_idx", 0))
         sel_idx = max(0, min(sel_idx, len(df_all) - 1))
         sel = df_all.iloc[sel_idx]
@@ -1049,7 +1083,7 @@ with tab_pdf:
         st.write(f"**파일**: {sel_file}  |  **페이지**: {sel_page}  |  **file_id**: {fid or '-'}")
         st.markdown(highlight_html(sel["text"], body_tok, width=200), unsafe_allow_html=True)
 
-        # ---- PDF 바이트 캐시 + 미리보기(pdf.js)
+        # pdf.js 미리보기
         cache = st.session_state.setdefault("pdf_cache", {})
         b64 = cache.get(fid)
         if not b64:
@@ -1061,7 +1095,6 @@ with tab_pdf:
         zoom_pct  = st.slider("줌(%)", 30, 200, 80, step=5, key=f"pv_zoom_{fid}")
         height_px = st.slider("미리보기 높이(px)", 480, 1200, 640, step=40, key=f"pv_h_{fid}")
 
-        max_fit_width = 900
         viewer_html = f"""
 <div id="pdf-root" style="width:100%;height:{height_px}px;max-height:80vh;background:#fafafa;overflow:auto;">
   <canvas id="pdf-canvas" style="display:block;margin:0 auto;background:#fff;box-shadow:0 0 4px rgba(0,0,0,0.08)"></canvas>
@@ -1079,7 +1112,7 @@ with tab_pdf:
   const pdfData    = b64ToUint8Array("{b64}");
   const targetPage = {int(page_view)};
   const sliderZoom = {float(zoom_pct)}/100.0;
-  const maxFitW    = {int(max_fit_width)};
+  const maxFitW    = 900;
   pdfjsLib.getDocument({{ data: pdfData }}).promise.then(function(pdf) {{
     const pageNo = Math.min(Math.max(1, targetPage), pdf.numPages);
     return pdf.getPage(pageNo).then(function(page) {{
