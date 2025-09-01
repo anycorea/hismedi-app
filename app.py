@@ -56,11 +56,10 @@ h1, h2, h3, .main-title{ scroll-margin-top: 80px; }
       text-decoration:none;color:#0d6efd;font-weight:600}
 .pmeta{font-size:12px;color:#6c757d;margin-top:6px}
 
-/* 동영상 탭(매우 심플) */
-.vlist .row{display:flex;align-items:center;gap:.5rem;margin:.35rem 0;}
+/* 동영상 탭(심플) */
+.vlist .row{display:flex;align-items:center;gap:.5rem;margin:.6rem 0;} /* 간격 살짝 확대 */
 .vlist .name{flex:1 1 auto; word-break:break-all; font-size:14px;}
-.vbar{display:flex;justify-content:space-between;align-items:center;margin:.25rem 0 .5rem 0}
-.vbar .right{opacity:.75;font-size:12px}
+.vlist .name a{text-decoration:none; font-weight:600; color:#0d6efd}
 
 /* 상단 동기화 버튼 */
 .stButton > button.sync-all{
@@ -104,7 +103,7 @@ if _APP_PW:
         st.error("APP_PASSWORD 는 8자리 숫자여야 합니다. (예: 12345678)"); st.stop()
     if not st.session_state.get("pw_ok", False):
         with st.form("pw_gate", clear_on_submit=False):
-            pw = st.text_input("접속 비밀번호 (8자리 숫자)", type="password", max_chars=8, placeholder="예: 12345678")
+            pw = st.text_input("접속 비밀번호 (입력 숫자 8자리)", type="password", max_chars=8, placeholder="예: 12345678")
             ok = st.form_submit_button("확인")
         if ok:
             if (not _is_valid_pw_format(pw)) or (pw != _APP_PW):
@@ -166,9 +165,6 @@ def _choose_search_cols(eng, table: str) -> List[str]:
     return pref if pref else all_cols
 
 def search_table_any(eng, table: str, keywords: str, columns=None, limit: int = 500):
-    """
-    공백 AND, 다중 컬럼 OR, 모든 타입 ::text 캐스팅. 키워드가 비면 전체 조회(LIMIT 적용).
-    """
     kw_list = [w for w in re.split(r"\s+", (keywords or "").strip()) if w]
     select_cols = "*"
     if columns: select_cols = ", ".join(_qident(c) for c in columns)
@@ -279,7 +275,6 @@ def _drive_download_pdf(file_id: str, api_key: str) -> bytes:
     return r.content
 
 def index_pdfs_from_drive(eng, folder_id: str, api_key: str, limit_files: int = 0):
-    """간단 인덱싱(신규만)."""
     ensure_reg_table(eng)
     by_id, id_to_rel, rel_to_id = _drive_path_map(folder_id, api_key)
     indexed = skipped = errors = 0
@@ -326,7 +321,6 @@ def highlight_html(src_text: str, kw_list: List[str], width: int = 200) -> str:
     return esc
 
 def search_regs(eng, keywords: str, filename_like: str = "", limit: int = 500, hide_ipynb_chk: bool = True):
-    """PDF 본문 검색. 키워드 없으면 전체 조회."""
     kw_list = [k.strip() for k in str(keywords or "").split() if k.strip()]
     where_parts, params = [], {}
     if kw_list:
@@ -375,7 +369,7 @@ def _extract_drive_id(value: str) -> str:
 DRIVE_API_KEY   = (st.secrets.get("DRIVE_API_KEY")   or os.getenv("DRIVE_API_KEY")   or "").strip()
 DRIVE_FOLDER_ID = _extract_drive_id(st.secrets.get("DRIVE_FOLDER_ID") or os.getenv("DRIVE_FOLDER_ID") or "")
 
-# 인증교육자료(동영상) 폴더(시크릿 없으면 제공하신 기본값 사용)
+# 인증교육자료(동영상) 폴더(시크릿 없으면 기본값 사용)
 EDU_FOLDER_DEFAULT = "1AQkdgO3iVqzUta5LPTMl5qqUlppJ97Pn"
 EDU_FOLDER_ID = _extract_drive_id(st.secrets.get("EDU_FOLDER_ID") or os.getenv("EDU_FOLDER_ID") or EDU_FOLDER_DEFAULT)
 
@@ -383,7 +377,7 @@ EDU_FOLDER_ID = _extract_drive_id(st.secrets.get("EDU_FOLDER_ID") or os.getenv("
 # 상단: 데이터 전체 동기화 (Main+QnA + PDF 인덱스)
 # ------------------------------------------------------------
 if (not _APP_PW) or st.session_state.get("pw_ok", False):
-    if st.button("데이터 전체 동기화", key="btn_sync_all_pdf", type="secondary", help="Main+QnA 동기화, PDF 키가 있으면 인덱싱까지 수행합니다.", kwargs=None):
+    if st.button("데이터 전체 동기화", key="btn_sync_all_pdf", type="secondary", help="Main+QnA 동기화, PDF 키가 있으면 인덱싱까지 수행합니다."):
         try:
             r1 = _trigger_edge_func("sync_main"); cnt_main = int(r1.get("count", 0))
             r2 = _trigger_edge_func("sync_qna");  cnt_qna  = int(r2.get("count", 0))
@@ -423,6 +417,8 @@ tab_main, tab_qna, tab_pdf, tab_edu = st.tabs(["기준/지침", "Q/n/A", "규정
 
 # ========================== 메인 탭 ==========================
 with tab_main:
+    # 탭 상단 앵커(보기 전환 시 상단 고정용)
+    st.markdown('<div id="main-tab-top"></div>', unsafe_allow_html=True)
     st.markdown("<style>div[data-testid='stFormSubmitButton']{display:none!important;}</style>", unsafe_allow_html=True)
 
     main_table = _pick_table(eng, ["main_sheet_v", "main_v", "main_raw"]) or "main_raw"
@@ -482,8 +478,7 @@ with tab_main:
             st.session_state.pop("main_results", None)
         else:
             st.session_state["main_results"] = results_df.to_dict("records")
-        # ← 검색 직후 1회만 포커스 주도록 플래그
-        st.session_state["main_should_focus"] = True
+        st.session_state["main_should_focus"] = True  # 검색 직후 1회 포커스
 
     st.markdown("""
 <style>
@@ -532,12 +527,19 @@ with tab_main:
 </div>
 """, unsafe_allow_html=True)
 
+    # 보기 형식 라디오 (전환 시 상단 고정)
+    def _on_main_view_change():
+        st.session_state["main_view_changed"] = True
+
+    if "main_view_mode" not in st.session_state:
+        st.session_state["main_view_mode"] = "표형(PC)"
+
     if "main_results" in st.session_state and st.session_state["main_results"]:
         df = pd.DataFrame(st.session_state["main_results"])
         cols_order = [c for c in MAIN_COLS if c in df.columns]
         st.write(f"결과: {len(df):,}건")
-        # 기본값을 '표형(PC)'로
-        view_mode = st.radio("보기 형식", ["표형(PC)", "카드형(모바일)"], index=0, horizontal=True, key="main_view_mode")
+        view_mode = st.radio("보기 형식", ["표형(PC)", "카드형(모바일)"], index=0, horizontal=True,
+                             key="main_view_mode", on_change=_on_main_view_change)
         if view_mode.startswith("표형"):
             render_table(df, cols_order)
         else:
@@ -545,7 +547,7 @@ with tab_main:
     else:
         st.caption("힌트: 조사장소/조사대상은 메인 키워드와 AND 조건으로 결합되어 검색됩니다.")
 
-    # --- 메인 검색 입력칸 포커스(1회) / 스크롤 이동 없음 ---
+    # 검색 직후 포커스(스크롤 이동 없음)
     if st.session_state.pop("main_should_focus", False):
         st.components.v1.html("""
 <script>
@@ -557,8 +559,7 @@ with tab_main:
     const labels = Array.from(doc.querySelectorAll('label'));
     for (const lb of labels){
       if ((lb.textContent || '').trim().startsWith(LABEL)){
-        input = lb.parentElement?.querySelector('input');
-        if (input) break;
+        input = lb.parentElement?.querySelector('input'); if (input) break;
       }
     }
     if (!input){ input = doc.querySelector('input[aria-label="'+LABEL+'"]'); }
@@ -566,9 +567,39 @@ with tab_main:
       input.focus();
       const len = input.value?.length || 0;
       try { input.setSelectionRange(len, len); } catch(e){}
-      /* scrollIntoView 금지: 스크롤 튐 방지 */
     }
   }, 80);
+})();
+</script>
+        """, height=0)
+
+    # 보기 형식 변경 시 상단 고정 + 포커스 (하단 튐 방지)
+    if st.session_state.pop("main_view_changed", False):
+        st.components.v1.html("""
+<script>
+(function(){
+  try{
+    var doc = window.parent && window.parent.document ? window.parent.document : document;
+    var el = doc.getElementById('main-tab-top');
+    if(el){
+      var top = (el.getBoundingClientRect().top + (window.parent ? window.parent.pageYOffset : window.pageYOffset)) - 90;
+      if(window.parent) window.parent.scrollTo({top: top, left: 0, behavior: 'auto'});
+      else window.scrollTo({top: top, left: 0, behavior: 'auto'});
+    }
+    var LABEL = '키워드 (입력 없이 Enter=전체조회, 공백=AND)';
+    var labels = Array.from(doc.querySelectorAll('label'));
+    var input = null;
+    for (const lb of labels){
+      if ((lb.textContent||'').trim().startsWith(LABEL)){
+        input = lb.parentElement && lb.parentElement.querySelector('input'); if(input) break;
+      }
+    }
+    if(!input) input = doc.querySelector('input[aria-label="'+LABEL+'"]');
+    if(input){
+      input.focus();
+      var len = (input.value||'').length; try{input.setSelectionRange(len, len);}catch(e){}
+    }
+  }catch(e){}
 })();
 </script>
         """, height=0)
@@ -903,13 +934,9 @@ with tab_pdf:
 
 # ============================ 인증교육자료(동영상) 탭 ============================
 with tab_edu:
-    # 간단 새로고침/안내
-    cL, cR = st.columns([1, 3])
-    with cL:
-        if st.button("목록 새로고침", key="edu_refresh", use_container_width=True):
-            st.cache_data.clear(); st.rerun()
-    with cR:
-        st.caption("공유폴더 변경 후 목록이 다르면 새로고침을 눌러주세요.")
+    # 필요 시 목록 새로고침(심플 유지)
+    if st.button("목록 새로고침", key="edu_refresh"):
+        st.cache_data.clear(); st.rerun()
 
     API_KEY = DRIVE_API_KEY
     if not API_KEY or not EDU_FOLDER_ID:
@@ -938,30 +965,16 @@ with tab_edu:
                 items.append({"id": n["id"], "path": _path_of(n["id"]), "name": name})
         items.sort(key=lambda x: x["path"].lower())
 
-        q = st.text_input(
-            "파일명 검색 (입력 없이 Enter=전체조회, 공백=AND)",
-            value=st.session_state.get("edu_kw", ""),
-            key="edu_kw",
-            placeholder="예) 1.1, 환자 확인, 손위생, 낙상 예방 등"
-        ).strip()
-
-        if q:
-            tokens = [t for t in re.split(r"\s+", q) if t]
-            def _match(it):
-                hay = (it["path"] + " " + it["name"]).lower()
-                return all(tok.lower() in hay for tok in tokens)
-            items = [it for it in items if _match(it)]
-
-        st.write(f"총 {len(items):,}개")
+        st.markdown(f"총 **{len(items):,}개**")
         if not items:
-            st.info("표시할 동영상이 없습니다. (검색어를 비워 전체 목록을 보세요)")
+            st.info("표시할 동영상이 없습니다.")
         else:
-            # 아이콘/버튼 제거 — 파일명만 링크(프리뷰 전용 URL)
+            # 파일명만 링크: /view (새 탭에서 바로 재생)
             st.markdown('<div class="vlist">', unsafe_allow_html=True)
             for it in items:
-                url_preview = f"https://drive.google.com/file/d/{it['id']}/preview"
+                url_view = f"https://drive.google.com/file/d/{it['id']}/view"
                 st.markdown(
-                    f'<div class="row"><div class="name"><a href="{url_preview}" target="_blank" rel="noopener noreferrer">{html.escape(it["path"])}</a></div></div>',
+                    f'<div class="row"><div class="name"><a href="{url_view}" target="_blank" rel="noopener noreferrer">{html.escape(it["path"])}</a></div></div>',
                     unsafe_allow_html=True
                 )
             st.markdown('</div>', unsafe_allow_html=True)
