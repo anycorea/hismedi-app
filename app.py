@@ -923,11 +923,11 @@ with tab_pdf:
                     st.session_state[PAGE_KEY] = page + 1
                     st.rerun()
         with topC:
-            # 뷰 모드 스위치: 기본 '모바일 카드'
+            # 뷰 모드 스위치: 기본 '카드형(모바일)'
             view_mode_pdf = st.radio(
                 "보기",
-                ["모바일 카드", "표형(PC)"],
-                index=0 if st.session_state.get("pdf_view_mode","모바일 카드")=="모바일 카드" else 1,
+                ["카드형(모바일)", "표형(PC)"],
+                index=0 if st.session_state.get("pdf_view_mode","카드형(모바일)")=="카드형(모바일)" else 1,
                 key="pdf_view_mode",
                 horizontal=True
             )
@@ -961,8 +961,8 @@ with tab_pdf:
             fid = (fid or "").strip()
             return f"https://drive.google.com/file/d/{fid}/view#page={int(p)}"
 
-        # ===== (A) 모바일 카드 뷰 =====
-        if view_mode_pdf == "모바일 카드":
+        # ===== (A) 카드형(모바일) 뷰 =====
+        if view_mode_pdf == "카드형(모바일)":
             if "pdf_sel_idx" not in st.session_state:
                 st.session_state["pdf_sel_idx"] = 0
 
