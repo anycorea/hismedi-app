@@ -759,20 +759,48 @@ with tab_qna:
     else:
         st.caption("키워드를 입력하고 **Enter** 를 누르면 결과가 표시됩니다. (입력 없이 Enter=전체 조회)")
 
-# ============================ PDF 탭 ============================
+# ====================== PDF 탭 ============================
 with tab_pdf:
-    # 폼 제출 버튼 숨김 + 이 탭 전용 컴팩트 CSS (라벨/입력 간격 축소)
+    # 폼 제출 버튼 숨김 + 이 탭 전용 컴팩트/모바일 친화 CSS
     st.markdown("""
 <style>
-/* 이 탭 전용: 버튼/셀렉트 컴팩트 */
+/* 컨트롤/버튼/셀렉트 컴팩트 */
 .pdf-compact .stButton>button{
   padding:4px 10px !important; font-size:12px !important; border-radius:8px !important;
 }
 .pdf-compact [data-baseweb="select"]>div{
   min-height:30px !important; padding-top:2px !important; padding-bottom:2px !important;
 }
-/* 라벨과 입력창 간격을 더 타이트하게 (탭 하단 여백 느낌 줄이기) */
+/* 라벨-입력 간격 타이트 */
 .stTextInput > label{ margin-bottom:6px !important; }
+
+/* 모바일 카드 스타일 */
+.pdf-card{
+  border:1px solid #e9ecef; border-radius:12px; background:#fff;
+  padding:10px 12px; margin:8px 0;
+}
+.pdf-card .fname{
+  font-weight:800; font-size:14px; line-height:1.35; word-break:break-all;
+}
+.pdf-card .meta{
+  font-size:12px; color:#6c757d; margin-top:4px;
+}
+.pdf-card .snip{
+  font-size:13px; line-height:1.45; margin-top:6px; word-break:break-word;
+}
+.pdf-card .rowbtn{ display:flex; gap:6px; margin-top:8px; }
+.pdf-compact .open-btn{
+  display:inline-block; padding:4px 10px !important; font-size:12px !important;
+  border:1px solid #ddd; border-radius:8px; background:#f8f9fa;
+  text-decoration:none; color:#0d6efd; font-weight:600;
+}
+
+/* PC에서는 표형이 더 잘 보이므로 표 스타일 유지 */
+.pcard{border:1px solid #e9ecef;border-radius:12px;padding:12px 14px;margin:10px 0;background:#fff}
+.pcard .title{font-size:15px;font-weight:700;margin-bottom:10px;word-break:break-all}
+.pbtn{display:inline-block;padding:8px 12px;border:1px solid #dee2e6;border-radius:10px;background:#f8f9fa;
+      text-decoration:none;color:#0d6efd;font-weight:600}
+.pmeta{font-size:12px;color:#6c757d;margin-top:6px}
 </style>
 """, unsafe_allow_html=True)
 
@@ -846,6 +874,7 @@ with tab_pdf:
             st.session_state["pdf_name_tokens"]  = [t for t in re.split(r"\s+", (name_kw or "").strip()) if t]
             st.session_state["pdf_page"]         = 1
             st.session_state.setdefault("pdf_page_size_label", "10개/page")
+            st.session_state.setdefault("pdf_view_mode", "모바일 카드")  # 기본: 모바일 친화
 
     # ====== 결과 + 페이지네이션 ======
     if "pdf_results" in st.session_state and st.session_state["pdf_results"]:
@@ -866,10 +895,10 @@ with tab_pdf:
         except ValueError:
             idx_default = 0
 
+        # 상단 컨트롤 바 (모바일 친화)
         st.markdown('<div class="pdf-compact">', unsafe_allow_html=True)
-        topA, topB, topC = st.columns([1.2, 0.9, 3])
+        topA, topB, topC = st.columns([1.2, 0.9, 1.4])
         with topA:
-            # 라벨 제거(간격 맞춤)
             new_label = st.selectbox(
                 "",
                 size_labels,
@@ -894,7 +923,14 @@ with tab_pdf:
                     st.session_state[PAGE_KEY] = page + 1
                     st.rerun()
         with topC:
-            st.caption("※ 파일명/본문을 동시에 입력하면 AND 조건으로 모두 만족하는 페이지만 표시합니다.")
+            # 뷰 모드 스위치: 기본 '모바일 카드'
+            view_mode_pdf = st.radio(
+                "보기",
+                ["모바일 카드", "표형(PC)"],
+                index=0 if st.session_state.get("pdf_view_mode","모바일 카드")=="모바일 카드" else 1,
+                key="pdf_view_mode",
+                horizontal=True
+            )
         st.markdown('</div>', unsafe_allow_html=True)
 
         # 드롭다운 값 변경 시 1페이지로
@@ -918,43 +954,83 @@ with tab_pdf:
         end   = min(start + page_size, total)
         df    = df_all.iloc[start:end].reset_index(drop=False)
 
-        st.write(f"결과: {total:,}건  ·  페이지 {page}/{total_pages}  ·  표시 {start+1}–{end}")
+        st.write(f"결과: {total:,}건  ·  페이지 {page}/{total_pages}  ·  표시 {start+1}–{end}  ·  페이지당 {page_size:,}건")
 
         # 링크 생성
         def view_url(fid: str, p: int) -> str:
             fid = (fid or "").strip()
             return f"https://drive.google.com/file/d/{fid}/view#page={int(p)}"
 
-        # ===== 목록(심플 표형) =====
-        hdr = st.columns([6, 1, 1, 6])
-        hdr[0].markdown("**파일명**")
-        hdr[1].markdown("**페이지**")
-        hdr[2].markdown("**열기**")
-        hdr[3].markdown("**본문 요약**")
+        # ===== (A) 모바일 카드 뷰 =====
+        if view_mode_pdf == "모바일 카드":
+            if "pdf_sel_idx" not in st.session_state:
+                st.session_state["pdf_sel_idx"] = 0
 
-        if "pdf_sel_idx" not in st.session_state:
-            st.session_state["pdf_sel_idx"] = 0
+            st.markdown('<div class="pdf-compact">', unsafe_allow_html=True)
+            for _, row in df.iterrows():
+                global_i = int(row["index"])
+                fname    = str(row["filename"])
+                pagei    = int(row["page"])
+                fid_i    = (row.get("me") or "").strip()
 
-        for _, row in df.iterrows():
-            global_i = int(row["index"])
-            c1, c2, c3, c4 = st.columns([6, 1, 1, 6])
+                # 본문 스니펫
+                txt = str(row.get("text",""))
+                if body_tok:
+                    snippet_html = highlight_html(txt, body_tok, width=140)
+                else:
+                    snippet_html = _html.escape(txt[:140]) + ("..." if len(txt) > 140 else "")
 
-            if c1.button(str(row["filename"]), key=f"pick_name_{global_i}"):
-                st.session_state["pdf_sel_idx"] = global_i
-                st.rerun()
-            if c2.button(str(int(row["page"])), key=f"pick_page_{global_i}"):
-                st.session_state["pdf_sel_idx"] = global_i
-                st.rerun()
-            c3.markdown(
-                f'<a href="{view_url(row["me"], int(row["page"]))}" target="_blank" rel="noopener noreferrer" '
-                f'style="display:inline-block;padding:6px 12px;border:1px solid #ddd;border-radius:8px;'
-                f'background:#f8f9fa;text-decoration:none;color:#0d6efd;font-weight:600;">열기</a>',
-                unsafe_allow_html=True
-            )
+                # 카드 렌더
+                st.markdown(
+                    f"""
+<div class="pdf-card">
+  <div class="fname">{_html.escape(fname)}</div>
+  <div class="meta">페이지 {pagei}</div>
+  <div class="snip">{snippet_html}</div>
+  <div class="rowbtn">
+    <a class="open-btn" href="{view_url(fid_i, pagei)}" target="_blank" rel="noopener noreferrer">열기</a>
+  </div>
+</div>
+""",
+                    unsafe_allow_html=True
+                )
+                # 카드 전체를 선택으로 만들기 위한 작은 버튼(시각적 노이즈 최소화)
+                if st.button("미리보기", key=f"pick_mobile_{global_i}", use_container_width=True):
+                    st.session_state["pdf_sel_idx"] = global_i
+                    st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
 
-            snippet_html = highlight_html(str(row.get("text","")), body_tok, width=120) if body_tok \
-                else _html.escape(str(row.get("text",""))[:120]) + ("..." if len(str(row.get("text",""))) > 120 else "")
-            c4.markdown(snippet_html, unsafe_allow_html=True)
+        # ===== (B) 표형(PC) 뷰 =====
+        else:
+            # 헤더
+            hdr = st.columns([6, 1, 1, 6])
+            hdr[0].markdown("**파일명**")
+            hdr[1].markdown("**페이지**")
+            hdr[2].markdown("**열기**")
+            hdr[3].markdown("**본문 요약**")
+
+            if "pdf_sel_idx" not in st.session_state:
+                st.session_state["pdf_sel_idx"] = 0
+
+            for _, row in df.iterrows():
+                global_i = int(row["index"])
+                c1, c2, c3, c4 = st.columns([6, 1, 1, 6])
+
+                if c1.button(str(row["filename"]), key=f"pick_name_{global_i}"):
+                    st.session_state["pdf_sel_idx"] = global_i
+                    st.rerun()
+                if c2.button(str(int(row["page"])), key=f"pick_page_{global_i}"):
+                    st.session_state["pdf_sel_idx"] = global_i
+                    st.rerun()
+                c3.markdown(
+                    f'<a class="open-btn" href="{view_url(row["me"], int(row["page"]))}" target="_blank" rel="noopener noreferrer">열기</a>',
+                    unsafe_allow_html=True
+                )
+
+                txt = str(row.get("text",""))
+                snippet_html = highlight_html(txt, body_tok, width=120) if body_tok \
+                    else _html.escape(txt[:120]) + ("..." if len(txt) > 120 else "")
+                c4.markdown(snippet_html, unsafe_allow_html=True)
 
         # ===== 선택 행 미리보기 =====
         sel_idx = int(st.session_state.get("pdf_sel_idx", 0))
@@ -968,7 +1044,7 @@ with tab_pdf:
         st.write(f"**파일**: {sel_file}  |  **페이지**: {sel_page}  |  **file_id**: {fid or '-'}")
         st.markdown(highlight_html(sel["text"], body_tok, width=200), unsafe_allow_html=True)
 
-        # pdf.js 미리보기
+        # ---- pdf.js 미리보기
         cache = st.session_state.setdefault("pdf_cache", {})
         b64 = cache.get(fid)
         if not b64:
