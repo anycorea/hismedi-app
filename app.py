@@ -795,7 +795,7 @@ with tab_pdf:
   text-decoration:none; color:#0d6efd; font-weight:600;
 }
 
-/* PC에서는 표형이 더 잘 보이므로 표 스타일 유지 */
+/* PC용 간단 표 카드 (표형 보기에서 사용) */
 .pcard{border:1px solid #e9ecef;border-radius:12px;padding:12px 14px;margin:10px 0;background:#fff}
 .pcard .title{font-size:15px;font-weight:700;margin-bottom:10px;word-break:break-all}
 .pbtn{display:inline-block;padding:8px 12px;border:1px solid #dee2e6;border-radius:10px;background:#f8f9fa;
@@ -865,7 +865,7 @@ with tab_pdf:
 
         if _df.empty:
             st.info("조건에 맞는 결과가 없습니다. (둘 다 비워서 Enter=전체 조회)")
-            for k in ("pdf_results", "pdf_sel_idx", "pdf_body_tokens", "pdf_name_tokens", "pdf_page", "pdf_page_size_label"):
+            for k in ("pdf_results", "pdf_sel_idx", "pdf_body_tokens", "pdf_name_tokens", "pdf_page", "pdf_page_size_label", "pdf_view_mode"):
                 st.session_state.pop(k, None)
         else:
             st.session_state["pdf_results"]      = _df.to_dict("records")
@@ -874,7 +874,7 @@ with tab_pdf:
             st.session_state["pdf_name_tokens"]  = [t for t in re.split(r"\s+", (name_kw or "").strip()) if t]
             st.session_state["pdf_page"]         = 1
             st.session_state.setdefault("pdf_page_size_label", "10개/page")
-            st.session_state.setdefault("pdf_view_mode", "모바일 카드")  # 기본: 모바일 친화
+            st.session_state.setdefault("pdf_view_mode", "카드형(모바일)")  # 기본: 모바일 친화
 
     # ====== 결과 + 페이지네이션 ======
     if "pdf_results" in st.session_state and st.session_state["pdf_results"]:
@@ -897,7 +897,7 @@ with tab_pdf:
 
         # 상단 컨트롤 바 (모바일 친화)
         st.markdown('<div class="pdf-compact">', unsafe_allow_html=True)
-        topA, topB, topC = st.columns([1.2, 0.9, 1.4])
+        topA, topB, topC = st.columns([1.2, 0.9, 1.6])
         with topA:
             new_label = st.selectbox(
                 "",
@@ -923,7 +923,7 @@ with tab_pdf:
                     st.session_state[PAGE_KEY] = page + 1
                     st.rerun()
         with topC:
-            # 뷰 모드 스위치: 기본 '카드형(모바일)'
+            # 뷰 모드 스위치: **카드형(모바일)** / **표형(PC)**
             view_mode_pdf = st.radio(
                 "보기",
                 ["카드형(모바일)", "표형(PC)"],
@@ -961,7 +961,7 @@ with tab_pdf:
             fid = (fid or "").strip()
             return f"https://drive.google.com/file/d/{fid}/view#page={int(p)}"
 
-        # ===== (A) 카드형(모바일) 뷰 =====
+        # ===== (A) 카드형(모바일) =====
         if view_mode_pdf == "카드형(모바일)":
             if "pdf_sel_idx" not in st.session_state:
                 st.session_state["pdf_sel_idx"] = 0
@@ -994,13 +994,13 @@ with tab_pdf:
 """,
                     unsafe_allow_html=True
                 )
-                # 카드 전체를 선택으로 만들기 위한 작은 버튼(시각적 노이즈 최소화)
+                # (필요 시) 미리보기 선택용 최소 버튼
                 if st.button("미리보기", key=f"pick_mobile_{global_i}", use_container_width=True):
                     st.session_state["pdf_sel_idx"] = global_i
                     st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
 
-        # ===== (B) 표형(PC) 뷰 =====
+        # ===== (B) 표형(PC) =====
         else:
             # 헤더
             hdr = st.columns([6, 1, 1, 6])
