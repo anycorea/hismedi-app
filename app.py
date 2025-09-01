@@ -973,7 +973,7 @@ with tab_pdf:
                 st.session_state[PAGE_KEY] = page + 1
                 st.rerun()
         with cC:
-            view_mode_pdf = st.radio("보기 형식", ["카드형(모바일)", "표형(간단)"], horizontal=True, key="pdf_view_mode")
+            view_mode_pdf = st.radio("보기 형식", ["카드형(모바일)", "표형(PC)"], horizontal=True, key="pdf_view_mode")
 
         # 링크 생성기
         def view_url(fid: str, page: int) -> str:
