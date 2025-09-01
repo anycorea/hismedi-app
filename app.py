@@ -811,7 +811,7 @@ with tab_pdf:
             )
         with c2:
             body_kw = st.text_input(
-                "본문(내용) 검색 (입력 없이 Enter=전체조회, 공백=AND)",
+                "본문(내용) 검색 (검색어 1개 이상 입력, 공백=AND)",
                 st.session_state.get("pdf_body_kw", ""),
                 key="pdf_body_kw",
                 placeholder="예) 병동, 외래, 내시경실, 간호사 등"
