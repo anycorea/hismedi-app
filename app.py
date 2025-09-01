@@ -879,21 +879,17 @@ with tab_qna:
 
 # ============================ 규정검색(PDF파일/본문) 탭 ============================
 with tab_pdf:
-    st.write("")
-    # 폼 제출 버튼 숨김
-    st.markdown("<style>div[data-testid='stFormSubmitButton']{display:none!important;}</style>", unsafe_allow_html=True)
-
-    # --- 이 탭 전용: 컴팩트 UI + 라벨/입력 간격 타이트 ---
+    # 폼 제출 버튼 숨김 + 이 탭 전용 컴팩트 CSS (라벨/입력 간격 축소)
     st.markdown("""
 <style>
-/* 버튼/셀렉트 최소 패딩 */
+/* 이 탭 전용: 버튼/셀렉트 컴팩트 */
 .pdf-compact .stButton>button{
   padding:4px 10px !important; font-size:12px !important; border-radius:8px !important;
 }
 .pdf-compact [data-baseweb="select"]>div{
   min-height:30px !important; padding-top:2px !important; padding-bottom:2px !important;
 }
-/* 라벨과 입력창 간격 살짝 축소(이 탭 포함 전역에 큰 영향 없음) */
+/* 라벨과 입력창 간격을 더 타이트하게 (탭 하단 여백 느낌 줄이기) */
 .stTextInput > label{ margin-bottom:6px !important; }
 </style>
 """, unsafe_allow_html=True)
@@ -967,7 +963,6 @@ with tab_pdf:
             st.session_state["pdf_body_tokens"]  = [t for t in re.split(r"\s+", (body_kw or "").strip()) if t]
             st.session_state["pdf_name_tokens"]  = [t for t in re.split(r"\s+", (name_kw or "").strip()) if t]
             st.session_state["pdf_page"]         = 1
-            # 드롭다운 기본값: 10개/page
             st.session_state.setdefault("pdf_page_size_label", "10개/page")
 
     # ====== 결과 + 페이지네이션 ======
@@ -980,7 +975,7 @@ with tab_pdf:
 
         # --- 페이지 상태
         PAGE_KEY = "pdf_page"
-        SIZE_KEY = "pdf_page_size_label"   # 값: '10개/page' | '30개/page' | '50개/page' | '전체 파일'
+        SIZE_KEY = "pdf_page_size_label"   # '10개/page' | '30개/page' | '50개/page' | '전체 파일'
         size_labels = ["10개/page", "30개/page", "50개/page", "전체 파일"]
 
         prev_label = st.session_state.get(SIZE_KEY, "10개/page")
@@ -992,16 +987,21 @@ with tab_pdf:
         st.markdown('<div class="pdf-compact">', unsafe_allow_html=True)
         topA, topB, topC = st.columns([1.2, 0.9, 3])
         with topA:
-            new_label = st.selectbox("페이지당", size_labels, index=idx_default, key=SIZE_KEY)
+            # 라벨 제거(간격 맞춤)
+            new_label = st.selectbox(
+                "",
+                size_labels,
+                index=idx_default,
+                key=SIZE_KEY,
+                label_visibility="collapsed",
+            )
         with topB:
-            # 이전/다음 (아주 작게)
             col_prev, col_next = st.columns(2)
             page = int(st.session_state.get(PAGE_KEY, 1))
             if col_prev.button("◀", key="pdf_prev_btn", use_container_width=True) and page > 1:
                 st.session_state[PAGE_KEY] = page - 1
                 st.rerun()
             if col_next.button("▶", key="pdf_next_btn", use_container_width=True):
-                # 총 페이지 계산 후 체크
                 if prev_label == "전체 파일":
                     total_pages = 1
                 else:
