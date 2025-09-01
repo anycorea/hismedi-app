@@ -761,143 +761,225 @@ with tab_qna:
 
 # ============================ PDF 탭 ============================
 with tab_pdf:
-    st.markdown("<style>div[data-testid='stFormSubmitButton']{display:none!important;}</style>", unsafe_allow_html=True)
+    # 폼 제출 버튼 숨김 + 이 탭 전용 컴팩트 CSS (라벨/입력 간격 축소)
+    st.markdown("""
+<style>
+/* 이 탭 전용: 버튼/셀렉트 컴팩트 */
+.pdf-compact .stButton>button{
+  padding:4px 10px !important; font-size:12px !important; border-radius:8px !important;
+}
+.pdf-compact [data-baseweb="select"]>div{
+  min-height:30px !important; padding-top:2px !important; padding-bottom:2px !important;
+}
+/* 라벨과 입력창 간격을 더 타이트하게 (탭 하단 여백 느낌 줄이기) */
+.stTextInput > label{ margin-bottom:6px !important; }
+</style>
+""", unsafe_allow_html=True)
 
-    # 내부 유틸: 전체 조회
-    def _fetch_all_regs(eng, filename_like: str = "", limit: int = 1000, hide_ipynb_chk: bool = True):
+    # ====== 검색 폼: 파일명 / 본문 분리 ======
+    FIXED_LIMIT = 2000
+    with st.form("pdf_search_form", clear_on_submit=False):
+        c1, c2 = st.columns([1, 1])
+        with c1:
+            name_kw = st.text_input(
+                "파일명 검색 (입력 없이 Enter=전체조회, 공백=AND)",
+                st.session_state.get("pdf_name_kw", ""),
+                key="pdf_name_kw",
+                placeholder="예) 1.1, 환자 확인, 수술, 손위생 등"
+            )
+        with c2:
+            body_kw = st.text_input(
+                "본문(내용) 검색 (입력 없이 Enter=전체조회, 공백=AND)",
+                st.session_state.get("pdf_body_kw", ""),
+                key="pdf_body_kw",
+                placeholder="예) 병동, 외래, 내시경실, 간호사 등"
+            )
+        submitted_pdf = st.form_submit_button("검색")
+
+    # ====== 쿼리 유틸 ======
+    def _query_regs(name_kw: str, body_kw: str, limit: int = 2000, hide_ipynb_chk: bool = True) -> pd.DataFrame:
+        name_tokens = [t for t in re.split(r"\s+", (name_kw or "").strip()) if t]
+        body_tokens = [t for t in re.split(r"\s+", (body_kw or "").strip()) if t]
         where_parts, params = [], {}
-        if filename_like.strip():
-            where_parts.append("filename ILIKE :fn"); params["fn"] = f"%{filename_like.strip()}%"
+
+        # 본문 AND
+        for i, kw in enumerate(body_tokens):
+            where_parts.append(f"(text ILIKE :b{i})")
+            params[f"b{i}"] = f"%{kw}%"
+        # 파일명 AND
+        for j, kw in enumerate(name_tokens):
+            where_parts.append(f"(filename ILIKE :n{j})")
+            params[f"n{j}"] = f"%{kw}%"
+
         if hide_ipynb_chk:
             where_parts.append(r"(filename !~* '(^|[\\/])\.ipynb_checkpoints([\\/]|$)')")
+
         where_sql = " AND ".join(where_parts) if where_parts else "TRUE"
         sql = text(f"""
-            select filename, page, me, text
-              from regulations
-             where {where_sql}
-             order by filename, page
-             limit :lim
+            SELECT filename, page, me, text
+              FROM regulations
+             WHERE {where_sql}
+             ORDER BY filename, page
+             LIMIT :lim
         """)
         params["lim"] = int(limit)
         with eng.begin() as con:
             return pd.read_sql_query(sql, con, params=params)
 
-    FIXED_LIMIT = 2000
-    with st.form("pdf_search_form", clear_on_submit=False):
-        kw_pdf  = st.text_input("키워드 (입력 없이 Enter=전체조회, 공백=AND)", st.session_state.get("pdf_kw", ""), key="pdf_kw")
-        fn_like = st.text_input("파일명 필터(선택)", st.session_state.get("pdf_fn_filter", ""), key="pdf_fn_filter")
-        submitted_pdf = st.form_submit_button("검색")
-
+    # ====== 검색 실행 ======
     if submitted_pdf:
         with st.spinner("검색 중..."):
-            if kw_pdf.strip():
-                _df = search_regs(eng, kw_pdf, filename_like=fn_like, limit=FIXED_LIMIT)
-            else:
-                _df = _fetch_all_regs(eng, filename_like=fn_like, limit=FIXED_LIMIT)
+            _df = _query_regs(name_kw, body_kw, limit=FIXED_LIMIT)
+
         if "me" in _df.columns:
             _df = _df[_df["me"].astype(str).str.strip() != ""]
         _df = _df.sort_values(["filename", "page"], kind="stable").reset_index(drop=True)
+
         if _df.empty:
-            st.info("조건에 맞는 결과가 없습니다. (키워드 없이 Enter=전체 조회)")
-            for k in ("pdf_results", "pdf_sel_idx", "pdf_kw_list", "pdf_page"):
+            st.info("조건에 맞는 결과가 없습니다. (둘 다 비워서 Enter=전체 조회)")
+            for k in ("pdf_results", "pdf_sel_idx", "pdf_body_tokens", "pdf_name_tokens", "pdf_page", "pdf_page_size_label"):
                 st.session_state.pop(k, None)
         else:
-            st.session_state["pdf_results"] = _df.to_dict("records")
-            st.session_state["pdf_sel_idx"] = 0
-            st.session_state["pdf_kw_list"] = [k.strip() for k in kw_pdf.split() if k.strip()]
-            st.session_state["pdf_page"] = 1
+            st.session_state["pdf_results"]      = _df.to_dict("records")
+            st.session_state["pdf_sel_idx"]      = 0
+            st.session_state["pdf_body_tokens"]  = [t for t in re.split(r"\s+", (body_kw or "").strip()) if t]
+            st.session_state["pdf_name_tokens"]  = [t for t in re.split(r"\s+", (name_kw or "").strip()) if t]
+            st.session_state["pdf_page"]         = 1
+            st.session_state.setdefault("pdf_page_size_label", "10개/page")
 
+    # ====== 결과 + 페이지네이션 ======
     if "pdf_results" in st.session_state and st.session_state["pdf_results"]:
-        import math, html as _html
+        import math, html as _html, base64 as _b64
+
         df_all   = pd.DataFrame(st.session_state["pdf_results"])
-        kw_list  = st.session_state.get("pdf_kw_list", [])
+        body_tok = st.session_state.get("pdf_body_tokens", [])
         total    = len(df_all)
-        PAGE_KEY = "pdf_page"; SIZE_KEY = "pdf_page_size"
-        page_size = int(st.session_state.get(SIZE_KEY, 30))
-        page      = int(st.session_state.get(PAGE_KEY, 1))
-        total_pages = max(1, math.ceil(total / max(1, page_size)))
-        page = min(max(1, page), total_pages)
-        start = (page - 1) * page_size; end = min(start + page_size, total)
+
+        # --- 페이지 상태
+        PAGE_KEY = "pdf_page"
+        SIZE_KEY = "pdf_page_size_label"   # '10개/page' | '30개/page' | '50개/page' | '전체 파일'
+        size_labels = ["10개/page", "30개/page", "50개/page", "전체 파일"]
+
+        prev_label = st.session_state.get(SIZE_KEY, "10개/page")
+        try:
+            idx_default = size_labels.index(prev_label)
+        except ValueError:
+            idx_default = 0
+
+        st.markdown('<div class="pdf-compact">', unsafe_allow_html=True)
+        topA, topB, topC = st.columns([1.2, 0.9, 3])
+        with topA:
+            # 라벨 제거(간격 맞춤)
+            new_label = st.selectbox(
+                "",
+                size_labels,
+                index=idx_default,
+                key=SIZE_KEY,
+                label_visibility="collapsed",
+            )
+        with topB:
+            col_prev, col_next = st.columns(2)
+            page = int(st.session_state.get(PAGE_KEY, 1))
+            if col_prev.button("◀", key="pdf_prev_btn", use_container_width=True) and page > 1:
+                st.session_state[PAGE_KEY] = page - 1
+                st.rerun()
+            if col_next.button("▶", key="pdf_next_btn", use_container_width=True):
+                if prev_label == "전체 파일":
+                    total_pages = 1
+                else:
+                    ps_map = {"10개/page": 10, "30개/page": 30, "50개/page": 50}
+                    ps = ps_map.get(prev_label, 10)
+                    total_pages = max(1, math.ceil(total / max(1, ps)))
+                if page < total_pages:
+                    st.session_state[PAGE_KEY] = page + 1
+                    st.rerun()
+        with topC:
+            st.caption("※ 파일명/본문을 동시에 입력하면 AND 조건으로 모두 만족하는 페이지만 표시합니다.")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        # 드롭다운 값 변경 시 1페이지로
+        if new_label != prev_label:
+            st.session_state[PAGE_KEY] = 1
+            st.rerun()
+
+        # 실제 page_size/total_pages 계산
+        if new_label == "전체 파일":
+            page_size   = max(1, total)
+            total_pages = 1
+            page        = 1
+        else:
+            ps_map = {"10개/page": 10, "30개/page": 30, "50개/page": 50}
+            page_size   = int(ps_map.get(new_label, 10))
+            page        = int(st.session_state.get(PAGE_KEY, 1))
+            total_pages = max(1, math.ceil(total / max(1, page_size)))
+            page        = min(max(1, page), total_pages)
+
+        start = (page - 1) * page_size
+        end   = min(start + page_size, total)
         df    = df_all.iloc[start:end].reset_index(drop=False)
 
         st.write(f"결과: {total:,}건  ·  페이지 {page}/{total_pages}  ·  표시 {start+1}–{end}")
 
-        cA, cB, cC = st.columns([1.5, 2, 2])
-        with cA:
-            new_size = st.selectbox("페이지당 표시", [10, 30, 50, 100], index=[10,30,50,100].index(page_size), key=SIZE_KEY)
-            if new_size != page_size:
-                st.session_state[PAGE_KEY] = 1; st.rerun()
-        with cB:
-            col_prev, col_next = st.columns(2)
-            if col_prev.button("◀ 이전", use_container_width=True) and page > 1:
-                st.session_state[PAGE_KEY] = page - 1; st.rerun()
-            if col_next.button("다음 ▶", use_container_width=True) and page < total_pages:
-                st.session_state[PAGE_KEY] = page + 1; st.rerun()
-        with cC:
-            view_mode_pdf = st.radio("보기 형식", ["카드형(모바일)", "표형(간단)"], horizontal=True, key="pdf_view_mode")
-
-        def view_url(fid: str, page: int) -> str:
+        # 링크 생성
+        def view_url(fid: str, p: int) -> str:
             fid = (fid or "").strip()
-            return f"https://drive.google.com/file/d/{fid}/view#page={int(page)}"
+            return f"https://drive.google.com/file/d/{fid}/view#page={int(p)}"
 
-        if view_mode_pdf.endswith("간단)"):
-            st.caption("파일명/페이지 버튼을 클릭하면 아래 미리보기가 바뀝니다.")
-            hdr = st.columns([7, 1, 1])
-            hdr[0].markdown("**파일명**"); hdr[1].markdown("**페이지**"); hdr[2].markdown("**열기**")
-            if "pdf_sel_idx" not in st.session_state: st.session_state["pdf_sel_idx"] = 0
-            for _, row in df.iterrows():
-                global_i = int(row["index"])
-                c1, c2, c3 = st.columns([7, 1, 1])
-                if c1.button(str(row["filename"]), key=f"pick_file_{global_i}"):
-                    st.session_state["pdf_sel_idx"] = global_i; st.rerun()
-                if c2.button(str(int(row["page"])), key=f"pick_page_{global_i}"):
-                    st.session_state["pdf_sel_idx"] = global_i; st.rerun()
-                c3.markdown(
-                    f'<a href="{view_url(row["me"], int(row["page"]))}" target="_blank" rel="noopener noreferrer" '
-                    f'style="display:inline-block;padding:6px 12px;border:1px solid #ddd;border-radius:8px;'
-                    f'background:#f8f9fa;text-decoration:none;color:#0d6efd;font-weight:600;">열기</a>',
-                    unsafe_allow_html=True
-                )
-        else:
-            if "pdf_sel_idx" not in st.session_state: st.session_state["pdf_sel_idx"] = 0
-            for _, row in df.iterrows():
-                global_i = int(row["index"])
-                fid_i  = (row.get("me") or "").strip()
-                fname  = _html.escape(str(row["filename"]))
-                pagei  = int(row["page"])
-                st.markdown(f'<div class="pcard"><div class="title">{fname}</div>', unsafe_allow_html=True)
-                cA2, cB2 = st.columns(2)
-                with cA2:
-                    if st.button(f"이 파일 미리보기 (p.{pagei})", key=f"pick_file_card_{global_i}", use_container_width=True):
-                        st.session_state["pdf_sel_idx"] = global_i; st.rerun()
-                with cB2:
-                    st.markdown(
-                        f'<a class="pbtn" href="{view_url(fid_i, pagei)}" target="_blank" rel="noopener noreferrer" '
-                        f'style="display:block;text-align:center;padding:9px 12px;">열기</a>',
-                        unsafe_allow_html=True
-                    )
-                st.markdown(f'<div class="pmeta">file_id: {fid_i or "-"}</div></div>', unsafe_allow_html=True)
+        # ===== 목록(심플 표형) =====
+        hdr = st.columns([6, 1, 1, 6])
+        hdr[0].markdown("**파일명**")
+        hdr[1].markdown("**페이지**")
+        hdr[2].markdown("**열기**")
+        hdr[3].markdown("**본문 요약**")
 
+        if "pdf_sel_idx" not in st.session_state:
+            st.session_state["pdf_sel_idx"] = 0
+
+        for _, row in df.iterrows():
+            global_i = int(row["index"])
+            c1, c2, c3, c4 = st.columns([6, 1, 1, 6])
+
+            if c1.button(str(row["filename"]), key=f"pick_name_{global_i}"):
+                st.session_state["pdf_sel_idx"] = global_i
+                st.rerun()
+            if c2.button(str(int(row["page"])), key=f"pick_page_{global_i}"):
+                st.session_state["pdf_sel_idx"] = global_i
+                st.rerun()
+            c3.markdown(
+                f'<a href="{view_url(row["me"], int(row["page"]))}" target="_blank" rel="noopener noreferrer" '
+                f'style="display:inline-block;padding:6px 12px;border:1px solid #ddd;border-radius:8px;'
+                f'background:#f8f9fa;text-decoration:none;color:#0d6efd;font-weight:600;">열기</a>',
+                unsafe_allow_html=True
+            )
+
+            snippet_html = highlight_html(str(row.get("text","")), body_tok, width=120) if body_tok \
+                else _html.escape(str(row.get("text",""))[:120]) + ("..." if len(str(row.get("text",""))) > 120 else "")
+            c4.markdown(snippet_html, unsafe_allow_html=True)
+
+        # ===== 선택 행 미리보기 =====
         sel_idx = int(st.session_state.get("pdf_sel_idx", 0))
         sel_idx = max(0, min(sel_idx, len(df_all) - 1))
         sel = df_all.iloc[sel_idx]
         fid = (sel.get("me") or "").strip()
-        sel_file = sel["filename"]; sel_page = int(sel["page"])
+        sel_file = sel["filename"]
+        sel_page = int(sel["page"])
+
         st.caption("텍스트 미리보기 & 문서 보기 (선택한 1건)")
         st.write(f"**파일**: {sel_file}  |  **페이지**: {sel_page}  |  **file_id**: {fid or '-'}")
-        st.markdown(highlight_html(sel["text"], st.session_state.get("pdf_kw_list", []), width=200), unsafe_allow_html=True)
+        st.markdown(highlight_html(sel["text"], body_tok, width=200), unsafe_allow_html=True)
 
+        # pdf.js 미리보기
         cache = st.session_state.setdefault("pdf_cache", {})
         b64 = cache.get(fid)
         if not b64:
             pdf_bytes = _drive_download_pdf(fid, DRIVE_API_KEY)
-            b64 = base64.b64encode(pdf_bytes).decode("ascii"); cache[fid] = b64
+            b64 = _b64.b64encode(pdf_bytes).decode("ascii")
+            cache[fid] = b64
 
         page_view = st.number_input("미리보기 페이지", 1, 9999, int(sel_page), step=1, key=f"pv_page_{fid}")
         zoom_pct  = st.slider("줌(%)", 30, 200, 80, step=5, key=f"pv_zoom_{fid}")
         height_px = st.slider("미리보기 높이(px)", 480, 1200, 640, step=40, key=f"pv_h_{fid}")
 
-        max_fit_width = 900
         viewer_html = f"""
 <div id="pdf-root" style="width:100%;height:{height_px}px;max-height:80vh;background:#fafafa;overflow:auto;">
   <canvas id="pdf-canvas" style="display:block;margin:0 auto;background:#fff;box-shadow:0 0 4px rgba(0,0,0,0.08)"></canvas>
@@ -908,15 +990,14 @@ with tab_pdf:
     pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
   }}
   function b64ToUint8Array(b64) {{
-    const raw = atob(b64), len = raw.length;
-    const arr = new Uint8Array(len);
+    const raw = atob(b64), len = raw.length, arr = new Uint8Array(len);
     for (let i=0; i<len; i++) arr[i] = raw.charCodeAt(i);
     return arr;
   }}
   const pdfData    = b64ToUint8Array("{b64}");
   const targetPage = {int(page_view)};
   const sliderZoom = {float(zoom_pct)}/100.0;
-  const maxFitW    = {int(max_fit_width)};
+  const maxFitW    = 900;
   pdfjsLib.getDocument({{ data: pdfData }}).promise.then(function(pdf) {{
     const pageNo = Math.min(Math.max(1, targetPage), pdf.numPages);
     return pdf.getPage(pageNo).then(function(page) {{
@@ -947,7 +1028,8 @@ with tab_pdf:
 """
         st.components.v1.html(viewer_html, height=height_px + 40)
     else:
-        st.caption("키워드를 입력하고 **Enter**를 누르면 결과가 표시됩니다. (입력 없이 Enter=전체 조회)")
+        st.caption("파일명/본문 중 아무거나 입력하고 **Enter**를 누르세요. (둘 다 비우고 Enter=전체 조회)")
+# =================================================================
 
 # ============================ 인증교육자료(동영상) 탭 ============================
 with tab_edu:
