@@ -761,15 +761,11 @@ with tab_qna:
 
 # ====================== PDF 탭 ============================
 with tab_pdf:
-    # --- 라이트한 스타일 (모바일 가독성 + 컴팩트 컨트롤) ---
+    # --- 기본 스타일 (불필요한 크기 강제 없음) ---
     st.markdown("""
 <style>
-/* 입력 간격 타이트 */
+/* 입력 라벨 여백만 살짝 타이트 */
 .stTextInput > label{ margin-bottom:6px !important; }
-
-/* 상단 컨트롤 줄 */
-.pdfbar{display:flex;gap:.5rem;align-items:center;margin:.25rem 0 .5rem 0}
-.pdfbar .grow{flex:1 1 auto}
 
 /* 파일목록(모바일 친화) */
 .filelist{margin:.25rem 0}
@@ -820,7 +816,7 @@ with tab_pdf:
     def _tokens(s: str) -> list[str]:
         return [t for t in re.split(r"\s+", (s or "").strip()) if t]
 
-    # 페이지(본문) 결과 쿼리
+    # 본문(페이지) 결과 쿼리
     def _query_pages(name_kw: str, body_kw: str, limit: int = 3000) -> pd.DataFrame:
         n_tok, b_tok = _tokens(name_kw), _tokens(body_kw)
         where, params = [], {}
@@ -843,14 +839,13 @@ with tab_pdf:
             return pd.read_sql_query(sql, con, params=params)
 
     # 파일(파일명 모드) 전용 쿼리: 파일당 1행 (DISTINCT me)
-    def _query_files(name_kw: str, limit_files: int = 2000) -> pd.DataFrame:
+    def _query_files(name_kw: str, limit_files: int = 3000) -> pd.DataFrame:
         n_tok = _tokens(name_kw)
         where, params = ["(COALESCE(me,'') <> '')",
                          r"(filename !~* '(^|[\\/])\.ipynb_checkpoints([\\/]|$)')"], {}
         for j, kw in enumerate(n_tok):
             where.append(f"(filename ILIKE :n{j})"); params[f"n{j}"] = f"%{kw}%"
         where_sql = " AND ".join(where)
-        # 파일명은 DB내 대표값(최신 mtime 기준)으로 뽑아두고, 실제 표시는 Drive 실시간명으로 덮어씁니다.
         sql = text(f"""
             SELECT me,
                    MAX(file_mtime) AS mtime,
@@ -898,7 +893,7 @@ with tab_pdf:
                 st.session_state["pdf_page"]  = 1
                 st.session_state.setdefault("pdf_page_size_label", "10개/page")
         else:
-            # 파일명 모드: 파일당 1행
+            # 파일명 모드: 파일당 1행 (빈값 허용=전체 파일)
             df = _query_files(name_kw, limit_files=3000)
             if df.empty:
                 st.info("표시할 파일이 없습니다. (파일명 검색어를 비우면 전체 파일을 볼 수 있어요)")
@@ -911,11 +906,10 @@ with tab_pdf:
     # ====== 출력 ======
     mode = st.session_state.get("pdf_mode")
 
-    # ---- 파일명 모드: 파일당 1행(중복 파일명 정리, Drive 실시간명 적용) ----
+    # ---- 파일명 모드: 파일당 1행(Drive 실시간명으로 표시) ----
     if mode == "files" and st.session_state.get("pdf_files"):
         items = pd.DataFrame(st.session_state["pdf_files"])
         st.write(f"파일: {len(items):,}개")
-
         st.markdown('<div class="filelist">', unsafe_allow_html=True)
         for _, row in items.iterrows():
             fid   = str(row["me"]).strip()
@@ -940,7 +934,7 @@ with tab_pdf:
         body_tok = _tokens(st.session_state.get("pdf_body_kw",""))
         total    = len(df_all)
 
-        # 상단 컨트롤 (드롭다운 + 좌우 화살표)
+        # 상단 컨트롤 (예전 레이아웃로 복구: 넉넉한 드롭다운 + 넓은 이전/다음 버튼)
         PAGE_KEY = "pdf_page"
         SIZE_KEY = "pdf_page_size_label"   # '10개/page' | '30개/page' | '50개/page' | '전체 파일'
         size_labels = ["10개/page", "30개/page", "50개/page", "전체 파일"]
@@ -949,28 +943,31 @@ with tab_pdf:
         try: idx_default = size_labels.index(prev_label)
         except ValueError: idx_default = 0
 
-        st.markdown('<div class="pdfbar">', unsafe_allow_html=True)
-        new_label = st.selectbox("", size_labels, index=idx_default, key=SIZE_KEY, label_visibility="collapsed")
-        # 좌우 화살표
-        page = int(st.session_state.get(PAGE_KEY, 1))
-        col_prev, col_next = st.columns([0.08, 0.08])
-        if col_prev.button("◀", key="pdf_prev_btn"):
-            if new_label == "전체 파일":
-                st.session_state[PAGE_KEY] = 1
-            else:
-                ps = {"10개/page":10,"30개/page":30,"50개/page":50}.get(prev_label, 10)
-                total_pages = max(1, math.ceil(total / max(1, ps)))
-                if page > 1:
-                    st.session_state[PAGE_KEY] = page - 1
-        if col_next.button("▶", key="pdf_next_btn"):
-            if new_label == "전체 파일":
-                st.session_state[PAGE_KEY] = 1
-            else:
-                ps = {"10개/page":10,"30개/page":30,"50개/page":50}.get(prev_label, 10)
-                total_pages = max(1, math.ceil(total / max(1, ps)))
+        topA, topB, topC = st.columns([1.5, 1.0, 3])  # ← 공간 넉넉히
+        with topA:
+            new_label = st.selectbox(
+                "",
+                size_labels,
+                index=idx_default,
+                key=SIZE_KEY,
+                label_visibility="collapsed",
+            )
+        with topB:
+            col_prev, col_next = st.columns(2)
+            page = int(st.session_state.get(PAGE_KEY, 1))
+            if col_prev.button("◀", key="pdf_prev_btn", use_container_width=True) and page > 1:
+                st.session_state[PAGE_KEY] = page - 1; st.rerun()
+            if col_next.button("▶", key="pdf_next_btn", use_container_width=True):
+                if prev_label == "전체 파일":
+                    total_pages = 1
+                else:
+                    ps_map = {"10개/page": 10, "30개/page": 30, "50개/page": 50}
+                    ps = ps_map.get(prev_label, 10)
+                    total_pages = max(1, math.ceil(total / max(1, ps)))
                 if page < total_pages:
-                    st.session_state[PAGE_KEY] = page + 1
-        st.markdown('</div>', unsafe_allow_html=True)
+                    st.session_state[PAGE_KEY] = page + 1; st.rerun()
+        with topC:
+            st.caption("※ 파일명/본문을 동시에 입력하면 AND 조건으로 모두 만족하는 페이지만 표시합니다.")
 
         # 드롭다운 변경 시 1페이지로
         if new_label != prev_label:
@@ -1049,7 +1046,6 @@ with tab_pdf:
                 )
 
         # ---- 하단: 단일 미리보기(pdf.js) ----
-        # 첫 행 기준으로 간단 미리보기(표형/카드형 공통)
         try:
             sel = df.iloc[0]
             fid = (sel.get("me") or "").strip()
