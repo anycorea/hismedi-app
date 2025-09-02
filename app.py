@@ -431,14 +431,15 @@ if _is_admin():
             r2 = _trigger_edge_func("sync_qna");  cnt_qna  = int(r2.get("count", 0))
 
             # 2) PDF (Drive 키/폴더 있을 때만)
-            cnt_pdf = skipped = errors = 0
+            cnt_pdf = skipped = errors = renamed = 0
             pdf_note = ""
             if DRIVE_API_KEY and DRIVE_FOLDER_ID:
                 res = index_pdfs_from_drive(eng, DRIVE_FOLDER_ID, DRIVE_API_KEY)
                 cnt_pdf  = int(res.get("indexed", 0))
+                renamed  = int(res.get("renamed", 0))
                 skipped  = int(res.get("skipped", 0))
                 errors   = int(res.get("errors", 0))
-                pdf_note = f" · PDF indexed {cnt_pdf:,}, skipped {skipped:,}, errors {errors:,}"
+                pdf_note = f" · PDF indexed {cnt_pdf:,}, renamed {renamed:,}, skipped {skipped:,}, errors {errors:,}"
 
             # 캐시/세션 정리 + 최근 동기화 기록
             st.cache_data.clear()
