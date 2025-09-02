@@ -112,6 +112,33 @@ if _APP_PW:
         else:
             st.stop()
 
+# === [ADD] Admin-only helper (URL 토큰) ===
+ADMIN_TOKEN = (st.secrets.get("ADMIN_TOKEN") or os.getenv("ADMIN_TOKEN") or "").strip()
+
+def _is_admin() -> bool:
+    # 세션에 이미 판정이 있으면 그대로 사용
+    if "is_admin" in st.session_state:
+        return bool(st.session_state["is_admin"])
+
+    # 쿼리스트링 ?admin=TOKEN (예: https://.../?admin=abcd1234)
+    try:
+        # Streamlit ≥ 1.30
+        qp = st.query_params
+        admin_param = qp.get("admin", "")
+        if isinstance(admin_param, list):
+            admin_param = admin_param[0] if admin_param else ""
+    except Exception:
+        # 구버전 호환
+        qp = st.experimental_get_query_params()
+        vals = qp.get("admin", [""])
+        admin_param = vals[0] if isinstance(vals, list) else (vals or "")
+
+    ok = bool(ADMIN_TOKEN and admin_param == ADMIN_TOKEN)
+    st.session_state["is_admin"] = ok
+    return ok
+# === [ADD end] ===
+
+
 # =========== DB 유틸 ===========
 def _load_database_url() -> str:
     url = st.secrets.get("DATABASE_URL") or os.getenv("DATABASE_URL")
