@@ -403,11 +403,25 @@ EDU_FOLDER_ID = _extract_drive_id(st.secrets.get("EDU_FOLDER_ID") or os.getenv("
 # ------------------------------------------------------------
 # 상단: 데이터 전체 동기화 (Main+QnA + PDF 인덱스)
 # ------------------------------------------------------------
-if (not _APP_PW) or st.session_state.get("pw_ok", False):
-    if st.button("데이터 전체 동기화", key="btn_sync_all_pdf", type="secondary", help="Main+QnA 동기화, PDF 키가 있으면 인덱싱까지 수행합니다."):
+# 관리자만 버튼 노출:
+# - 앱 비밀번호가 있다면 pw_ok=True 상태여야 하고
+# - _is_admin() 이 True 여야 함 (이전 단계에서 추가한 토큰/쿠키 기반)
+_show_sync_admin = ((not _APP_PW) or st.session_state.get("pw_ok", False)) and _is_admin()
+
+if _show_sync_admin:
+    if st.button(
+        "데이터 전체 동기화",
+        key="btn_sync_all_pdf",
+        type="secondary",
+        help="Main+QnA 동기화, PDF 키가 있으면 인덱싱까지 수행합니다.",
+        kwargs=None
+    ):
         try:
+            # 1) Main + QnA 동기화(Edge Functions)
             r1 = _trigger_edge_func("sync_main"); cnt_main = int(r1.get("count", 0))
             r2 = _trigger_edge_func("sync_qna");  cnt_qna  = int(r2.get("count", 0))
+
+            # 2) PDF 인덱싱(Drive 키/폴더가 있을 때만)
             cnt_pdf = 0; pdf_note = ""
             if DRIVE_API_KEY and DRIVE_FOLDER_ID:
                 res = index_pdfs_from_drive(eng, DRIVE_FOLDER_ID, DRIVE_API_KEY)
@@ -415,14 +429,28 @@ if (not _APP_PW) or st.session_state.get("pw_ok", False):
                 skipped = int(res.get("skipped", 0))
                 errors  = int(res.get("errors", 0))
                 pdf_note = f" · PDF indexed {cnt_pdf:,}, skipped {skipped:,}, errors {errors:,}"
+
+            # 3) 캐시/세션 초기화
             st.cache_data.clear()
-            for k in ("main_results","qna_results","pdf_results","pdf_sel_idx","pdf_kw_list"): st.session_state.pop(k, None)
+            for k in (
+                "main_results","qna_results","pdf_results","pdf_sel_idx",
+                "pdf_kw_list","pdf_page","pdf_page_size_label"
+            ):
+                st.session_state.pop(k, None)
+
+            # 4) 최근 동기화 기록 저장(모든 사용자에게 표시되는 요약 캡션용)
             st.session_state["last_sync_ts"] = time.time()
-            st.session_state["last_sync_counts"] = {"main": cnt_main, "qna": cnt_qna, "pdf": cnt_pdf}
+            st.session_state["last_sync_counts"] = {
+                "main": cnt_main, "qna": cnt_qna, "pdf": cnt_pdf
+            }
+
             st.success(f"완료: Main {cnt_main:,} · QnA {cnt_qna:,}{pdf_note}")
             st.rerun()
+
         except Exception as e:
-            if e.__class__.__name__ in ("RerunData","RerunException"): raise
+            # Streamlit 재실행 예외는 그대로 통과
+            if e.__class__.__name__ in ("RerunData","RerunException"):
+                raise
             st.error(f"동기화 실패: {e}")
 
 def _fmt_ts(ts: float) -> str:
@@ -1221,14 +1249,20 @@ with tab_pdf:
 
 # ============================ 인증교육자료(동영상) 탭 (START) ============================
 with tab_edu:
-    # — 간단 새로고침/안내 (유지)
+    # 상단: 관리자만 '목록 새로고침' 노출
+    _show_video_refresh_admin = ((not _APP_PW) or st.session_state.get("pw_ok", False)) and _is_admin()
+
     cL, cR = st.columns([1, 3])
     with cL:
-        if st.button("목록 새로고침", key="edu_refresh", use_container_width=True):
-            st.cache_data.clear()
-            st.rerun()
+        if _show_video_refresh_admin:
+            if st.button("목록 새로고침", key="edu_refresh", use_container_width=True):
+                st.cache_data.clear()
+                st.rerun()
     with cR:
-        st.caption("카드를 탭/클릭하면 새 창에서 바로 재생됩니다. (Google Drive 미리보기)")
+        if _show_video_refresh_admin:
+            st.caption("공유폴더 변경 후 목록이 다르면 새로고침을 눌러주세요. (관리자 전용)")
+        else:
+            st.caption("공유폴더 변경 사항은 관리자가 새로고침하면 반영됩니다.")
 
     API_KEY = DRIVE_API_KEY
     if not API_KEY or not EDU_FOLDER_ID:
