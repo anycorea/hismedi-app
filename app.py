@@ -403,12 +403,10 @@ EDU_FOLDER_ID = _extract_drive_id(st.secrets.get("EDU_FOLDER_ID") or os.getenv("
 # ------------------------------------------------------------
 # 상단: 데이터 전체 동기화 (Main+QnA + PDF 인덱스)
 # ------------------------------------------------------------
-# 관리자만 버튼 노출:
-# - 앱 비밀번호가 있다면 pw_ok=True 상태여야 하고
-# - _is_admin() 이 True 여야 함 (이전 단계에서 추가한 토큰/쿠키 기반)
-_show_sync_admin = ((not _APP_PW) or st.session_state.get("pw_ok", False)) and _is_admin()
+# 관리자만 버튼 노출: (비번 게이트 통과) AND (_is_admin()=True)
+_show_sync_btn_admin = ((not _APP_PW) or st.session_state.get("pw_ok", False)) and _is_admin()
 
-if _show_sync_admin:
+if _show_sync_btn_admin:
     if st.button(
         "데이터 전체 동기화",
         key="btn_sync_all_pdf",
@@ -417,39 +415,31 @@ if _show_sync_admin:
         kwargs=None
     ):
         try:
-            # 1) Main + QnA 동기화(Edge Functions)
+            # 1) Main + QnA
             r1 = _trigger_edge_func("sync_main"); cnt_main = int(r1.get("count", 0))
             r2 = _trigger_edge_func("sync_qna");  cnt_qna  = int(r2.get("count", 0))
 
-            # 2) PDF 인덱싱(Drive 키/폴더가 있을 때만)
-            cnt_pdf = 0; pdf_note = ""
+            # 2) PDF (Drive 키/폴더 있을 때만)
+            cnt_pdf = skipped = errors = 0
+            pdf_note = ""
             if DRIVE_API_KEY and DRIVE_FOLDER_ID:
                 res = index_pdfs_from_drive(eng, DRIVE_FOLDER_ID, DRIVE_API_KEY)
-                cnt_pdf = int(res.get("indexed", 0))
-                skipped = int(res.get("skipped", 0))
-                errors  = int(res.get("errors", 0))
+                cnt_pdf  = int(res.get("indexed", 0))
+                skipped  = int(res.get("skipped", 0))
+                errors   = int(res.get("errors", 0))
                 pdf_note = f" · PDF indexed {cnt_pdf:,}, skipped {skipped:,}, errors {errors:,}"
 
-            # 3) 캐시/세션 초기화
+            # 캐시/세션 정리 + 최근 동기화 기록
             st.cache_data.clear()
-            for k in (
-                "main_results","qna_results","pdf_results","pdf_sel_idx",
-                "pdf_kw_list","pdf_page","pdf_page_size_label"
-            ):
+            for k in ("main_results", "qna_results", "pdf_results", "pdf_sel_idx", "pdf_kw_list"):
                 st.session_state.pop(k, None)
-
-            # 4) 최근 동기화 기록 저장(모든 사용자에게 표시되는 요약 캡션용)
             st.session_state["last_sync_ts"] = time.time()
-            st.session_state["last_sync_counts"] = {
-                "main": cnt_main, "qna": cnt_qna, "pdf": cnt_pdf
-            }
+            st.session_state["last_sync_counts"] = {"main": cnt_main, "qna": cnt_qna, "pdf": cnt_pdf}
 
             st.success(f"완료: Main {cnt_main:,} · QnA {cnt_qna:,}{pdf_note}")
             st.rerun()
-
         except Exception as e:
-            # Streamlit 재실행 예외는 그대로 통과
-            if e.__class__.__name__ in ("RerunData","RerunException"):
+            if e.__class__.__name__ in ("RerunData", "RerunException"):
                 raise
             st.error(f"동기화 실패: {e}")
 
