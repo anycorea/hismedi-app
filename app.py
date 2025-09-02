@@ -316,20 +316,21 @@ def _drive_download_pdf(file_id: str, api_key: str) -> bytes:
 
 def index_pdfs_from_drive(eng, folder_id: str, api_key: str, limit_files: int = 0):
     """Drive → DB 동기화:
-       1) 파일 id(me) 기준으로 DB의 filename을 최신 Drive 경로로 일괄 갱신(재인덱싱 없음, 빠름)
+       1) 파일 id(me) 기준으로 DB의 filename을 최신 Drive 경로로 일괄 갱신(재인덱싱 없음)
        2) DB에 없던 신규 파일만 다운로드/인덱싱
+       반환: indexed(신규 파일 수), renamed(이름만 바뀐 파일 수), skipped, errors
     """
     ensure_reg_table(eng)
     by_id, id_to_rel, rel_to_id = _drive_path_map(folder_id, api_key)
 
-    indexed = skipped = errors = 0
+    indexed = skipped = errors = renamed = 0
     done_files = []
 
     with eng.begin() as con:
-        # 1) 기존 레코드의 파일명만 최신 경로로 업데이트(파일 ID 기준)
+        # 1) 기존 레코드 filename을 최신 경로로 업데이트(파일 ID 기준)
         for rel, fid in rel_to_id.items():
             try:
-                con.execute(
+                res = con.execute(
                     text("""
                         UPDATE regulations
                            SET filename = :rel
@@ -338,14 +339,18 @@ def index_pdfs_from_drive(eng, folder_id: str, api_key: str, limit_files: int = 
                     """),
                     {"rel": rel, "fid": fid}
                 )
+                # 같은 파일 id의 여러 페이지가 갱신돼도 '파일 1건'만 renamed로 카운트
+                rc = getattr(res, "rowcount", 0)
+                if isinstance(rc, int) and rc > 0:
+                    renamed += 1
             except Exception:
-                # 이름 갱신 실패는 전체 실패로 보지 않음
+                # 이름 갱신 실패는 전체 동기화를 막지 않음
                 pass
 
         # 2) 신규 파일만 인덱싱 (이미 존재하면 skip)
         for rel, fid in rel_to_id.items():
             try:
-                # 업데이트 이후 현재 파일명이 DB에 존재하면 이미 인덱싱된 것으로 간주
+                # 이름 갱신 이후 현재 파일명이 DB에 존재하면 인덱싱된 것으로 간주
                 row = con.execute(
                     text("SELECT COUNT(*) FROM regulations WHERE filename = :fn"),
                     {"fn": rel}
@@ -356,7 +361,7 @@ def index_pdfs_from_drive(eng, folder_id: str, api_key: str, limit_files: int = 
                     done_files.append((rel, "skip"))
                     continue
 
-                # 새 파일만 다운로드/인덱싱
+                # 새 파일 다운로드/인덱싱
                 reader = PdfReader(io.BytesIO(_drive_download_pdf(fid, api_key)))
                 rows = []
                 for pno, page in enumerate(reader.pages, start=1):
@@ -371,7 +376,7 @@ def index_pdfs_from_drive(eng, folder_id: str, api_key: str, limit_files: int = 
                         "filename": rel,
                         "page": pno,
                         "text": txt,
-                        "file_mtime": 0,  # 필요 시 Drive modifiedTime 반영 가능
+                        "file_mtime": 0,  # 필요 시 modifiedTime 반영 가능
                         "me": fid
                     })
                 if rows:
@@ -384,11 +389,11 @@ def index_pdfs_from_drive(eng, folder_id: str, api_key: str, limit_files: int = 
                 if limit_files and indexed >= limit_files:
                     break
 
-            except Exception:
+            except Exception as e:
                 errors += 1
-                done_files.append((rel, "error"))
+                done_files.append((rel, f"error: {type(e).__name__}"))
 
-    return {"indexed": indexed, "skipped": skipped, "errors": errors, "files": done_files}
+    return {"indexed": indexed, "renamed": renamed, "skipped": skipped, "errors": errors, "files": done_files}
 
 def make_snippet(text_: str, kw_list: List[str], width: int = 160) -> str:
     if not text_: return ""
