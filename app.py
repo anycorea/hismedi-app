@@ -112,32 +112,45 @@ if _APP_PW:
         else:
             st.stop()
 
-# === [ADD] Admin-only helper (URL 토큰) ===
+# -------------------------
+# 관리자 토큰 핸들러 (?admin=...)
+# -------------------------
 ADMIN_TOKEN = (st.secrets.get("ADMIN_TOKEN") or os.getenv("ADMIN_TOKEN") or "").strip()
 
 def _is_admin() -> bool:
-    # 세션에 이미 판정이 있으면 그대로 사용
-    if "is_admin" in st.session_state:
-        return bool(st.session_state["is_admin"])
+    """URL의 ?admin= 토큰이 ADMIN_TOKEN과 일치하면 세션에 관리자 플래그 저장."""
+    if not ADMIN_TOKEN:
+        return False
 
-    # 쿼리스트링 ?admin=TOKEN (예: https://.../?admin=abcd1234)
+    # 이미 인증된 세션이면 바로 True
+    if st.session_state.get("_admin_ok"):
+        return True
+
+    # 쿼리파라미터에서 admin 값 읽기 (신/구 API 모두 대응)
     try:
-        # Streamlit ≥ 1.30
-        qp = st.query_params
-        admin_param = qp.get("admin", "")
-        if isinstance(admin_param, list):
-            admin_param = admin_param[0] if admin_param else ""
+        if hasattr(st, "query_params"):  # 최신
+            qp = st.query_params
+            tok = qp.get("admin", None)
+        else:  # 구버전
+            q = st.experimental_get_query_params()
+            tok = (q.get("admin", [None]) or [None])[0]
     except Exception:
-        # 구버전 호환
-        qp = st.experimental_get_query_params()
-        vals = qp.get("admin", [""])
-        admin_param = vals[0] if isinstance(vals, list) else (vals or "")
+        tok = None
 
-    ok = bool(ADMIN_TOKEN and admin_param == ADMIN_TOKEN)
-    st.session_state["is_admin"] = ok
-    return ok
-# === [ADD end] ===
+    if tok and str(tok).strip() == ADMIN_TOKEN:
+        st.session_state["_admin_ok"] = True
 
+        # (선택) URL에서 admin 파라미터 지우기 — 최신 API에서만 가능
+        try:
+            if hasattr(st, "query_params"):
+                if "admin" in st.query_params:
+                    del st.query_params["admin"]
+        except Exception:
+            pass
+
+        return True
+
+    return False
 
 # =========== DB 유틸 ===========
 def _load_database_url() -> str:
