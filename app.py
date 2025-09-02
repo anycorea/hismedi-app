@@ -675,7 +675,6 @@ with tab_main:
 })();
 </script>
         """, height=0)
-# ========================== 메인 탭 끝 ==========================
 
 # ============================ QnA 탭 ============================
 with tab_qna:
@@ -815,7 +814,7 @@ with tab_qna:
     else:
         st.caption("키워드를 입력하고 **Enter** 를 누르면 결과가 표시됩니다. (입력 없이 Enter=전체 조회)")
 
-# ====================== PDF 탭 (START) ============================
+# ====================== PDF 탭 ============================
 with tab_pdf:
     # 폼 제출 버튼 숨김 + 이 탭 전용 컴팩트/모바일 친화 CSS
     st.markdown("""
@@ -1246,9 +1245,8 @@ with tab_pdf:
                     st.components.v1.html(viewer_html, height=height_px + 40)
     else:
         st.caption("파일명/본문 중 아무거나 입력하고 **Enter**를 누르세요. (아무것도 입력 안 하고 Enter=**전체 파일 목록**)")
-# ====================== PDF 탭 (END) ============================
 
-# ============================ 인증교육자료(동영상) 탭 (START) ============================
+# ============================ 인증교육자료(동영상) 탭 ============================
 with tab_edu:
     # 상단: 관리자만 '목록 새로고침' 노출
     _show_video_refresh_admin = ((not _APP_PW) or st.session_state.get("pw_ok", False)) and _is_admin()
@@ -1354,4 +1352,3 @@ a.vcard:active{ transform:translateY(1px); }
                     unsafe_allow_html=True
                 )
             st.markdown('</div></div>', unsafe_allow_html=True)
-# ============================ 인증교육자료(동영상) 탭 (END) ============================
