@@ -416,10 +416,8 @@ EDU_FOLDER_ID = _extract_drive_id(st.secrets.get("EDU_FOLDER_ID") or os.getenv("
 # ------------------------------------------------------------
 # 상단: 데이터 전체 동기화 (Main+QnA + PDF 인덱스)
 # ------------------------------------------------------------
-# 관리자만 버튼 노출: (비번 게이트 통과) AND (_is_admin()=True)
-_show_sync_btn_admin = ((not _APP_PW) or st.session_state.get("pw_ok", False)) and _is_admin()
-
-if _show_sync_btn_admin:
+# 관리자만 버튼 노출
+if _is_admin():
     if st.button(
         "데이터 전체 동기화",
         key="btn_sync_all_pdf",
@@ -444,7 +442,7 @@ if _show_sync_btn_admin:
 
             # 캐시/세션 정리 + 최근 동기화 기록
             st.cache_data.clear()
-            for k in ("main_results", "qna_results", "pdf_results", "pdf_sel_idx", "pdf_kw_list"):
+            for k in ("main_results","qna_results","pdf_results","pdf_sel_idx","pdf_kw_list"):
                 st.session_state.pop(k, None)
             st.session_state["last_sync_ts"] = time.time()
             st.session_state["last_sync_counts"] = {"main": cnt_main, "qna": cnt_qna, "pdf": cnt_pdf}
@@ -452,7 +450,7 @@ if _show_sync_btn_admin:
             st.success(f"완료: Main {cnt_main:,} · QnA {cnt_qna:,}{pdf_note}")
             st.rerun()
         except Exception as e:
-            if e.__class__.__name__ in ("RerunData", "RerunException"):
+            if e.__class__.__name__ in ("RerunData","RerunException"):
                 raise
             st.error(f"동기화 실패: {e}")
 
