@@ -1255,10 +1255,8 @@ with tab_edu:
 
     cL, cR = st.columns([1, 3])
     with cL:
-        if _show_video_refresh_admin:
-            if st.button("목록 새로고침", key="edu_refresh", use_container_width=True):
-                st.cache_data.clear()
-                st.rerun()
+        if _is_admin() and st.button("목록 새로고침", key="edu_refresh", use_container_width=True):
+            st.cache_data.clear(); st.rerun()
     with cR:
         if _show_video_refresh_admin:
             st.caption("공유폴더 변경 후 목록이 다르면 새로고침을 눌러주세요. (관리자 전용)")
