@@ -827,7 +827,7 @@ with tab_pdf:
 .pdf-compact [data-baseweb="select"]>div{
   min-height:30px !important; padding-top:2px !important; padding-bottom:2px !important;
 }
-/* 라ベル-입력 간격 */
+/* 라벨-입력 간격 */
 .stTextInput > label{ margin-bottom:6px !important; }
 
 /* 모바일 카드 스타일(파일/페이지 공통) */
@@ -1182,7 +1182,6 @@ with tab_pdf:
                     sel_file = sel["filename"]; sel_page = int(sel["page"])
                     st.caption("텍스트 미리보기 & 문서 보기 (선택한 1건)")
                     st.write(f"**파일**: {sel_file}  |  **페이지**: {sel_page}  |  **file_id**: {fid or '-'}")
-                    # highlight_html()은 기존 공용 유틸 사용
                     st.markdown(highlight_html(sel["text"], body_tok, width=200), unsafe_allow_html=True)
 
                     # pdf.js 미리보기
