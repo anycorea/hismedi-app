@@ -520,6 +520,34 @@ if counts and when:
     line += f" · {_fmt_ts(when)}"
     st.caption(line)
 
+# ===== 전역 검색 초기화 버튼 (Main/QnA/PDF 한 번에 초기화) =====
+_clear_cols = st.columns([5, 1])
+with _clear_cols[1]:
+    if st.button("모든 검색 초기화", key="clear_all_searches",
+                 help="Main / QnA / PDF 탭의 검색어와 결과를 한 번에 지웁니다."):
+        # 입력칸 값은 ''로 재설정(위젯 키를 쓰므로 pop대신 직접 빈값 대입이 안전)
+        st.session_state["main_kw"] = ""
+        st.session_state["main_filter_place"] = ""
+        st.session_state["main_filter_target"] = ""
+        st.session_state["qna_kw"] = ""
+        st.session_state["pdf_name_kw"] = ""
+        st.session_state["pdf_body_kw"] = ""
+
+        # 결과/상태 키들은 제거
+        for k in (
+            # Main
+            "main_results", "main_scroll_and_focus",
+            # QnA
+            "qna_results",
+            # PDF
+            "pdf_results", "pdf_mode", "pdf_sel_idx",
+            "pdf_body_tokens", "pdf_name_tokens",
+            "pdf_page", "pdf_page_size_label", "pdf_view_mode", "pdf_cache",
+        ):
+            st.session_state.pop(k, None)
+
+        st.rerun()
+
 # ===== 탭 =====
 tab_main, tab_qna, tab_pdf, tab_edu = st.tabs(["기준/지침", "Q/n/A", "규정검색/PDF", "인증교육/영상"])
 
