@@ -559,9 +559,8 @@ with tab_main:
     # 폼 제출 버튼 숨김(Enter로 제출)
     st.markdown("<style>div[data-testid='stFormSubmitButton']{display:none!important;}</style>", unsafe_allow_html=True)
 
-    # ----- (추가) 쿼리파라미터 유틸 -----
+    # ----- (유틸) 쿼리파라미터 read/write -----
     def _qp_get_one(key: str):
-        """URL 쿼리파라미터에서 단일값을 안전하게 반환(없으면 None)."""
         try:
             if hasattr(st, "query_params"):  # 신 API
                 val = st.query_params.get(key, None)
@@ -574,35 +573,26 @@ with tab_main:
             return None
 
     def _qp_set_or_del(updates: dict, remove_keys: list[str] = []):
-        """주어진 키는 설정/삭제. 나머지 파라미터는 보존."""
         try:
             if hasattr(st, "query_params"):
-                # 설정
                 for k, v in (updates or {}).items():
                     if v is None or str(v).strip() == "":
                         try:
-                            if k in st.query_params:
-                                del st.query_params[k]
-                        except Exception:
-                            pass
+                            if k in st.query_params: del st.query_params[k]
+                        except Exception: pass
                     else:
                         st.query_params[k] = str(v)
-                # 삭제
                 for k in (remove_keys or []):
                     try:
-                        if k in st.query_params:
-                            del st.query_params[k]
-                    except Exception:
-                        pass
+                        if k in st.query_params: del st.query_params[k]
+                    except Exception: pass
             else:
                 cur = st.experimental_get_query_params()
-                # 설정
                 for k, v in (updates or {}).items():
                     if v is None or str(v).strip() == "":
                         cur.pop(k, None)
                     else:
                         cur[k] = [str(v)]
-                # 삭제
                 for k in (remove_keys or []):
                     cur.pop(k, None)
                 st.experimental_set_query_params(**cur)
@@ -623,6 +613,10 @@ with tab_main:
     show_cols = [c for c in MAIN_COLS if c in existing_cols]
     has_sort = all(x in existing_cols for x in ["sort1","sort2","sort3"])
 
+    # ----- (상수) 기본 OR 에 포함할 표준값 -----
+    PLACE_FALLBACK  = "전 부서"
+    TARGET_FALLBACK = "전 직원"
+
     # ----- (핵심) 고정 필터를 URL에서 읽어와 session_state로 '미리' 주입 -----
     _pin_place  = _qp_get_one("m_place")
     _pin_target = _qp_get_one("m_target")
@@ -635,68 +629,103 @@ with tab_main:
     with st.form("main_search_form", clear_on_submit=False):
         c1, c2, c3 = st.columns([2,1,1])
         with c1:
-            # ⚠️ value 인자 제거 → 세션/기본값 충돌 방지
+            # value 인자 없이 key만 사용(세션 충돌 방지)
             kw = st.text_input(
                 "키워드 (입력 없이 Enter=전체조회, 공백=AND)",
                 key="main_kw",
                 placeholder="예) 낙상, 환자 확인, 환자안전 지표 등"
             )
         with c2:
-            # ⚠️ value 인자 제거 (세션에 주입된 값 사용)
             f_place = st.text_input(
                 "조사장소 (선택)",
                 key="main_filter_place",
-                placeholder="예) 전 부서, 병동, 외래, 수술실, 검사실 등"
+                placeholder=f"예) 병동, 외래 … (자동 OR '{PLACE_FALLBACK}')"
             )
         with c3:
-            # ⚠️ value 인자 제거 (세션에 주입된 값 사용)
             f_target = st.text_input(
                 "조사대상 (선택)",
                 key="main_filter_target",
-                placeholder="예) 전 직원, 의사, 간호사, 의료기사, 원무 등"
+                placeholder=f"예) 간호사, 의사 … (자동 OR '{TARGET_FALLBACK}')"
             )
 
-        # ----- 필터 고정 토글 -----
-        _pin_exists = bool((_pin_place and _pin_place.strip()) or (_pin_target and _pin_target.strip()))
-        keep_pin = st.checkbox(
-            "조사장소/대상 고정 (📌)",
-            value=_pin_exists,
-            key="main_pin_keep",
-            help="체크하면 ‘검색’ 시 현재 값을 브라우저 주소에 저장합니다. 다음 접속 때 자동 적용됩니다."
-        )
+        c4, c5, c6 = st.columns([1,1,2])
+        with c4:
+            # 기본값: True (전 부서/전 직원 자동 포함)
+            include_all = st.checkbox(
+                "전부서/전직원 OR",
+                value=st.session_state.get("main_include_all", True),
+                key="main_include_all",
+                help=f"장소 입력 시 '{PLACE_FALLBACK}', 대상 입력 시 '{TARGET_FALLBACK}'를 OR로 함께 필터합니다."
+            )
+        with c5:
+            # 핀 상태 존재 여부
+            _pin_exists = bool((_pin_place and _pin_place.strip()) or (_pin_target and _pin_target.strip()))
+            keep_pin = st.checkbox(
+                "필터 고정(📌)",
+                value=st.session_state.get("main_pin_keep", _pin_exists),
+                key="main_pin_keep",
+                help="체크하면 ‘검색’ 시 현재 값을 주소에 저장하여 다음 접속 때 자동 적용됩니다."
+            )
+        with c6:
+            ignore_pin_once = st.checkbox(
+                "이번만 고정 필터 무시",
+                value=False,
+                key="main_pin_ignore_once",
+                help="핀은 유지하고 이번 검색에서만 고정값을 적용하지 않습니다."
+            )
 
         FIXED_LIMIT = 1000
         submitted_main = st.form_submit_button("검색")
 
     # ====== 검색 실행 ======
     results_df = pd.DataFrame()
-    if submitted_main:  # 키워드 없이 Enter여도 전체 조회
-        # ---- 핀 반영/해제 ----
-        if st.session_state.get("main_pin_keep", False):
-            _qp_set_or_del({"m_place": st.session_state.get("main_filter_place", "").strip(),
-                            "m_target": st.session_state.get("main_filter_target", "").strip()})
-            st.toast("필터를 고정했어요. 다음 접속 때 자동 적용됩니다. 📌", icon="📌")
-        else:
-            _qp_set_or_del({}, remove_keys=["m_place","m_target"])
-            st.toast("필터 고정을 해제했어요.", icon="❎")
+    if submitted_main:
+        # ---- 핀 반영/해제 (단, 이번만 무시 체크 시 핀은 건드리지 않음) ----
+        if not ignore_pin_once:
+            if keep_pin:
+                _qp_set_or_del({"m_place": st.session_state.get("main_filter_place", "").strip(),
+                                "m_target": st.session_state.get("main_filter_target", "").strip()})
+                st.toast("필터를 고정했어요. 다음 접속 때 자동 적용됩니다. 📌", icon="📌")
+            else:
+                _qp_set_or_del({}, remove_keys=["m_place","m_target"])
+
+        # ---- 실제 검색에 사용할 유효 값 계산 ----
+        use_place  = (st.session_state.get("main_filter_place") or "").strip()
+        use_target = (st.session_state.get("main_filter_target") or "").strip()
+        if ignore_pin_once:
+            # 입력칸의 현재 값만 사용(핀은 유지되지만 이번 검색에는 미적용)
+            use_place  = use_place
+            use_target = use_target
 
         kw_list = [k.strip() for k in (kw or "").split() if k.strip()]
         where_parts, params = [], {}
 
-        # 키워드(AND) → 각 키워드가 show_cols(OR) 중 하나에 매칭
+        # 키워드(AND) → show_cols(OR)
         if kw_list and show_cols:
             for i, token in enumerate(kw_list):
                 ors = " OR ".join([f'"{c}" ILIKE :kw{i}' for c in show_cols])
                 where_parts.append(f"({ors})")
                 params[f"kw{i}"] = f"%{token}%"
 
-        # 조사장소/조사대상 개별 필터(선택)
-        if f_place.strip() and "조사장소" in existing_cols:
-            where_parts.append('"조사장소" ILIKE :place')
-            params["place"] = f"%{f_place.strip()}%"
-        if f_target.strip() and "조사대상" in existing_cols:
-            where_parts.append('"조사대상" ILIKE :target')
-            params["target"] = f"%{f_target.strip()}%"
+        # 조사장소
+        if use_place and "조사장소" in existing_cols:
+            if include_all:
+                where_parts.append('("조사장소" ILIKE :place_user OR "조사장소" ILIKE :place_all)')
+                params["place_user"] = f"%{use_place}%"
+                params["place_all"]  = f"%{PLACE_FALLBACK}%"
+            else:
+                where_parts.append('"조사장소" ILIKE :place_user')
+                params["place_user"] = f"%{use_place}%"
+
+        # 조사대상
+        if use_target and "조사대상" in existing_cols:
+            if include_all:
+                where_parts.append('("조사대상" ILIKE :target_user OR "조사대상" ILIKE :target_all)')
+                params["target_user"] = f"%{use_target}%"
+                params["target_all"]  = f"%{TARGET_FALLBACK}%"
+            else:
+                where_parts.append('"조사대상" ILIKE :target_user')
+                params["target_user"] = f"%{use_target}%"
 
         where_sql = " AND ".join(where_parts) if where_parts else "TRUE"
 
@@ -719,7 +748,7 @@ with tab_main:
         else:
             st.session_state["main_results"] = results_df.to_dict("records")
 
-        # ▶ 검색 직후 '무조건' 상단 고정 + 입력칸 포커스 (첫 검색 하단 튐 방지)
+        # ▶ 검색 직후 상단 고정 + 입력칸 포커스
         st.session_state["main_scroll_and_focus"] = True
 
     # ====== 스타일(하이라이트) ======
@@ -790,11 +819,12 @@ with tab_main:
         else:
             render_cards(df, cols_order)
     else:
-        # (선택) 고정 필터가 있을 때 안내 표시
+        # 안내
+        tip = "장소/대상 입력 시 자동으로 “전 부서/전 직원”도 OR로 포함됩니다." if st.session_state.get("main_include_all", True) else ""
         if (_pin_place or _pin_target):
-            st.caption(f"📌 고정 필터 적용 중 — 장소: {(_pin_place or '-')}, 대상: {(_pin_target or '-')}")
+            st.caption(f"📌 고정 필터 적용 중 — 장소: {(_pin_place or '-')}, 대상: {(_pin_target or '-')}  {tip}")
         else:
-            st.caption("힌트: 조사장소/조사대상은 메인 키워드와 AND 조건으로 결합되어 검색됩니다.")
+            st.caption("힌트: 조사장소/조사대상은 메인 키워드와 AND 조건으로 결합되어 검색됩니다. " + tip)
 
     # ====== (핵심) 검색/보기전환 이후 상단 고정 + 입력칸 포커스 ======
     if st.session_state.pop("main_scroll_and_focus", False):
@@ -802,21 +832,17 @@ with tab_main:
 <script>
 (function(){
   const doc = window.parent?.document || document;
-
-  // 1) 상단 앵커로 즉시 스크롤(하단 튐 방지)
   try{
     var el = doc.getElementById('main-tab-top');
     var top = 0;
     if(el){
       var rect = el.getBoundingClientRect();
       var scrollTop = (window.parent ? window.parent.pageYOffset : window.pageYOffset);
-      top = rect.top + scrollTop - 90; // 상단 고정바 여유
+      top = rect.top + scrollTop - 90;
     }
     if (window.parent) window.parent.scrollTo({top: top, left: 0, behavior: 'auto'});
     else window.scrollTo({top: top, left: 0, behavior: 'auto'});
   }catch(e){}
-
-  // 2) 키워드 입력칸 포커스(+커서 끝)
   try{
     const LABEL = '키워드 (입력 없이 Enter=전체조회, 공백=AND)';
     let input = null;
