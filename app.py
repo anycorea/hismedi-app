@@ -623,7 +623,7 @@ with tab_main:
     show_cols = [c for c in MAIN_COLS if c in existing_cols]
     has_sort = all(x in existing_cols for x in ["sort1","sort2","sort3"])
 
-    # ----- (추가) 고정 필터를 URL에서 읽어와 초기값으로 주입 -----
+    # ----- (핵심) 고정 필터를 URL에서 읽어와 session_state로 '미리' 주입 -----
     _pin_place  = _qp_get_one("m_place")
     _pin_target = _qp_get_one("m_target")
     if _pin_place is not None and not st.session_state.get("main_filter_place"):
@@ -635,28 +635,28 @@ with tab_main:
     with st.form("main_search_form", clear_on_submit=False):
         c1, c2, c3 = st.columns([2,1,1])
         with c1:
+            # ⚠️ value 인자 제거 → 세션/기본값 충돌 방지
             kw = st.text_input(
                 "키워드 (입력 없이 Enter=전체조회, 공백=AND)",
-                st.session_state.get("main_kw", ""),
                 key="main_kw",
                 placeholder="예) 낙상, 환자 확인, 환자안전 지표 등"
             )
         with c2:
+            # ⚠️ value 인자 제거 (세션에 주입된 값 사용)
             f_place = st.text_input(
                 "조사장소 (선택)",
-                st.session_state.get("main_filter_place", ""),
                 key="main_filter_place",
                 placeholder="예) 전 부서, 병동, 외래, 수술실, 검사실 등"
             )
         with c3:
+            # ⚠️ value 인자 제거 (세션에 주입된 값 사용)
             f_target = st.text_input(
                 "조사대상 (선택)",
-                st.session_state.get("main_filter_target", ""),
                 key="main_filter_target",
                 placeholder="예) 전 직원, 의사, 간호사, 의료기사, 원무 등"
             )
 
-        # ----- (추가) 필터 고정 토글 -----
+        # ----- 필터 고정 토글 -----
         _pin_exists = bool((_pin_place and _pin_place.strip()) or (_pin_target and _pin_target.strip()))
         keep_pin = st.checkbox(
             "조사장소/대상 고정 (📌)",
@@ -671,7 +671,7 @@ with tab_main:
     # ====== 검색 실행 ======
     results_df = pd.DataFrame()
     if submitted_main:  # 키워드 없이 Enter여도 전체 조회
-        # ---- (추가) 핀 반영/해제 ----
+        # ---- 핀 반영/해제 ----
         if st.session_state.get("main_pin_keep", False):
             _qp_set_or_del({"m_place": st.session_state.get("main_filter_place", "").strip(),
                             "m_target": st.session_state.get("main_filter_target", "").strip()})
