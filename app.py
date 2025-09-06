@@ -559,6 +559,56 @@ with tab_main:
     # 폼 제출 버튼 숨김(Enter로 제출)
     st.markdown("<style>div[data-testid='stFormSubmitButton']{display:none!important;}</style>", unsafe_allow_html=True)
 
+    # ----- (추가) 쿼리파라미터 유틸 -----
+    def _qp_get_one(key: str):
+        """URL 쿼리파라미터에서 단일값을 안전하게 반환(없으면 None)."""
+        try:
+            if hasattr(st, "query_params"):  # 신 API
+                val = st.query_params.get(key, None)
+                return None if val is None else str(val)
+            else:  # 구 API
+                q = st.experimental_get_query_params()
+                lst = q.get(key, None)
+                return None if not lst else (lst[0] if isinstance(lst, list) else str(lst))
+        except Exception:
+            return None
+
+    def _qp_set_or_del(updates: dict, remove_keys: list[str] = []):
+        """주어진 키는 설정/삭제. 나머지 파라미터는 보존."""
+        try:
+            if hasattr(st, "query_params"):
+                # 설정
+                for k, v in (updates or {}).items():
+                    if v is None or str(v).strip() == "":
+                        try:
+                            if k in st.query_params:
+                                del st.query_params[k]
+                        except Exception:
+                            pass
+                    else:
+                        st.query_params[k] = str(v)
+                # 삭제
+                for k in (remove_keys or []):
+                    try:
+                        if k in st.query_params:
+                            del st.query_params[k]
+                    except Exception:
+                        pass
+            else:
+                cur = st.experimental_get_query_params()
+                # 설정
+                for k, v in (updates or {}).items():
+                    if v is None or str(v).strip() == "":
+                        cur.pop(k, None)
+                    else:
+                        cur[k] = [str(v)]
+                # 삭제
+                for k in (remove_keys or []):
+                    cur.pop(k, None)
+                st.experimental_set_query_params(**cur)
+        except Exception:
+            pass
+
     # 1) 사용할 테이블(뷰 우선)
     main_table = _pick_table(eng, ["main_sheet_v", "main_v", "main_raw"]) or "main_raw"
 
@@ -572,6 +622,14 @@ with tab_main:
     existing_cols = _list_columns(eng, main_table)
     show_cols = [c for c in MAIN_COLS if c in existing_cols]
     has_sort = all(x in existing_cols for x in ["sort1","sort2","sort3"])
+
+    # ----- (추가) 고정 필터를 URL에서 읽어와 초기값으로 주입 -----
+    _pin_place  = _qp_get_one("m_place")
+    _pin_target = _qp_get_one("m_target")
+    if _pin_place is not None and not st.session_state.get("main_filter_place"):
+        st.session_state["main_filter_place"] = _pin_place
+    if _pin_target is not None and not st.session_state.get("main_filter_target"):
+        st.session_state["main_filter_target"] = _pin_target
 
     # ====== 입력 폼 (Enter 제출) ======
     with st.form("main_search_form", clear_on_submit=False):
@@ -597,12 +655,31 @@ with tab_main:
                 key="main_filter_target",
                 placeholder="예) 전 직원, 의사, 간호사, 의료기사, 원무 등"
             )
+
+        # ----- (추가) 필터 고정 토글 -----
+        _pin_exists = bool((_pin_place and _pin_place.strip()) or (_pin_target and _pin_target.strip()))
+        keep_pin = st.checkbox(
+            "조사장소/대상 고정 (📌)",
+            value=_pin_exists,
+            key="main_pin_keep",
+            help="체크하면 ‘검색’ 시 현재 값을 브라우저 주소에 저장합니다. 다음 접속 때 자동 적용됩니다."
+        )
+
         FIXED_LIMIT = 1000
         submitted_main = st.form_submit_button("검색")
 
     # ====== 검색 실행 ======
     results_df = pd.DataFrame()
     if submitted_main:  # 키워드 없이 Enter여도 전체 조회
+        # ---- (추가) 핀 반영/해제 ----
+        if st.session_state.get("main_pin_keep", False):
+            _qp_set_or_del({"m_place": st.session_state.get("main_filter_place", "").strip(),
+                            "m_target": st.session_state.get("main_filter_target", "").strip()})
+            st.toast("필터를 고정했어요. 다음 접속 때 자동 적용됩니다. 📌", icon="📌")
+        else:
+            _qp_set_or_del({}, remove_keys=["m_place","m_target"])
+            st.toast("필터 고정을 해제했어요.", icon="❎")
+
         kw_list = [k.strip() for k in (kw or "").split() if k.strip()]
         where_parts, params = [], {}
 
@@ -713,7 +790,11 @@ with tab_main:
         else:
             render_cards(df, cols_order)
     else:
-        st.caption("힌트: 조사장소/조사대상은 메인 키워드와 AND 조건으로 결합되어 검색됩니다.")
+        # (선택) 고정 필터가 있을 때 안내 표시
+        if (_pin_place or _pin_target):
+            st.caption(f"📌 고정 필터 적용 중 — 장소: {(_pin_place or '-')}, 대상: {(_pin_target or '-')}")
+        else:
+            st.caption("힌트: 조사장소/조사대상은 메인 키워드와 AND 조건으로 결합되어 검색됩니다.")
 
     # ====== (핵심) 검색/보기전환 이후 상단 고정 + 입력칸 포커스 ======
     if st.session_state.pop("main_scroll_and_focus", False):
