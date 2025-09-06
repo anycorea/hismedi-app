@@ -652,7 +652,7 @@ with tab_main:
         with c4:
             # 기본값: True (전 부서/전 직원 자동 포함)
             include_all = st.checkbox(
-                "전부서/전직원 OR",
+                "전부서/전직원 포함",
                 value=st.session_state.get("main_include_all", True),
                 key="main_include_all",
                 help=f"장소 입력 시 '{PLACE_FALLBACK}', 대상 입력 시 '{TARGET_FALLBACK}'를 OR로 함께 필터합니다."
@@ -661,7 +661,7 @@ with tab_main:
             # 핀 상태 존재 여부
             _pin_exists = bool((_pin_place and _pin_place.strip()) or (_pin_target and _pin_target.strip()))
             keep_pin = st.checkbox(
-                "필터 고정(📌)",
+                "조사장소/대상 고정(📌)",
                 value=st.session_state.get("main_pin_keep", _pin_exists),
                 key="main_pin_keep",
                 help="체크하면 ‘검색’ 시 현재 값을 주소에 저장하여 다음 접속 때 자동 적용됩니다."
