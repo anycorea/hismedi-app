@@ -30,9 +30,17 @@ except Exception:
 # ─────────────────────────────
 # Google / gspread
 # ─────────────────────────────
-import gspread
-from google.oauth2.service_account import Credentials
-
+try:
+    import gspread
+    from google.oauth2.service_account import Credentials
+except ModuleNotFoundError:
+    # 클라우드 환경에서 gspread가 없을 때 자동 설치
+    import subprocess, sys
+    subprocess.check_call(
+        [sys.executable, "-m", "pip", "install", "gspread==6.1.2", "google-auth==2.31.0"]
+    )
+    import gspread
+    from google.oauth2.service_account import Credentials
 
 # =============================================================================
 # Streamlit 기본 설정
@@ -887,3 +895,4 @@ def main():
 # =============================================================================
 if __name__ == "__main__":
     main()
+
