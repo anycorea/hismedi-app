@@ -752,7 +752,8 @@ def update_eval_items_order(df_order: pd.DataFrame):
 EVAL_RESP_SHEET_PREFIX = "평가_응답_"
 EVAL_BASE_HEADERS = [
     "연도","평가유형","평가대상사번","평가대상이름",
-    "평가자사번","평가자이름","총점","상태","제출시각"
+    "평가자사번","평가자이름","총점","상태","제출시각",
+    "서명_대상","서명시각_대상","서명_평가자","서명시각_평가자","잠금"
 ]
 EVAL_TYPES = ["자기","1차","2차"]
 
@@ -764,19 +765,17 @@ def _emp_name_by_sabun(emp_df: pd.DataFrame, sabun: str) -> str:
     return "" if row.empty else str(row.iloc[0].get("이름",""))
 
 def _ensure_eval_response_sheet(year: int, item_ids: list[str]) -> gspread.Worksheet:
-    """연도별 응답 시트를 보장하고, 현행 활성 항목ID에 대한 점수 컬럼(점수_ITM0001 ...)을 보강."""
+    """연도별 응답 시트를 보장하고, 활성 항목ID에 대한 점수 컬럼과 서명/잠금 컬럼을 보강."""
     wb = get_workbook()
     sname = _eval_sheet_name(year)
     try:
         ws = wb.worksheet(sname)
     except Exception:
-        ws = wb.add_worksheet(title=sname, rows=500, cols=50)
+        ws = wb.add_worksheet(title=sname, rows=800, cols=100)
         ws.update("A1", [EVAL_BASE_HEADERS + [f"점수_{iid}" for iid in item_ids]])
         return ws
 
-    header = ws.row_values(1)
-    if not header:
-        header = []
+    header = ws.row_values(1) or []
     needed = list(EVAL_BASE_HEADERS) + [f"점수_{iid}" for iid in item_ids]
     add_cols = [h for h in needed if h not in header]
     if add_cols:
@@ -884,6 +883,51 @@ def read_my_eval_rows(year: int, sabun: str) -> pd.DataFrame:
     df = df[df["평가자사번"].astype(str) == str(sabun)]
     df = df.sort_values(["평가유형","평가대상사번","제출시각"], ascending=[True, True, False])
     return df
+
+def sign_eval_response(year: int, eval_type: str, target_sabun: str, evaluator_sabun: str,
+                       who: str, signature_text: str) -> int:
+    """
+    who: '대상' 또는 '평가자'
+    signature_text: 서명란에 저장할 텍스트(이름 등). 필요 시 이미지/BASE64로 확장 가능.
+    반환: 업데이트된 행 번호(없으면 0)
+    """
+    # 활성 항목ID 확보(헤더 보강 위해)
+    items = read_eval_items_df(only_active=True)
+    item_ids = [str(x) for x in items["항목ID"].tolist()]
+    ws = _ensure_eval_response_sheet(year, item_ids)
+
+    header = ws.row_values(1); hmap = {n:i+1 for i,n in enumerate(header)}
+    idx = _eval_find_row(ws, hmap, year, eval_type, target_sabun, evaluator_sabun)
+    if idx == 0:
+        return 0
+
+    if who == "대상":
+        c_sig, c_at = hmap.get("서명_대상"), hmap.get("서명시각_대상")
+    else:
+        c_sig, c_at = hmap.get("서명_평가자"), hmap.get("서명시각_평가자")
+
+    now = kst_now_str()
+    if c_sig: ws.update_cell(idx, c_sig, signature_text)
+    if c_at:  ws.update_cell(idx, c_at, now)
+
+    st.cache_data.clear()
+    return idx
+
+def set_eval_lock(year: int, eval_type: str, target_sabun: str, evaluator_sabun: str, locked: bool) -> int:
+    """응답 행의 '잠금' 값을 True/False 로 설정. 반환: 행 번호(없으면 0)"""
+    items = read_eval_items_df(only_active=True)
+    item_ids = [str(x) for x in items["항목ID"].tolist()]
+    ws = _ensure_eval_response_sheet(year, item_ids)
+
+    header = ws.row_values(1); hmap = {n:i+1 for i,n in enumerate(header)}
+    idx = _eval_find_row(ws, hmap, year, eval_type, target_sabun, evaluator_sabun)
+    if idx == 0:
+        return 0
+    c_lock = hmap.get("잠금")
+    if c_lock:
+        ws.update_cell(idx, c_lock, bool(locked))
+        st.cache_data.clear()
+    return idx
 
 
 # =============================================================================
@@ -1312,12 +1356,10 @@ def tab_eval_input(emp_df: pd.DataFrame):
 
     u = st.session_state["user"]
     me_sabun = str(u["사번"])
-    me_name = str(u["이름"])
+    me_name  = str(u["이름"])
     is_admin = bool(u.get("관리자여부", False))
 
     st.markdown("#### 대상/유형 선택")
-
-    # 대상자 선택(관리자만 선택 가능, 일반 사용자는 본인 고정)
     if is_admin:
         df = emp_df.copy()
         if "재직여부" in df.columns:
@@ -1332,14 +1374,14 @@ def tab_eval_input(emp_df: pd.DataFrame):
         target_name = _emp_name_by_sabun(emp_df, target_sabun)
         eval_type = st.radio("평가유형", EVAL_TYPES, horizontal=True)
         evaluator_sabun = me_sabun
-        evaluator_name = me_name
+        evaluator_name  = me_name
         st.caption(f"평가자: {evaluator_name} ({evaluator_sabun})")
     else:
         target_sabun = me_sabun
-        target_name = me_name
+        target_name  = me_name
         eval_type = "자기"
         evaluator_sabun = me_sabun
-        evaluator_name = me_name
+        evaluator_name  = me_name
         st.info(f"대상자: {target_name} ({target_sabun}) · 평가유형: 자기", icon="👤")
 
     # ─────────────────────────────────────────────────────────────
@@ -1347,7 +1389,6 @@ def tab_eval_input(emp_df: pd.DataFrame):
     # ─────────────────────────────────────────────────────────────
     st.markdown("#### 점수 입력 (각 1~5)")
 
-    # 입력 방식 선택
     input_mode = st.radio(
         "입력 방식",
         ("버튼(1~5)", "스텝퍼(±)"),
@@ -1355,7 +1396,6 @@ def tab_eval_input(emp_df: pd.DataFrame):
         key="eval_input_mode",
     )
 
-    # 약간의 스타일 (행 구분/정렬)
     st.markdown(
         """
         <style>
@@ -1370,19 +1410,14 @@ def tab_eval_input(emp_df: pd.DataFrame):
         unsafe_allow_html=True,
     )
 
-    # 항목 정렬
     items_sorted = items.sort_values(["순서", "항목"]).reset_index(drop=True)
-
     scores = {}
     for r in items_sorted.itertuples(index=False):
         iid  = getattr(r, "항목ID")
         name = getattr(r, "항목") or ""
         desc = getattr(r, "내용") or ""
-
-        # 현재 값(세션 유지), 기본은 0 = 미선택
         cur_val = int(st.session_state.get(f"score_{iid}", 0))
 
-        # 행 레이아웃: [항목명 | 설명 | 컨트롤]
         c1, c2, c3 = st.columns([2, 7, 3])
         with c1:
             st.markdown(f'<div class="score-row score-name">{name}</div>', unsafe_allow_html=True)
@@ -1393,25 +1428,27 @@ def tab_eval_input(emp_df: pd.DataFrame):
             )
         with c3:
             st.markdown('<div class="score-row">', unsafe_allow_html=True)
-
-            # 1) 버튼형(1~5) — segmented_control 지원 시 우선 사용, 없으면 radio 가로 배열
             if input_mode == "버튼(1~5)":
                 if getattr(st, "segmented_control", None):
                     new_val = st.segmented_control(
                         " ",
-                        options=[0, 1, 2, 3, 4, 5],  # 0은 '—'(미선택)로 표기
+                        options=[0, 1, 2, 3, 4, 5],
                         format_func=lambda x: "—" if x == 0 else str(x),
                         default_value=cur_val,
                         key=f"seg_{iid}",
                     )
                 else:
-                    labels = ["—", "1", "2", "3", "4", "5"]  # 0을 '—'로 표시
-                    idx = max(0, min(5, cur_val))           # 0~5 -> 라디오 인덱스
+                    labels = ["—", "1", "2", "3", "4", "5"]
+                    idx = max(0, min(5, cur_val))
                     picked = st.radio(
                         " ", labels, index=idx, horizontal=True,
                         key=f"seg_{iid}", label_visibility="collapsed"
                     )
                     new_val = 0 if picked == "—" else int(picked)
+            else:
+                minus_col, val_col, plus_col = st.columns([1, 1, 1])
+                with minus_col
+
 
             # 2) 스텝퍼(±)
             else:
@@ -1532,5 +1569,6 @@ def main():
 # =============================================================================
 if __name__ == "__main__":
     main()
+
 
 
