@@ -702,6 +702,151 @@ def update_eval_items_order(df_order: pd.DataFrame):
 
 
 # =============================================================================
+# 평가 응답 유틸 (연 1회 / 시트명: '평가_응답_YYYY')
+# =============================================================================
+EVAL_RESP_SHEET_PREFIX = "평가_응답_"
+EVAL_BASE_HEADERS = [
+    "연도","평가유형","평가대상사번","평가대상이름",
+    "평가자사번","평가자이름","총점","상태","제출시각"
+]
+EVAL_TYPES = ["자기","1차","2차"]
+
+def _eval_sheet_name(year: int | str) -> str:
+    return f"{EVAL_RESP_SHEET_PREFIX}{int(year)}"
+
+def _emp_name_by_sabun(emp_df: pd.DataFrame, sabun: str) -> str:
+    row = emp_df.loc[emp_df["사번"].astype(str) == str(sabun)]
+    return "" if row.empty else str(row.iloc[0].get("이름",""))
+
+def _ensure_eval_response_sheet(year: int, item_ids: list[str]) -> gspread.Worksheet:
+    """연도별 응답 시트를 보장하고, 현행 활성 항목ID에 대한 점수 컬럼(점수_ITM0001 ...)을 보강."""
+    wb = get_workbook()
+    sname = _eval_sheet_name(year)
+    try:
+        ws = wb.worksheet(sname)
+    except Exception:
+        ws = wb.add_worksheet(title=sname, rows=500, cols=50)
+        ws.update("A1", [EVAL_BASE_HEADERS + [f"점수_{iid}" for iid in item_ids]])
+        return ws
+
+    header = ws.row_values(1)
+    if not header:
+        header = []
+    needed = list(EVAL_BASE_HEADERS) + [f"점수_{iid}" for iid in item_ids]
+    add_cols = [h for h in needed if h not in header]
+    if add_cols:
+        new_header = header + add_cols
+        ws.update("1:1", [new_header])
+    return ws
+
+def _eval_find_row(ws: gspread.Worksheet, hmap: dict, year: int, eval_type: str,
+                   target_sabun: str, evaluator_sabun: str) -> int:
+    """복합키(연도, 평가유형, 평가대상사번, 평가자사번)로 기존 행 검색. 없으면 0."""
+    cY = hmap.get("연도"); cT = hmap.get("평가유형")
+    cTS = hmap.get("평가대상사번"); cES = hmap.get("평가자사번")
+    if not all([cY, cT, cTS, cES]):
+        return 0
+    values = ws.get_all_values()
+    for i in range(2, len(values)+1):
+        row = values[i-1]
+        try:
+            if (str(row[cY-1]).strip() == str(year).strip() and
+                str(row[cT-1]).strip() == str(eval_type).strip() and
+                str(row[cTS-1]).strip() == str(target_sabun).strip() and
+                str(row[cES-1]).strip() == str(evaluator_sabun).strip()):
+                return i
+        except Exception:
+            pass
+    return 0
+
+def upsert_eval_response(emp_df: pd.DataFrame, year: int, eval_type: str,
+                         target_sabun: str, evaluator_sabun: str,
+                         scores: dict[str, int], status: str = "제출") -> dict:
+    """
+    평가 응답 업서트.
+      - 점수: {항목ID: 1~5}
+      - 총점: 항목수×5를 100으로 정규화(반드시 100점 만점 스케일)
+    """
+    items = read_eval_items_df(only_active=True)
+    item_ids = [str(x) for x in items["항목ID"].tolist()]
+    ws = _ensure_eval_response_sheet(year, item_ids)
+
+    header = ws.row_values(1)
+    hmap = {n: i+1 for i, n in enumerate(header)}
+
+    # 총점(100점 만점) 계산
+    scores_list = [int(scores.get(iid, 0)) for iid in item_ids]
+    # 1~5 clamp
+    scores_list = [min(5, max(0, s)) for s in scores_list]
+    raw = sum(scores_list)
+    denom = max(1, len(item_ids) * 5)
+    total_100 = round(raw * (100.0 / denom), 1)
+
+    # 기본 필드 채우기
+    t_name = _emp_name_by_sabun(emp_df, target_sabun)
+    e_name = _emp_name_by_sabun(emp_df, evaluator_sabun)
+
+    # 기존행 찾기
+    row_idx = _eval_find_row(ws, hmap, year, eval_type, target_sabun, evaluator_sabun)
+    now = kst_now_str()
+
+    # 신규 → append
+    if row_idx == 0:
+        # 한 행을 헤더 순서대로 구성
+        rowbuf = [""] * len(header)
+        def put(col_name, val):
+            c = hmap.get(col_name)
+            if c: rowbuf[c-1] = val
+
+        put("연도", int(year))
+        put("평가유형", eval_type)
+        put("평가대상사번", str(target_sabun)); put("평가대상이름", t_name)
+        put("평가자사번", str(evaluator_sabun)); put("평가자이름", e_name)
+        put("총점", total_100); put("상태", status); put("제출시각", now)
+
+        # 점수 컬럼
+        for iid, sc in zip(item_ids, scores_list):
+            cname = f"점수_{iid}"
+            c = hmap.get(cname)
+            if c:
+                rowbuf[c-1] = sc
+        ws.append_row(rowbuf, value_input_option="USER_ENTERED")
+        st.cache_data.clear()
+        return {"action": "insert", "row": None, "total": total_100}
+
+    # 기존행 → 업데이트
+    ws.update_cell(row_idx, hmap["총점"], total_100)
+    ws.update_cell(row_idx, hmap["상태"], status)
+    ws.update_cell(row_idx, hmap["제출시각"], now)
+    # 이름 보정(혹시 바뀐 경우)
+    ws.update_cell(row_idx, hmap["평가대상이름"], t_name)
+    ws.update_cell(row_idx, hmap["평가자이름"], e_name)
+    # 점수 컬럼들
+    for iid, sc in zip(item_ids, scores_list):
+        cname = f"점수_{iid}"
+        c = hmap.get(cname)
+        if c: ws.update_cell(row_idx, c, sc)
+
+    st.cache_data.clear()
+    return {"action": "update", "row": row_idx, "total": total_100}
+
+def read_my_eval_rows(year: int, sabun: str) -> pd.DataFrame:
+    """내가 '평가자'로 제출한 해당 연도 응답."""
+    sname = _eval_sheet_name(year)
+    wb = get_workbook()
+    try:
+        ws = wb.worksheet(sname)
+    except Exception:
+        return pd.DataFrame(columns=EVAL_BASE_HEADERS)
+    rows = ws.get_all_records(numericise_ignore=["all"])
+    df = pd.DataFrame(rows)
+    if df.empty: return df
+    df = df[df["평가자사번"].astype(str) == str(sabun)]
+    df = df.sort_values(["평가유형","평가대상사번","제출시각"], ascending=[True, True, False])
+    return df
+
+
+# =============================================================================
 # 부서이력 유틸 (시트명: '부서이력')
 # =============================================================================
 HIST_SHEET = "부서이력"
@@ -1121,6 +1266,124 @@ def tab_admin_eval_items():
 
 
 # =============================================================================
+# 탭: 평가 입력 (직원/관리자 공용)
+# =============================================================================
+def tab_eval_input(emp_df: pd.DataFrame):
+    st.subheader("평가 입력 (자기 / 1차 / 2차)")
+    this_year = datetime.now(tz=tz_kst()).year
+    colY = st.columns([1,3])
+    with colY[0]:
+        year = st.number_input("평가 연도", min_value=2000, max_value=2100, value=int(this_year), step=1)
+
+    # 항목 불러오기
+    items = read_eval_items_df(only_active=True)
+    if items.empty:
+        st.warning("활성화된 평가 항목이 없습니다. 관리자에게 문의하세요.", icon="⚠️")
+        return
+
+    u = st.session_state["user"]
+    me_sabun = str(u["사번"])
+    me_name  = str(u["이름"])
+    is_admin = bool(u.get("관리자여부", False))
+
+    st.markdown("#### 대상/유형 선택")
+
+    # 대상자 선택(관리자만 선택 가능, 일반 사용자는 본인 고정)
+    if is_admin:
+        df = emp_df.copy()
+        df = df[df.get("재직여부", True) == True] if "재직여부" in df.columns else df
+        df["표시"] = df.apply(lambda r: f"{str(r.get('사번',''))} - {str(r.get('이름',''))}", axis=1)
+        df = df.sort_values(["사번"])
+        sel = st.selectbox("평가 **대상자** (사번 - 이름)", ["(선택)"] + df["표시"].tolist(), index=0)
+        if sel == "(선택)":
+            st.info("평가 대상자를 선택하세요.")
+            return
+        target_sabun = sel.split(" - ", 1)[0]
+        target_name = _emp_name_by_sabun(emp_df, target_sabun)
+        eval_type = st.radio("평가유형", EVAL_TYPES, horizontal=True)
+        evaluator_sabun = me_sabun
+        evaluator_name  = me_name
+        st.caption(f"평가자: {evaluator_name} ({evaluator_sabun})")
+    else:
+        target_sabun = me_sabun
+        target_name  = me_name
+        eval_type = "자기"
+        evaluator_sabun = me_sabun
+        evaluator_name  = me_name
+        st.info(f"대상자: {target_name} ({target_sabun}) · 평가유형: 자기", icon="👤")
+
+    # 점수 입력(1~5)
+    st.markdown("#### 점수 입력 (각 1~5)")
+    scores = {}
+    # 보기 좋게 2열로 배치
+    left, right = st.columns(2)
+    half = (len(items) + 1) // 2
+    for i, row in enumerate(items.itertuples(index=False)):
+        host = left if i < half else right
+        with host:
+            iid = getattr(row, "항목ID")
+            name = getattr(row, "항목")
+            key  = f"score_{iid}"
+            scores[iid] = st.number_input(f"{name} ({iid})", min_value=0, max_value=5, value=0, step=1, key=key)
+
+    # 합계 계산(100점 환산)
+    item_ids = [str(x) for x in items["항목ID"].tolist()]
+    raw = sum([int(scores.get(iid, 0)) for iid in item_ids])
+    denom = max(1, len(item_ids) * 5)
+    total_100 = round(raw * (100.0 / denom), 1)
+
+    st.markdown("---")
+    cM1, cM2 = st.columns([1,3])
+    with cM1:
+        st.metric("합계(100점 만점)", total_100)
+    with cM2:
+        st.progress(min(1.0, total_100/100.0), text=f"총점 {total_100}점")
+
+    colBTN = st.columns([1,1,2,2])
+    with colBTN[0]:
+        save_draft = st.button("임시저장", use_container_width=True)
+    with colBTN[1]:
+        submit = st.button("제출", type="primary", use_container_width=True)
+
+    if not (save_draft or submit):
+        # 아래 현황표는 항상 보여줌
+        pass
+    else:
+        try:
+            status = "임시저장" if save_draft else "제출"
+            rep = upsert_eval_response(
+                emp_df=emp_df,
+                year=int(year),
+                eval_type=eval_type,
+                target_sabun=str(target_sabun),
+                evaluator_sabun=str(evaluator_sabun),
+                scores=scores,
+                status=status,
+            )
+            if rep["action"] == "insert":
+                st.success(f"저장 완료(신규). 총점 {rep['total']}점", icon="✅")
+            else:
+                st.success(f"저장 완료(업데이트). 총점 {rep['total']}점", icon="✅")
+            st.toast("평가 응답이 저장되었습니다.", icon="✅")
+        except Exception as e:
+            st.exception(e)
+
+    st.markdown("#### 내 제출 현황")
+    try:
+        my = read_my_eval_rows(int(year), me_sabun)
+        if my.empty:
+            st.caption("제출된 평가가 없습니다.")
+        else:
+            st.dataframe(
+                my[["평가유형","평가대상사번","평가대상이름","총점","상태","제출시각"]],
+                use_container_width=True,
+                height=260,
+            )
+    except Exception:
+        st.caption("제출 현황을 불러오지 못했습니다.")
+
+
+# =============================================================================
 # 메인
 # =============================================================================
 def main():
@@ -1145,11 +1408,11 @@ def main():
             logout()
 
     # 4) 탭 구성 (도움말 탭은 항상 맨 오른쪽)
-    labels = ["직원"]
+    labels = ["직원", "평가"]
     admin_idx = None
     if u.get("관리자여부", False):
         labels.append("관리자")
-        admin_idx = 1
+        admin_idx = 2
     labels.append("도움말")  # 항상 마지막
 
     tabs = st.tabs(labels)
@@ -1157,6 +1420,10 @@ def main():
     # 직원
     with tabs[0]:
         tab_staff(emp_df)
+
+    # 평가
+    with tabs[1]:
+        tab_eval_input(emp_df)
 
     # 관리자
     if admin_idx is not None:
@@ -1169,7 +1436,6 @@ def main():
                 key="admin_page_selector",
             )
             st.divider()
-
             if admin_page == "PIN 관리":
                 tab_admin_pin(emp_df)
             elif admin_page == "부서(근무지) 이동":
@@ -1184,13 +1450,11 @@ def main():
             ### 사용 안내
             - Google Sheets의 **직원** 시트와 연동해 조회합니다.  
             - `secrets.toml` 의 서비스 계정(편집자 권한)이 시트에 공유되어 있어야 합니다.  
-            - `private_key` 는  
-              - **삼중따옴표 + 실제 줄바꿈** 또는  
-              - **한 줄 문자열 + `\\n` 이스케이프** 모두 지원합니다.  
-            - 관리자 메뉴에서 **개별 PIN 변경**, **일괄 PIN 발급**, **부서 이동 기록/반영**, **평가 항목 관리**가 가능합니다.
+            - **평가 입력** 탭에서 자기/1차/2차 평가를 1~5점으로 입력합니다(항목 수×5를 100점으로 환산).  
+            - 평가 응답은 연도별 시트('평가_응답_YYYY')에 저장됩니다.  
+            - 관리자 메뉴: PIN 관리 · 부서 이동 · 평가 항목 관리.
             """
         )
-
 
 # =============================================================================
 if __name__ == "__main__":
