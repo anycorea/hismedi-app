@@ -36,6 +36,7 @@ st.markdown(
       .block-container{padding-top:.8rem}
       .stTabs [role='tab']{padding:10px 16px !important;font-size:1.02rem !important}
       .grid-head{font-size:.9rem;color:#6b7280;margin:.2rem 0 .5rem}
+      h1, .stMarkdown h1 { font-size: 1.4rem; line-height: 1.6rem; margin: .2rem 0 .6rem; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -91,6 +92,13 @@ def _find_row_by_sabun(ws, hmap, sabun: str) -> int:
     return 0
 
 def _update_cell(ws, row, col, value): ws.update_cell(row, col, value)
+
+def _hide_doctors(df: pd.DataFrame) -> pd.DataFrame:
+    """직무가 '의사'인 행을 숨깁니다. (대소문자/공백 안전)"""
+    if "직무" not in df.columns:
+        return df
+    col = df["직무"].astype(str).str.strip().str.lower()
+    return df[~col.eq("의사")]
 
 # ── Session/Auth ──────────────────────────────────────────────────────────────
 SESSION_TTL_MIN = 30
@@ -298,9 +306,17 @@ def _ensure_eval_response_sheet(year:int,item_ids:list[str])->gspread.Worksheet:
     if add: ws.update("1:1",[header+add])
     return ws
 
-def _emp_name_by_sabun(emp_df:pd.DataFrame,sabun:str)->str:
-    row=emp_df.loc[emp_df["사번"].astype(str)==str(sabun)]
-    return "" if row.empty else str(row.iloc[0].get("이름",""))
+def _emp_name_by_sabun(emp_df: pd.DataFrame, sabun: str) -> str:
+    row = emp_df.loc[emp_df["사번"].astype(str) == str(sabun)]
+    if not row.empty:
+        return str(row.iloc[0].get("이름", ""))
+    # fallback: 필터링 때문에 못 찾는 경우 전체 시트에서 재조회
+    try:
+        full = read_sheet_df(EMP_SHEET)
+        row2 = full.loc[full["사번"].astype(str) == str(sabun)]
+        return "" if row2.empty else str(row2.iloc[0].get("이름", ""))
+    except Exception:
+        return ""
 
 def upsert_eval_response(emp_df:pd.DataFrame, year:int, eval_type:str, target_sabun:str, evaluator_sabun:str, scores:dict[str,int], status:str="제출")->dict:
     items=read_eval_items_df(True); item_ids=[str(x) for x in items["항목ID"].tolist()]
@@ -1215,7 +1231,12 @@ def main():
     require_login(emp_df_all)
 
     # 3) 로그인 직후: 관리자 플래그 최신화
+    # 권한 플래그 갱신(시드/시트 기준)
     st.session_state["user"]["관리자여부"] = is_admin(st.session_state["user"]["사번"])
+
+    # 직원 탭은 전체, 그 외 탭은 '의사' 숨김
+    emp_df_full  = emp_df
+    emp_df_no_md = _hide_doctors(emp_df_full)
 
     # 4) 사이드바 사용자/로그아웃
     u = st.session_state["user"]
@@ -1246,34 +1267,30 @@ def main():
 
     # 관리자 탭도 “의사” 제외본 사용 (요청사항: 직원 탭 외 전부 제외)
     if u.get("관리자여부", False):
+        tabs = st.tabs(["직원","평가","직무기술서","직무능력평가","관리자","도움말"])
+    else:
+        tabs = st.tabs(["직원","평가","직무기술서","직무능력평가","도움말"])
+
+    # 직원 탭: 전체 데이터(의사 포함)
+    with tabs[0]: tab_staff(emp_df_full)
+
+    # 그 외 탭: 의사 숨김
+    with tabs[1]: tab_eval_input(emp_df_no_md)
+    with tabs[2]: tab_job_desc(emp_df_no_md)
+    with tabs[3]: tab_competency(emp_df_no_md)
+
+    if u.get("관리자여부", False):
         with tabs[4]:
             st.subheader("관리자 메뉴")
-            admin_page = st.radio(
-                "기능 선택",
-                ["PIN 관리", "부서(근무지) 이동", "평가 항목 관리", "권한 관리"],
-                horizontal=True,
-                key="admin_page_selector",
-            )
+            admin_page = st.radio("기능 선택", ["PIN 관리","부서(근무지) 이동","평가 항목 관리","권한 관리"], horizontal=True, key="admin_page_selector")
             st.divider()
-            if admin_page == "PIN 관리":
-                tab_admin_pin(emp_df_nodoctor)
-            elif admin_page == "부서(근무지) 이동":
-                tab_admin_transfer(emp_df_nodoctor)
-            elif admin_page == "평가 항목 관리":
-                tab_admin_eval_items()
+            if admin_page=="PIN 관리":
+                tab_admin_pin(emp_df_no_md)            # ← 의사 숨김
+            elif admin_page=="부서(근무지) 이동":
+                tab_admin_transfer(emp_df_no_md)       # ← 의사 숨김
+            elif admin_page=="평가 항목 관리":
+                tab_admin_eval_items()                  # 항목 시트 관리이므로 DF 전달 불필요
             else:
-                tab_admin_acl(emp_df_nodoctor)
+                tab_admin_acl(emp_df_no_md)            # ← 의사 숨김
 
-    with tabs[-1]:
-        st.markdown(
-            """
-            ### 사용 안내
-            - 직원 탭: 전체 직원 표시
-            - 그 외 탭: 직무가 '의사'인 직원은 제외
-            - 권한: 직원(자기) · 매니저(위임 범위) · 관리자(전체)
-            """
-        )
-
-if __name__ == "__main__":
-    main()
 
