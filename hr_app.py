@@ -703,6 +703,96 @@ def sync_current_department_from_history(as_of_date: datetime.date = None) -> in
 
 
 # =============================================================================
+# 평가 항목 유틸 (시트명: '평가_항목') — 영역(대분류) 없음, 1~5점 척도(가중치 없음)
+# =============================================================================
+EVAL_SHEET = "평가_항목"
+
+def ensure_eval_sheet():
+    """'평가_항목' 시트와 필요한 헤더 보장 (영역 칼럼 없음)."""
+    wb = get_workbook()
+    try:
+        ws = wb.worksheet(EVAL_SHEET)
+    except Exception:
+        ws = wb.add_worksheet(title=EVAL_SHEET, rows=500, cols=10)
+        ws.update("A1", [[
+            "항목ID","항목","내용","순서","활성","비고"
+        ]])
+        return ws
+
+    need = ["항목ID","항목","내용","순서","활성","비고"]
+    header = ws.row_values(1)
+    missing = [h for h in need if h not in header]
+    if missing:
+        start_col = len(header) + 1
+        for i, name in enumerate(missing, start=start_col):
+            ws.update_cell(1, i, name)
+    return ws
+
+@st.cache_data(ttl=60, show_spinner=True)
+def read_eval_items_df(only_active: bool = False) -> pd.DataFrame:
+    """평가_항목을 DF로 읽음(영역 없음)."""
+    ws = ensure_eval_sheet()
+    rows = ws.get_all_records(numericise_ignore=["all"])
+    df = pd.DataFrame(rows)
+    if df.empty:
+        df = pd.DataFrame(columns=["항목ID","항목","내용","순서","활성","비고"])
+
+    if "순서" in df.columns:
+        df["순서"] = pd.to_numeric(df["순서"], errors="coerce").fillna(0).astype(int)
+        df = df.sort_values("순서", kind="stable")
+
+    if "활성" in df.columns:
+        df["활성"] = df["활성"].map(_to_bool)
+
+    if only_active and "활성" in df.columns:
+        df = df[df["활성"] == True]
+
+    # 필요 컬럼만 정렬(시트에 다른 칼럼이 있어도 무시)
+    keep = ["항목ID","항목","내용","순서","활성","비고"]
+    for c in keep:
+        if c not in df.columns:
+            df[c] = ""
+    return df[keep].reset_index(drop=True)
+
+def _next_item_id(existing_ids: list[str]) -> str:
+    """ITM0001 형태 다음 ID 생성."""
+    base = [int(s[3:]) for s in existing_ids if str(s).startswith("ITM") and str(s[3:]).isdigit()]
+    n = max(base) + 1 if base else 1
+    return f"ITM{n:04d}"
+
+def save_eval_items_df(df: pd.DataFrame):
+    """DF 전체를 '평가_항목' 시트에 반영. 빈 항목ID는 자동 발급."""
+    ws = ensure_eval_sheet()
+    cols = ["항목ID","항목","내용","순서","활성","비고"]
+    for c in cols:
+        if c not in df.columns:
+            df[c] = ""
+    df = df[cols].copy()
+
+    # ID 자동 발급
+    ids = df["항목ID"].astype(str).tolist()
+    used = {i for i in ids if i}
+    for i, v in enumerate(ids):
+        if not v:
+            new_id = _next_item_id(list(used))
+            df.loc[i, "항목ID"] = new_id
+            used.add(new_id)
+
+    # 타입 보정
+    df["순서"] = pd.to_numeric(df["순서"], errors="coerce").fillna(0).astype(int)
+    df["활성"] = df["활성"].map(_to_bool)
+
+    # 기존 데이터 영역 비우고 덮어쓰기
+    last_row = ws.row_count
+    last_col = ws.col_count
+    ws.batch_clear([f"A2:{gspread.utils.rowcol_to_a1(last_row, last_col)}"])
+
+    values = df.fillna("").values.tolist()
+    ws.update("A2", values, value_input_option="USER_ENTERED")
+    st.cache_data.clear()
+
+
+# =============================================================================
 # 관리자: 부서 이동 UI
 # =============================================================================
 def tab_admin_transfer(emp_df: pd.DataFrame):
@@ -895,4 +985,5 @@ def main():
 # =============================================================================
 if __name__ == "__main__":
     main()
+
 
