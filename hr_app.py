@@ -55,6 +55,8 @@ st.markdown(
       .block-container {padding-top: 1.1rem;}
       /* 탭 클릭 영역/가독성 확대 */
       .stTabs [role="tab"] { padding: 12px 20px !important; font-size: 1.05rem !important; }
+      /* 평가 입력 레이아웃 가독성 */
+      .eval-desc p { margin: 0; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -112,6 +114,9 @@ def get_workbook():
     book_id = st.secrets["sheets"]["HR_SHEET_ID"]
     return gc.open_by_key(book_id)
 
+# ── 시트명 상수(환경설정 가능) ─────────────────────────────────────────────
+EMP_SHEET = st.secrets.get("sheets", {}).get("EMP_SHEET", "직원")
+
 
 # =============================================================================
 # 데이터 로딩
@@ -144,12 +149,13 @@ def read_sheet_df(sheet_name: str) -> pd.DataFrame:
 
 
 # gspread 원본 시트 핸들/헤더 맵
-def _get_ws_and_headers(sheet_name: str = "직원"):
+def _get_ws_and_headers(sheet_name: str | None = None):
     wb = get_workbook()
-    ws = wb.worksheet(sheet_name)
+    sheet = sheet_name or EMP_SHEET
+    ws = wb.worksheet(sheet)
     header = ws.row_values(1)  # 1행 헤더
     if not header:
-        raise RuntimeError(f"'{sheet_name}' 시트의 헤더(1행)를 찾을 수 없습니다.")
+        raise RuntimeError(f"'{sheet}' 시트의 헤더(1행)를 찾을 수 없습니다.")
     hmap = {name: idx + 1 for idx, name in enumerate(header)}  # 이름->1기반컬럼
     return ws, header, hmap
 
@@ -331,6 +337,9 @@ def tab_staff(emp_df: pd.DataFrame):
     url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit"
     st.caption(f"📄 원본 스프레드시트 열기: [{url}]({url})")
 
+# 예전 이름과의 호환
+tab_employees = tab_staff
+
 
 # =============================================================================
 # 탭: 관리자 (PIN 등록/변경 + 일괄 발급)
@@ -396,9 +405,9 @@ def tab_admin_pin(emp_df: pd.DataFrame):
 
             # gspread 셀 업데이트
             try:
-                ws, header, hmap = _get_ws_and_headers("직원")
+                ws, header, hmap = _get_ws_and_headers(EMP_SHEET)
                 if "PIN_hash" not in hmap:
-                    st.error("'직원' 시트에 PIN_hash 컬럼이 없습니다. (헤더 행에 'PIN_hash' 추가)")
+                    st.error(f"'{EMP_SHEET}' 시트에 PIN_hash 컬럼이 없습니다. (헤더 행에 'PIN_hash' 추가)")
                     st.stop()
 
                 row_idx = _find_row_by_sabun(ws, hmap, sabun)
@@ -417,9 +426,9 @@ def tab_admin_pin(emp_df: pd.DataFrame):
 
         if do_clear:
             try:
-                ws, header, hmap = _get_ws_and_headers("직원")
+                ws, header, hmap = _get_ws_and_headers(EMP_SHEET)
                 if "PIN_hash" not in hmap:
-                    st.error("'직원' 시트에 PIN_hash 컬럼이 없습니다. (헤더 행에 'PIN_hash' 추가)")
+                    st.error(f"'{EMP_SHEET}' 시트에 PIN_hash 컬럼이 없습니다. (헤더 행에 'PIN_hash' 추가)")
                     st.stop()
                 row_idx = _find_row_by_sabun(ws, hmap, sabun)
                 if row_idx == 0:
@@ -476,6 +485,7 @@ def tab_admin_pin(emp_df: pd.DataFrame):
     with col_btns[1]:
         do_issue = st.button("발급 실행(시트 업데이트)", type="primary", use_container_width=True)
 
+    preview = None
     if do_preview or do_issue:
         if len(candidates) == 0:
             st.warning("대상자가 없습니다.", icon="⚠️")
@@ -493,25 +503,18 @@ def tab_admin_pin(emp_df: pd.DataFrame):
             preview = candidates[["사번", "이름"]].copy()
             preview["새_PIN"] = new_pins
 
-            # ── 미리보기(대상자) 표시             ─────────────────────────────────────────────
+            # ── 미리보기(대상자) 표시 ─────────────────────────────────────────
             st.dataframe(preview, use_container_width=True, height=360)
-            
+
             # ── CSV: 직원 전체(사번,이름,새_PIN)로 내려받기 ─────────────────────
             #   - 새 PIN이 생성된 직원만 '새_PIN' 값이 채워지고, 나머지는 공백("")
-            #   - 어떤 필터(재직자만/미설정자만/덮어쓰기)로 실행했든 항상 '전체' CSV 제공
             full = emp_df[["사번", "이름"]].copy()
             full["사번"] = full["사번"].astype(str)
-            
-            # 대상자 미리보기(preview)에서 새 PIN만 추출해 LEFT JOIN
             join_src = preview[["사번", "새_PIN"]].copy()
             join_src["사번"] = join_src["사번"].astype(str)
-            
             csv_df = full.merge(join_src, on="사번", how="left")
             csv_df["새_PIN"] = csv_df["새_PIN"].fillna("")
-            
-            # 보기 좋게 정렬(사번 기준 문자열 정렬; 앞자리 0 보존 목적)
             csv_df = csv_df.sort_values("사번")
-            
             csv_all = csv_df.to_csv(index=False, encoding="utf-8-sig")
             st.download_button(
                 "CSV 전체 다운로드 (사번,이름,새_PIN)",
@@ -520,8 +523,7 @@ def tab_admin_pin(emp_df: pd.DataFrame):
                 mime="text/csv",
                 use_container_width=True,
             )
-            
-            # (선택) 필요하면 아래 “대상자만 CSV” 버튼도 같이 제공할 수 있어요.
+            # 대상자만 CSV (선택)
             csv_targets = preview.to_csv(index=False, encoding="utf-8-sig")
             st.download_button(
                 "CSV 대상자만 다운로드 (사번,이름,새_PIN)",
@@ -531,11 +533,11 @@ def tab_admin_pin(emp_df: pd.DataFrame):
                 use_container_width=True,
             )
 
-    if do_issue:
+    if do_issue and preview is not None:
         try:
-            ws, header, hmap = _get_ws_and_headers("직원")
+            ws, header, hmap = _get_ws_and_headers(EMP_SHEET)
             if "PIN_hash" not in hmap or "사번" not in hmap:
-                st.error("'직원' 시트에 '사번' 또는 'PIN_hash' 헤더가 없습니다.")
+                st.error(f"'{EMP_SHEET}' 시트에 '사번' 또는 'PIN_hash' 헤더가 없습니다.")
                 st.stop()
 
             # 한 번만 읽어서 사번 -> 행번호 매핑
@@ -561,9 +563,9 @@ def tab_admin_pin(emp_df: pd.DataFrame):
             CHUNK = 100
             pbar = st.progress(0.0, text="시트 업데이트(배치) 중...")
             for i in range(0, len(updates), CHUNK):
-                ws.batch_update(updates[i:i+CHUNK])
+                ws.batch_update(updates[i:i + CHUNK])
                 pbar.progress(min(1.0, (i + CHUNK) / len(updates)))
-                time.sleep(0.2)  # 살짝 페이싱
+                time.sleep(0.2)  # 약간 페이싱
 
             st.cache_data.clear()
             st.success(f"일괄 발급 완료: {len(updates):,}명 반영", icon="✅")
@@ -819,7 +821,6 @@ def upsert_eval_response(emp_df: pd.DataFrame, year: int, eval_type: str,
 
     # 총점(100점 만점) 계산
     scores_list = [int(scores.get(iid, 0)) for iid in item_ids]
-    # 1~5 clamp
     scores_list = [min(5, max(0, s)) for s in scores_list]
     raw = sum(scores_list)
     denom = max(1, len(item_ids) * 5)
@@ -835,7 +836,6 @@ def upsert_eval_response(emp_df: pd.DataFrame, year: int, eval_type: str,
 
     # 신규 → append
     if row_idx == 0:
-        # 한 행을 헤더 순서대로 구성
         rowbuf = [""] * len(header)
         def put(col_name, val):
             c = hmap.get(col_name)
@@ -847,7 +847,6 @@ def upsert_eval_response(emp_df: pd.DataFrame, year: int, eval_type: str,
         put("평가자사번", str(evaluator_sabun)); put("평가자이름", e_name)
         put("총점", total_100); put("상태", status); put("제출시각", now)
 
-        # 점수 컬럼
         for iid, sc in zip(item_ids, scores_list):
             cname = f"점수_{iid}"
             c = hmap.get(cname)
@@ -861,10 +860,8 @@ def upsert_eval_response(emp_df: pd.DataFrame, year: int, eval_type: str,
     ws.update_cell(row_idx, hmap["총점"], total_100)
     ws.update_cell(row_idx, hmap["상태"], status)
     ws.update_cell(row_idx, hmap["제출시각"], now)
-    # 이름 보정(혹시 바뀐 경우)
     ws.update_cell(row_idx, hmap["평가대상이름"], t_name)
     ws.update_cell(row_idx, hmap["평가자이름"], e_name)
-    # 점수 컬럼들
     for iid, sc in zip(item_ids, scores_list):
         cname = f"점수_{iid}"
         c = hmap.get(cname)
@@ -896,8 +893,7 @@ HIST_SHEET = "부서이력"
 
 
 def ensure_dept_history_sheet():
-    """'부서이력' 시트를 보장. 없으면 생성 + 헤더 세팅.
-       WorksheetNotFound만 생성 트리거로 삼고, 그 외 에러는 그대로 노출."""
+    """'부서이력' 시트를 보장. 없으면 생성 + 헤더 세팅."""
     wb = get_workbook()
     try:
         ws = wb.worksheet(HIST_SHEET)
@@ -911,7 +907,7 @@ def ensure_dept_history_sheet():
         headers = ["사번", "이름", "부서1", "부서2", "시작일", "종료일", "변경사유", "승인자", "메모", "등록시각"]
         ws.update("A1", [headers])
         return ws
-    except APIError as e:
+    except APIError:
         st.error("부서이력 시트를 만들 수 없습니다. (권한/시트수/보호 영역/쿼터 확인)")
         raise
 
@@ -951,7 +947,6 @@ def _hist_close_active_range(ws_hist, sabun: str, end_date: str):
     if not (sabun_col and end_col):
         return
     values = ws_hist.get_all_values()
-    # 2행부터 검사
     for i in range(2, len(values) + 1):
         if values[i - 1][sabun_col - 1].strip() == str(sabun).strip():
             if values[i - 1][end_col - 1].strip() == "":
@@ -969,10 +964,6 @@ def apply_department_change(
 ) -> dict:
     """
     부서 이동을 기록하고(부서이력), 필요 시 '직원' 시트의 현재 부서를 업데이트.
-    규칙:
-      - 기존 '종료일 빈' 구간을 (start_date - 1) 로 닫음
-      - 새 구간: 시작일 = start_date, 종료일 = ""
-      - start_date <= 오늘 이면 '직원' 시트 현재부서도 갱신
     """
     ensure_dept_history_sheet()
     wb = get_workbook()
@@ -1011,7 +1002,7 @@ def apply_department_change(
     # 3) 오늘 적용 대상이면 '직원' 현재부서도 갱신
     applied = False
     if start_date <= today:
-        ws_emp, header_emp, hmap_emp = _get_ws_and_headers("직원")
+        ws_emp, header_emp, hmap_emp = _get_ws_and_headers(EMP_SHEET)
         row_idx = _find_row_by_sabun(ws_emp, hmap_emp, str(sabun))
         if row_idx > 0:
             if "부서1" in hmap_emp:
@@ -1027,18 +1018,15 @@ def apply_department_change(
 def sync_current_department_from_history(as_of_date: datetime.date = None) -> int:
     """
     '부서이력'을 기준으로 '직원' 시트의 현재 부서(부서1/부서2)를 동기화.
-    규칙: as_of_date(기본=오늘) 기준으로 시작일 <= D 이고 (종료일이 비었거나 종료일 >= D) 인 최신 구간을 현재값으로 반영.
-    반환: 업데이트된 직원 수
     """
     ensure_dept_history_sheet()
     hist = read_dept_history_df()
-    emp = read_sheet_df("직원")
+    emp = read_sheet_df(EMP_SHEET)
 
     if as_of_date is None:
         as_of_date = datetime.now(tz=tz_kst()).date()
     D = as_of_date.strftime("%Y-%m-%d")
 
-    # 사번별 최신 구간 선택
     updates = {}  # sabun -> (dept1, dept2)
     for sabun, grp in hist.groupby("사번"):
         def ok(row):
@@ -1055,8 +1043,7 @@ def sync_current_department_from_history(as_of_date: datetime.date = None) -> in
     if not updates:
         return 0
 
-    wb = get_workbook()
-    ws_emp, header_emp, hmap_emp = _get_ws_and_headers("직원")
+    ws_emp, header_emp, hmap_emp = _get_ws_and_headers(EMP_SHEET)
     changed = 0
     for _, r in emp.iterrows():
         sabun = str(r.get("사번", ""))
@@ -1309,16 +1296,15 @@ def tab_admin_eval_items():
 
 
 # =============================================================================
-# 탭: 평가 입력 (직원/관리자 공용)
+# 탭: 평가 입력 (자기/1차/2차 공용)
 # =============================================================================
 def tab_eval_input(emp_df: pd.DataFrame):
     st.subheader("평가 입력 (자기 / 1차 / 2차)")
     this_year = datetime.now(tz=tz_kst()).year
-    colY = st.columns([1,3])
+    colY = st.columns([1, 3])
     with colY[0]:
         year = st.number_input("평가 연도", min_value=2000, max_value=2100, value=int(this_year), step=1)
 
-    # 항목 불러오기
     items = read_eval_items_df(only_active=True)
     if items.empty:
         st.warning("활성화된 평가 항목이 없습니다. 관리자에게 문의하세요.", icon="⚠️")
@@ -1326,7 +1312,7 @@ def tab_eval_input(emp_df: pd.DataFrame):
 
     u = st.session_state["user"]
     me_sabun = str(u["사번"])
-    me_name  = str(u["이름"])
+    me_name = str(u["이름"])
     is_admin = bool(u.get("관리자여부", False))
 
     st.markdown("#### 대상/유형 선택")
@@ -1334,7 +1320,8 @@ def tab_eval_input(emp_df: pd.DataFrame):
     # 대상자 선택(관리자만 선택 가능, 일반 사용자는 본인 고정)
     if is_admin:
         df = emp_df.copy()
-        df = df[df.get("재직여부", True) == True] if "재직여부" in df.columns else df
+        if "재직여부" in df.columns:
+            df = df[df["재직여부"] == True]
         df["표시"] = df.apply(lambda r: f"{str(r.get('사번',''))} - {str(r.get('이름',''))}", axis=1)
         df = df.sort_values(["사번"])
         sel = st.selectbox("평가 **대상자** (사번 - 이름)", ["(선택)"] + df["표시"].tolist(), index=0)
@@ -1345,40 +1332,40 @@ def tab_eval_input(emp_df: pd.DataFrame):
         target_name = _emp_name_by_sabun(emp_df, target_sabun)
         eval_type = st.radio("평가유형", EVAL_TYPES, horizontal=True)
         evaluator_sabun = me_sabun
-        evaluator_name  = me_name
+        evaluator_name = me_name
         st.caption(f"평가자: {evaluator_name} ({evaluator_sabun})")
     else:
         target_sabun = me_sabun
-        target_name  = me_name
+        target_name = me_name
         eval_type = "자기"
         evaluator_sabun = me_sabun
-        evaluator_name  = me_name
+        evaluator_name = me_name
         st.info(f"대상자: {target_name} ({target_sabun}) · 평가유형: 자기", icon="👤")
 
     # 점수 입력(1~5) — 항목/내용/점수 3열 레이아웃 (ID 표시는 숨김)
     st.markdown("#### 점수 입력 (각 1~5)")
-    
-    # 헤더줄
+
+    # 헤더
     h1, h2, h3 = st.columns([2, 6, 1])
-    with h1: st.markdown("**항목**")
-    with h2: st.markdown("**내용**")
-    with h3: st.markdown("**점수**")
-    
+    with h1:
+        st.markdown("**항목**")
+    with h2:
+        st.markdown("**내용**")
+    with h3:
+        st.markdown("**점수**")
+
     scores = {}
-    # 항목 순서대로 한 줄씩 렌더링
-    for r in items.sort_values(["순서","항목"]).itertuples(index=False):
-        iid   = getattr(r, "항목ID")
-        name  = getattr(r, "항목") or ""
-        desc  = getattr(r, "내용") or ""
-    
+    for r in items.sort_values(["순서", "항목"]).itertuples(index=False):
+        iid = getattr(r, "항목ID")
+        name = getattr(r, "항목") or ""
+        desc = getattr(r, "내용") or ""
+
         c1, c2, c3 = st.columns([2, 6, 1])
         with c1:
             st.markdown(f"**{name}**")
         with c2:
-            # 긴 문장 줄바꿈/개행 허용
-            st.markdown(desc.replace("\n", "  \n"))
+            st.markdown(desc.replace("\n", "  \n"), unsafe_allow_html=False, help=None)
         with c3:
-            # 레이블은 공백으로 숨김, 0~5 정수 입력
             scores[iid] = st.number_input(
                 " ", min_value=0, max_value=5, value=0, step=1, key=f"score_{iid}"
             )
@@ -1390,22 +1377,19 @@ def tab_eval_input(emp_df: pd.DataFrame):
     total_100 = round(raw * (100.0 / denom), 1)
 
     st.markdown("---")
-    cM1, cM2 = st.columns([1,3])
+    cM1, cM2 = st.columns([1, 3])
     with cM1:
         st.metric("합계(100점 만점)", total_100)
     with cM2:
-        st.progress(min(1.0, total_100/100.0), text=f"총점 {total_100}점")
+        st.progress(min(1.0, total_100 / 100.0), text=f"총점 {total_100}점")
 
-    colBTN = st.columns([1,1,2,2])
+    colBTN = st.columns([1, 1, 2, 2])
     with colBTN[0]:
         save_draft = st.button("임시저장", use_container_width=True)
     with colBTN[1]:
         submit = st.button("제출", type="primary", use_container_width=True)
 
-    if not (save_draft or submit):
-        # 아래 현황표는 항상 보여줌
-        pass
-    else:
+    if save_draft or submit:
         try:
             status = "임시저장" if save_draft else "제출"
             rep = upsert_eval_response(
@@ -1427,56 +1411,17 @@ def tab_eval_input(emp_df: pd.DataFrame):
 
     st.markdown("#### 내 제출 현황")
     try:
-        my = read_my_eval_rows(int(year), me_sabun)
+        my = read_my_eval_rows(int(year), evaluator_sabun)
         if my.empty:
             st.caption("제출된 평가가 없습니다.")
         else:
             st.dataframe(
-                my[["평가유형","평가대상사번","평가대상이름","총점","상태","제출시각"]],
+                my[["평가유형", "평가대상사번", "평가대상이름", "총점", "상태", "제출시각"]],
                 use_container_width=True,
                 height=260,
             )
     except Exception:
         st.caption("제출 현황을 불러오지 못했습니다.")
-
-def tab_eval_self_input():
-    """평가 > 자기평가 입력(1~5점, 20문항, 총점 100) — ITM코드 숨김, 정렬된 표 UI"""
-    st.subheader("평가 - 자기평가 입력 (1~5점)")
-
-    items = read_eval_items_df(only_active=True)
-    if items.empty:
-        st.info("활성화된 평가 항목이 없습니다. 먼저 '관리자 > 평가 항목 관리'에서 항목을 등록/활성화하세요.")
-        return
-
-    # 입력 테이블 구성(ITM코드 제외)
-    base = items[["항목", "내용"]].copy()
-    base["점수(1~5)"] = None
-
-    st.caption("각 항목을 1~5점으로 입력하세요. (20개 × 5점 = 100점 만점)")
-    edited = st.data_editor(
-        base,
-        hide_index=True,
-        use_container_width=True,
-        height=520,
-        num_rows="fixed",
-        column_config={
-            "항목": st.column_config.TextColumn("항목", width="small", disabled=True),
-            "내용": st.column_config.TextColumn("내용", width="large", disabled=True),
-            "점수(1~5)": st.column_config.NumberColumn(
-                "점수(1~5)", min_value=1, max_value=5, step=1, format="%d"
-            ),
-        },
-        key="self_eval_editor",
-    )
-
-    # 합계/검증
-    total = int(pd.to_numeric(edited["점수(1~5)"], errors="coerce").fillna(0).sum())
-    st.metric(label="합계", value=f"{total} / 100")
-    if (edited["점수(1~5)"].isna()).any():
-        st.info("모든 항목의 점수를 입력하면 100점 만점 기준 합계가 정확히 계산됩니다.")
-
-    # (저장 로직은 다음 단계에서 '평가_응답' 시트와 연결 예정)
-    st.button("임시 저장(추후 연결)", disabled=True, use_container_width=True)
 
 
 # =============================================================================
@@ -1488,9 +1433,9 @@ def main():
 
     # 1) 데이터 읽기
     try:
-        emp_df = read_sheet_df("직원")
+        emp_df = read_sheet_df(EMP_SHEET)
     except Exception as e:
-        st.error(f"'직원' 시트 로딩 실패: {e}")
+        st.error(f"'{EMP_SHEET}' 시트 로딩 실패: {e}")
         return
 
     # 2) 로그인 요구
@@ -1503,21 +1448,19 @@ def main():
         if st.button("로그아웃", use_container_width=True):
             logout()
 
-    # 4) 탭 구성
-    tabs_names = ["직원", "평가"]
+    # 4) 탭 구성 (도움말은 항상 맨 오른쪽)
     if u.get("관리자여부", False):
-        tabs_names.append("관리자")
-    tabs_names.append("도움말")  # 항상 맨 오른쪽
+        tabs = st.tabs(["직원", "평가", "관리자", "도움말"])
+    else:
+        tabs = st.tabs(["직원", "평가", "도움말"])
 
-    tabs = st.tabs(tabs_names)
-
-    # 직원 조회
+    # 직원
     with tabs[0]:
-        tab_employees(emp_df)
+        tab_staff(emp_df)
 
-    # 평가(자기평가 입력)
+    # 평가
     with tabs[1]:
-        tab_eval_self_input()
+        tab_eval_input(emp_df)
 
     # 관리자
     if u.get("관리자여부", False):
@@ -1543,8 +1486,9 @@ def main():
             """
             ### 사용 안내
             - Google Sheets 연동 조회/관리
+            - 직원 시트명은 기본 **직원**이며, `secrets.toml`의 `[sheets].EMP_SHEET`로 변경 가능
             - 관리자: **개별 PIN/일괄 PIN/부서이동/평가항목 관리**
-            - 평가: **자기평가 입력(1~5점)** — ITM코드는 숨기고 표로 정렬
+            - 평가: **자기/1차/2차 입력(1~5점)** — ITM 코드는 숨김, 항목/내용/점수 3열 정렬
             """
         )
 
@@ -1552,6 +1496,3 @@ def main():
 # =============================================================================
 if __name__ == "__main__":
     main()
-
-
-
