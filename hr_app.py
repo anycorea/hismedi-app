@@ -493,13 +493,40 @@ def tab_admin_pin(emp_df: pd.DataFrame):
             preview = candidates[["사번", "이름"]].copy()
             preview["새_PIN"] = new_pins
 
-            # 미리보기 표시 + CSV 다운로드
+            # ── 미리보기(대상자) 표시             ─────────────────────────────────────────────
             st.dataframe(preview, use_container_width=True, height=360)
-            csv = preview.to_csv(index=False, encoding="utf-8-sig")
+            
+            # ── CSV: 직원 전체(사번,이름,새_PIN)로 내려받기 ─────────────────────
+            #   - 새 PIN이 생성된 직원만 '새_PIN' 값이 채워지고, 나머지는 공백("")
+            #   - 어떤 필터(재직자만/미설정자만/덮어쓰기)로 실행했든 항상 '전체' CSV 제공
+            full = emp_df[["사번", "이름"]].copy()
+            full["사번"] = full["사번"].astype(str)
+            
+            # 대상자 미리보기(preview)에서 새 PIN만 추출해 LEFT JOIN
+            join_src = preview[["사번", "새_PIN"]].copy()
+            join_src["사번"] = join_src["사번"].astype(str)
+            
+            csv_df = full.merge(join_src, on="사번", how="left")
+            csv_df["새_PIN"] = csv_df["새_PIN"].fillna("")
+            
+            # 보기 좋게 정렬(사번 기준 문자열 정렬; 앞자리 0 보존 목적)
+            csv_df = csv_df.sort_values("사번")
+            
+            csv_all = csv_df.to_csv(index=False, encoding="utf-8-sig")
             st.download_button(
-                "CSV 다운로드 (사번,이름,새_PIN)",
-                data=csv,
-                file_name=f"PIN_bulk_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                "CSV 전체 다운로드 (사번,이름,새_PIN)",
+                data=csv_all,
+                file_name=f"PIN_ALL_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
+            
+            # (선택) 필요하면 아래 “대상자만 CSV” 버튼도 같이 제공할 수 있어요.
+            csv_targets = preview.to_csv(index=False, encoding="utf-8-sig")
+            st.download_button(
+                "CSV 대상자만 다운로드 (사번,이름,새_PIN)",
+                data=csv_targets,
+                file_name=f"PIN_TARGETS_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                 mime="text/csv",
                 use_container_width=True,
             )
@@ -1525,5 +1552,6 @@ def main():
 # =============================================================================
 if __name__ == "__main__":
     main()
+
 
 
