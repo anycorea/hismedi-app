@@ -1222,24 +1222,19 @@ def main():
         st.error(f"'{EMP_SHEET}' 시트 로딩 실패: {e}")
         return
 
-    # “의사” 제외본 만들기 (직원 탭 외 전부에 사용)
-    emp_df_nodoctor = emp_df_all.copy()
-    if "직무" in emp_df_nodoctor.columns:
-        emp_df_nodoctor = emp_df_nodoctor[emp_df_nodoctor["직무"].astype(str) != "의사"]
-
     # 2) 로그인 요구
     require_login(emp_df_all)
 
-    # 3) 로그인 직후: 관리자 플래그 최신화
-    # 권한 플래그 갱신(시드/시트 기준)
-    st.session_state["user"]["관리자여부"] = is_admin(st.session_state["user"]["사번"])
-
-    # 직원 탭은 전체, 그 외 탭은 '의사' 숨김
-    emp_df_full  = emp_df
-    emp_df_no_md = _hide_doctors(emp_df_full)
-
-    # 4) 사이드바 사용자/로그아웃
+    # 3) 로그인 직후: 관리자 플래그 최신화 (시드/시트 기준)
     u = st.session_state["user"]
+    st.session_state["user"]["관리자여부"] = is_admin(u["사번"])
+
+    # 4) 데이터 뷰 분기
+    #    - 직원 탭: 전체(emp_df_all)
+    #    - 그 외 탭: '의사' 숨김(emp_df_nodoctor)
+    emp_df_nodoctor = _hide_doctors(emp_df_all.copy())
+
+    # 5) 사이드바 사용자/로그아웃
     with st.sidebar:
         st.write(f"👤 **{u['이름']}** ({u['사번']})")
         role_badge = "관리자" if u.get("관리자여부", False) else ("매니저" if is_manager(emp_df_all, u["사번"]) else "직원")
@@ -1247,13 +1242,13 @@ def main():
         if st.button("로그아웃", use_container_width=True):
             logout()
 
-    # 5) 탭 구성
+    # 6) 탭 구성 (한 번만!)
     if u.get("관리자여부", False):
         tabs = st.tabs(["직원", "평가", "직무기술서", "직무능력평가", "관리자", "도움말"])
     else:
         tabs = st.tabs(["직원", "평가", "직무기술서", "직무능력평가", "도움말"])
 
-    # 직원 탭: 전체 데이터
+    # 직원 탭: 전체 데이터(의사 포함)
     with tabs[0]:
         tab_staff(emp_df_all)
 
@@ -1265,32 +1260,33 @@ def main():
     with tabs[3]:
         tab_competency(emp_df_nodoctor)
 
-    # 관리자 탭도 “의사” 제외본 사용 (요청사항: 직원 탭 외 전부 제외)
-    if u.get("관리자여부", False):
-        tabs = st.tabs(["직원","평가","직무기술서","직무능력평가","관리자","도움말"])
-    else:
-        tabs = st.tabs(["직원","평가","직무기술서","직무능력평가","도움말"])
-
-    # 직원 탭: 전체 데이터(의사 포함)
-    with tabs[0]: tab_staff(emp_df_full)
-
-    # 그 외 탭: 의사 숨김
-    with tabs[1]: tab_eval_input(emp_df_no_md)
-    with tabs[2]: tab_job_desc(emp_df_no_md)
-    with tabs[3]: tab_competency(emp_df_no_md)
-
+    # 관리자 탭 (의사 제외본 사용)
     if u.get("관리자여부", False):
         with tabs[4]:
             st.subheader("관리자 메뉴")
-            admin_page = st.radio("기능 선택", ["PIN 관리","부서(근무지) 이동","평가 항목 관리","권한 관리"], horizontal=True, key="admin_page_selector")
+            admin_page = st.radio(
+                "기능 선택",
+                ["PIN 관리", "부서(근무지) 이동", "평가 항목 관리", "권한 관리"],
+                horizontal=True,
+                key="admin_page_selector",
+            )
             st.divider()
-            if admin_page=="PIN 관리":
-                tab_admin_pin(emp_df_no_md)            # ← 의사 숨김
-            elif admin_page=="부서(근무지) 이동":
-                tab_admin_transfer(emp_df_no_md)       # ← 의사 숨김
-            elif admin_page=="평가 항목 관리":
-                tab_admin_eval_items()                  # 항목 시트 관리이므로 DF 전달 불필요
+            if admin_page == "PIN 관리":
+                tab_admin_pin(emp_df_nodoctor)
+            elif admin_page == "부서(근무지) 이동":
+                tab_admin_transfer(emp_df_nodoctor)
+            elif admin_page == "평가 항목 관리":
+                tab_admin_eval_items()
             else:
-                tab_admin_acl(emp_df_no_md)            # ← 의사 숨김
+                tab_admin_acl(emp_df_nodoctor)
 
-
+    # 도움말
+    with tabs[-1]:
+        st.markdown(
+            """
+            ### 사용 안내
+            - 직원 탭: 전체 데이터(의사 포함), 권한에 따라 행 제한
+            - 평가/직무기술서/직무능력평가/관리자: '의사' 직무는 숨김
+            - 상태표시: 상단에 'DB연결 ... (KST)'
+            """
+        )
