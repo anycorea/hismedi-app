@@ -1533,6 +1533,313 @@ def tab_eval_input(emp_df: pd.DataFrame):
 
 
 # =============================================================================
+# 직무기술서 유틸 (시트명: '직무기술서')
+# =============================================================================
+JOBDESC_SHEET = "직무기술서"
+JOBDESC_HEADERS = [
+    "사번","연도","버전","부서1","부서2","직군","직종","직무명",
+    "제정일","개정일","직무개요","주업무","기타업무","교육요건","자격요건",
+    "비고","제출시각","서명방식","서명데이터"
+]
+
+def ensure_jobdesc_sheet():
+    """'직무기술서' 시트를 보장. 없으면 생성 + 헤더 세팅."""
+    wb = get_workbook()
+    try:
+        ws = wb.worksheet(JOBDESC_SHEET)
+        # 헤더 보강
+        header = ws.row_values(1) or []
+        need = [h for h in JOBDESC_HEADERS if h not in header]
+        if need:
+            ws.update("1:1", [header + need])
+        return ws
+    except WorksheetNotFound:
+        pass
+
+    # 새 시트 생성
+    ws = wb.add_worksheet(title=JOBDESC_SHEET, rows=1000, cols=40)
+    ws.update("A1", [JOBDESC_HEADERS])
+    return ws
+
+@st.cache_data(ttl=60, show_spinner=False)
+def read_jobdesc_df() -> pd.DataFrame:
+    """직무기술서 전체를 DF로 읽기."""
+    ensure_jobdesc_sheet()
+    wb = get_workbook()
+    ws = wb.worksheet(JOBDESC_SHEET)
+    rows = ws.get_all_records(numericise_ignore=["all"])
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return pd.DataFrame(columns=JOBDESC_HEADERS)
+    # 타입/문자 정리
+    for c in ["사번","부서1","부서2","직군","직종","직무명","제정일","개정일",
+              "직무개요","주업무","기타업무","교육요건","자격요건","비고","서명방식","서명데이터","제출시각"]:
+        if c in df.columns:
+            df[c] = df[c].astype(str)
+    for c in ["연도","버전"]:
+        if c in df.columns:
+            def _to_int(x):
+                try:
+                    return int(float(str(x).strip()))
+                except Exception:
+                    return 0
+            df[c] = df[c].apply(_to_int)
+    if "사번" in df.columns:
+        df["사번"] = df["사번"].astype(str)
+    return df
+
+def _jobdesc_next_version(sabun: str, year: int) -> int:
+    """사번/연도 조합의 다음 버전번호(최소 1)."""
+    df = read_jobdesc_df()
+    if df.empty:
+        return 1
+    sub = df[(df["사번"].astype(str) == str(sabun)) & (df["연도"] == int(year))]
+    if sub.empty:
+        return 1
+    return int(sub["버전"].max()) + 1
+
+def upsert_jobdesc(rec: dict, as_new_version: bool = False) -> dict:
+    """
+    직무기술서 1건 저장.
+      - 키: (사번, 연도, 버전)
+      - as_new_version=True 이면 같은 사번/연도에서 새 버전으로 append
+      - False면 동일 키가 있으면 업데이트, 없으면 신규(버전 자동 1)
+    """
+    ensure_jobdesc_sheet()
+    wb = get_workbook()
+    ws = wb.worksheet(JOBDESC_SHEET)
+    header = ws.row_values(1)
+    hmap = {n: i+1 for i, n in enumerate(header)}
+
+    sabun = str(rec.get("사번","")).strip()
+    year  = int(rec.get("연도", 0))
+
+    # 버전 결정
+    if as_new_version:
+        ver = _jobdesc_next_version(sabun, year)
+    else:
+        ver = rec.get("버전", 0) or _jobdesc_next_version(sabun, year)
+        # 기존 존재하면 그 버전 유지, 없으면 1로
+        df = read_jobdesc_df()
+        exist = df[(df["사번"].astype(str)==sabun) & (df["연도"]==year) & (df["버전"]==int(ver))]
+        if exist.empty:
+            if int(ver) == _jobdesc_next_version(sabun, year):
+                # 새로 생성되는 상황 → ver 그대로 OK
+                pass
+            else:
+                ver = 1
+
+    rec["버전"] = int(ver)
+    rec["제출시각"] = kst_now_str()
+
+    # 기존행 찾기
+    values = ws.get_all_values()
+    row_idx = 0
+    cS, cY, cV = hmap.get("사번"), hmap.get("연도"), hmap.get("버전")
+    for i in range(2, len(values)+1):
+        row = values[i-1]
+        try:
+            if (str(row[cS-1]).strip()==sabun and
+                str(row[cY-1]).strip()==str(year) and
+                str(row[cV-1]).strip()==str(ver)):
+                row_idx = i
+                break
+        except Exception:
+            pass
+
+    # 값을 헤더 순서에 맞춰 구성
+    def row_from_rec():
+        buf = ["" for _ in header]
+        for k, v in rec.items():
+            c = hmap.get(k)
+            if c: buf[c-1] = v
+        return buf
+
+    if row_idx == 0:  # 신규
+        ws.append_row(row_from_rec(), value_input_option="USER_ENTERED")
+        st.cache_data.clear()
+        return {"action":"insert","version":int(ver)}
+    else:             # 업데이트
+        # 핵심 칼럼만 업데이트(전체 업데이트도 가능)
+        for k, v in rec.items():
+            c = hmap.get(k)
+            if c:
+                ws.update_cell(row_idx, c, v)
+        st.cache_data.clear()
+        return {"action":"update","version":int(ver)}
+
+def sign_jobdesc(sabun: str, year: int, version: int, signer: str, method: str="text") -> int:
+    """서명 갱신(서명방식, 서명데이터, 제출시각). 반환: 업데이트된 행번호(없으면 0)."""
+    ensure_jobdesc_sheet()
+    wb = get_workbook()
+    ws = wb.worksheet(JOBDESC_SHEET)
+    header = ws.row_values(1); hmap = {n:i+1 for i,n in enumerate(header)}
+    cS, cY, cV = hmap.get("사번"), hmap.get("연도"), hmap.get("버전")
+    idx = 0
+    values = ws.get_all_values()
+    for i in range(2, len(values)+1):
+        row = values[i-1]
+        if str(row[cS-1]).strip()==str(sabun) and str(row[cY-1]).strip()==str(year) and str(row[cV-1]).strip()==str(version):
+            idx = i; break
+    if idx==0: return 0
+    if hmap.get("서명방식"): ws.update_cell(idx, hmap["서명방식"], method)
+    if hmap.get("서명데이터"): ws.update_cell(idx, hmap["서명데이터"], signer)
+    if hmap.get("제출시각"): ws.update_cell(idx, hmap["제출시각"], kst_now_str())
+    st.cache_data.clear()
+    return idx
+
+
+# =============================================================================
+# 탭: 직무기술서
+# =============================================================================
+def tab_job_desc(emp_df: pd.DataFrame):
+    st.subheader("직무기술서")
+    this_year = datetime.now(tz=tz_kst()).year
+    u = st.session_state["user"]
+    me_sabun = str(u["사번"])
+    me_name  = str(u["이름"])
+    is_admin = bool(u.get("관리자여부", False))
+
+    # 대상 선택
+    st.markdown("#### 대상/연도 선택")
+    if is_admin:
+        df = emp_df.copy()
+        if "재직여부" in df.columns:
+            df = df[df["재직여부"] == True]
+        df["표시"] = df.apply(lambda r: f"{str(r.get('사번',''))} - {str(r.get('이름',''))}", axis=1)
+        df = df.sort_values(["사번"])
+        sel = st.selectbox("대상자 (사번 - 이름)", ["(선택)"] + df["표시"].tolist(), index=0)
+        if sel == "(선택)":
+            st.info("대상자를 선택하세요.")
+            return
+        target_sabun = sel.split(" - ", 1)[0]
+        target_name  = str(df.loc[df["사번"].astype(str)==str(target_sabun)].iloc[0].get("이름",""))
+    else:
+        target_sabun = me_sabun
+        target_name  = me_name
+        st.info(f"대상자: {target_name} ({target_sabun})", icon="👤")
+
+    colY = st.columns([1,2,2])
+    with colY[0]:
+        year = st.number_input("연도", min_value=2000, max_value=2100, value=int(this_year), step=1)
+    with colY[1]:
+        st.caption(f"작성자(표시용): {target_name}")
+    with colY[2]:
+        latest_btn = st.button("최근 버전 불러오기", use_container_width=True)
+
+    # 최근 버전 불러오기
+    init = {
+        "사번": target_sabun, "연도": int(year), "버전": 0,
+        "부서1":"", "부서2":"", "직군":"", "직종":"", "직무명":"",
+        "제정일":"", "개정일":"", "직무개요":"", "주업무":"", "기타업무":"",
+        "교육요건":"", "자격요건":"", "비고":"", "서명방식":"", "서명데이터":""
+    }
+    df_all = read_jobdesc_df()
+    latest = None
+    if not df_all.empty:
+        sub = df_all[(df_all["사번"].astype(str)==str(target_sabun)) & (df_all["연도"]==int(year))]
+        if not sub.empty:
+            latest = sub.sort_values("버전").iloc[-1].to_dict()
+
+    if latest_btn and latest:
+        init.update(latest)
+    elif latest:
+        # 처음 진입 시에도 최근값을 기본으로
+        init.update(latest)
+
+    st.divider()
+    st.markdown("#### 기본 정보")
+    c1,c2,c3,c4 = st.columns([1,1,1,1])
+    with c1:
+        dept1 = st.text_input("부서1", value=init["부서1"])
+    with c2:
+        dept2 = st.text_input("부서2", value=init["부서2"])
+    with c3:
+        group = st.text_input("직군", value=init["직군"])
+    with c4:
+        jobcat = st.text_input("직종", value=init["직종"])
+
+    c5,c6 = st.columns([2,2])
+    with c5:
+        jobname = st.text_input("직무명", value=init["직무명"])
+    with c6:
+        ver_shown = st.text_input("현재 버전", value=str(init.get("버전",0)), disabled=True)
+
+    c7,c8 = st.columns([1,1])
+    with c7:
+        made_at = st.text_input("제정일(YYYY-MM-DD)", value=init["제정일"])
+    with c8:
+        revised_at = st.text_input("개정일(YYYY-MM-DD)", value=init["개정일"])
+
+    st.markdown("#### 내용")
+    overview = st.text_area("직무개요", value=init["직무개요"], height=120)
+    main_tasks = st.text_area("주업무", value=init["주업무"], height=160, help="여러 줄 입력 가능")
+    other_tasks = st.text_area("기타업무", value=init["기타업무"], height=120)
+    edu_req = st.text_area("교육요건", value=init["교육요건"], height=100)
+    qual_req = st.text_area("자격요건", value=init["자격요건"], height=100)
+    memo = st.text_area("비고", value=init["비고"], height=80)
+
+    st.markdown("#### 저장/서명")
+    colB = st.columns([1,1,2])
+    with colB[0]:
+        do_save_new = st.button("💾 새 버전으로 저장", type="primary", use_container_width=True)
+    with colB[1]:
+        do_save_over = st.button("현재 버전 덮어쓰기", use_container_width=True)
+    with colB[2]:
+        signer = st.text_input("서명(선택: 이름/이니셜 등 텍스트)", value=init.get("서명데이터",""))
+
+    # 저장 공통 레코드
+    rec = {
+        "사번": target_sabun,
+        "연도": int(year),
+        "버전": int(init.get("버전", 0) or 0),
+        "부서1": dept1.strip(),
+        "부서2": dept2.strip(),
+        "직군": group.strip(),
+        "직종": jobcat.strip(),
+        "직무명": jobname.strip(),
+        "제정일": made_at.strip(),
+        "개정일": revised_at.strip(),
+        "직무개요": overview.strip(),
+        "주업무": main_tasks.strip(),
+        "기타업무": other_tasks.strip(),
+        "교육요건": edu_req.strip(),
+        "자격요건": qual_req.strip(),
+        "비고": memo.strip(),
+        "서명방식": "text" if signer.strip() else "",
+        "서명데이터": signer.strip(),
+    }
+
+    if do_save_new or do_save_over:
+        try:
+            rep = upsert_jobdesc(rec=rec, as_new_version=bool(do_save_new))
+            st.success(
+                f"{'신규 저장' if rep['action']=='insert' else '업데이트'} 완료 · 버전 {rep['version']}",
+                icon="✅",
+            )
+            st.toast("직무기술서 저장됨", icon="✅")
+            # 새로고침으로 최신 버전 반영
+            st.cache_data.clear()
+            st.rerun()
+        except Exception as e:
+            st.exception(e)
+
+    # 하단: 해당 사번/연도 버전 리스트
+    st.markdown("#### 버전 이력")
+    df = read_jobdesc_df()
+    view = df[(df["사번"].astype(str)==str(target_sabun)) & (df["연도"]==int(year))].copy()
+    if view.empty:
+        st.caption("등록된 버전이 없습니다.")
+    else:
+        view = view.sort_values("버전")
+        st.dataframe(
+            view[["버전","직무명","개정일","제출시각","서명데이터"]],
+            use_container_width=True,
+            height=240,
+        )
+
+
+# =============================================================================
 # 메인
 # =============================================================================
 def main():
@@ -1556,23 +1863,20 @@ def main():
         if st.button("로그아웃", use_container_width=True):
             logout()
 
-    # 4) 탭 구성 (도움말은 항상 맨 오른쪽)
+    # 4) 탭 구성
     if u.get("관리자여부", False):
-        tabs = st.tabs(["직원", "평가", "관리자", "도움말"])
+        tabs = st.tabs(["직원", "평가", "직무기술서", "관리자", "도움말"])
     else:
-        tabs = st.tabs(["직원", "평가", "도움말"])
+        tabs = st.tabs(["직원", "평가", "직무기술서", "도움말"])
 
-    # 직원
     with tabs[0]:
         tab_staff(emp_df)
-
-    # 평가
     with tabs[1]:
         tab_eval_input(emp_df)
-
-    # 관리자
+    with tabs[2]:
+        tab_job_desc(emp_df)  # ← 새 탭
     if u.get("관리자여부", False):
-        with tabs[2]:
+        with tabs[3]:
             st.subheader("관리자 메뉴")
             admin_page = st.radio(
                 "기능 선택",
@@ -1587,16 +1891,12 @@ def main():
                 tab_admin_transfer(emp_df)
             else:
                 tab_admin_eval_items()
-
-    # 도움말(맨 오른쪽)
     with tabs[-1]:
         st.markdown(
             """
             ### 사용 안내
             - Google Sheets 연동 조회/관리
-            - 직원 시트명은 기본 **직원**이며, `secrets.toml`의 `[sheets].EMP_SHEET`로 변경 가능
-            - 관리자: **개별 PIN/일괄 PIN/부서이동/평가항목 관리**
-            - 평가: **자기/1차/2차 입력(1~5점)** — ITM 코드는 숨김, 항목/내용/점수 3열 정렬
+            - 직원, 평가, **직무기술서(버전관리/서명)** 지원
             """
         )
 
@@ -1604,4 +1904,3 @@ def main():
 # =============================================================================
 if __name__ == "__main__":
     main()
-
