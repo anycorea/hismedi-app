@@ -1358,7 +1358,7 @@ def tab_eval_input(emp_df: pd.DataFrame):
     this_year = datetime.now(tz=tz_kst()).year
     colY = st.columns([1, 3])
     with colY[0]:
-        year = st.number_input("평가 연도", min_value=2000, max_value=2100, value=int(this_year), step=1)
+        year = st.number_input("평가 연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="eval_year")
 
     items = read_eval_items_df(only_active=True)
     if items.empty:
@@ -2080,7 +2080,7 @@ def tab_competency(emp_df: pd.DataFrame):
     this_year = datetime.now(tz=tz_kst()).year
     colY = st.columns([1, 3])
     with colY[0]:
-        year = st.number_input("평가 연도", min_value=2000, max_value=2100, value=int(this_year), step=1)
+        year = st.number_input("평가 연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="cmp_year")
 
     items = read_comp_items_df(only_active=True)
     if items.empty:
@@ -2099,7 +2099,12 @@ def tab_competency(emp_df: pd.DataFrame):
             df = df[df["재직여부"] == True]
         df["표시"] = df.apply(lambda r: f"{str(r.get('사번',''))} - {str(r.get('이름',''))}", axis=1)
         df = df.sort_values(["사번"])
-        sel = st.selectbox("평가 **대상자** (사번 - 이름)", ["(선택)"] + df["표시"].tolist(), index=0)
+        sel = st.selectbox(
+            "평가 **대상자** (사번 - 이름)",
+            ["(선택)"] + df["표시"].tolist(),
+            index=0,
+            key="cmp_target_select",
+        )
         if sel == "(선택)":
             st.info("평가 대상자를 선택하세요.")
             return
@@ -2158,13 +2163,20 @@ def tab_competency(emp_df: pd.DataFrame):
         st.markdown('<div class="input">', unsafe_allow_html=True)
 
         if getattr(st, "segmented_control", None):
-            new_val = st.segmented_control(" ", options=[1,2,3,4,5],
-                                           format_func=lambda x: str(x),
-                                           default_value=cur_val, key=f"cmp_seg_{iid}")
+            new_val = st.segmented_control(
+                " ", options=[1,2,3,4,5],
+                format_func=lambda x: str(x),
+                default_value=cur_val,
+                key=f"cmp_seg_{iid}",
+            )
         else:
-            new_val = int(st.radio(" ", ["1","2","3","4","5"], index=(cur_val-1),
-                                   horizontal=True, key=f"cmp_seg_{iid}",
-                                   label_visibility="collapsed"))
+            new_val = int(
+                st.radio(
+                    " ", ["1","2","3","4","5"],
+                    index=(cur_val-1), horizontal=True,
+                    key=f"cmp_seg_{iid}", label_visibility="collapsed",
+                )
+            )
 
         st.markdown('</div>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
@@ -2174,9 +2186,7 @@ def tab_competency(emp_df: pd.DataFrame):
         st.session_state[f"cmp_{iid}"] = new_val
         weight_sum += max(0.0, w)
 
-    # 총점 계산 미리보기
-    preview = upsert_comp_response  # alias for type hint only
-    # 동일 로직으로 미리 계산
+    # 총점 미리보기
     total = 0.0
     if len(items_sorted) > 0:
         for r in items_sorted.itertuples(index=False):
@@ -2196,9 +2206,9 @@ def tab_competency(emp_df: pd.DataFrame):
 
     col_submit = st.columns([1, 1, 3])
     with col_submit[0]:
-        do_save = st.button("제출/저장", type="primary", use_container_width=True)
+        do_save = st.button("제출/저장", type="primary", use_container_width=True, key="cmp_save_btn")
     with col_submit[1]:
-        do_reset = st.button("모든 점수 3점으로", use_container_width=True)
+        do_reset = st.button("모든 점수 3점으로", use_container_width=True, key="cmp_reset_btn")
 
     if do_reset:
         for r in items_sorted.itertuples(index=False):
@@ -2312,5 +2322,6 @@ def main():
 # =============================================================================
 if __name__ == "__main__":
     main()
+
 
 
