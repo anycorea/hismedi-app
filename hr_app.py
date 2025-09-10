@@ -214,8 +214,13 @@ def is_manager(emp_df:pd.DataFrame,sabun:str)->bool:
 
 # ── Status Line ───────────────────────────────────────────────────────────────
 def render_status_line():
-    try: st.success(f"시트 연결 OK · 파일: **{get_workbook().title}** · {kst_now_str()}", icon="✅")
-    except Exception as e: st.error(f"시트 연결 실패: {e}", icon="🛑")
+    try:
+        # 연결만 점검(예외가 안 나면 OK)
+        _ = get_workbook()
+        # 간결한 상태 표기
+        st.caption(f"DB연결 {kst_now_str()}")
+    except Exception as e:
+        st.error(f"DB 연결 실패: {e}", icon="🛑")
 
 # ── 직원 탭 ───────────────────────────────────────────────────────────────────
 def tab_staff(emp_df: pd.DataFrame):
@@ -1190,53 +1195,85 @@ def tab_admin_acl(emp_df: pd.DataFrame):
 
 # ── 메인 ──────────────────────────────────────────────────────────────────────
 def main():
-    st.title(APP_TITLE)
+    # 제목을 조금 작게 (H2)
+    st.markdown(f"## {APP_TITLE}")
     render_status_line()
 
-    try: emp_df = read_sheet_df(EMP_SHEET)
-    except Exception as e: st.error(f"'{EMP_SHEET}' 시트 로딩 실패: {e}"); return
+    # 1) 데이터 읽기 (전체)
+    try:
+        emp_df_all = read_sheet_df(EMP_SHEET)
+    except Exception as e:
+        st.error(f"'{EMP_SHEET}' 시트 로딩 실패: {e}")
+        return
 
-    require_login(emp_df)
+    # “의사” 제외본 만들기 (직원 탭 외 전부에 사용)
+    emp_df_nodoctor = emp_df_all.copy()
+    if "직무" in emp_df_nodoctor.columns:
+        emp_df_nodoctor = emp_df_nodoctor[emp_df_nodoctor["직무"].astype(str) != "의사"]
 
-    # 권한 플래그 갱신(시드/시트 기준)
+    # 2) 로그인 요구
+    require_login(emp_df_all)
+
+    # 3) 로그인 직후: 관리자 플래그 최신화
     st.session_state["user"]["관리자여부"] = is_admin(st.session_state["user"]["사번"])
 
+    # 4) 사이드바 사용자/로그아웃
     u = st.session_state["user"]
     with st.sidebar:
         st.write(f"👤 **{u['이름']}** ({u['사번']})")
-        role_badge = "관리자" if u.get("관리자여부", False) else ("매니저" if is_manager(emp_df, u["사번"]) else "직원")
+        role_badge = "관리자" if u.get("관리자여부", False) else ("매니저" if is_manager(emp_df_all, u["사번"]) else "직원")
         st.caption(f"권한: {role_badge}")
-        if st.button("로그아웃", use_container_width=True): logout()
+        if st.button("로그아웃", use_container_width=True):
+            logout()
 
+    # 5) 탭 구성
     if u.get("관리자여부", False):
-        tabs = st.tabs(["직원","평가","직무기술서","직무능력평가","관리자","도움말"])
+        tabs = st.tabs(["직원", "평가", "직무기술서", "직무능력평가", "관리자", "도움말"])
     else:
-        tabs = st.tabs(["직원","평가","직무기술서","직무능력평가","도움말"])
+        tabs = st.tabs(["직원", "평가", "직무기술서", "직무능력평가", "도움말"])
 
-    with tabs[0]: tab_staff(emp_df)
-    with tabs[1]: tab_eval_input(emp_df)
-    with tabs[2]: tab_job_desc(emp_df)
-    with tabs[3]: tab_competency(emp_df)
+    # 직원 탭: 전체 데이터
+    with tabs[0]:
+        tab_staff(emp_df_all)
 
+    # 그 외 탭: “의사” 제외 데이터
+    with tabs[1]:
+        tab_eval_input(emp_df_nodoctor)
+    with tabs[2]:
+        tab_job_desc(emp_df_nodoctor)
+    with tabs[3]:
+        tab_competency(emp_df_nodoctor)
+
+    # 관리자 탭도 “의사” 제외본 사용 (요청사항: 직원 탭 외 전부 제외)
     if u.get("관리자여부", False):
         with tabs[4]:
             st.subheader("관리자 메뉴")
-            admin_page = st.radio("기능 선택", ["PIN 관리","부서(근무지) 이동","평가 항목 관리","권한 관리"], horizontal=True, key="admin_page_selector")
+            admin_page = st.radio(
+                "기능 선택",
+                ["PIN 관리", "부서(근무지) 이동", "평가 항목 관리", "권한 관리"],
+                horizontal=True,
+                key="admin_page_selector",
+            )
             st.divider()
-            if admin_page=="PIN 관리": tab_admin_pin(emp_df)
-            elif admin_page=="부서(근무지) 이동": tab_admin_transfer(emp_df)
-            elif admin_page=="평가 항목 관리": tab_admin_eval_items()
-            else: tab_admin_acl(emp_df)
+            if admin_page == "PIN 관리":
+                tab_admin_pin(emp_df_nodoctor)
+            elif admin_page == "부서(근무지) 이동":
+                tab_admin_transfer(emp_df_nodoctor)
+            elif admin_page == "평가 항목 관리":
+                tab_admin_eval_items()
+            else:
+                tab_admin_acl(emp_df_nodoctor)
 
     with tabs[-1]:
         st.markdown(
             """
             ### 사용 안내
+            - 직원 탭: 전체 직원 표시
+            - 그 외 탭: 직무가 '의사'인 직원은 제외
             - 권한: 직원(자기) · 매니저(위임 범위) · 관리자(전체)
-            - 직원 조회, 평가(1~5), 직무기술서(버전/서명), 직무능력평가(가중치)
-            - 관리자: PIN / 부서 이동 / 평가 항목 / 권한 관리
             """
         )
 
 if __name__ == "__main__":
     main()
+
