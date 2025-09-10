@@ -1342,38 +1342,44 @@ def tab_eval_input(emp_df: pd.DataFrame):
         evaluator_name = me_name
         st.info(f"대상자: {target_name} ({target_sabun}) · 평가유형: 자기", icon="👤")
 
-    # 점수 입력(1~5) — 항목/내용/점수 3열 레이아웃 (ID 표시는 숨김)
+    # ─────────────────────────────────────────────────────────────
+    # 점수 입력 UI (표 기반 / ITM 코드 숨김 / 반응형 정렬)
+    # ─────────────────────────────────────────────────────────────
     st.markdown("#### 점수 입력 (각 1~5)")
 
-    # 헤더
-    h1, h2, h3 = st.columns([2, 6, 1])
-    with h1:
-        st.markdown("**항목**")
-    with h2:
-        st.markdown("**내용**")
-    with h3:
-        st.markdown("**점수**")
+    # 1) 입력 테이블 구성(ITM 코드는 숨기고, 항목/내용 고정 + 점수만 편집)
+    #    - 세션에 저장해 재실행 시에도 값 유지
+    _base = items[["항목ID", "항목", "내용"]].copy()
+    _base["점수"] = [st.session_state.get(f"score_{iid}", 0) for iid in _base["항목ID"]]
 
+    edited = st.data_editor(
+        _base,
+        hide_index=True,
+        use_container_width=True,
+        height=min(680, 64 + 34 * len(_base)),  # 행 수에 따라 높이 유연 조절(최대 680px)
+        num_rows="fixed",
+        column_order=["항목", "내용", "점수"],  # ITM 코드는 숨김
+        column_config={
+            "항목": st.column_config.TextColumn("항목", width="small", disabled=True),
+            "내용": st.column_config.TextColumn("내용", width="large", disabled=True),
+            "점수": st.column_config.NumberColumn(
+                "점수(1~5)", min_value=0, max_value=5, step=1, format="%d"
+            ),
+        },
+    )
+
+    # 2) 점수 dict 추출 + 세션에 보관(임시저장/제출 시 사용)
     scores = {}
-    for r in items.sort_values(["순서", "항목"]).itertuples(index=False):
-        iid = getattr(r, "항목ID")
-        name = getattr(r, "항목") or ""
-        desc = getattr(r, "내용") or ""
+    for iid, val in zip(
+        edited["항목ID"],
+        pd.to_numeric(edited["점수"], errors="coerce").fillna(0).astype(int),
+    ):
+        scores[str(iid)] = int(val)
+        st.session_state[f"score_{iid}"] = int(val)
 
-        c1, c2, c3 = st.columns([2, 6, 1])
-        with c1:
-            st.markdown(f"**{name}**")
-        with c2:
-            st.markdown(desc.replace("\n", "  \n"), unsafe_allow_html=False, help=None)
-        with c3:
-            scores[iid] = st.number_input(
-                " ", min_value=0, max_value=5, value=0, step=1, key=f"score_{iid}"
-            )
-
-    # 합계 계산(100점 환산)
-    item_ids = [str(x) for x in items["항목ID"].tolist()]
-    raw = sum([int(scores.get(iid, 0)) for iid in item_ids])
-    denom = max(1, len(item_ids) * 5)
+    # 3) 합계(100점 만점) 계산 및 표시
+    raw = int(sum(scores.values()))
+    denom = max(1, len(edited) * 5)  # 항목수 × 5
     total_100 = round(raw * (100.0 / denom), 1)
 
     st.markdown("---")
@@ -1382,32 +1388,6 @@ def tab_eval_input(emp_df: pd.DataFrame):
         st.metric("합계(100점 만점)", total_100)
     with cM2:
         st.progress(min(1.0, total_100 / 100.0), text=f"총점 {total_100}점")
-
-    colBTN = st.columns([1, 1, 2, 2])
-    with colBTN[0]:
-        save_draft = st.button("임시저장", use_container_width=True)
-    with colBTN[1]:
-        submit = st.button("제출", type="primary", use_container_width=True)
-
-    if save_draft or submit:
-        try:
-            status = "임시저장" if save_draft else "제출"
-            rep = upsert_eval_response(
-                emp_df=emp_df,
-                year=int(year),
-                eval_type=eval_type,
-                target_sabun=str(target_sabun),
-                evaluator_sabun=str(evaluator_sabun),
-                scores=scores,
-                status=status,
-            )
-            if rep["action"] == "insert":
-                st.success(f"저장 완료(신규). 총점 {rep['total']}점", icon="✅")
-            else:
-                st.success(f"저장 완료(업데이트). 총점 {rep['total']}점", icon="✅")
-            st.toast("평가 응답이 저장되었습니다.", icon="✅")
-        except Exception as e:
-            st.exception(e)
 
     st.markdown("#### 내 제출 현황")
     try:
@@ -1496,3 +1476,4 @@ def main():
 # =============================================================================
 if __name__ == "__main__":
     main()
+
