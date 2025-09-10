@@ -1343,43 +1343,98 @@ def tab_eval_input(emp_df: pd.DataFrame):
         st.info(f"대상자: {target_name} ({target_sabun}) · 평가유형: 자기", icon="👤")
 
     # ─────────────────────────────────────────────────────────────
-    # 점수 입력 UI (표 기반 / ITM 코드 숨김 / 반응형 정렬)
+    # 점수 입력 UI (버튼형/스텝퍼 선택 · ITM코드 숨김 · 반응형 정렬)
     # ─────────────────────────────────────────────────────────────
     st.markdown("#### 점수 입력 (각 1~5)")
 
-    # 1) 입력 테이블 구성(ITM 코드는 숨기고, 항목/내용 고정 + 점수만 편집)
-    #    - 세션에 저장해 재실행 시에도 값 유지
-    _base = items[["항목ID", "항목", "내용"]].copy()
-    _base["점수"] = [st.session_state.get(f"score_{iid}", 0) for iid in _base["항목ID"]]
-
-    edited = st.data_editor(
-        _base,
-        hide_index=True,
-        use_container_width=True,
-        height=min(680, 64 + 34 * len(_base)),  # 행 수에 따라 높이 유연 조절(최대 680px)
-        num_rows="fixed",
-        column_order=["항목", "내용", "점수"],  # ITM 코드는 숨김
-        column_config={
-            "항목": st.column_config.TextColumn("항목", width="small", disabled=True),
-            "내용": st.column_config.TextColumn("내용", width="large", disabled=True),
-            "점수": st.column_config.NumberColumn(
-                "점수(1~5)", min_value=0, max_value=5, step=1, format="%d"
-            ),
-        },
+    # 입력 방식 선택
+    input_mode = st.radio(
+        "입력 방식",
+        ("버튼(1~5)", "스텝퍼(±)"),
+        horizontal=True,
+        key="eval_input_mode",
     )
 
-    # 2) 점수 dict 추출 + 세션에 보관(임시저장/제출 시 사용)
-    scores = {}
-    for iid, val in zip(
-        edited["항목ID"],
-        pd.to_numeric(edited["점수"], errors="coerce").fillna(0).astype(int),
-    ):
-        scores[str(iid)] = int(val)
-        st.session_state[f"score_{iid}"] = int(val)
+    # 약간의 스타일 (행 구분/정렬)
+    st.markdown(
+        """
+        <style>
+          .score-row {padding: 8px 4px; border-bottom: 1px solid rgba(49,51,63,.10);}
+          .score-name {font-weight: 600;}
+          .score-desc {color: #555;}
+          .score-badge {min-width: 36px; text-align: center; font-weight: 700;
+                        padding: 6px 8px; border-radius: 10px; background: rgba(49,51,63,.06);}
+          .score-center {display:flex; align-items:center; justify-content:center; height:100%;}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
-    # 3) 합계(100점 만점) 계산 및 표시
+    # 항목 정렬
+    items_sorted = items.sort_values(["순서", "항목"]).reset_index(drop=True)
+
+    scores = {}
+    for r in items_sorted.itertuples(index=False):
+        iid  = getattr(r, "항목ID")
+        name = getattr(r, "항목") or ""
+        desc = getattr(r, "내용") or ""
+
+        # 현재 값(세션 유지), 기본은 0 = 미선택
+        cur_val = int(st.session_state.get(f"score_{iid}", 0))
+
+        # 행 레이아웃: [항목명 | 설명 | 컨트롤]
+        c1, c2, c3 = st.columns([2, 7, 3])
+        with c1:
+            st.markdown(f'<div class="score-row score-name">{name}</div>', unsafe_allow_html=True)
+        with c2:
+            st.markdown(
+                f'<div class="score-row score-desc">{desc.replace(chr(10), "<br/>")}</div>',
+                unsafe_allow_html=True,
+            )
+        with c3:
+            st.markdown('<div class="score-row">', unsafe_allow_html=True)
+
+            # 1) 버튼형(1~5) — segmented_control 지원 시 우선 사용, 없으면 radio 가로 배열
+            if input_mode == "버튼(1~5)":
+                if getattr(st, "segmented_control", None):
+                    new_val = st.segmented_control(
+                        " ",
+                        options=[0, 1, 2, 3, 4, 5],  # 0은 '—'(미선택)로 표기
+                        format_func=lambda x: "—" if x == 0 else str(x),
+                        default_value=cur_val,
+                        key=f"seg_{iid}",
+                    )
+                else:
+                    labels = ["—", "1", "2", "3", "4", "5"]  # 0을 '—'로 표시
+                    idx = max(0, min(5, cur_val))           # 0~5 -> 라디오 인덱스
+                    picked = st.radio(
+                        " ", labels, index=idx, horizontal=True,
+                        key=f"seg_{iid}", label_visibility="collapsed"
+                    )
+                    new_val = 0 if picked == "—" else int(picked)
+
+            # 2) 스텝퍼(±)
+            else:
+                minus_col, val_col, plus_col = st.columns([1, 1, 1])
+                with minus_col:
+                    if st.button("−", key=f"minus_{iid}"):
+                        cur_val = max(0, cur_val - 1)
+                with val_col:
+                    st.markdown(f'<div class="score-center"><span class="score-badge">{cur_val}</span></div>', unsafe_allow_html=True)
+                with plus_col:
+                    if st.button("+", key=f"plus_{iid}"):
+                        cur_val = min(5, cur_val + 1)
+                new_val = cur_val
+
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        # 값 보관
+        scores[str(iid)] = int(new_val)
+        st.session_state[f"score_{iid}"] = int(new_val)
+
+    # 합계(100점 만점) 계산 및 표시
     raw = int(sum(scores.values()))
-    denom = max(1, len(edited) * 5)  # 항목수 × 5
+    denom = max(1, len(items_sorted) * 5)  # 항목수 × 5
     total_100 = round(raw * (100.0 / denom), 1)
 
     st.markdown("---")
@@ -1388,6 +1443,7 @@ def tab_eval_input(emp_df: pd.DataFrame):
         st.metric("합계(100점 만점)", total_100)
     with cM2:
         st.progress(min(1.0, total_100 / 100.0), text=f"총점 {total_100}점")
+
 
     st.markdown("#### 내 제출 현황")
     try:
@@ -1476,4 +1532,5 @@ def main():
 # =============================================================================
 if __name__ == "__main__":
     main()
+
 
