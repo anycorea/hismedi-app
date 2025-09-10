@@ -624,18 +624,27 @@ def tab_admin_eval_items():
 # =============================================================================
 HIST_SHEET = "부서이력"
 
+from gspread.exceptions import WorksheetNotFound, APIError
 
 def ensure_dept_history_sheet():
-    """'부서이력' 시트가 없으면 생성하고 헤더를 세팅."""
+    """'부서이력' 시트를 보장. 없으면 생성 + 헤더 세팅.
+       WorksheetNotFound만 생성 트리거로 삼고, 그 외 에러는 그대로 노출."""
     wb = get_workbook()
     try:
-        wb.worksheet(HIST_SHEET)
-        return
-    except Exception:
-        pass
-    ws = wb.add_worksheet(title=HIST_SHEET, rows=200, cols=10)
-    headers = ["사번", "이름", "부서1", "부서2", "시작일", "종료일", "변경사유", "승인자", "메모", "등록시각"]
-    ws.update("A1", [headers])
+        ws = wb.worksheet(HIST_SHEET)
+        return ws
+    except WorksheetNotFound:
+        pass  # 정말 없을 때만 생성 시도
+
+    # 새 시트 생성
+    try:
+        ws = wb.add_worksheet(title=HIST_SHEET, rows=200, cols=10)
+        headers = ["사번","이름","부서1","부서2","시작일","종료일","변경사유","승인자","메모","등록시각"]
+        ws.update("A1", [headers])
+        return ws
+    except APIError as e:
+        st.error("부서이력 시트를 만들 수 없습니다. (권한/시트수/보호 영역/쿼터 확인)")
+        raise
 
 
 @st.cache_data(ttl=60, show_spinner=False)
@@ -1115,10 +1124,24 @@ def main():
 
     # 4) 탭 구성 (관리자여부에 따라 '관리자' 탭 보이기)
     tabs_names = ["사원", "도움말"]
+    # 관리자 (PIN + 부서이동 + 평가항목)
     if u.get("관리자여부", False):
-        tabs_names.append("관리자")  # PIN 등록/변경 + 일괄 발급 + 부서이동
+        with tabs[2]:
+            st.subheader("관리자 메뉴")
+            admin_page = st.radio(
+                "기능 선택", 
+                ["PIN 관리", "부서(근무지) 이동", "평가 항목 관리"],
+                horizontal=True,
+                key="admin_page_selector",
+            )
+            st.divider()
 
-    tabs = st.tabs(tabs_names)
+            if admin_page == "PIN 관리":
+                tab_admin_pin(emp_df)
+            elif admin_page == "부서(근무지) 이동":
+                tab_admin_transfer(emp_df)
+            else:  # 평가 항목 관리
+                tab_admin_eval_items()
 
     # 사원
     with tabs[0]:
@@ -1150,4 +1173,5 @@ def main():
 # =============================================================================
 if __name__ == "__main__":
     main()
+
 
