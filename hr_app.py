@@ -36,11 +36,13 @@ try:
 except ModuleNotFoundError:
     # 클라우드 환경에서 gspread가 없을 때 자동 설치
     import subprocess, sys
+
     subprocess.check_call(
         [sys.executable, "-m", "pip", "install", "gspread==6.1.2", "google-auth==2.31.0"]
     )
     import gspread
     from google.oauth2.service_account import Credentials
+from gspread.exceptions import WorksheetNotFound, APIError
 
 # =============================================================================
 # Streamlit 기본 설정
@@ -51,6 +53,8 @@ st.markdown(
     """
     <style>
       .block-container {padding-top: 1.1rem;}
+      /* 탭 클릭 영역/가독성 확대 */
+      .stTabs [role="tab"] { padding: 12px 20px !important; font-size: 1.05rem !important; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -140,7 +144,7 @@ def read_sheet_df(sheet_name: str) -> pd.DataFrame:
 
 
 # gspread 원본 시트 핸들/헤더 맵
-def _get_ws_and_headers(sheet_name: str = "사원"):
+def _get_ws_and_headers(sheet_name: str = "직원"):
     wb = get_workbook()
     ws = wb.worksheet(sheet_name)
     header = ws.row_values(1)  # 1행 헤더
@@ -260,11 +264,11 @@ def render_status_line():
 
 
 # =============================================================================
-# 탭: 사원
+# 탭: 직원(=기존 사원)
 # =============================================================================
-def tab_employees(emp_df: pd.DataFrame):
-    st.subheader("사원")
-    st.caption("사원 기본정보(조회/필터). 편집은 추후 입력폼/승인 절차와 함께 추가 예정입니다.")
+def tab_staff(emp_df: pd.DataFrame):
+    st.subheader("직원")
+    st.caption("직원 기본정보(조회/필터). 편집은 추후 입력폼/승인 절차와 함께 추가 예정입니다.")
 
     df = emp_df.copy()
 
@@ -392,9 +396,9 @@ def tab_admin_pin(emp_df: pd.DataFrame):
 
             # gspread 셀 업데이트
             try:
-                ws, header, hmap = _get_ws_and_headers("사원")
+                ws, header, hmap = _get_ws_and_headers("직원")
                 if "PIN_hash" not in hmap:
-                    st.error("'사원' 시트에 PIN_hash 컬럼이 없습니다. (헤더 행에 'PIN_hash' 추가)")
+                    st.error("'직원' 시트에 PIN_hash 컬럼이 없습니다. (헤더 행에 'PIN_hash' 추가)")
                     st.stop()
 
                 row_idx = _find_row_by_sabun(ws, hmap, sabun)
@@ -413,9 +417,9 @@ def tab_admin_pin(emp_df: pd.DataFrame):
 
         if do_clear:
             try:
-                ws, header, hmap = _get_ws_and_headers("사원")
+                ws, header, hmap = _get_ws_and_headers("직원")
                 if "PIN_hash" not in hmap:
-                    st.error("'사원' 시트에 PIN_hash 컬럼이 없습니다. (헤더 행에 'PIN_hash' 추가)")
+                    st.error("'직원' 시트에 PIN_hash 컬럼이 없습니다. (헤더 행에 'PIN_hash' 추가)")
                     st.stop()
                 row_idx = _find_row_by_sabun(ws, hmap, sabun)
                 if row_idx == 0:
@@ -502,9 +506,9 @@ def tab_admin_pin(emp_df: pd.DataFrame):
 
             if do_issue:
                 try:
-                    ws, header, hmap = _get_ws_and_headers("사원")
+                    ws, header, hmap = _get_ws_and_headers("직원")
                     if "PIN_hash" not in hmap or "사번" not in hmap:
-                        st.error("'사원' 시트에 '사번' 또는 'PIN_hash' 헤더가 없습니다.")
+                        st.error("'직원' 시트에 '사번' 또는 'PIN_hash' 헤더가 없습니다.")
                         st.stop()
 
                     # 행별 업데이트 (규모가 250명 내외라 단건 업데이트로도 충분)
@@ -525,98 +529,176 @@ def tab_admin_pin(emp_df: pd.DataFrame):
                     st.exception(e)
 
 
-def tab_admin_eval_items():
-    st.subheader("관리자 - 평가 항목 관리 (1~5점 척도, 총 20개)")
-    st.caption("가중치 없이 20개 항목을 1~5점으로 평가하면 합계가 100점 만점이 됩니다. (영역 없음)")
+# =============================================================================
+# 평가 항목 유틸 (시트: '평가_항목')
+# =============================================================================
+EVAL_ITEMS_SHEET = "평가_항목"
+EVAL_ITEM_HEADERS = ["항목ID", "항목", "내용", "순서", "활성", "비고"]
 
-    df = read_eval_items_df(only_active=False)
-    st.write(f"현재 등록 항목: **{len(df)}개** (활성: {df[df['활성']==True].shape[0]}개)")
 
-    with st.expander("목록 보기 / 순서 일괄 편집", expanded=True):
-        edit_df = df[["항목ID","항목","순서","활성"]].copy().reset_index(drop=True)
-        edited = st.data_editor(
-            edit_df,
-            use_container_width=True,
-            height=380,
-            column_config={
-                "항목ID": st.column_config.TextColumn(disabled=True),
-                "항목": st.column_config.TextColumn(disabled=True),
-                "활성": st.column_config.CheckboxColumn(disabled=True),
-                "순서": st.column_config.NumberColumn(step=1, min_value=0),
-            },
-            num_rows="fixed",
-        )
-        if st.button("순서 일괄 저장", use_container_width=True):
+def ensure_eval_items_sheet():
+    """'평가_항목' 시트가 없으면 생성하고, 헤더를 보장."""
+    wb = get_workbook()
+    try:
+        ws = wb.worksheet(EVAL_ITEMS_SHEET)
+    except Exception:
+        ws = wb.add_worksheet(title=EVAL_ITEMS_SHEET, rows=200, cols=10)
+        ws.update("A1", [EVAL_ITEM_HEADERS])
+        return
+    # 헤더 보강(누락 컬럼 추가)
+    header = ws.row_values(1)
+    if not header:
+        ws.update("A1", [EVAL_ITEM_HEADERS])
+        return
+    need = [h for h in EVAL_ITEM_HEADERS if h not in header]
+    if need:
+        new_header = header + need
+        ws.update("1:1", [new_header])
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def read_eval_items_df(only_active: bool = True) -> pd.DataFrame:
+    """평가_항목 → DataFrame 반환."""
+    ensure_eval_items_sheet()
+    wb = get_workbook()
+    ws = wb.worksheet(EVAL_ITEMS_SHEET)
+    rows = ws.get_all_records(numericise_ignore=["all"])
+    df = pd.DataFrame(rows)
+    if df.empty:
+        df = pd.DataFrame(columns=EVAL_ITEM_HEADERS)
+    # 타입 보정
+    if "순서" in df.columns:
+        def _to_int(x):
+            s = str(x).strip()
             try:
-                update_eval_items_order(edited[["항목ID","순서"]])
-                st.success("순서가 반영되었습니다.")
-                st.rerun()
-            except Exception as e:
-                st.exception(e)
+                return int(float(s))
+            except Exception:
+                return 0
+        df["순서"] = df["순서"].apply(_to_int)
+    if "활성" in df.columns:
+        df["활성"] = df["활성"].map(_to_bool)
+    # 정렬 및 필터
+    df = df.sort_values(["순서", "항목"]).reset_index(drop=True)
+    if only_active and "활성" in df.columns:
+        df = df[df["활성"] == True]
+    return df
 
-    st.divider()
-    st.markdown("### 신규 등록 / 수정")
 
-    choices = ["(신규)"] + [f"{r['항목ID']} - {r['항목']}" for _, r in df.iterrows()]
-    sel = st.selectbox("대상 선택", choices, index=0, key="eval_item_pick")
+def _new_eval_item_id(ws) -> str:
+    """ITM0001 형태의 신규 항목ID 생성."""
+    header = ws.row_values(1)
+    hmap = {n: i + 1 for i, n in enumerate(header)}
+    col = hmap.get("항목ID")
+    if not col:
+        return "ITM0001"
+    vals = ws.col_values(col)[1:]  # 헤더 제외
+    nums = []
+    for v in vals:
+        s = str(v).strip()
+        if s.startswith("ITM"):
+            try:
+                nums.append(int(s[3:]))
+            except Exception:
+                pass
+    nxt = (max(nums) + 1) if nums else 1
+    return f"ITM{nxt:04d}"
 
-    # 기본값
-    item_id = None
-    name = ""; desc = ""; order = (df["순서"].max()+1 if not df.empty else 1); active = True; memo = ""
 
-    if sel != "(신규)":
-        iid = sel.split(" - ", 1)[0]
-        row = df.loc[df["항목ID"] == iid].iloc[0]
-        item_id = row["항목ID"]
-        name = str(row.get("항목",""))
-        desc = str(row.get("내용",""))
-        order = int(row.get("순서", 0))
-        active = bool(row.get("활성", True))
-        memo = str(row.get("비고",""))
+def upsert_eval_item(item_id: str | None, name: str, desc: str, order: int, active: bool, memo: str = ""):
+    """항목ID가 있으면 업데이트, 없으면 신규 추가."""
+    ensure_eval_items_sheet()
+    wb = get_workbook()
+    ws = wb.worksheet(EVAL_ITEMS_SHEET)
+    header = ws.row_values(1)
+    hmap = {n: i + 1 for i, n in enumerate(header)}
+    # 신규면 ID 발급
+    if not item_id:
+        item_id = _new_eval_item_id(ws)
+        row = [""] * len(header)
+        row[hmap["항목ID"] - 1] = item_id
+        row[hmap["항목"] - 1] = name
+        row[hmap["내용"] - 1] = desc
+        row[hmap["순서"] - 1] = int(order)
+        row[hmap["활성"] - 1] = bool(active)
+        if "비고" in hmap:
+            row[hmap["비고"] - 1] = memo
+        ws.append_row(row, value_input_option="USER_ENTERED")
+        st.cache_data.clear()
+        return item_id
 
-    c1, c2 = st.columns([3,1])
-    with c1:
-        name = st.text_input("항목명", value=name, placeholder="예: 책임감", key="eval_item_name")
-        desc = st.text_area("설명(문항 내용)", value=desc, height=100, key="eval_item_desc")
-        memo = st.text_input("비고(선택)", value=memo, key="eval_item_memo")
-    with c2:
-        order = st.number_input("순서", min_value=0, step=1, value=int(order), key="eval_item_order")
-        active = st.checkbox("활성", value=active, key="eval_item_active")
+    # 업데이트: 항목ID 행 찾기
+    col_id = hmap.get("항목ID")
+    vals = ws.col_values(col_id)  # 헤더 포함
+    target_row = 0
+    for i, v in enumerate(vals[1:], start=2):
+        if str(v).strip() == str(item_id).strip():
+            target_row = i
+            break
+    if target_row == 0:
+        # 못 찾으면 신규로
+        return upsert_eval_item(None, name, desc, order, active, memo)
 
-        if st.button("저장(신규/수정)", type="primary", use_container_width=True):
-            if not name.strip():
-                st.error("항목명을 입력하세요.")
-            else:
-                try:
-                    new_id = upsert_eval_item(
-                        item_id=item_id,
-                        name=name.strip(),
-                        desc=desc.strip(),
-                        order=int(order),
-                        active=bool(active),
-                        memo=memo.strip(),
-                    )
-                    st.success(f"저장 완료 (항목ID: {new_id})")
-                    st.rerun()
-                except Exception as e:
-                    st.exception(e)
+    ws.update_cell(target_row, hmap["항목"], name)
+    ws.update_cell(target_row, hmap["내용"], desc)
+    ws.update_cell(target_row, hmap["순서"], int(order))
+    ws.update_cell(target_row, hmap["활성"], bool(active))
+    if "비고" in hmap:
+        ws.update_cell(target_row, hmap["비고"], memo)
+    st.cache_data.clear()
+    return item_id
 
-        st.write("")
-        if item_id:
-            if st.button("비활성화(소프트 삭제)", use_container_width=True):
-                try:
-                    deactivate_eval_item(item_id)
-                    st.success("비활성화 완료")
-                    st.rerun()
-                except Exception as e:
-                    st.exception(e)
-            if st.button("행 삭제(완전 삭제)", use_container_width=True):
-                try:
-                    delete_eval_item_row(item_id)
-                    st.success("삭제 완료")
-                    st.rerun()
-                except Exception as e:
-                    st.exception(e)
+
+def deactivate_eval_item(item_id: str):
+    """활성=False (소프트 삭제)."""
+    ensure_eval_items_sheet()
+    wb = get_workbook()
+    ws = wb.worksheet(EVAL_ITEMS_SHEET)
+    header = ws.row_values(1)
+    hmap = {n: i + 1 for i, n in enumerate(header)}
+    col_id = hmap.get("항목ID")
+    col_active = hmap.get("활성")
+    if not (col_id and col_active):
+        return
+    vals = ws.col_values(col_id)
+    for i, v in enumerate(vals[1:], start=2):
+        if str(v).strip() == str(item_id).strip():
+            ws.update_cell(i, col_active, False)
+            break
+    st.cache_data.clear()
+
+
+def delete_eval_item_row(item_id: str):
+    """행 자체 삭제(완전 삭제)."""
+    ensure_eval_items_sheet()
+    wb = get_workbook()
+    ws = wb.worksheet(EVAL_ITEMS_SHEET)
+    header = ws.row_values(1)
+    hmap = {n: i + 1 for i, n in enumerate(header)}
+    col_id = hmap.get("항목ID")
+    vals = ws.col_values(col_id)
+    for i, v in enumerate(vals[1:], start=2):
+        if str(v).strip() == str(item_id).strip():
+            ws.delete_rows(i)
+            break
+    st.cache_data.clear()
+
+
+def update_eval_items_order(df_order: pd.DataFrame):
+    """순서 값 일괄 반영(df: cols=['항목ID','순서'])."""
+    ensure_eval_items_sheet()
+    wb = get_workbook()
+    ws = wb.worksheet(EVAL_ITEMS_SHEET)
+    header = ws.row_values(1)
+    hmap = {n: i + 1 for i, n in enumerate(header)}
+    col_id = hmap.get("항목ID")
+    col_ord = hmap.get("순서")
+    vals = ws.col_values(col_id)
+    pos = {str(v).strip(): i for i, v in enumerate(vals[1:], start=2)}
+    for _, r in df_order.iterrows():
+        iid = str(r["항목ID"]).strip()
+        if iid in pos:
+            ws.update_cell(pos[iid], col_ord, int(r["순서"]))
+    st.cache_data.clear()
 
 
 # =============================================================================
@@ -624,7 +706,6 @@ def tab_admin_eval_items():
 # =============================================================================
 HIST_SHEET = "부서이력"
 
-from gspread.exceptions import WorksheetNotFound, APIError
 
 def ensure_dept_history_sheet():
     """'부서이력' 시트를 보장. 없으면 생성 + 헤더 세팅.
@@ -639,7 +720,7 @@ def ensure_dept_history_sheet():
     # 새 시트 생성
     try:
         ws = wb.add_worksheet(title=HIST_SHEET, rows=200, cols=10)
-        headers = ["사번","이름","부서1","부서2","시작일","종료일","변경사유","승인자","메모","등록시각"]
+        headers = ["사번", "이름", "부서1", "부서2", "시작일", "종료일", "변경사유", "승인자", "메모", "등록시각"]
         ws.update("A1", [headers])
         return ws
     except APIError as e:
@@ -699,11 +780,11 @@ def apply_department_change(
     approver: str = "",
 ) -> dict:
     """
-    부서 이동을 기록하고(부서이력), 필요 시 '사원' 시트의 현재 부서를 업데이트.
+    부서 이동을 기록하고(부서이력), 필요 시 '직원' 시트의 현재 부서를 업데이트.
     규칙:
       - 기존 '종료일 빈' 구간을 (start_date - 1) 로 닫음
       - 새 구간: 시작일 = start_date, 종료일 = ""
-      - start_date <= 오늘 이면 '사원' 시트 현재부서도 갱신
+      - start_date <= 오늘 이면 '직원' 시트 현재부서도 갱신
     """
     ensure_dept_history_sheet()
     wb = get_workbook()
@@ -713,7 +794,7 @@ def apply_department_change(
     start_str = start_date.strftime("%Y-%m-%d")
     prev_end = (start_date - timedelta(days=1)).strftime("%Y-%m-%d")
 
-    # 사원 정보
+    # 직원 정보
     row = emp_df.loc[emp_df["사번"].astype(str) == str(sabun)]
     if row.empty:
         raise RuntimeError("사번을 찾지 못했습니다.")
@@ -739,10 +820,10 @@ def apply_department_change(
         }
     )
 
-    # 3) 오늘 적용 대상이면 '사원' 현재부서도 갱신
+    # 3) 오늘 적용 대상이면 '직원' 현재부서도 갱신
     applied = False
     if start_date <= today:
-        ws_emp, header_emp, hmap_emp = _get_ws_and_headers("사원")
+        ws_emp, header_emp, hmap_emp = _get_ws_and_headers("직원")
         row_idx = _find_row_by_sabun(ws_emp, hmap_emp, str(sabun))
         if row_idx > 0:
             if "부서1" in hmap_emp:
@@ -757,13 +838,13 @@ def apply_department_change(
 
 def sync_current_department_from_history(as_of_date: datetime.date = None) -> int:
     """
-    '부서이력'을 기준으로 '사원' 시트의 현재 부서(부서1/부서2)를 동기화.
+    '부서이력'을 기준으로 '직원' 시트의 현재 부서(부서1/부서2)를 동기화.
     규칙: as_of_date(기본=오늘) 기준으로 시작일 <= D 이고 (종료일이 비었거나 종료일 >= D) 인 최신 구간을 현재값으로 반영.
-    반환: 업데이트된 사원 수
+    반환: 업데이트된 직원 수
     """
     ensure_dept_history_sheet()
     hist = read_dept_history_df()
-    emp = read_sheet_df("사원")
+    emp = read_sheet_df("직원")
 
     if as_of_date is None:
         as_of_date = datetime.now(tz=tz_kst()).date()
@@ -787,7 +868,7 @@ def sync_current_department_from_history(as_of_date: datetime.date = None) -> in
         return 0
 
     wb = get_workbook()
-    ws_emp, header_emp, hmap_emp = _get_ws_and_headers("사원")
+    ws_emp, header_emp, hmap_emp = _get_ws_and_headers("직원")
     changed = 0
     for _, r in emp.iterrows():
         sabun = str(r.get("사번", ""))
@@ -806,171 +887,11 @@ def sync_current_department_from_history(as_of_date: datetime.date = None) -> in
 
 
 # =============================================================================
-# 평가 항목 유틸 (시트: '평가_항목')
-# =============================================================================
-EVAL_ITEMS_SHEET = "평가_항목"
-EVAL_ITEM_HEADERS = ["항목ID","항목","내용","순서","활성","비고"]
-
-def ensure_eval_items_sheet():
-    """'평가_항목' 시트가 없으면 생성하고, 헤더를 보장."""
-    wb = get_workbook()
-    try:
-        ws = wb.worksheet(EVAL_ITEMS_SHEET)
-    except Exception:
-        ws = wb.add_worksheet(title=EVAL_ITEMS_SHEET, rows=200, cols=10)
-        ws.update("A1", [EVAL_ITEM_HEADERS])
-        return
-    # 헤더 보강(누락 컬럼 추가)
-    header = ws.row_values(1)
-    if not header:
-        ws.update("A1", [EVAL_ITEM_HEADERS])
-        return
-    need = [h for h in EVAL_ITEM_HEADERS if h not in header]
-    if need:
-        new_header = header + need
-        ws.update("1:1", [new_header])
-
-@st.cache_data(ttl=60, show_spinner=False)
-def read_eval_items_df(only_active: bool = True) -> pd.DataFrame:
-    """평가_항목 → DataFrame 반환."""
-    ensure_eval_items_sheet()
-    wb = get_workbook()
-    ws = wb.worksheet(EVAL_ITEMS_SHEET)
-    rows = ws.get_all_records(numericise_ignore=["all"])
-    df = pd.DataFrame(rows)
-    if df.empty:
-        df = pd.DataFrame(columns=EVAL_ITEM_HEADERS)
-    # 타입 보정
-    if "순서" in df.columns:
-        def _to_int(x):
-            s = str(x).strip()
-            return int(s) if s.isdigit() else 0
-        df["순서"] = df["순서"].apply(_to_int)
-    if "활성" in df.columns:
-        df["활성"] = df["활성"].map(_to_bool)
-    # 정렬 및 필터
-    df = df.sort_values(["순서","항목"]).reset_index(drop=True)
-    if only_active and "활성" in df.columns:
-        df = df[df["활성"] == True]
-    return df
-
-def _new_eval_item_id(ws) -> str:
-    """ITM0001 형태의 신규 항목ID 생성."""
-    header = ws.row_values(1)
-    hmap = {n: i+1 for i, n in enumerate(header)}
-    col = hmap.get("항목ID")
-    if not col:
-        return "ITM0001"
-    vals = ws.col_values(col)[1:]  # 헤더 제외
-    nums = []
-    for v in vals:
-        s = str(v).strip()
-        if s.startswith("ITM"):
-            try:
-                nums.append(int(s[3:]))
-            except Exception:
-                pass
-    nxt = (max(nums) + 1) if nums else 1
-    return f"ITM{nxt:04d}"
-
-def upsert_eval_item(item_id: str | None, name: str, desc: str, order: int, active: bool, memo: str = ""):
-    """항목ID가 있으면 업데이트, 없으면 신규 추가."""
-    ensure_eval_items_sheet()
-    wb = get_workbook()
-    ws = wb.worksheet(EVAL_ITEMS_SHEET)
-    header = ws.row_values(1)
-    hmap = {n: i+1 for i, n in enumerate(header)}
-    # 신규면 ID 발급
-    if not item_id:
-        item_id = _new_eval_item_id(ws)
-        row = [""] * len(header)
-        row[hmap["항목ID"]-1] = item_id
-        row[hmap["항목"]-1] = name
-        row[hmap["내용"]-1] = desc
-        row[hmap["순서"]-1] = int(order)
-        row[hmap["활성"]-1] = bool(active)
-        if "비고" in hmap:
-            row[hmap["비고"]-1] = memo
-        ws.append_row(row, value_input_option="USER_ENTERED")
-        st.cache_data.clear()
-        return item_id
-
-    # 업데이트: 항목ID 행 찾기
-    col_id = hmap.get("항목ID")
-    vals = ws.col_values(col_id)  # 헤더 포함
-    target_row = 0
-    for i, v in enumerate(vals[1:], start=2):
-        if str(v).strip() == str(item_id).strip():
-            target_row = i
-            break
-    if target_row == 0:
-        # 못 찾으면 신규로
-        return upsert_eval_item(None, name, desc, order, active, memo)
-
-    ws.update_cell(target_row, hmap["항목"], name)
-    ws.update_cell(target_row, hmap["내용"], desc)
-    ws.update_cell(target_row, hmap["순서"], int(order))
-    ws.update_cell(target_row, hmap["활성"], bool(active))
-    if "비고" in hmap:
-        ws.update_cell(target_row, hmap["비고"], memo)
-    st.cache_data.clear()
-    return item_id
-
-def deactivate_eval_item(item_id: str):
-    """활성=False (소프트 삭제)."""
-    ensure_eval_items_sheet()
-    wb = get_workbook()
-    ws = wb.worksheet(EVAL_ITEMS_SHEET)
-    header = ws.row_values(1)
-    hmap = {n: i+1 for i, n in enumerate(header)}
-    col_id = hmap.get("항목ID"); col_active = hmap.get("활성")
-    if not (col_id and col_active):
-        return
-    vals = ws.col_values(col_id)
-    for i, v in enumerate(vals[1:], start=2):
-        if str(v).strip() == str(item_id).strip():
-            ws.update_cell(i, col_active, False)
-            break
-    st.cache_data.clear()
-
-def delete_eval_item_row(item_id: str):
-    """행 자체 삭제(완전 삭제)."""
-    ensure_eval_items_sheet()
-    wb = get_workbook()
-    ws = wb.worksheet(EVAL_ITEMS_SHEET)
-    header = ws.row_values(1)
-    hmap = {n: i+1 for i, n in enumerate(header)}
-    col_id = hmap.get("항목ID")
-    vals = ws.col_values(col_id)
-    for i, v in enumerate(vals[1:], start=2):
-        if str(v).strip() == str(item_id).strip():
-            ws.delete_rows(i)
-            break
-    st.cache_data.clear()
-
-def update_eval_items_order(df_order: pd.DataFrame):
-    """순서 값 일괄 반영(df: cols=['항목ID','순서'])."""
-    ensure_eval_items_sheet()
-    wb = get_workbook()
-    ws = wb.worksheet(EVAL_ITEMS_SHEET)
-    header = ws.row_values(1)
-    hmap = {n: i+1 for i, n in enumerate(header)}
-    col_id = hmap.get("항목ID"); col_ord = hmap.get("순서")
-    vals = ws.col_values(col_id)
-    pos = {str(v).strip(): i for i, v in enumerate(vals[1:], start=2)}
-    for _, r in df_order.iterrows():
-        iid = str(r["항목ID"]).strip()
-        if iid in pos:
-            ws.update_cell(pos[iid], col_ord, int(r["순서"]))
-    st.cache_data.clear()
-
-
-# =============================================================================
 # 관리자: 부서 이동 UI
 # =============================================================================
 def tab_admin_transfer(emp_df: pd.DataFrame):
     st.subheader("관리자 - 부서(근무지) 이동")
-    st.caption("이동 이력 기록 + (필요 시) 사원 시트 현재부서 반영. 예정일 이동은 이력만 넣고, 나중에 '동기화'로 반영하세요.")
+    st.caption("이동 이력 기록 + (필요 시) 직원 시트 현재부서 반영. 예정일 이동은 이력만 넣고, 나중에 '동기화'로 반영하세요.")
 
     ensure_dept_history_sheet()
 
@@ -1092,10 +1013,111 @@ def tab_admin_transfer(emp_df: pd.DataFrame):
         if st.button("오늘 기준 전체 동기화", use_container_width=True):
             try:
                 cnt = sync_current_department_from_history()
-                st.success(f"사원 시트 현재부서 동기화 완료: {cnt}명 반영", icon="✅")
+                st.success(f"직원 시트 현재부서 동기화 완료: {cnt}명 반영", icon="✅")
                 st.toast("동기화 완료", icon="✅")
             except Exception as e:
                 st.exception(e)
+
+
+# =============================================================================
+# 관리자: 평가 항목 관리 UI
+# =============================================================================
+def tab_admin_eval_items():
+    st.subheader("관리자 - 평가 항목 관리 (1~5점 척도, 총 20개)")
+    st.caption("가중치 없이 20개 항목을 1~5점으로 평가하면 합계가 100점 만점이 됩니다. (영역 없음)")
+
+    df = read_eval_items_df(only_active=False)
+    st.write(f"현재 등록 항목: **{len(df)}개** (활성: {df[df['활성']==True].shape[0]}개)")
+
+    with st.expander("목록 보기 / 순서 일괄 편집", expanded=True):
+        edit_df = df[["항목ID", "항목", "순서", "활성"]].copy().reset_index(drop=True)
+        edited = st.data_editor(
+            edit_df,
+            use_container_width=True,
+            height=380,
+            column_config={
+                "항목ID": st.column_config.TextColumn(disabled=True),
+                "항목": st.column_config.TextColumn(disabled=True),
+                "활성": st.column_config.CheckboxColumn(disabled=True),
+                "순서": st.column_config.NumberColumn(step=1, min_value=0),
+            },
+            num_rows="fixed",
+        )
+        if st.button("순서 일괄 저장", use_container_width=True):
+            try:
+                update_eval_items_order(edited[["항목ID", "순서"]])
+                st.success("순서가 반영되었습니다.")
+                st.rerun()
+            except Exception as e:
+                st.exception(e)
+
+    st.divider()
+    st.markdown("### 신규 등록 / 수정")
+
+    choices = ["(신규)"] + [f"{r['항목ID']} - {r['항목']}" for _, r in df.iterrows()]
+    sel = st.selectbox("대상 선택", choices, index=0, key="eval_item_pick")
+
+    # 기본값
+    item_id = None
+    name = ""
+    desc = ""
+    order = (df["순서"].max() + 1 if not df.empty else 1)
+    active = True
+    memo = ""
+
+    if sel != "(신규)":
+        iid = sel.split(" - ", 1)[0]
+        row = df.loc[df["항목ID"] == iid].iloc[0]
+        item_id = row["항목ID"]
+        name = str(row.get("항목", ""))
+        desc = str(row.get("내용", ""))
+        order = int(row.get("순서", 0))
+        active = bool(row.get("활성", True))
+        memo = str(row.get("비고", ""))
+
+    c1, c2 = st.columns([3, 1])
+    with c1:
+        name = st.text_input("항목명", value=name, placeholder="예: 책임감", key="eval_item_name")
+        desc = st.text_area("설명(문항 내용)", value=desc, height=100, key="eval_item_desc")
+        memo = st.text_input("비고(선택)", value=memo, key="eval_item_memo")
+    with c2:
+        order = st.number_input("순서", min_value=0, step=1, value=int(order), key="eval_item_order")
+        active = st.checkbox("활성", value=active, key="eval_item_active")
+
+        if st.button("저장(신규/수정)", type="primary", use_container_width=True):
+            if not name.strip():
+                st.error("항목명을 입력하세요.")
+            else:
+                try:
+                    new_id = upsert_eval_item(
+                        item_id=item_id,
+                        name=name.strip(),
+                        desc=desc.strip(),
+                        order=int(order),
+                        active=bool(active),
+                        memo=memo.strip(),
+                    )
+                    st.success(f"저장 완료 (항목ID: {new_id})")
+                    st.rerun()
+                except Exception as e:
+                    st.exception(e)
+
+        st.write("")
+        if item_id:
+            if st.button("비활성화(소프트 삭제)", use_container_width=True):
+                try:
+                    deactivate_eval_item(item_id)
+                    st.success("비활성화 완료")
+                    st.rerun()
+                except Exception as e:
+                    st.exception(e)
+            if st.button("행 삭제(완전 삭제)", use_container_width=True):
+                try:
+                    delete_eval_item_row(item_id)
+                    st.success("삭제 완료")
+                    st.rerun()
+                except Exception as e:
+                    st.exception(e)
 
 
 # =============================================================================
@@ -1107,9 +1129,9 @@ def main():
 
     # 1) 데이터 읽기
     try:
-        emp_df = read_sheet_df("사원")
+        emp_df = read_sheet_df("직원")
     except Exception as e:
-        st.error(f"'사원' 시트 로딩 실패: {e}")
+        st.error(f"'직원' 시트 로딩 실패: {e}")
         return
 
     # 2) 로그인 요구
@@ -1122,14 +1144,26 @@ def main():
         if st.button("로그아웃", use_container_width=True):
             logout()
 
-    # 4) 탭 구성 (관리자여부에 따라 '관리자' 탭 보이기)
-    tabs_names = ["사원", "도움말"]
-    # 관리자 (PIN + 부서이동 + 평가항목)
+    # 4) 탭 구성 (도움말 탭은 항상 맨 오른쪽)
+    labels = ["직원"]
+    admin_idx = None
     if u.get("관리자여부", False):
-        with tabs[2]:
+        labels.append("관리자")
+        admin_idx = 1
+    labels.append("도움말")  # 항상 마지막
+
+    tabs = st.tabs(labels)
+
+    # 직원
+    with tabs[0]:
+        tab_staff(emp_df)
+
+    # 관리자
+    if admin_idx is not None:
+        with tabs[admin_idx]:
             st.subheader("관리자 메뉴")
             admin_page = st.radio(
-                "기능 선택", 
+                "기능 선택",
                 ["PIN 관리", "부서(근무지) 이동", "평가 항목 관리"],
                 horizontal=True,
                 key="admin_page_selector",
@@ -1140,38 +1174,24 @@ def main():
                 tab_admin_pin(emp_df)
             elif admin_page == "부서(근무지) 이동":
                 tab_admin_transfer(emp_df)
-            else:  # 평가 항목 관리
+            else:
                 tab_admin_eval_items()
 
-    # 사원
-    with tabs[0]:
-        tab_employees(emp_df)
-
-    # 도움말
-    with tabs[1]:
+    # 도움말 (맨 오른쪽)
+    with tabs[-1]:
         st.markdown(
             """
             ### 사용 안내
-            - Google Sheets의 **사원** 시트와 연동해 조회합니다.  
+            - Google Sheets의 **직원** 시트와 연동해 조회합니다.  
             - `secrets.toml` 의 서비스 계정(편집자 권한)이 시트에 공유되어 있어야 합니다.  
             - `private_key` 는  
               - **삼중따옴표 + 실제 줄바꿈** 또는  
               - **한 줄 문자열 + `\\n` 이스케이프** 모두 지원합니다.  
-            - 관리자 탭에서 **개별 PIN 변경**, **일괄 PIN 발급**, **부서 이동 기록/반영**이 가능합니다.
+            - 관리자 메뉴에서 **개별 PIN 변경**, **일괄 PIN 발급**, **부서 이동 기록/반영**, **평가 항목 관리**가 가능합니다.
             """
         )
 
-    # 관리자 (PIN + 부서이동)
-    if u.get("관리자여부", False):
-        with tabs[2]:
-            tab_admin_pin(emp_df)
-            st.divider()
-            tab_admin_transfer(emp_df)
-            st.divider()
-            tab_admin_eval_items()
 
 # =============================================================================
 if __name__ == "__main__":
     main()
-
-
