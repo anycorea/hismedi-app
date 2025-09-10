@@ -1312,19 +1312,33 @@ def tab_eval_input(emp_df: pd.DataFrame):
         evaluator_name  = me_name
         st.info(f"대상자: {target_name} ({target_sabun}) · 평가유형: 자기", icon="👤")
 
-    # 점수 입력(1~5)
+    # 점수 입력(1~5) — 항목/내용/점수 3열 레이아웃 (ID 표시는 숨김)
     st.markdown("#### 점수 입력 (각 1~5)")
+    
+    # 헤더줄
+    h1, h2, h3 = st.columns([2, 6, 1])
+    with h1: st.markdown("**항목**")
+    with h2: st.markdown("**내용**")
+    with h3: st.markdown("**점수**")
+    
     scores = {}
-    # 보기 좋게 2열로 배치
-    left, right = st.columns(2)
-    half = (len(items) + 1) // 2
-    for i, row in enumerate(items.itertuples(index=False)):
-        host = left if i < half else right
-        with host:
-            iid = getattr(row, "항목ID")
-            name = getattr(row, "항목")
-            key  = f"score_{iid}"
-            scores[iid] = st.number_input(f"{name} ({iid})", min_value=0, max_value=5, value=0, step=1, key=key)
+    # 항목 순서대로 한 줄씩 렌더링
+    for r in items.sort_values(["순서","항목"]).itertuples(index=False):
+        iid   = getattr(r, "항목ID")
+        name  = getattr(r, "항목") or ""
+        desc  = getattr(r, "내용") or ""
+    
+        c1, c2, c3 = st.columns([2, 6, 1])
+        with c1:
+            st.markdown(f"**{name}**")
+        with c2:
+            # 긴 문장 줄바꿈/개행 허용
+            st.markdown(desc.replace("\n", "  \n"))
+        with c3:
+            # 레이블은 공백으로 숨김, 0~5 정수 입력
+            scores[iid] = st.number_input(
+                " ", min_value=0, max_value=5, value=0, step=1, key=f"score_{iid}"
+            )
 
     # 합계 계산(100점 환산)
     item_ids = [str(x) for x in items["항목ID"].tolist()]
@@ -1459,3 +1473,4 @@ def main():
 # =============================================================================
 if __name__ == "__main__":
     main()
+
