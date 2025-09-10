@@ -264,7 +264,7 @@ def render_status_line():
 
 
 # =============================================================================
-# 탭: 직원(=기존 사원)
+# 탭: 직원
 # =============================================================================
 def tab_staff(emp_df: pd.DataFrame):
     st.subheader("직원")
@@ -504,29 +504,45 @@ def tab_admin_pin(emp_df: pd.DataFrame):
                 use_container_width=True,
             )
 
-            if do_issue:
-                try:
-                    ws, header, hmap = _get_ws_and_headers("직원")
-                    if "PIN_hash" not in hmap or "사번" not in hmap:
-                        st.error("'직원' 시트에 '사번' 또는 'PIN_hash' 헤더가 없습니다.")
-                        st.stop()
+    if do_issue:
+        try:
+            ws, header, hmap = _get_ws_and_headers("직원")
+            if "PIN_hash" not in hmap or "사번" not in hmap:
+                st.error("'직원' 시트에 '사번' 또는 'PIN_hash' 헤더가 없습니다.")
+                st.stop()
 
-                    # 행별 업데이트 (규모가 250명 내외라 단건 업데이트로도 충분)
-                    pin_col = hmap["PIN_hash"]
-                    pbar = st.progress(0.0, text="시트 업데이트 중...")
-                    for i, (_, row) in enumerate(preview.iterrows(), start=1):
-                        sabun = str(row["사번"])
-                        r_idx = _find_row_by_sabun(ws, hmap, sabun)
-                        if r_idx > 0:
-                            _update_cell(ws, r_idx, pin_col, _sha256_hex(row["새_PIN"]))
-                        time.sleep(0.02)  # 과도한 API 호출 방지 약간의 딜레이
-                        pbar.progress(i / len(preview))
+            # 한 번만 읽어서 사번 -> 행번호 매핑
+            sabun_col = hmap["사번"]
+            pin_col = hmap["PIN_hash"]
+            sabun_values = ws.col_values(sabun_col)[1:]  # 헤더 제외
+            pos = {str(v).strip(): i for i, v in enumerate(sabun_values, start=2)}
 
-                    st.cache_data.clear()
-                    st.success(f"일괄 발급 완료: {len(preview):,}명 반영", icon="✅")
-                    st.toast("PIN 일괄 발급 반영됨", icon="✅")
-                except Exception as e:
-                    st.exception(e)
+            # 단일 셀 범위를 여러 개 묶어 한 번에 업데이트
+            updates = []
+            for _, row in preview.iterrows():
+                sabun = str(row["사번"]).strip()
+                r_idx = pos.get(sabun, 0)
+                if r_idx:
+                    a1 = gspread.utils.rowcol_to_a1(r_idx, pin_col)
+                    updates.append({"range": a1, "values": [[_sha256_hex(row["새_PIN"])]]})
+
+            if not updates:
+                st.warning("업데이트할 대상이 없습니다.", icon="⚠️")
+                st.stop()
+
+            # 큰 페이로드를 안전하게 나눠서 전송(쿼터 회피)
+            CHUNK = 100
+            pbar = st.progress(0.0, text="시트 업데이트(배치) 중...")
+            for i in range(0, len(updates), CHUNK):
+                ws.batch_update(updates[i:i+CHUNK])
+                pbar.progress(min(1.0, (i + CHUNK) / len(updates)))
+                time.sleep(0.2)  # 살짝 페이싱
+
+            st.cache_data.clear()
+            st.success(f"일괄 발급 완료: {len(updates):,}명 반영", icon="✅")
+            st.toast("PIN 일괄 발급 반영됨", icon="✅")
+        except Exception as e:
+            st.exception(e)
 
 
 # =============================================================================
@@ -1396,6 +1412,45 @@ def tab_eval_input(emp_df: pd.DataFrame):
     except Exception:
         st.caption("제출 현황을 불러오지 못했습니다.")
 
+def tab_eval_self_input():
+    """평가 > 자기평가 입력(1~5점, 20문항, 총점 100) — ITM코드 숨김, 정렬된 표 UI"""
+    st.subheader("평가 - 자기평가 입력 (1~5점)")
+
+    items = read_eval_items_df(only_active=True)
+    if items.empty:
+        st.info("활성화된 평가 항목이 없습니다. 먼저 '관리자 > 평가 항목 관리'에서 항목을 등록/활성화하세요.")
+        return
+
+    # 입력 테이블 구성(ITM코드 제외)
+    base = items[["항목", "내용"]].copy()
+    base["점수(1~5)"] = None
+
+    st.caption("각 항목을 1~5점으로 입력하세요. (20개 × 5점 = 100점 만점)")
+    edited = st.data_editor(
+        base,
+        hide_index=True,
+        use_container_width=True,
+        height=520,
+        num_rows="fixed",
+        column_config={
+            "항목": st.column_config.TextColumn("항목", width="small", disabled=True),
+            "내용": st.column_config.TextColumn("내용", width="large", disabled=True),
+            "점수(1~5)": st.column_config.NumberColumn(
+                "점수(1~5)", min_value=1, max_value=5, step=1, format="%d"
+            ),
+        },
+        key="self_eval_editor",
+    )
+
+    # 합계/검증
+    total = int(pd.to_numeric(edited["점수(1~5)"], errors="coerce").fillna(0).sum())
+    st.metric(label="합계", value=f"{total} / 100")
+    if (edited["점수(1~5)"].isna()).any():
+        st.info("모든 항목의 점수를 입력하면 100점 만점 기준 합계가 정확히 계산됩니다.")
+
+    # (저장 로직은 다음 단계에서 '평가_응답' 시트와 연결 예정)
+    st.button("임시 저장(추후 연결)", disabled=True, use_container_width=True)
+
 
 # =============================================================================
 # 메인
@@ -1421,27 +1476,25 @@ def main():
         if st.button("로그아웃", use_container_width=True):
             logout()
 
-    # 4) 탭 구성 (도움말 탭은 항상 맨 오른쪽)
-    labels = ["직원", "평가"]
-    admin_idx = None
+    # 4) 탭 구성
+    tabs_names = ["직원", "평가"]
     if u.get("관리자여부", False):
-        labels.append("관리자")
-        admin_idx = 2
-    labels.append("도움말")  # 항상 마지막
+        tabs_names.append("관리자")
+    tabs_names.append("도움말")  # 항상 맨 오른쪽
 
-    tabs = st.tabs(labels)
+    tabs = st.tabs(tabs_names)
 
-    # 직원
+    # 직원 조회
     with tabs[0]:
-        tab_staff(emp_df)
+        tab_employees(emp_df)
 
-    # 평가
+    # 평가(자기평가 입력)
     with tabs[1]:
-        tab_eval_input(emp_df)
+        tab_eval_self_input()
 
     # 관리자
-    if admin_idx is not None:
-        with tabs[admin_idx]:
+    if u.get("관리자여부", False):
+        with tabs[2]:
             st.subheader("관리자 메뉴")
             admin_page = st.radio(
                 "기능 선택",
@@ -1457,20 +1510,20 @@ def main():
             else:
                 tab_admin_eval_items()
 
-    # 도움말 (맨 오른쪽)
+    # 도움말(맨 오른쪽)
     with tabs[-1]:
         st.markdown(
             """
             ### 사용 안내
-            - Google Sheets의 **직원** 시트와 연동해 조회합니다.  
-            - `secrets.toml` 의 서비스 계정(편집자 권한)이 시트에 공유되어 있어야 합니다.  
-            - **평가 입력** 탭에서 자기/1차/2차 평가를 1~5점으로 입력합니다(항목 수×5를 100점으로 환산).  
-            - 평가 응답은 연도별 시트('평가_응답_YYYY')에 저장됩니다.  
-            - 관리자 메뉴: PIN 관리 · 부서 이동 · 평가 항목 관리.
+            - Google Sheets 연동 조회/관리
+            - 관리자: **개별 PIN/일괄 PIN/부서이동/평가항목 관리**
+            - 평가: **자기평가 입력(1~5점)** — ITM코드는 숨기고 표로 정렬
             """
         )
+
 
 # =============================================================================
 if __name__ == "__main__":
     main()
+
 
