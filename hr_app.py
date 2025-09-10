@@ -57,6 +57,16 @@ st.markdown(
       .stTabs [role="tab"] { padding: 12px 20px !important; font-size: 1.05rem !important; }
       /* 평가 입력 레이아웃 가독성 */
       .eval-desc p { margin: 0; }
+      /* 점수 입력 테이블 라인 정렬 */
+      .score-row {padding: 10px 6px; border-bottom: 1px solid rgba(49,51,63,.10);}
+      .score-name {font-weight: 700;}
+      .score-desc {color: #4b5563;}
+      .score-badge {min-width: 36px; text-align: center; font-weight: 700;
+                    padding: 6px 8px; border-radius: 10px; background: rgba(49,51,63,.06);}
+      .score-center {display:flex; align-items:center; justify-content:center; height:100%;}
+      .score-buttons .stButton>button {padding: 4px 10px; margin: 0 2px;}
+      .score-buttons {display:flex; align-items:center; justify-content:center; gap:4px;}
+      .score-head {font-size: .9rem; color:#6b7280; margin-bottom: .4rem;}
     </style>
     """,
     unsafe_allow_html=True,
@@ -846,11 +856,12 @@ def upsert_eval_response(emp_df: pd.DataFrame, year: int, eval_type: str,
         put("평가자사번", str(evaluator_sabun)); put("평가자이름", e_name)
         put("총점", total_100); put("상태", status); put("제출시각", now)
 
-        for iid, sc in zip(item_ids, scores_list):
+        for iid in item_ids:
             cname = f"점수_{iid}"
             c = hmap.get(cname)
             if c:
-                rowbuf[c-1] = sc
+                rowbuf[c-1] = min(5, max(1, int(scores.get(iid, 3))))  # 최소 1점 보장
+
         ws.append_row(rowbuf, value_input_option="USER_ENTERED")
         st.cache_data.clear()
         return {"action": "insert", "row": None, "total": total_100}
@@ -861,10 +872,10 @@ def upsert_eval_response(emp_df: pd.DataFrame, year: int, eval_type: str,
     ws.update_cell(row_idx, hmap["제출시각"], now)
     ws.update_cell(row_idx, hmap["평가대상이름"], t_name)
     ws.update_cell(row_idx, hmap["평가자이름"], e_name)
-    for iid, sc in zip(item_ids, scores_list):
+    for iid in item_ids:
         cname = f"점수_{iid}"
         c = hmap.get(cname)
-        if c: ws.update_cell(row_idx, c, sc)
+        if c: ws.update_cell(row_idx, c, min(5, max(1, int(scores.get(iid, 3)))))
 
     st.cache_data.clear()
     return {"action": "update", "row": row_idx, "total": total_100}
@@ -1340,7 +1351,7 @@ def tab_admin_eval_items():
 
 
 # =============================================================================
-# 탭: 평가 입력 (자기/1차/2차 공용)
+# 탭: 평가 입력 (자기/1차/2차 공용) — 버튼형(1~5)만, 0점 없음, 라인 정렬
 # =============================================================================
 def tab_eval_input(emp_df: pd.DataFrame):
     st.subheader("평가 입력 (자기 / 1차 / 2차)")
@@ -1385,30 +1396,12 @@ def tab_eval_input(emp_df: pd.DataFrame):
         st.info(f"대상자: {target_name} ({target_sabun}) · 평가유형: 자기", icon="👤")
 
     # ─────────────────────────────────────────────────────────────
-    # 점수 입력 UI (버튼형/스텝퍼 선택 · ITM코드 숨김 · 반응형 정렬)
+    # 점수 입력 UI — 버튼(1~5)만, 한 줄 정렬, 0점 없음, 기본값 3
     # ─────────────────────────────────────────────────────────────
     st.markdown("#### 점수 입력 (각 1~5)")
+    st.caption("모든 항목은 1~5 중 하나를 반드시 선택합니다. (기본 3)")
 
-    input_mode = st.radio(
-        "입력 방식",
-        ("버튼(1~5)", "스텝퍼(±)"),
-        horizontal=True,
-        key="eval_input_mode",
-    )
-
-    st.markdown(
-        """
-        <style>
-          .score-row {padding: 8px 4px; border-bottom: 1px solid rgba(49,51,63,.10);}
-          .score-name {font-weight: 600;}
-          .score-desc {color: #555;}
-          .score-badge {min-width: 36px; text-align: center; font-weight: 700;
-                        padding: 6px 8px; border-radius: 10px; background: rgba(49,51,63,.06);}
-          .score-center {display:flex; align-items:center; justify-content:center; height:100%;}
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
+    st.markdown('<div class="score-head">항목 / 내용 / 점수</div>', unsafe_allow_html=True)
 
     items_sorted = items.sort_values(["순서", "항목"]).reset_index(drop=True)
     scores = {}
@@ -1416,9 +1409,12 @@ def tab_eval_input(emp_df: pd.DataFrame):
         iid  = getattr(r, "항목ID")
         name = getattr(r, "항목") or ""
         desc = getattr(r, "내용") or ""
-        cur_val = int(st.session_state.get(f"score_{iid}", 0))
 
-        c1, c2, c3 = st.columns([2, 7, 3])
+        # 저장된 값 없으면 3으로 초기화
+        cur_val = int(st.session_state.get(f"score_{iid}", 3))
+        cur_val = 3 if cur_val < 1 or cur_val > 5 else cur_val
+
+        c1, c2, c3 = st.columns([2, 7, 3], vertical_alignment="center")
         with c1:
             st.markdown(f'<div class="score-row score-name">{name}</div>', unsafe_allow_html=True)
         with c2:
@@ -1428,46 +1424,32 @@ def tab_eval_input(emp_df: pd.DataFrame):
             )
         with c3:
             st.markdown('<div class="score-row">', unsafe_allow_html=True)
-            if input_mode == "버튼(1~5)":
-                if getattr(st, "segmented_control", None):
-                    new_val = st.segmented_control(
-                        " ",
-                        options=[0, 1, 2, 3, 4, 5],
-                        format_func=lambda x: "—" if x == 0 else str(x),
-                        default_value=cur_val,
-                        key=f"seg_{iid}",
-                    )
-                else:
-                    labels = ["—", "1", "2", "3", "4", "5"]
-                    idx = max(0, min(5, cur_val))
-                    picked = st.radio(
-                        " ", labels, index=idx, horizontal=True,
-                        key=f"seg_{iid}", label_visibility="collapsed"
-                    )
-                    new_val = 0 if picked == "—" else int(picked)
-            else:
-                minus_col, val_col, plus_col = st.columns([1, 1, 1])
-                with minus_col
 
-
-            # 2) 스텝퍼(±)
+            # segmented_control 지원되면 그걸 사용(모바일/데스크톱 정렬 깔끔)
+            new_val = cur_val
+            if getattr(st, "segmented_control", None):
+                new_val = st.segmented_control(
+                    " ",
+                    options=[1, 2, 3, 4, 5],
+                    format_func=lambda x: str(x),
+                    default_value=cur_val,
+                    key=f"seg_{iid}",
+                )
             else:
-                minus_col, val_col, plus_col = st.columns([1, 1, 1])
-                with minus_col:
-                    if st.button("−", key=f"minus_{iid}"):
-                        cur_val = max(0, cur_val - 1)
-                with val_col:
-                    st.markdown(f'<div class="score-center"><span class="score-badge">{cur_val}</span></div>', unsafe_allow_html=True)
-                with plus_col:
-                    if st.button("+", key=f"plus_{iid}"):
-                        cur_val = min(5, cur_val + 1)
-                new_val = cur_val
+                # 대체: 라디오 버튼(가로)
+                labels = ["1", "2", "3", "4", "5"]
+                picked = st.radio(
+                    " ", labels, index=(cur_val - 1), horizontal=True,
+                    key=f"seg_{iid}", label_visibility="collapsed"
+                )
+                new_val = int(picked)
 
             st.markdown('</div>', unsafe_allow_html=True)
 
-        # 값 보관
-        scores[str(iid)] = int(new_val)
-        st.session_state[f"score_{iid}"] = int(new_val)
+        # 값 보관 (1~5 보장)
+        new_val = min(5, max(1, int(new_val)))
+        scores[str(iid)] = new_val
+        st.session_state[f"score_{iid}"] = new_val
 
     # 합계(100점 만점) 계산 및 표시
     raw = int(sum(scores.values()))
@@ -1481,6 +1463,36 @@ def tab_eval_input(emp_df: pd.DataFrame):
     with cM2:
         st.progress(min(1.0, total_100 / 100.0), text=f"총점 {total_100}점")
 
+    # 제출/저장
+    col_submit = st.columns([1, 1, 4])
+    with col_submit[0]:
+        do_save = st.button("제출/저장", type="primary", use_container_width=True)
+    with col_submit[1]:
+        do_reset = st.button("모든 점수 3점으로", use_container_width=True)
+
+    if do_reset:
+        for r in items_sorted.itertuples(index=False):
+            st.session_state[f"score_{getattr(r, '항목ID')}"] = 3
+        st.rerun()
+
+    if do_save:
+        try:
+            rep = upsert_eval_response(
+                emp_df=emp_df,
+                year=int(year),
+                eval_type=eval_type,
+                target_sabun=str(target_sabun),
+                evaluator_sabun=str(evaluator_sabun),
+                scores=scores,
+                status="제출",
+            )
+            if rep["action"] == "insert":
+                st.success(f"제출 완료 (총점 {rep['total']}점)", icon="✅")
+            else:
+                st.success(f"업데이트 완료 (총점 {rep['total']}점)", icon="✅")
+            st.toast("평가 저장됨", icon="✅")
+        except Exception as e:
+            st.exception(e)
 
     st.markdown("#### 내 제출 현황")
     try:
@@ -1569,6 +1581,3 @@ def main():
 # =============================================================================
 if __name__ == "__main__":
     main()
-
-
-
