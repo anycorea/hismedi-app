@@ -129,6 +129,264 @@ EMP_SHEET = st.secrets.get("sheets", {}).get("EMP_SHEET", "직원")
 
 
 # =============================================================================
+# 권한(ACL) 유틸  — 시트: '권한'
+#   - 행 = 1개의 권한 규칙
+#   - 역할: admin(전체권한) / manager(관리자 권한은 아님, 위임 범위만 가짐)
+#   - 범위유형: '부서' (부서1/부서2 기준 전체) / '개별' (대상사번 1명)
+#   - 기본 관리자(초기값): 113001(병원장), 524007(행정원장), 524003(이영하, 팀장)
+# =============================================================================
+AUTH_SHEET = "권한"
+AUTH_HEADERS = ["사번","이름","역할","범위유형","부서1","부서2","대상사번","활성","비고"]
+
+SEED_ADMINS = [
+    {"사번":"113001","이름":"병원장","역할":"admin","범위유형":"","부서1":"","부서2":"","대상사번":"","활성":True,"비고":"seed"},
+    {"사번":"524007","이름":"행정원장","역할":"admin","범위유형":"","부서1":"","부서2":"","대상사번":"","활성":True,"비고":"seed"},
+    {"사번":"524003","이름":"이영하","역할":"admin","범위유형":"","부서1":"","부서2":"","대상사번":"","활성":True,"비고":"seed"},
+]
+
+def ensure_auth_sheet():
+    wb = get_workbook()
+    try:
+        ws = wb.worksheet(AUTH_SHEET)
+        header = ws.row_values(1) or []
+        need = [h for h in AUTH_HEADERS if h not in header]
+        if need:
+            ws.update("1:1", [header + need])
+        # 시드 관리자 보강
+        vals = ws.get_all_records(numericise_ignore=["all"])
+        cur_admins = {str(r.get("사번","")).strip() for r in vals if str(r.get("역할","")).strip()=="admin"}
+        to_add = [r for r in SEED_ADMINS if r["사번"] not in cur_admins]
+        if to_add:
+            rows = []
+            hmap = {n:i for i,n in enumerate(ws.row_values(1))}
+            for rec in to_add:
+                row = ["" for _ in range(len(ws.row_values(1)))]
+                for k,v in rec.items():
+                    if k in hmap: row[hmap[k]] = v
+                rows.append(row)
+            if rows:
+                ws.append_rows(rows, value_input_option="USER_ENTERED")
+        return ws
+    except WorksheetNotFound:
+        pass
+
+    ws = wb.add_worksheet(title=AUTH_SHEET, rows=1000, cols=20)
+    ws.update("A1", [AUTH_HEADERS])
+    # seed
+    ws.append_rows([[r.get(h,"") for h in AUTH_HEADERS] for r in SEED_ADMINS], value_input_option="USER_ENTERED")
+    return ws
+
+@st.cache_data(ttl=60, show_spinner=False)
+def read_auth_df() -> pd.DataFrame:
+    ensure_auth_sheet()
+    wb = get_workbook()
+    ws = wb.worksheet(AUTH_SHEET)
+    rows = ws.get_all_records(numericise_ignore=["all"])
+    df = pd.DataFrame(rows)
+    if df.empty:
+        df = pd.DataFrame(columns=AUTH_HEADERS)
+    # 정리
+    for c in ["사번","이름","역할","범위유형","부서1","부서2","대상사번","비고"]:
+        if c in df.columns: df[c] = df[c].astype(str)
+    if "활성" in df.columns: df["활성"] = df["활성"].map(_to_bool)
+    return df
+
+def is_admin(sabun: str) -> bool:
+    s = str(sabun).strip()
+    if s in {a["사번"] for a in SEED_ADMINS}:
+        return True
+    df = read_auth_df()
+    if df.empty: return False
+    q = df[(df["사번"].astype(str)==s) & (df["역할"].str.lower()=="admin") & (df["활성"]==True)]
+    return not q.empty
+
+def _infer_implied_scopes(emp_df: pd.DataFrame, sabun: str) -> list[dict]:
+    """
+    직급명에 '부장' → 부서1 전체, '팀장' → 해당 부서1/부서2 조합
+    (시트 명칭에 따라 자유롭게 수정 가능)
+    """
+    out = []
+    me = emp_df.loc[emp_df["사번"].astype(str)==str(sabun)]
+    if me.empty: return out
+    r = me.iloc[0]
+    grade = str(r.get("직급",""))
+    d1 = str(r.get("부서1","")); d2 = str(r.get("부서2",""))
+    name = str(r.get("이름",""))
+    if "부장" in grade:
+        out.append({"사번":sabun,"이름":name,"역할":"manager","범위유형":"부서","부서1":d1,"부서2":"","대상사번":"","활성":True,"비고":"implied:부장"})
+    if "팀장" in grade:
+        out.append({"사번":sabun,"이름":name,"역할":"manager","범위유형":"부서","부서1":d1,"부서2":d2,"대상사번":"","활성":True,"비고":"implied:팀장"})
+    return out
+
+def get_allowed_sabuns(emp_df: pd.DataFrame, sabun: str, include_self: bool=True) -> set[str]:
+    """
+    사용자가 조회/관리 가능한 '대상 사번' 집합
+    - admin → 모든 사번
+    - manager → 권한 시트 + 직급 기반 암묵 권한
+    - 일반 → 자기 자신
+    """
+    sabun = str(sabun)
+    # admin → all
+    if is_admin(sabun):
+        return set(emp_df["사번"].astype(str).tolist())
+
+    allowed = set([sabun]) if include_self else set()
+
+    df_auth = read_auth_df()
+    # 명시된 규칙
+    if not df_auth.empty:
+        mine = df_auth[(df_auth["사번"].astype(str)==sabun) & (df_auth["활성"]==True)]
+        for _, r in mine.iterrows():
+            rtype = str(r.get("범위유형","")).strip()
+            if rtype == "부서":
+                d1 = str(r.get("부서1","")).strip()
+                d2 = str(r.get("부서2","")).strip()
+                tgt = emp_df.copy()
+                if d1: tgt = tgt[tgt["부서1"].astype(str)==d1]
+                if d2: tgt = tgt[tgt["부서2"].astype(str)==d2]
+                allowed.update(tgt["사번"].astype(str).tolist())
+            elif rtype == "개별":
+                t = str(r.get("대상사번","")).strip()
+                # 쉼표/공백/개행 모두 허용
+                parts = [p for p in re.split(r"[,\s]+", t) if p]
+                allowed.update([p for p in parts])
+
+    # 암묵 규칙(직급 → 부장/팀장)
+    for r in _infer_implied_scopes(emp_df, sabun):
+        if r["범위유형"]=="부서":
+            d1 = r["부서1"]; d2 = r["부서2"]
+            tgt = emp_df.copy()
+            if d1: tgt = tgt[tgt["부서1"].astype(str)==d1]
+            if d2: tgt = tgt[tgt["부서2"].astype(str)==d2]
+            allowed.update(tgt["사번"].astype(str).tolist())
+
+    return allowed
+
+def is_manager(emp_df: pd.DataFrame, sabun: str) -> bool:
+    """자기외 대상이 1명 이상 있으면 manager로 간주(관리 범위를 가짐)."""
+    allowed = get_allowed_sabuns(emp_df, sabun, include_self=False)
+    return len(allowed) > 0
+
+
+# =============================================================================
+# 관리자: 권한 관리 UI
+# =============================================================================
+def tab_admin_acl(emp_df: pd.DataFrame):
+    st.subheader("관리자 - 권한 관리")
+    st.caption("역할(admin/manager)과 범위(부서/개별)를 사번 기준으로 설정합니다.")
+
+    df_auth = read_auth_df()
+
+    # 빠른 추가
+    st.markdown("### 권한 규칙 추가")
+    c1, c2 = st.columns([2, 2])
+    with c1:
+        # 관리자(권한 부여자)
+        df_pick = emp_df.copy()
+        df_pick["표시"] = df_pick.apply(lambda r: f"{str(r.get('사번',''))} - {str(r.get('이름',''))}", axis=1)
+        df_pick = df_pick.sort_values(["사번"])
+        giver = st.selectbox("권한 주체(사번 - 이름)", ["(선택)"] + df_pick["표시"].tolist(), index=0, key="acl_giver")
+    with c2:
+        role = st.selectbox("역할", ["manager", "admin"], index=0, key="acl_role")
+
+    c3, c4 = st.columns([1, 3])
+    with c3:
+        scope_type = st.radio("범위유형", ["부서", "개별"], horizontal=True, key="acl_scope_type")
+    with c4:
+        memo = st.text_input("비고(선택)", "", key="acl_memo")
+
+    add_rows = []
+    if scope_type == "부서":
+        cA, cB, cC = st.columns([1, 1, 1])
+        with cA:
+            dept1 = st.selectbox("부서1", [""] + sorted([x for x in emp_df.get("부서1", []).dropna().unique() if x]), index=0, key="acl_dept1")
+        with cB:
+            # 선택된 부서1의 하위 부서2만
+            sub = emp_df.copy()
+            if dept1:
+                sub = sub[sub["부서1"].astype(str)==dept1]
+            opt_d2 = [""] + sorted([x for x in sub.get("부서2", []).dropna().unique() if x])
+            dept2 = st.selectbox("부서2(선택)", opt_d2, index=0, key="acl_dept2")
+        with cC:
+            active = st.checkbox("활성", True, key="acl_active_dep")
+        if st.button("➕ 부서 권한 추가", type="primary", use_container_width=True, key="acl_add_dep"):
+            if giver != "(선택)":
+                sab = giver.split(" - ", 1)[0]
+                name = _emp_name_by_sabun(emp_df, sab)
+                add_rows.append({
+                    "사번":sab,"이름":name,"역할":role,"범위유형":"부서",
+                    "부서1":dept1,"부서2":dept2,"대상사번":"","활성":bool(active),"비고":memo.strip()
+                })
+            else:
+                st.warning("권한 주체를 선택하세요.", icon="⚠️")
+    else:
+        cA, cB, cC = st.columns([2, 2, 1])
+        with cA:
+            targets = st.multiselect(
+                "대상자(여러 명 선택 가능)",
+                df_pick["표시"].tolist(),
+                default=[],
+                key="acl_targets",
+            )
+        with cB:
+            active = st.checkbox("활성", True, key="acl_active_ind")
+        with cC:
+            st.write("")
+        if st.button("➕ 개별 권한 추가", type="primary", use_container_width=True, key="acl_add_ind"):
+            if giver != "(선택)" and targets:
+                sab = giver.split(" - ", 1)[0]
+                name = _emp_name_by_sabun(emp_df, sab)
+                for t in targets:
+                    tsab = t.split(" - ", 1)[0]
+                    add_rows.append({
+                        "사번":sab,"이름":name,"역할":role,"범위유형":"개별",
+                        "부서1":"","부서2":"","대상사번":tsab,"활성":bool(active),"비고":memo.strip()
+                    })
+            else:
+                st.warning("권한 주체/대상자를 선택하세요.", icon="⚠️")
+
+    # 시트 반영
+    if add_rows:
+        try:
+            wb = get_workbook(); ws = wb.worksheet(AUTH_SHEET)
+            header = ws.row_values(1); hmap = {n:i for i,n in enumerate(header)}
+            rows = []
+            for rec in add_rows:
+                row = ["" for _ in range(len(header))]
+                for k,v in rec.items():
+                    if k in hmap: row[hmap[k]] = v
+                rows.append(row)
+            ws.append_rows(rows, value_input_option="USER_ENTERED")
+            st.cache_data.clear()
+            st.success(f"규칙 {len(rows)}건 추가 완료", icon="✅")
+            st.rerun()
+        except Exception as e:
+            st.exception(e)
+
+    st.divider()
+    st.markdown("### 권한 규칙 목록")
+    if df_auth.empty:
+        st.caption("권한 규칙이 없습니다.")
+    else:
+        view = df_auth.copy()
+        view = view.sort_values(["역할","사번","범위유형","부서1","부서2","대상사번"])
+        st.dataframe(view, use_container_width=True, height=380)
+
+    st.divider()
+    st.markdown("### 규칙 삭제 (행 번호)")
+    del_row = st.number_input("삭제할 시트 행 번호 (헤더=1)", min_value=2, step=1, value=2, key="acl_del_row")
+    if st.button("🗑️ 해당 행 삭제", use_container_width=True, key="acl_del_btn"):
+        try:
+            wb = get_workbook(); ws = wb.worksheet(AUTH_SHEET)
+            ws.delete_rows(int(del_row))
+            st.cache_data.clear()
+            st.success(f"{del_row}행 삭제 완료", icon="✅")
+            st.rerun()
+        except Exception as e:
+            st.exception(e)
+
+
+# =============================================================================
 # 데이터 로딩
 # =============================================================================
 @st.cache_data(ttl=60, show_spinner=True)
@@ -283,6 +541,13 @@ def render_status_line():
 # 탭: 직원
 # =============================================================================
 def tab_staff(emp_df: pd.DataFrame):
+    # 권한 필터: admin이 아니면 볼 수 있는 사번만
+    u = st.session_state["user"]
+    me = str(u["사번"])
+    if not is_admin(me):
+        allowed = get_allowed_sabuns(emp_df, me, include_self=True)
+        emp_df = emp_df[emp_df["사번"].astype(str).isin(allowed)].copy()
+
     st.subheader("직원")
     st.caption("직원 기본정보(조회/필터). 편집은 추후 입력폼/승인 절차와 함께 추가 예정입니다.")
 
@@ -1371,29 +1636,36 @@ def tab_eval_input(emp_df: pd.DataFrame):
     is_admin = bool(u.get("관리자여부", False))
 
     st.markdown("#### 대상/유형 선택")
-    if is_admin:
+    u = st.session_state["user"]
+    me_sabun = str(u["사번"]); me_name = str(u["이름"])
+    am_admin = is_admin(me_sabun)
+    allowed = get_allowed_sabuns(emp_df, me_sabun, include_self=True)
+
+    if am_admin or is_manager(emp_df, me_sabun):
+        # 내가 권한 가진 대상만 리스트업
         df = emp_df.copy()
+        df = df[df["사번"].astype(str).isin(allowed)]
         if "재직여부" in df.columns:
             df = df[df["재직여부"] == True]
         df["표시"] = df.apply(lambda r: f"{str(r.get('사번',''))} - {str(r.get('이름',''))}", axis=1)
         df = df.sort_values(["사번"])
-        sel = st.selectbox("평가 **대상자** (사번 - 이름)", ["(선택)"] + df["표시"].tolist(), index=0)
+        sel = st.selectbox("평가 **대상자** (사번 - 이름)", ["(선택)"] + df["표시"].tolist(), index=0, key="eval_target_select")
         if sel == "(선택)":
             st.info("평가 대상자를 선택하세요.")
             return
         target_sabun = sel.split(" - ", 1)[0]
-        target_name = _emp_name_by_sabun(emp_df, target_sabun)
-        eval_type = st.radio("평가유형", EVAL_TYPES, horizontal=True)
-        evaluator_sabun = me_sabun
-        evaluator_name  = me_name
+        target_name  = _emp_name_by_sabun(emp_df, target_sabun)
+        # 자기평가/1차/2차 모두 허용 (관리체계에 맞춰)
+        eval_type = st.radio("평가유형", EVAL_TYPES, horizontal=True, key="eval_type_radio")
+        evaluator_sabun = me_sabun; evaluator_name = me_name
         st.caption(f"평가자: {evaluator_name} ({evaluator_sabun})")
     else:
-        target_sabun = me_sabun
-        target_name  = me_name
+        # 일반 직원 → 자기평가만
+        target_sabun = me_sabun; target_name = me_name
         eval_type = "자기"
-        evaluator_sabun = me_sabun
-        evaluator_name  = me_name
+        evaluator_sabun = me_sabun; evaluator_name = me_name
         st.info(f"대상자: {target_name} ({target_sabun}) · 평가유형: 자기", icon="👤")
+
 
     # ─────────────────────────────────────────────────────────────
     # 점수 입력 UI — 버튼(1~5)만, 한 줄 정렬, 0점 없음, 기본값 3
@@ -1683,21 +1955,26 @@ def tab_job_desc(emp_df: pd.DataFrame):
 
     # 대상 선택
     st.markdown("#### 대상/연도 선택")
-    if is_admin:
+    u = st.session_state["user"]
+    me_sabun = str(u["사번"]); me_name = str(u["이름"])
+    am_admin = is_admin(me_sabun)
+    allowed = get_allowed_sabuns(emp_df, me_sabun, include_self=True)
+
+    if am_admin or is_manager(emp_df, me_sabun):
         df = emp_df.copy()
+        df = df[df["사번"].astype(str).isin(allowed)]
         if "재직여부" in df.columns:
             df = df[df["재직여부"] == True]
         df["표시"] = df.apply(lambda r: f"{str(r.get('사번',''))} - {str(r.get('이름',''))}", axis=1)
         df = df.sort_values(["사번"])
-        sel = st.selectbox("대상자 (사번 - 이름)", ["(선택)"] + df["표시"].tolist(), index=0)
+        sel = st.selectbox("대상자 (사번 - 이름)", ["(선택)"] + df["표시"].tolist(), index=0, key="jobdesc_target_select")
         if sel == "(선택)":
             st.info("대상자를 선택하세요.")
             return
         target_sabun = sel.split(" - ", 1)[0]
-        target_name  = str(df.loc[df["사번"].astype(str)==str(target_sabun)].iloc[0].get("이름",""))
+        target_name  = _emp_name_by_sabun(emp_df, target_sabun)
     else:
-        target_sabun = me_sabun
-        target_name  = me_name
+        target_sabun = me_sabun; target_name = me_name
         st.info(f"대상자: {target_name} ({target_sabun})", icon="👤")
 
     colY = st.columns([1,2,2])
@@ -2322,6 +2599,7 @@ def main():
 # =============================================================================
 if __name__ == "__main__":
     main()
+
 
 
 
