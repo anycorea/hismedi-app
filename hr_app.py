@@ -6,6 +6,7 @@ HISMEDI - 인사/HR (Google Sheets 연동)
 """
 
 import time
+import re
 import hashlib
 import secrets as pysecrets
 from datetime import datetime, timedelta
@@ -2538,6 +2539,9 @@ def main():
     # 2) 로그인 요구
     require_login(emp_df)
 
+    # C-1) 로그인 직후: 관리자 플래그 재계산 (admin 시드/시트 기준)
+    st.session_state["user"]["관리자여부"] = is_admin(st.session_state["user"]["사번"])
+    
     # 3) 사이드바 사용자/로그아웃
     u = st.session_state["user"]
     with st.sidebar:
@@ -2573,7 +2577,8 @@ def main():
             st.subheader("관리자 메뉴")
             admin_page = st.radio(
                 "기능 선택",
-                ["PIN 관리", "부서(근무지) 이동", "평가 항목 관리"],
+                # C-5) '권한 관리' 추가
+                ["PIN 관리", "부서(근무지) 이동", "평가 항목 관리", "권한 관리"],
                 horizontal=True,
                 key="admin_page_selector",
             )
@@ -2582,8 +2587,10 @@ def main():
                 tab_admin_pin(emp_df)
             elif admin_page == "부서(근무지) 이동":
                 tab_admin_transfer(emp_df)
-            else:
+            elif admin_page == "평가 항목 관리":
                 tab_admin_eval_items()
+            else:  # 권한 관리
+                tab_admin_acl(emp_df)
 
     # 도움말(맨 오른쪽)
     with tabs[-1]:
@@ -2599,7 +2606,4 @@ def main():
 # =============================================================================
 if __name__ == "__main__":
     main()
-
-
-
 
