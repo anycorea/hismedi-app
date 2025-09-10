@@ -525,6 +525,100 @@ def tab_admin_pin(emp_df: pd.DataFrame):
                     st.exception(e)
 
 
+def tab_admin_eval_items():
+    st.subheader("관리자 - 평가 항목 관리 (1~5점 척도, 총 20개)")
+    st.caption("가중치 없이 20개 항목을 1~5점으로 평가하면 합계가 100점 만점이 됩니다. (영역 없음)")
+
+    df = read_eval_items_df(only_active=False)
+    st.write(f"현재 등록 항목: **{len(df)}개** (활성: {df[df['활성']==True].shape[0]}개)")
+
+    with st.expander("목록 보기 / 순서 일괄 편집", expanded=True):
+        edit_df = df[["항목ID","항목","순서","활성"]].copy().reset_index(drop=True)
+        edited = st.data_editor(
+            edit_df,
+            use_container_width=True,
+            height=380,
+            column_config={
+                "항목ID": st.column_config.TextColumn(disabled=True),
+                "항목": st.column_config.TextColumn(disabled=True),
+                "활성": st.column_config.CheckboxColumn(disabled=True),
+                "순서": st.column_config.NumberColumn(step=1, min_value=0),
+            },
+            num_rows="fixed",
+        )
+        if st.button("순서 일괄 저장", use_container_width=True):
+            try:
+                update_eval_items_order(edited[["항목ID","순서"]])
+                st.success("순서가 반영되었습니다.")
+                st.rerun()
+            except Exception as e:
+                st.exception(e)
+
+    st.divider()
+    st.markdown("### 신규 등록 / 수정")
+
+    choices = ["(신규)"] + [f"{r['항목ID']} - {r['항목']}" for _, r in df.iterrows()]
+    sel = st.selectbox("대상 선택", choices, index=0, key="eval_item_pick")
+
+    # 기본값
+    item_id = None
+    name = ""; desc = ""; order = (df["순서"].max()+1 if not df.empty else 1); active = True; memo = ""
+
+    if sel != "(신규)":
+        iid = sel.split(" - ", 1)[0]
+        row = df.loc[df["항목ID"] == iid].iloc[0]
+        item_id = row["항목ID"]
+        name = str(row.get("항목",""))
+        desc = str(row.get("내용",""))
+        order = int(row.get("순서", 0))
+        active = bool(row.get("활성", True))
+        memo = str(row.get("비고",""))
+
+    c1, c2 = st.columns([3,1])
+    with c1:
+        name = st.text_input("항목명", value=name, placeholder="예: 책임감", key="eval_item_name")
+        desc = st.text_area("설명(문항 내용)", value=desc, height=100, key="eval_item_desc")
+        memo = st.text_input("비고(선택)", value=memo, key="eval_item_memo")
+    with c2:
+        order = st.number_input("순서", min_value=0, step=1, value=int(order), key="eval_item_order")
+        active = st.checkbox("활성", value=active, key="eval_item_active")
+
+        if st.button("저장(신규/수정)", type="primary", use_container_width=True):
+            if not name.strip():
+                st.error("항목명을 입력하세요.")
+            else:
+                try:
+                    new_id = upsert_eval_item(
+                        item_id=item_id,
+                        name=name.strip(),
+                        desc=desc.strip(),
+                        order=int(order),
+                        active=bool(active),
+                        memo=memo.strip(),
+                    )
+                    st.success(f"저장 완료 (항목ID: {new_id})")
+                    st.rerun()
+                except Exception as e:
+                    st.exception(e)
+
+        st.write("")
+        if item_id:
+            if st.button("비활성화(소프트 삭제)", use_container_width=True):
+                try:
+                    deactivate_eval_item(item_id)
+                    st.success("비활성화 완료")
+                    st.rerun()
+                except Exception as e:
+                    st.exception(e)
+            if st.button("행 삭제(완전 삭제)", use_container_width=True):
+                try:
+                    delete_eval_item_row(item_id)
+                    st.success("삭제 완료")
+                    st.rerun()
+                except Exception as e:
+                    st.exception(e)
+
+
 # =============================================================================
 # 부서이력 유틸 (시트명: '부서이력')
 # =============================================================================
@@ -703,92 +797,162 @@ def sync_current_department_from_history(as_of_date: datetime.date = None) -> in
 
 
 # =============================================================================
-# 평가 항목 유틸 (시트명: '평가_항목') — 영역(대분류) 없음, 1~5점 척도(가중치 없음)
+# 평가 항목 유틸 (시트: '평가_항목')
 # =============================================================================
-EVAL_SHEET = "평가_항목"
+EVAL_ITEMS_SHEET = "평가_항목"
+EVAL_ITEM_HEADERS = ["항목ID","항목","내용","순서","활성","비고"]
 
-def ensure_eval_sheet():
-    """'평가_항목' 시트와 필요한 헤더 보장 (영역 칼럼 없음)."""
+def ensure_eval_items_sheet():
+    """'평가_항목' 시트가 없으면 생성하고, 헤더를 보장."""
     wb = get_workbook()
     try:
-        ws = wb.worksheet(EVAL_SHEET)
+        ws = wb.worksheet(EVAL_ITEMS_SHEET)
     except Exception:
-        ws = wb.add_worksheet(title=EVAL_SHEET, rows=500, cols=10)
-        ws.update("A1", [[
-            "항목ID","항목","내용","순서","활성","비고"
-        ]])
-        return ws
-
-    need = ["항목ID","항목","내용","순서","활성","비고"]
+        ws = wb.add_worksheet(title=EVAL_ITEMS_SHEET, rows=200, cols=10)
+        ws.update("A1", [EVAL_ITEM_HEADERS])
+        return
+    # 헤더 보강(누락 컬럼 추가)
     header = ws.row_values(1)
-    missing = [h for h in need if h not in header]
-    if missing:
-        start_col = len(header) + 1
-        for i, name in enumerate(missing, start=start_col):
-            ws.update_cell(1, i, name)
-    return ws
+    if not header:
+        ws.update("A1", [EVAL_ITEM_HEADERS])
+        return
+    need = [h for h in EVAL_ITEM_HEADERS if h not in header]
+    if need:
+        new_header = header + need
+        ws.update("1:1", [new_header])
 
-@st.cache_data(ttl=60, show_spinner=True)
-def read_eval_items_df(only_active: bool = False) -> pd.DataFrame:
-    """평가_항목을 DF로 읽음(영역 없음)."""
-    ws = ensure_eval_sheet()
+@st.cache_data(ttl=60, show_spinner=False)
+def read_eval_items_df(only_active: bool = True) -> pd.DataFrame:
+    """평가_항목 → DataFrame 반환."""
+    ensure_eval_items_sheet()
+    wb = get_workbook()
+    ws = wb.worksheet(EVAL_ITEMS_SHEET)
     rows = ws.get_all_records(numericise_ignore=["all"])
     df = pd.DataFrame(rows)
     if df.empty:
-        df = pd.DataFrame(columns=["항목ID","항목","내용","순서","활성","비고"])
-
+        df = pd.DataFrame(columns=EVAL_ITEM_HEADERS)
+    # 타입 보정
     if "순서" in df.columns:
-        df["순서"] = pd.to_numeric(df["순서"], errors="coerce").fillna(0).astype(int)
-        df = df.sort_values("순서", kind="stable")
-
+        def _to_int(x):
+            s = str(x).strip()
+            return int(s) if s.isdigit() else 0
+        df["순서"] = df["순서"].apply(_to_int)
     if "활성" in df.columns:
         df["활성"] = df["활성"].map(_to_bool)
-
+    # 정렬 및 필터
+    df = df.sort_values(["순서","항목"]).reset_index(drop=True)
     if only_active and "활성" in df.columns:
         df = df[df["활성"] == True]
+    return df
 
-    # 필요 컬럼만 정렬(시트에 다른 칼럼이 있어도 무시)
-    keep = ["항목ID","항목","내용","순서","활성","비고"]
-    for c in keep:
-        if c not in df.columns:
-            df[c] = ""
-    return df[keep].reset_index(drop=True)
+def _new_eval_item_id(ws) -> str:
+    """ITM0001 형태의 신규 항목ID 생성."""
+    header = ws.row_values(1)
+    hmap = {n: i+1 for i, n in enumerate(header)}
+    col = hmap.get("항목ID")
+    if not col:
+        return "ITM0001"
+    vals = ws.col_values(col)[1:]  # 헤더 제외
+    nums = []
+    for v in vals:
+        s = str(v).strip()
+        if s.startswith("ITM"):
+            try:
+                nums.append(int(s[3:]))
+            except Exception:
+                pass
+    nxt = (max(nums) + 1) if nums else 1
+    return f"ITM{nxt:04d}"
 
-def _next_item_id(existing_ids: list[str]) -> str:
-    """ITM0001 형태 다음 ID 생성."""
-    base = [int(s[3:]) for s in existing_ids if str(s).startswith("ITM") and str(s[3:]).isdigit()]
-    n = max(base) + 1 if base else 1
-    return f"ITM{n:04d}"
+def upsert_eval_item(item_id: str | None, name: str, desc: str, order: int, active: bool, memo: str = ""):
+    """항목ID가 있으면 업데이트, 없으면 신규 추가."""
+    ensure_eval_items_sheet()
+    wb = get_workbook()
+    ws = wb.worksheet(EVAL_ITEMS_SHEET)
+    header = ws.row_values(1)
+    hmap = {n: i+1 for i, n in enumerate(header)}
+    # 신규면 ID 발급
+    if not item_id:
+        item_id = _new_eval_item_id(ws)
+        row = [""] * len(header)
+        row[hmap["항목ID"]-1] = item_id
+        row[hmap["항목"]-1] = name
+        row[hmap["내용"]-1] = desc
+        row[hmap["순서"]-1] = int(order)
+        row[hmap["활성"]-1] = bool(active)
+        if "비고" in hmap:
+            row[hmap["비고"]-1] = memo
+        ws.append_row(row, value_input_option="USER_ENTERED")
+        st.cache_data.clear()
+        return item_id
 
-def save_eval_items_df(df: pd.DataFrame):
-    """DF 전체를 '평가_항목' 시트에 반영. 빈 항목ID는 자동 발급."""
-    ws = ensure_eval_sheet()
-    cols = ["항목ID","항목","내용","순서","활성","비고"]
-    for c in cols:
-        if c not in df.columns:
-            df[c] = ""
-    df = df[cols].copy()
+    # 업데이트: 항목ID 행 찾기
+    col_id = hmap.get("항목ID")
+    vals = ws.col_values(col_id)  # 헤더 포함
+    target_row = 0
+    for i, v in enumerate(vals[1:], start=2):
+        if str(v).strip() == str(item_id).strip():
+            target_row = i
+            break
+    if target_row == 0:
+        # 못 찾으면 신규로
+        return upsert_eval_item(None, name, desc, order, active, memo)
 
-    # ID 자동 발급
-    ids = df["항목ID"].astype(str).tolist()
-    used = {i for i in ids if i}
-    for i, v in enumerate(ids):
-        if not v:
-            new_id = _next_item_id(list(used))
-            df.loc[i, "항목ID"] = new_id
-            used.add(new_id)
+    ws.update_cell(target_row, hmap["항목"], name)
+    ws.update_cell(target_row, hmap["내용"], desc)
+    ws.update_cell(target_row, hmap["순서"], int(order))
+    ws.update_cell(target_row, hmap["활성"], bool(active))
+    if "비고" in hmap:
+        ws.update_cell(target_row, hmap["비고"], memo)
+    st.cache_data.clear()
+    return item_id
 
-    # 타입 보정
-    df["순서"] = pd.to_numeric(df["순서"], errors="coerce").fillna(0).astype(int)
-    df["활성"] = df["활성"].map(_to_bool)
+def deactivate_eval_item(item_id: str):
+    """활성=False (소프트 삭제)."""
+    ensure_eval_items_sheet()
+    wb = get_workbook()
+    ws = wb.worksheet(EVAL_ITEMS_SHEET)
+    header = ws.row_values(1)
+    hmap = {n: i+1 for i, n in enumerate(header)}
+    col_id = hmap.get("항목ID"); col_active = hmap.get("활성")
+    if not (col_id and col_active):
+        return
+    vals = ws.col_values(col_id)
+    for i, v in enumerate(vals[1:], start=2):
+        if str(v).strip() == str(item_id).strip():
+            ws.update_cell(i, col_active, False)
+            break
+    st.cache_data.clear()
 
-    # 기존 데이터 영역 비우고 덮어쓰기
-    last_row = ws.row_count
-    last_col = ws.col_count
-    ws.batch_clear([f"A2:{gspread.utils.rowcol_to_a1(last_row, last_col)}"])
+def delete_eval_item_row(item_id: str):
+    """행 자체 삭제(완전 삭제)."""
+    ensure_eval_items_sheet()
+    wb = get_workbook()
+    ws = wb.worksheet(EVAL_ITEMS_SHEET)
+    header = ws.row_values(1)
+    hmap = {n: i+1 for i, n in enumerate(header)}
+    col_id = hmap.get("항목ID")
+    vals = ws.col_values(col_id)
+    for i, v in enumerate(vals[1:], start=2):
+        if str(v).strip() == str(item_id).strip():
+            ws.delete_rows(i)
+            break
+    st.cache_data.clear()
 
-    values = df.fillna("").values.tolist()
-    ws.update("A2", values, value_input_option="USER_ENTERED")
+def update_eval_items_order(df_order: pd.DataFrame):
+    """순서 값 일괄 반영(df: cols=['항목ID','순서'])."""
+    ensure_eval_items_sheet()
+    wb = get_workbook()
+    ws = wb.worksheet(EVAL_ITEMS_SHEET)
+    header = ws.row_values(1)
+    hmap = {n: i+1 for i, n in enumerate(header)}
+    col_id = hmap.get("항목ID"); col_ord = hmap.get("순서")
+    vals = ws.col_values(col_id)
+    pos = {str(v).strip(): i for i, v in enumerate(vals[1:], start=2)}
+    for _, r in df_order.iterrows():
+        iid = str(r["항목ID"]).strip()
+        if iid in pos:
+            ws.update_cell(pos[iid], col_ord, int(r["순서"]))
     st.cache_data.clear()
 
 
@@ -980,10 +1144,10 @@ def main():
             tab_admin_pin(emp_df)
             st.divider()
             tab_admin_transfer(emp_df)
-
+            st.divider()
+            tab_admin_eval_items()
 
 # =============================================================================
 if __name__ == "__main__":
     main()
-
 
