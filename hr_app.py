@@ -1225,7 +1225,7 @@ def tab_admin_acl(emp_df: pd.DataFrame):
 # ── 메인 ──────────────────────────────────────────────────────────────────────
 def main():
     # 제목을 조금 작게 (H2)
-    st.markdown(f"## {APP_TITLE}")
+    st.markdown(f"<div class='app-title'>{APP_TITLE}</div>", unsafe_allow_html=True)
     render_status_line()
 
     # 1) 데이터 읽기 (전체)
@@ -1307,4 +1307,3 @@ def main():
 # ── 엔트리포인트 ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     main()
-
