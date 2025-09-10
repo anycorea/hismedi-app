@@ -33,10 +33,23 @@ st.set_page_config(page_title=APP_TITLE, layout="wide")
 st.markdown(
     """
     <style>
-      .block-container{padding-top:.8rem}
-      .stTabs [role='tab']{padding:10px 16px !important;font-size:1.02rem !important}
-      .grid-head{font-size:.9rem;color:#6b7280;margin:.2rem 0 .5rem}
-      h1, .stMarkdown h1 { font-size: 1.4rem; line-height: 1.6rem; margin: .2rem 0 .6rem; }
+      /* 상단 여백을 조금 늘려 잘림 방지 */
+      .block-container { padding-top: 1.35rem !important; }
+
+      /* 탭/보조 텍스트 */
+      .stTabs [role='tab']{ padding:10px 16px !important; font-size:1.02rem !important; }
+      .grid-head{ font-size:.9rem; color:#6b7280; margin:.2rem 0 .5rem; }
+
+      /* 앱 제목: 전용 클래스 사용 (글자 살짝 작게) */
+      .app-title{
+        font-size: 1.28rem;
+        line-height: 1.45rem;
+        margin: .2rem 0 .6rem;
+        font-weight: 800;
+      }
+      @media (min-width:1280px){
+        .app-title{ font-size: 1.34rem; line-height: 1.5rem; }
+      }
     </style>
     """,
     unsafe_allow_html=True,
@@ -1294,3 +1307,4 @@ def main():
 # ── 엔트리포인트 ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     main()
+
