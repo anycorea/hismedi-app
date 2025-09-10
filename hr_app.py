@@ -1401,50 +1401,73 @@ def tab_eval_input(emp_df: pd.DataFrame):
     st.markdown("#### 점수 입력 (각 1~5)")
     st.caption("모든 항목은 1~5 중 하나를 반드시 선택합니다. (기본 3)")
 
+    # 줄맞춤을 위한 Grid 스타일 (행 전체에 하나의 밑줄만)
+    st.markdown(
+        """
+        <style>
+          .score-grid { 
+            display: grid; 
+            grid-template-columns: 2fr 7fr 3fr; 
+            align-items: center;
+            gap: 0.5rem;
+            padding: 10px 6px;
+            border-bottom: 1px solid rgba(49,51,63,.10);
+          }
+          .score-grid .name { font-weight: 700; }
+          .score-grid .desc { color: #4b5563; }
+          .score-grid .input { display:flex; align-items:center; justify-content:center; }
+          .score-grid .input div[role="radiogroup"] { 
+            display:flex; gap: 10px; align-items:center; justify-content:center; 
+          }
+          .score-head {font-size: .9rem; color:#6b7280; margin-bottom: .4rem;}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
     st.markdown('<div class="score-head">항목 / 내용 / 점수</div>', unsafe_allow_html=True)
 
     items_sorted = items.sort_values(["순서", "항목"]).reset_index(drop=True)
     scores = {}
+
     for r in items_sorted.itertuples(index=False):
         iid  = getattr(r, "항목ID")
         name = getattr(r, "항목") or ""
         desc = getattr(r, "내용") or ""
 
-        # 저장된 값 없으면 3으로 초기화
+        # 저장된 값 없으면 3, 1~5 보장
         cur_val = int(st.session_state.get(f"score_{iid}", 3))
-        cur_val = 3 if cur_val < 1 or cur_val > 5 else cur_val
+        if cur_val < 1 or cur_val > 5:
+            cur_val = 3
 
-        c1, c2, c3 = st.columns([2, 7, 3], vertical_alignment="center")
-        with c1:
-            st.markdown(f'<div class="score-row score-name">{name}</div>', unsafe_allow_html=True)
-        with c2:
-            st.markdown(
-                f'<div class="score-row score-desc">{desc.replace(chr(10), "<br/>")}</div>',
-                unsafe_allow_html=True,
+        # 행 그리드 시작
+        st.markdown('<div class="score-grid">', unsafe_allow_html=True)
+        st.markdown(f'<div class="name">{name}</div>', unsafe_allow_html=True)  # 좌: 항목명
+        st.markdown(f'<div class="desc">{desc.replace(chr(10), "<br/>")}</div>', unsafe_allow_html=True)  # 중: 설명
+        st.markdown('<div class="input">', unsafe_allow_html=True)  # 우: 점수
+
+        if getattr(st, "segmented_control", None):
+            new_val = st.segmented_control(
+                " ",
+                options=[1, 2, 3, 4, 5],
+                format_func=lambda x: str(x),
+                default_value=cur_val,
+                key=f"seg_{iid}",
             )
-        with c3:
-            st.markdown('<div class="score-row">', unsafe_allow_html=True)
-
-            # segmented_control 지원되면 그걸 사용(모바일/데스크톱 정렬 깔끔)
-            new_val = cur_val
-            if getattr(st, "segmented_control", None):
-                new_val = st.segmented_control(
+        else:
+            new_val = int(
+                st.radio(
                     " ",
-                    options=[1, 2, 3, 4, 5],
-                    format_func=lambda x: str(x),
-                    default_value=cur_val,
+                    ["1", "2", "3", "4", "5"],
+                    index=(cur_val - 1),
+                    horizontal=True,
                     key=f"seg_{iid}",
+                    label_visibility="collapsed",
                 )
-            else:
-                # 대체: 라디오 버튼(가로)
-                labels = ["1", "2", "3", "4", "5"]
-                picked = st.radio(
-                    " ", labels, index=(cur_val - 1), horizontal=True,
-                    key=f"seg_{iid}", label_visibility="collapsed"
-                )
-                new_val = int(picked)
+            )
 
-            st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)   # .input 닫기
+        st.markdown('</div>', unsafe_allow_html=True)   # .score-grid 닫기
 
         # 값 보관 (1~5 보장)
         new_val = min(5, max(1, int(new_val)))
@@ -1463,7 +1486,7 @@ def tab_eval_input(emp_df: pd.DataFrame):
     with cM2:
         st.progress(min(1.0, total_100 / 100.0), text=f"총점 {total_100}점")
 
-    # 제출/저장
+    # 제출/저장 & 리셋
     col_submit = st.columns([1, 1, 4])
     with col_submit[0]:
         do_save = st.button("제출/저장", type="primary", use_container_width=True)
@@ -1581,3 +1604,4 @@ def main():
 # =============================================================================
 if __name__ == "__main__":
     main()
+
