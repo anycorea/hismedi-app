@@ -606,6 +606,51 @@ def tab_eval_input(emp_df: pd.DataFrame):
 
     # 항목 렌더링: 1행(항목명 | 라디오 1~5) + 2행(설명)
     items_sorted = items.sort_values(["순서", "항목"]).reset_index(drop=True)
+# ── (NEW) 일괄 점수 적용 컨트롤: 큰 드롭다운 + 적용 버튼 ───────────────
+    #  - 노트북에서도 숫자가 크게 보이도록 CSS 확대
+    st.markdown(
+        """
+        <style>
+          /* 선택된 값 컨트롤 영역 크게 */
+          .bulk-score [data-baseweb="select"] > div {
+            min-height: 48px;
+            padding: 8px 10px;
+          }
+          .bulk-score [data-baseweb="select"] span {
+            font-size: 20px;
+            line-height: 28px;
+          }
+          .bulk-score [data-baseweb="select"] svg {
+            width: 22px;
+            height: 22px;
+          }
+          /* 드롭다운 옵션(포털 메뉴) 크게 */
+          div[data-baseweb="menu"] li {
+            font-size: 18px;
+            padding: 10px 12px;
+          }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    bc1, bc2, _ = st.columns([1, 1, 6])
+    with bc1:
+        st.markdown('<div class="bulk-score">', unsafe_allow_html=True)
+        bulk_score = st.selectbox(
+            " ",
+            options=[1, 2, 3, 4, 5],
+            index=2,  # 기본 3점
+            key="eval_bulk_score",
+            label_visibility="collapsed",
+        )
+        st.markdown('</div>', unsafe_allow_html=True)
+    with bc2:
+        if st.button("일괄 적용", use_container_width=True, key="eval_bulk_apply"):
+            for r in items_sorted.itertuples(index=False):
+                st.session_state[f"eval_{getattr(r, '항목ID')}"] = int(bulk_score)
+            st.toast(f"모든 항목에 {bulk_score}점 적용", icon="✅")
+
     scores = {}
 
     for r in items_sorted.itertuples(index=False):
@@ -1628,6 +1673,7 @@ def main():
 # ── 엔트리포인트 ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     main()
+
 
 
 
