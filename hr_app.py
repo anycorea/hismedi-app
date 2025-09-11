@@ -1592,7 +1592,7 @@ def main():
     st.markdown(f"## {APP_TITLE}")
     render_status_line()
 
-    # 1) 데이터 읽기 (전체)
+    # 1) 직원 시트 로딩
     try:
         emp_df_all = read_sheet_df(EMP_SHEET)
     except Exception as e:
@@ -1602,19 +1602,22 @@ def main():
     # 2) 로그인 요구
     require_login(emp_df_all)
 
-    # 3) 로그인 직후: 관리자 플래그 최신화 (시드/시트 기준)
-    u = st.session_state["user"]
-    st.session_state["user"]["관리자여부"] = is_admin(u["사번"])
+    # 3) 로그인 직후: 관리자 플래그 최신화(시드/시트 기준)
+    st.session_state["user"]["관리자여부"] = is_admin(st.session_state["user"]["사번"])
 
     # 4) 데이터 뷰 분기
-    #    - 직원 탭: 전체(emp_df_all)
-    #    - 그 외 탭: '의사' 숨김(emp_df_nodoctor)
-    emp_df_nodoctor = _hide_doctors(emp_df_all.copy())
+    # - 직원 탭: 전체 데이터(의사 포함)
+    # - 그 외 탭(평가/직무기술서/직무능력/관리자): '의사' 숨김
+    emp_df_for_staff = emp_df_all
+    emp_df_for_rest  = _hide_doctors(emp_df_all)
 
     # 5) 사이드바 사용자/로그아웃
+    u = st.session_state["user"]
     with st.sidebar:
         st.write(f"👤 **{u['이름']}** ({u['사번']})")
-        role_badge = "관리자" if u.get("관리자여부", False) else ("매니저" if is_manager(emp_df_all, u["사번"]) else "직원")
+        role_badge = "관리자" if u.get("관리자여부", False) else (
+            "매니저" if is_manager(emp_df_all, u["사번"]) else "직원"
+        )
         st.caption(f"권한: {role_badge}")
         if st.button("로그아웃", use_container_width=True):
             logout()
@@ -1625,39 +1628,41 @@ def main():
     else:
         tabs = st.tabs(["직원", "평가", "직무기술서", "직무능력평가", "도움말"])
 
-    # 직원 탭: 전체 데이터(의사 포함)
+    # 직원 탭: 전체 데이터
     with tabs[0]:
-        tab_staff(emp_df_all)
+        tab_staff(emp_df_for_staff)
 
-    # 그 외 탭: “의사” 제외 데이터
+    # 평가: 의사 숨김
     with tabs[1]:
-        tab_eval_input(emp_df_nodoctor)
-    with tabs[2]:
-        tab_job_desc(emp_df_nodoctor)
-    with tabs[3]:
-        tab_competency(emp_df_nodoctor)
+        tab_eval_input(emp_df_for_rest)
 
-    # 관리자 탭 (의사 제외본 사용)
+    # 직무기술서: 의사 숨김
+    with tabs[2]:
+        tab_job_desc(emp_df_for_rest)
+
+    # 직무능력평가: 의사 숨김
+    with tabs[3]:
+        tab_competency(emp_df_for_rest)
+
+    # 관리자 탭: 의사 숨김 데이터 사용
     if u.get("관리자여부", False):
         with tabs[4]:
             st.subheader("관리자 메뉴")
             admin_page = st.radio(
                 "기능 선택",
-                ["PIN 관리", "부서(근무지) 이동", "평가 항목 관리", "권한 관리", "직무기술서 설정"],
+                ["PIN 관리", "부서(근무지) 이동", "평가 항목 관리", "권한 관리"],
                 horizontal=True,
                 key="admin_page_selector",
             )
             st.divider()
             if admin_page == "PIN 관리":
-                tab_admin_pin(emp_df_no_md)
+                tab_admin_pin(emp_df_for_rest)
             elif admin_page == "부서(근무지) 이동":
-                tab_admin_transfer(emp_df_no_md)
+                tab_admin_transfer(emp_df_for_rest)
             elif admin_page == "평가 항목 관리":
                 tab_admin_eval_items()
-            elif admin_page == "권한 관리":
-                tab_admin_acl(emp_df_no_md)
-            else:  # 직무기술서 설정
-                tab_admin_jobdesc_defaults()
+            else:
+                tab_admin_acl(emp_df_for_rest)
 
     # 도움말
     with tabs[-1]:
@@ -1669,14 +1674,16 @@ def main():
             - 상태표시: 상단에 'DB연결 ... (KST)'
             """
         )
+        # (선택) 원본 스프레드시트 빠른 이동 링크
+        try:
+            sheet_id = st.secrets["sheets"]["HR_SHEET_ID"]
+            url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit"
+            st.caption(f"📄 원본 스프레드시트: [{url}]({url})")
+        except Exception:
+            pass
 
 # ── 엔트리포인트 ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     main()
-
-
-
-
-
 
 
