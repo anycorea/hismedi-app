@@ -574,7 +574,7 @@ def tab_eval_input(emp_df: pd.DataFrame):
         <style>
           /* 한 항목 블록의 위/아래 여백 최소화 */
           .eval-row{
-            padding: 2px 0 !important;           /* 세로 패딩 확 줄임 */
+            padding: 1px 0 !important;           /* 세로 패딩 확 줄임 */
             border-bottom: 1px solid rgba(49,51,63,.06);
           }
           .eval-row .name{
@@ -1714,6 +1714,7 @@ def main():
 # ── 엔트리포인트 ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     main()
+
 
 
 
