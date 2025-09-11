@@ -325,6 +325,16 @@ def is_manager(emp_df:pd.DataFrame,sabun:str)->bool:
 SETTINGS_SHEET = "설정"
 SETTINGS_HEADERS = ["키", "값", "메모", "수정시각", "수정자사번", "수정자이름", "활성"]
 
+def _gs_retry(fn, tries: int = 3, delay: float = 0.6):
+    """gspread 호출 리트라이 헬퍼 (APIError 등 일시 오류 대비)."""
+    for i in range(tries):
+        try:
+            return fn()
+        except APIError:
+            if i == tries - 1:
+                raise
+            time.sleep(delay * (i + 1))
+
 def ensure_settings_sheet():
     wb = get_workbook()
     try:
@@ -339,61 +349,100 @@ def ensure_settings_sheet():
         ws.update("A1", [SETTINGS_HEADERS])
         return ws
 
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=30, show_spinner=False)
 def read_settings_df() -> pd.DataFrame:
-    ensure_settings_sheet()
-    ws = get_workbook().worksheet(SETTINGS_SHEET)
-    df = pd.DataFrame(ws.get_all_records(numericise_ignore=["all"]))
+    """설정 시트를 안전하게 읽기. 실패 시 빈 DF 반환."""
+    try:
+        ensure_settings_sheet()
+        ws = get_workbook().worksheet(SETTINGS_SHEET)
+        rows = _gs_retry(lambda: ws.get_all_records(numericise_ignore=["all"]))
+        df = pd.DataFrame(rows)
+    except Exception:
+        return pd.DataFrame(columns=SETTINGS_HEADERS)
+
     if df.empty:
         return pd.DataFrame(columns=SETTINGS_HEADERS)
+
     if "활성" in df.columns:
         df["활성"] = df["활성"].map(_to_bool)
-    for c in ["키", "값", "메모", "수정자사번", "수정자이름"]:
+
+    for c in ["키", "값", "메모", "수정시각", "수정자사번", "수정자이름"]:
         if c in df.columns:
             df[c] = df[c].astype(str)
+
     return df
 
 def get_setting(key: str, default: str = "") -> str:
-    df = read_settings_df()
-    if df.empty or "키" not in df.columns:
+    """키로 값을 가져오고, 없거나 비활성이거나 오류면 default."""
+    try:
+        df = read_settings_df()
+        if df.empty or "키" not in df.columns:
+            return default
+        if "활성" in df.columns:
+            q = df[(df["키"].astype(str) == str(key)) & (df["활성"] == True)]
+        else:
+            q = df[(df["키"].astype(str) == str(key))]
+        if q.empty:
+            return default
+        # 최신값 우선: 수정시각이 있으면 그 기준으로, 없으면 마지막 행
+        if "수정시각" in q.columns and q["수정시각"].notna().any():
+            q = q.sort_values("수정시각").iloc[-1]
+            return str(q.get("값", default))
+        return str(q.iloc[-1].get("값", default))
+    except Exception:
         return default
-    q = df[(df["키"].astype(str) == str(key)) & (df.get("활성", True) == True)]
-    if q.empty:
-        return default
-    return str(q.iloc[-1].get("값", default))
 
 def set_setting(key: str, value: str, memo: str, editor_sabun: str, editor_name: str):
-    ensure_settings_sheet()
-    ws = get_workbook().worksheet(SETTINGS_SHEET)
-    header = ws.row_values(1)
-    hmap = {n: i + 1 for i, n in enumerate(header)}
+    """설정값 업서트. 실패해도 앱 흐름은 중단하지 않음."""
+    try:
+        ws = ensure_settings_sheet()
+        header = ws.row_values(1) or SETTINGS_HEADERS
+        hmap = {n: i + 1 for i, n in enumerate(header)}
 
-    col_key = hmap.get("키")
-    row_idx = 0
-    if col_key:
-        vals = ws.col_values(col_key)
-        for i, v in enumerate(vals[1:], start=2):
-            if str(v).strip() == str(key).strip():
-                row_idx = i
-                break
+        col_key = hmap.get("키")
+        row_idx = 0
+        if col_key:
+            vals = _gs_retry(lambda: ws.col_values(col_key))
+            for i, v in enumerate(vals[1:], start=2):
+                if str(v).strip() == str(key).strip():
+                    row_idx = i
+                    break
 
-    now = kst_now_str()
-    if row_idx == 0:
-        row = [""] * len(header)
-        def put(k, v):
-            c = hmap.get(k)
-            if c: row[c - 1] = v
-        put("키", key); put("값", value); put("메모", memo); put("수정시각", now)
-        put("수정자사번", editor_sabun); put("수정자이름", editor_name); put("활성", True)
-        ws.append_row(row, value_input_option="USER_ENTERED")
-    else:
-        ws.update_cell(row_idx, hmap["값"], value)
-        if "메모" in hmap: ws.update_cell(row_idx, hmap["메모"], memo)
-        if "수정시각" in hmap: ws.update_cell(row_idx, hmap["수정시각"], now)
-        if "수정자사번" in hmap: ws.update_cell(row_idx, hmap["수정자사번"], editor_sabun)
-        if "수정자이름" in hmap: ws.update_cell(row_idx, hmap["수정자이름"], editor_name)
-        if "활성" in hmap: ws.update_cell(row_idx, hmap["활성"], True)
-    st.cache_data.clear()
+        now = kst_now_str()
+        if row_idx == 0:
+            row = [""] * len(header)
+            def put(k, v):
+                c = hmap.get(k)
+                if c:
+                    row[c - 1] = v
+            put("키", key)
+            put("값", value)
+            put("메모", memo)
+            put("수정시각", now)
+            put("수정자사번", editor_sabun)
+            put("수정자이름", editor_name)
+            put("활성", True)
+            _gs_retry(lambda: ws.append_row(row, value_input_option="USER_ENTERED"))
+        else:
+            updates = []
+            for k, v in [
+                ("값", value),
+                ("메모", memo),
+                ("수정시각", now),
+                ("수정자사번", editor_sabun),
+                ("수정자이름", editor_name),
+                ("활성", True),
+            ]:
+                c = hmap.get(k)
+                if c:
+                    a1 = gspread.utils.rowcol_to_a1(row_idx, c)
+                    updates.append({"range": a1, "values": [[v]]})
+            if updates:
+                _gs_retry(lambda: ws.batch_update(updates))
+        st.cache_data.clear()
+    except Exception:
+        # 설정 저장 실패는 치명적이지 않음
+        pass
 
 # ── Status Line ───────────────────────────────────────────────────────────────
 def render_status_line():
@@ -944,13 +993,13 @@ def upsert_jobdesc(rec:dict, as_new_version:bool=False)->dict:
 def tab_job_desc(emp_df: pd.DataFrame):
     st.subheader("직무기술서")
 
-    # 로그인 사용자/권한
+    # ── 로그인 사용자/권한
     u = st.session_state["user"]
     me_sabun = str(u["사번"])
-    me_name = str(u["이름"])
+    me_name  = str(u["이름"])
+    allowed  = get_allowed_sabuns(emp_df, me_sabun, include_self=True)
 
-    # 대상 선택(관리자/매니저는 범위 내에서 선택, 직원은 본인)
-    allowed = get_allowed_sabuns(emp_df, me_sabun, include_self=True)
+    # ── 대상자 선택
     st.markdown("#### 대상/연도 선택")
     if is_admin(me_sabun) or is_manager(emp_df, me_sabun):
         df = emp_df.copy()
@@ -964,150 +1013,132 @@ def tab_job_desc(emp_df: pd.DataFrame):
             st.info("대상자를 선택하세요.")
             return
         target_sabun = sel.split(" - ", 1)[0]
-        target_name = _emp_name_by_sabun(emp_df, target_sabun)
+        target_name  = _emp_name_by_sabun(emp_df, target_sabun)
     else:
         target_sabun = me_sabun
-        target_name = me_name
+        target_name  = me_name
         st.info(f"대상자: {target_name} ({target_sabun})", icon="👤")
 
-    # 연도
+    # ── 연도/버전
     this_year = datetime.now(tz=tz_kst()).year
-    col_year = st.columns([1, 3])
-    with col_year[0]:
+    col = st.columns([1, 1, 2, 2])
+    with col[0]:
         year = st.number_input("연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="job_year")
+    with col[1]:
+        version = st.number_input("버전(없으면 자동)", min_value=0, max_value=999, value=0, step=1, key="job_ver")
+    with col[2]:
+        jobname = st.text_input("직무명", value="", key="job_jobname")
+    with col[3]:
+        memo = st.text_input("비고", value="", key="job_memo")
 
-    # 대상자 기본값(조직/직무)
-    tgt_row = emp_df.loc[emp_df["사번"].astype(str) == str(target_sabun)]
-    pref_dept1  = ("" if tgt_row.empty else str(tgt_row.iloc[0].get("부서1", "")))
-    pref_dept2  = ("" if tgt_row.empty else str(tgt_row.iloc[0].get("부서2", "")))
-    pref_group  = ("" if tgt_row.empty else str(tgt_row.iloc[0].get("직군", "")))
-    pref_series = ("" if tgt_row.empty else str(tgt_row.iloc[0].get("직종", "")))
-    pref_jobname = ("" if tgt_row.empty else str(tgt_row.iloc[0].get("직무", "")))
-
-    # 날짜 기본값(관리자 설정 → 없으면 오늘/1년)
+    # ── 설정 기본값(관리자 탭에서 지정) + 직원 프로필에서 자동 채움
     today = datetime.now(tz=tz_kst()).strftime("%Y-%m-%d")
     defval_create = get_setting("JD.제정일", today)
     defval_update = get_setting("JD.개정일", today)
     defval_review = get_setting("JD.검토주기", "1년")
 
-    st.markdown("#### 기본 정보")
+    row_emp = emp_df.loc[emp_df["사번"].astype(str) == str(target_sabun)]
+    pref_dept1  = str(row_emp.iloc[0].get("부서1", "")) if not row_emp.empty else ""
+    pref_dept2  = str(row_emp.iloc[0].get("부서2", "")) if not row_emp.empty else ""
+    pref_group  = str(row_emp.iloc[0].get("직군", ""))  if (not row_emp.empty and "직군" in row_emp.columns) else ""
+    pref_series = str(row_emp.iloc[0].get("직종", ""))  if (not row_emp.empty and "직종" in row_emp.columns) else ""
+    pref_job    = str(row_emp.iloc[0].get("직무", ""))  if (not row_emp.empty and "직무" in row_emp.columns) else ""
 
-    # 조직/직무 기본값(자동 채움 — 필요 시 수정 가능)
+    # 직무명 빈값이면 프로필의 '직무'를 기본값으로
+    if not jobname and pref_job:
+        st.session_state["job_jobname"] = pref_job
+        jobname = pref_job
+
+    # ── 조직/직무 기본값(자동 채움 — 필요 시 수정 가능)
     c2 = st.columns([1, 1, 1, 1])
     with c2[0]:
         dept1 = st.text_input("부서1", value=pref_dept1, key="job_dept1")
     with c2[1]:
         dept2 = st.text_input("부서2", value=pref_dept2, key="job_dept2")
     with c2[2]:
-        group = st.text_input("직군", value=pref_group, key="job_group")
+        group = st.text_input("직군",  value=pref_group,  key="job_group")
     with c2[3]:
-        series = st.text_input("직종", value=pref_series, key="job_series")
+        series = st.text_input("직종",  value=pref_series, key="job_series")
 
-    # 직무명 + 제정/검토
-    c3 = st.columns([2, 2, 1])
+    # ── 날짜/검토주기: 관리자 설정값을 기본값으로
+    c3 = st.columns([1, 1, 1])
     with c3[0]:
-        jobname = st.text_input("직무명", value=pref_jobname, key="job_jobname")
+        d_create = st.text_input("제정일", value=defval_create, key="job_d_create")
     with c3[1]:
-        d_create = st.text_input("제정일", value=st.session_state.get("job_d_create", defval_create), key="job_d_create")
+        d_update = st.text_input("개정일", value=defval_update, key="job_d_update")
     with c3[2]:
-        review = st.text_input("검토주기", value=st.session_state.get("job_review", defval_review), key="job_review")
+        review   = st.text_input("검토주기", value=defval_review, key="job_review")
 
-    # 개정/비고
-    c4 = st.columns([2, 2])
+    # ── 본문
+    job_summary = st.text_area("직무개요", "", height=80,  key="job_summary")
+    job_main    = st.text_area("주업무",   "", height=120, key="job_main")
+    job_other   = st.text_area("기타업무", "", height=80,  key="job_other")
+
+    # ── 교육/자격
+    c4 = st.columns([1, 1, 1, 1, 1, 1])
     with c4[0]:
-        d_update = st.text_input("개정일", value=st.session_state.get("job_d_update", defval_update), key="job_d_update")
+        edu_req    = st.text_input("필요학력", "", key="job_edu")
     with c4[1]:
-        memo = st.text_input("비고", value="", key="job_memo")
-
-    # 본문
-    st.markdown("#### 직무 내용")
-    job_summary = st.text_area("직무개요", "", height=80, key="job_summary")
-    job_main    = st.text_area("주업무", "", height=120, key="job_main")
-    job_other   = st.text_area("기타업무", "", height=80, key="job_other")
-
-    # 교육/자격 (직원공통필수교육: 크게)
-    st.markdown("#### 요건/교육")
-    c5 = st.columns([1, 1, 1])
-    with c5[0]:
-        edu_req   = st.text_input("필요학력", "", key="job_edu")
-    with c5[1]:
-        major_req = st.text_input("전공계열", "", key="job_major")
-    with c5[2]:
-        license_  = st.text_input("면허", "", key="job_license")
-
-    c6 = st.columns([1, 1, 1])
-    with c6[0]:
-        edu_common = st.text_area("직원공통필수교육", "", height=200, key="job_edu_common")
-    with c6[1]:
+        major_req  = st.text_input("전공계열", "", key="job_major")
+    with c4[2]:
+        edu_common = st.text_input("직원공통필수교육", "", key="job_edu_common")
+    with c4[3]:
         edu_cont   = st.text_input("보수교육", "", key="job_edu_cont")
-    with c6[2]:
+    with c4[4]:
+        edu_etc    = st.text_input("기타교육", "", key="job_edu_etc")
+    with c4[5]:
         edu_spec   = st.text_input("특성화교육", "", key="job_edu_spec")
 
-    c7 = st.columns([1, 1, 1])
-    with c7[0]:
-        edu_etc  = st.text_input("기타교육", "", key="job_edu_etc")
-    with c7[1]:
+    c5 = st.columns([1, 1, 2])
+    with c5[0]:
+        license_ = st.text_input("면허", "", key="job_license")
+    with c5[1]:
         career   = st.text_input("경력(자격요건)", "", key="job_career")
-    with c7[2]:
-        pass
+    with c5[2]:
+        pass     # memo는 위에서 입력
 
-    # 서명(선택)
-    st.markdown("#### 서명(선택)")
-    c8 = st.columns([1, 2])
-    with c8[0]:
+    # ── 서명
+    c6 = st.columns([1, 2, 1])
+    with c6[0]:
         sign_type = st.selectbox("서명방식", ["", "text", "image"], index=0, key="job_sign_type")
-    with c8[1]:
+    with c6[1]:
         sign_data = st.text_input("서명데이터", "", key="job_sign_data")
-
-    # 저장 버튼
-    st.markdown("---")
-    col_btn = st.columns([1, 3])
-    with col_btn[0]:
-        do_save = st.button("저장/업서트", type="primary", use_container_width=True, key="job_save_btn")
+    with c6[2]:
+        do_save   = st.button("저장/업서트", type="primary", use_container_width=True, key="job_save_btn")
 
     if do_save:
-        # 기존 버전 존재 시 → 최신 버전 업데이트, 없으면 자동 신버전
+        rec = {
+            "사번": str(target_sabun),
+            "연도": int(year),
+            "버전": int(version or 0),
+            # "소속":  ← 요청에 따라 사용 안함 (시트 헤더에 있으면 공란으로 저장됨)
+            "부서1": dept1,
+            "부서2": dept2,
+            "작성자사번": me_sabun,
+            "작성자이름": _emp_name_by_sabun(emp_df, me_sabun),
+            "직군": group,
+            "직종": series,
+            "직무명": jobname,
+            "제정일": d_create,
+            "개정일": d_update,
+            "검토주기": review,
+            "직무개요": job_summary,
+            "주업무": job_main,
+            "기타업무": job_other,
+            "필요학력": edu_req,
+            "전공계열": major_req,
+            "직원공통필수교육": edu_common,
+            "보수교육": edu_cont,
+            "기타교육": edu_etc,
+            "특성화교육": edu_spec,
+            "면허": license_,
+            "경력(자격요건)": career,
+            "비고": memo,
+            "서명방식": sign_type,
+            "서명데이터": sign_data,
+        }
         try:
-            df_exist = read_jobdesc_df()
-            latest_ver = 0
-            if not df_exist.empty:
-                sub = df_exist[(df_exist["사번"].astype(str) == str(target_sabun)) &
-                               (df_exist["연도"].astype(int) == int(year))]
-                if not sub.empty:
-                    latest_ver = int(sub["버전"].astype(int).max())
-
-            rec = {
-                "사번": str(target_sabun),
-                "연도": int(year),
-                "버전": int(latest_ver),  # 0이면 upsert에서 자동 신버전, >0이면 해당 버전 업데이트
-                # "소속": 생략(필요 시 추가)
-                "부서1": dept1,
-                "부서2": dept2,
-                "작성자사번": me_sabun,
-                "작성자이름": _emp_name_by_sabun(emp_df, me_sabun),
-                "직군": group,
-                "직종": series,
-                "직무명": jobname,
-                "제정일": d_create,
-                "개정일": d_update,
-                "검토주기": review,
-                "직무개요": job_summary,
-                "주업무": job_main,
-                "기타업무": job_other,
-                "필요학력": edu_req,
-                "전공계열": major_req,
-                "직원공통필수교육": edu_common,
-                "보수교육": edu_cont,
-                "기타교육": edu_etc,
-                "특성화교육": edu_spec,
-                "면허": license_,
-                "경력(자격요건)": career,
-                "비고": memo,
-                "서명방식": sign_type,
-                "서명데이터": sign_data,
-            }
-
-            rep = upsert_jobdesc(rec, as_new_version=False)
+            rep = upsert_jobdesc(rec, as_new_version=(version == 0))
             st.success(f"저장 완료 (버전 {rep['version']})", icon="✅")
         except Exception as e:
             st.exception(e)
@@ -1825,5 +1856,6 @@ def main():
 # ── 엔트리포인트 ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     main()
+
 
 
