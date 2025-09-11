@@ -614,29 +614,30 @@ def tab_eval_input(emp_df: pd.DataFrame):
     # ── 키 prefix (위젯/상태 충돌 방지)
     kbase = f"{int(year)}_{eval_type}_{evaluator_sabun}_{target_sabun}"
 
-    # ── 스타일(간격 축소 + 상단 드롭다운/버튼 정렬)
+    # ── 스타일: 간격 축소 + 상단 드롭다운/버튼 높이/정렬 일치
     st.markdown(
         """
         <style>
           .eval-desc{color:#4b5563;margin:.15rem 0 .35rem;}
           .eval-sep{border-bottom:1px solid rgba(49,51,63,.06);margin:.2rem 0 .35rem;}
+          /* H4 제목 아래 여백 축소 */
+          .stMarkdown h4{margin: 0 0 .25rem !important;}
 
-          /* 상단 일괄선택 UI: 버튼/드롭다운 높이와 정렬 맞춤 + 숫자 가운데 */
+          /* 상단 일괄 드롭다운/버튼을 같은 줄, 같은 높이로 */
           .bulk-top .stButton > button{
-            height:48px;
-            padding:0 18px;
+            height:48px; padding:0 18px;
           }
           .bulk-top .bulk-score [data-baseweb="select"] > div{
-            min-height:48px;
-            display:flex; align-items:center; padding:6px 12px;
+            min-height:48px; display:flex; align-items:center; padding:6px 12px;
           }
+          /* 선택 숫자 가운데 정렬 */
           .bulk-top .bulk-score [data-baseweb="select"] div[aria-live="polite"]{
             width:100%; display:flex; justify-content:center;
           }
           .bulk-top .bulk-score [data-baseweb="select"] span{
             font-size:20px; line-height:26px;
           }
-          /* 드롭다운 옵션도 크게 */
+          /* 드롭다운 메뉴 옵션 크게 */
           div[data-baseweb="menu"] li{
             font-size:18px; padding:10px 12px;
           }
@@ -645,32 +646,35 @@ def tab_eval_input(emp_df: pd.DataFrame):
         unsafe_allow_html=True,
     )
 
-    # ── 상단: 제목 + (큰) 일괄 점수 드롭다운 + 적용 버튼  ────────────────────
-    kbase = f"evalbulk_{year}_{evaluator_sabun}"   # 위젯 키(중복 방지)
-
+    # ── 상단: 제목 + (큰) 일괄 점수 드롭다운 + 적용 버튼 (같은 라인)
     st.markdown('<div class="bulk-top">', unsafe_allow_html=True)
-    c_head, c_sel, c_btn = st.columns([5, 1.2, 1], gap="small")
-    with c_head:
+
+    # 위젯 key(연도+평가자 기준)로 유니크 보장 → DuplicateWidgetID 방지
+    kbase = f"evalbulk_{year}_{evaluator_sabun}"
+
+    col_head, col_sel, col_btn, _ = st.columns([2.4, 1.2, 1.0, 5.4], gap="small")
+    with col_head:
         st.markdown("#### 점수 입력 (각 1~5)")
-    with c_sel:
+    with col_sel:
         st.markdown('<div class="bulk-score">', unsafe_allow_html=True)
         bulk_score = st.selectbox(
-            " ", [1, 2, 3, 4, 5],
+            " ",
+            options=[1, 2, 3, 4, 5],
             index=int(st.session_state.get(f"{kbase}_default", 3)) - 1,  # 기본 3점
             key=f"{kbase}_sel",
             label_visibility="collapsed",
         )
         st.markdown("</div>", unsafe_allow_html=True)
-    with c_btn:
+    with col_btn:
         if st.button("일괄 적용", use_container_width=True, key=f"{kbase}_apply"):
             v = int(bulk_score)
-            # 개별 항목 라디오와 내부 점수 상태를 모두 갱신
+            # 라디오 위젯 값과 내부 계산 값을 모두 세팅 → 같은 런에서 즉시 반영, 탭 이동 없음
             for iid in items["항목ID"].astype(str):
-                st.session_state[f"eval_{iid}"] = v          # 계산용 상태
-                st.session_state[f"eval_seg_{iid}"] = str(v) # 라디오 표시 상태
+                st.session_state[f"eval_{iid}"] = v          # 계산용
+                st.session_state[f"eval_seg_{iid}"] = str(v) # 라디오 표시용
             st.session_state[f"{kbase}_default"] = v
             st.toast(f"모든 항목에 {v}점 적용", icon="✅")
-            st.rerun()
+            # st.rerun() 불필요: 버튼 클릭 시 자체 rerun되며 아래 라디오가 새 상태를 사용
     st.markdown("</div>", unsafe_allow_html=True)
 
     # ── 항목 렌더링 (제목 | 라디오 1~5, 설명은 다음 줄)
@@ -1701,6 +1705,7 @@ def main():
 # ── 엔트리포인트 ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     main()
+
 
 
 
