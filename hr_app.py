@@ -128,21 +128,79 @@ def logout():
     st.cache_data.clear(); st.rerun()
 
 def show_login_form(emp_df: pd.DataFrame):
-    st.header("로그인")
-    sabun = st.text_input("사번", placeholder="예) 123456", key="login_sabun")
-    pin   = st.text_input("PIN (숫자)", type="password", key="login_pin")
-    if not st.button("로그인", use_container_width=True, type="primary", key="login_btn"): st.stop()
+    import streamlit.components.v1 as components
 
-    if not sabun or not pin: st.error("사번과 PIN을 입력하세요."); st.stop()
-    row = emp_df.loc[emp_df["사번"].astype(str)==str(sabun)]
-    if row.empty: st.error("사번을 찾을 수 없습니다."); st.stop()
+    st.header("로그인")
+
+    # 폼으로 묶으면 Enter 로 제출 가능
+    with st.form("login_form", clear_on_submit=False):
+        sabun = st.text_input("사번", placeholder="예) 123456", key="login_sabun")
+        pin   = st.text_input("PIN (숫자)", type="password", key="login_pin")
+        submitted = st.form_submit_button("로그인", use_container_width=True, type="primary")
+
+    # ⌨️ Enter UX 보강: 사번 → PIN, PIN → 로그인
+    #   (DOM 탐색으로 해당 위젯을 찾아 포커스/클릭)
+    components.html("""
+    <script>
+    (function(){
+      function qdoc(){ try{ return window.frameElement?.ownerDocument || window.parent.document; }catch(e){ return document; } }
+      function labelInput(labelText){
+        const doc = qdoc();
+        const label = [...doc.querySelectorAll('label')].find(l => l.textContent.trim() === labelText);
+        if (!label) return null;
+        // streamlit 구조상 label의 부모에 input이 하나 들어있음
+        return label.parentElement.querySelector('input');
+      }
+      function setup(){
+        const doc = qdoc();
+        const sabun = labelInput('사번');
+        const pin   = labelInput('PIN (숫자)');
+        const loginBtn = [...doc.querySelectorAll('button')].find(b => b.innerText.trim() === '로그인');
+
+        if (sabun && !sabun.value) sabun.focus();
+
+        doc.addEventListener('keydown', function(e){
+          const active = doc.activeElement;
+          if (e.key === 'Enter'){
+            if (active === sabun && pin){ e.preventDefault(); pin.focus(); }
+            else if (active === pin && loginBtn){ e.preventDefault(); loginBtn.click(); }
+          }
+        }, true);
+      }
+      setTimeout(setup, 120);
+    })();
+    </script>
+    """, height=0)
+
+    # 폼 제출 처리
+    if not submitted:
+        st.stop()
+
+    if not sabun or not pin:
+        st.error("사번과 PIN을 입력하세요.")
+        st.stop()
+
+    row = emp_df.loc[emp_df["사번"].astype(str) == str(sabun)]
+    if row.empty:
+        st.error("사번을 찾을 수 없습니다.")
+        st.stop()
 
     r = row.iloc[0]
-    if not _to_bool(r.get("재직여부", False)): st.error("재직 상태가 아닙니다."); st.stop()
-    if str(r.get("PIN_hash","")).strip().lower() != _sha256_hex(pin): st.error("PIN이 올바르지 않습니다."); st.stop()
+    if not _to_bool(r.get("재직여부", False)):
+        st.error("재직 상태가 아닙니다.")
+        st.stop()
 
-    _start_session({"사번":str(r.get("사번","")), "이름":str(r.get("이름","")), "관리자여부":False})
-    st.success(f"{str(r.get('이름',''))}님 환영합니다!"); st.rerun()
+    if str(r.get("PIN_hash","")).strip().lower() != _sha256_hex(pin):
+        st.error("PIN이 올바르지 않습니다.")
+        st.stop()
+
+    _start_session({
+        "사번": str(r.get("사번","")),
+        "이름": str(r.get("이름","")),
+        "관리자여부": False,  # 로그인 직후 main()에서 is_admin으로 재계산
+    })
+    st.success(f"{str(r.get('이름',''))}님 환영합니다!")
+    st.rerun()
 
 def require_login(emp_df: pd.DataFrame):
     if not _session_valid():
@@ -1307,3 +1365,4 @@ def main():
 # ── 엔트리포인트 ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     main()
+
