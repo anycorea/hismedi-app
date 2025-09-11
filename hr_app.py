@@ -568,18 +568,47 @@ def read_my_eval_rows(year: int, sabun: str) -> pd.DataFrame:
 def tab_eval_input(emp_df: pd.DataFrame):
     st.subheader("평가")
 
-    # ── 최소 스타일: 한 줄(항목 | 내용 | 점수) 그리드
+    # ── 최소/콤팩트 스타일: 한 줄(항목 | 내용 | 점수) 간격 줄이기
     st.markdown(
         """
         <style>
+          /* 각 항목 한 줄 */
           .eval-row{
-            display:grid; grid-template-columns:2fr 6fr 3fr; gap:12px;
-            align-items:center; padding:8px 0; border-bottom:1px solid rgba(49,51,63,.08);
+            display:grid;
+            grid-template-columns:2fr 6fr 3fr;
+            gap:8px;                      /* 좌우 간격 ↓ */
+            align-items:center;
+            padding:4px 0;                /* 위아래 패딩 ↓ (기존 8px) */
+            border-bottom:1px solid rgba(49,51,63,.06);
           }
-          .eval-row .name{font-weight:600;}
-          .eval-row .desc{color:#4b5563;}
-          .eval-row .score .stRadio [role="radiogroup"]{
-            display:flex; gap:8px; justify-content:center; align-items:center;
+          .eval-row .name{
+            font-weight:600;
+            margin:0;                     /* 제목 여백 제거 */
+          }
+          .eval-row .desc{
+            color:#4b5563;
+            margin:0;                     /* 설명 여백 제거 */
+            line-height:1.25;             /* 줄간격 ↓ */
+            font-size:.93rem;             /* 글자 약간 작게 */
+          }
+          /* 점수 라디오: 좌우 간격/여백 축소 + 중앙 정렬 */
+          .eval-row .stRadio{ margin:0; }
+          .eval-row [role="radiogroup"]{
+            display:flex;
+            gap:6px;                      /* 라디오 간격 ↓ */
+            justify-content:center;       /* 가운데 정렬 */
+            align-items:center;
+          }
+          .eval-row [role="radiogroup"] label{
+            margin:0;
+            padding:0 2px;                /* 라벨 좌우 여백 ↓ */
+          }
+
+          /* 일괄적용 슬라이더/버튼 라인도 살짝 촘촘하게 */
+          .stSlider{ margin-top:.25rem; margin-bottom:.25rem; }
+          .bulk-row .stButton>button{
+            height:48px;                  /* 버튼 살짝 낮춤 */
+            padding:0 14px;
           }
         </style>
         """,
@@ -1696,4 +1725,5 @@ def main():
 # ── 엔트리포인트 ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     main()
+
 
