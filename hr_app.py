@@ -5,84 +5,99 @@ HISMEDI - 인사/HR (Google Sheets 연동)
 
 # ── Imports ───────────────────────────────────────────────────────────────────
 import os
+import sys
 import time, re, hashlib, random, secrets as pysecrets
 from datetime import datetime, timedelta
 import pandas as pd
-import streamlit as st  # ← import만 (호출 X)
+import traceback
 
-# ── Page Config: 반드시 "첫 번째 Streamlit 명령"이어야 함 ────────────────────
-# ⚠ 전역에서 st.secrets, st.sidebar, st.write, @st.cache_* 등 "모든 st.*" 금지. (이 줄보다 위에서는!)
+# Streamlit은 import만! (호출 금지; set_page_config가 첫 호출이어야 함)
+import streamlit as st
+
+# ── Page Config: 반드시 "첫 번째 Streamlit 명령" ────────────────────────────
+# ⚠ 이 줄보다 위에서는 st.sidebar, st.write, st.secrets 접근, @st.cache_* 등
+#    어떤 형태든 "st.* 호출"이 있으면 안 됩니다.
 APP_TITLE = os.environ.get("APP_TITLE", "HISMEDI - HR App")
-st.set_page_config(page_title=APP_TITLE, layout="wide")
+st.set_page_config(page_title=APP_TITLE, layout="wide", layout="wide")
 
-# ── KST (secrets는 "호출 시점"에만 읽도록 lazy) ────────────────────────────
-def _get_app_tz() -> str:
+# ── Secrets 접근 헬퍼 (lazy) ────────────────────────────────────────────────
+def _s(path: str, default=None):
+    """
+    st.secrets를 안전하게 참조하는 헬퍼.
+    path 예: "app.TZ", "gspread.SHEET_KEY"
+    """
     try:
-        # set_page_config 이후이므로 이제 접근 OK
-        return (st.secrets.get("app", {}) or {}).get("TZ", "Asia/Seoul")
+        cur = st.secrets
+        for key in path.split("."):
+            cur = cur.get(key, {})
+        return cur if cur != {} else default
     except Exception:
-        return "Asia/Seoul"
+        return default
 
+# ── KST 타임존 (secrets는 "호출 시점"에만 읽도록) ───────────────────────────
 try:
     from zoneinfo import ZoneInfo
     def tz_kst():
-        return ZoneInfo(_get_app_tz())
+        tzname = _s("app.TZ", "Asia/Seoul")
+        return ZoneInfo(tzname)
 except Exception:
     import pytz
     def tz_kst():
-        return pytz.timezone(_get_app_tz())
+        tzname = _s("app.TZ", "Asia/Seoul")
+        return pytz.timezone(tzname)
 
-# ── gspread ──────────────────────────────────────────────────────────────────
+# ── gspread (지연 초기화) ───────────────────────────────────────────────────
+#  - 전역에서 authorize 호출하지 말고, 함수 호출 시점에만 생성
 try:
     import gspread
     from google.oauth2.service_account import Credentials
 except ModuleNotFoundError:
-    import subprocess, sys
+    import subprocess
     subprocess.check_call([sys.executable, "-m", "pip", "install",
                            "gspread==6.1.2", "google-auth==2.31.0"])
     import gspread
     from google.oauth2.service_account import Credentials
+
 from gspread.exceptions import WorksheetNotFound, APIError
 
-# ── Guard Bootstrap (place ABOVE any @guard_page usage) ──────────────────────
-try:
-    guard_page  # already defined?
-except NameError:
-    import streamlit as st
-    import traceback, time
+def get_gspread_client(scope_drive_write: bool = False):
+    """
+    gspread Client를 lazy하게 생성해 st.session_state.gc에 캐싱.
+    scope_drive_write=True면 Drive 쓰기 권한 포함.
+    """
+    if "gc" in st.session_state and st.session_state.get("gc_scope_write") == scope_drive_write:
+        return st.session_state.gc
 
-    def show_recovery_card(error):
-        with st.container(border=True):
-            st.error("앱 실행 중 오류가 발생했어요.")
-            st.caption(type(error).__name__ if isinstance(error, Exception) else "Error")
-            with st.expander("자세한 오류 로그"):
-                st.code(traceback.format_exc() if isinstance(error, Exception) else str(error))
-            st.button("🔄 다시 시도", on_click=st.rerun, use_container_width=True)
+    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+    scopes.append("https://www.googleapis.com/auth/drive" if scope_drive_write
+                  else "https://www.googleapis.com/auth/drive.readonly")
 
-    def guard_page(fn):
-        def _inner(*args, **kwargs):
-            try:
-                return fn(*args, **kwargs)
-            except Exception as e:
-                show_recovery_card(e)
-        return _inner
+    sa_info = _s("gcp_service_account", {})
+    if not sa_info:
+        raise RuntimeError("gcp_service_account secrets가 설정되지 않았습니다.")
 
-# ── Recovery / Retry Utils ────────────────────────────────────────────────────
-import traceback
+    creds = Credentials.from_service_account_info(sa_info, scopes=scopes)
+    gc = gspread.authorize(creds)
+    st.session_state.gc = gc
+    st.session_state.gc_scope_write = scope_drive_write
+    return gc
 
-# 로그인/인증 관련 세션키: 프로젝트에 맞게 수정
-AUTH_KEYS = {"auth_user", "auth_token", "auth_refresh", "auth_profile"}
+# ── Recovery / Retry Utils ───────────────────────────────────────────────────
+#  ※ 여기에는 st.* "정의"만 있고, 호출은 섹션/메인에서 이뤄집니다.
+AUTH_KEYS = {"auth_user", "auth_token", "auth_refresh", "auth_profile"}  # 필요시 수정
 
 def init_state():
     st.session_state.setdefault("app_ready", True)
 
 def soft_reset():
+    # 인증 관련 키는 보존하고, 나머지 상태만 초기화
     for k in list(st.session_state.keys()):
         if (k not in AUTH_KEYS) and (not k.startswith("auth_")):
             del st.session_state[k]
     st.rerun()
 
 def hard_reload():
+    # 캐시 꼬임 회피용 쿼리 파라미터 갱신 후 재실행
     try:
         st.experimental_set_query_params(_ts=str(int(time.time())))
     except Exception:
@@ -116,21 +131,35 @@ def guard_page(fn):
     return _inner
 
 def call_api_with_refresh(fn, *args, **kwargs):
+    """
+    API 호출 시 401/Unauthorized 감지 → (필요 시) 토큰 리프레시 후 1회 재시도.
+    실제 리프레시는 프로젝트 로직에 맞게 채우세요.
+    """
     try:
         return fn(*args, **kwargs)
     except Exception as e:
         msg = str(e).lower()
         if ("401" in msg) or ("unauthorized" in msg):
             try:
-                # TODO: 토큰 리프레시 로직 구현 (성공 시 아래 재시도)
+                # TODO: st.session_state["auth_refresh"] 등을 이용한 리프레시 로직
+                # refresh 성공 시 재시도
                 return fn(*args, **kwargs)
             except Exception:
                 pass
         raise
 
-# ── App Config ────────────────────────────────────────────────────────────────
-APP_TITLE = st.secrets.get("app", {}).get("TITLE", "HISMEDI - 인사/HR")
-st.set_page_config(page_title=APP_TITLE, layout="wide")
+# ── App Config (REPLACE THIS WHOLE BLOCK) ────────────────────────────────────
+import os
+
+# ❗ set_page_config는 반드시 "첫 번째 Streamlit 호출"이어야 하므로
+#    여기서는 st.secrets에 접근하지 않습니다.
+DEFAULT_TITLE = os.environ.get("APP_TITLE", "HISMEDI - 인사/HR")
+st.set_page_config(page_title=DEFAULT_TITLE, layout="wide")
+
+# 이제부터는 st.secrets 접근 OK (set_page_config 이후)
+# 비록 탭 제목은 이미 설정되었지만, 화면 상단에 제목을 표시하는 용도로는 사용 가능
+APP_TITLE = (st.secrets.get("app", {}) or {}).get("TITLE", DEFAULT_TITLE)
+
 st.markdown(
     """
     <style>
@@ -1724,3 +1753,4 @@ if __name__ == "__main__":
         main()
     except Exception as e:
         show_recovery_card(e)
+
