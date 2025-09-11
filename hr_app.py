@@ -497,30 +497,24 @@ def tab_eval_input(emp_df: pd.DataFrame):
         unsafe_allow_html=True,
     )
 
-    # ── 상단: 일괄 점수 스텝퍼 + 적용 ────────────────────────────────────────
+    # ── 상단: 일괄 점수 선택 + 일괄 적용 (라벨 숨김·콤팩트) ─────────────────────
     st.markdown("#### 점수 입력 (각 1~5)")
-    bulk = int(st.session_state.get("eval_bulk", 3))
-    bulk = min(5, max(1, bulk))
 
-    cTopL, cTopM1, cTopM2, cTopR = st.columns([1, 0.6, 0.6, 2.2])
-    with cTopL:
-        st.caption("모든 항목 일괄 점수")
-        # (빈 줄로 높이 맞춤)
-        st.write("")
-    with cTopM1:
-        if st.button("−", key="eval_bulk_minus"):
-            bulk = max(1, bulk - 1)
-    with cTopM2:
-        if st.button("+", key="eval_bulk_plus"):
-            bulk = min(5, bulk + 1)
-    with cTopR:
-        st.markdown(f"<span class='eval-badge'>{bulk}</span>", unsafe_allow_html=True)
-        st.write("")
-        if st.button("모든 항목에 적용", key="eval_bulk_apply", use_container_width=True):
+    col_bulk = st.columns([0.6, 1.2, 8])
+    with col_bulk[0]:
+        bulk = st.selectbox(
+            " ", [1, 2, 3, 4, 5],
+            index=int(st.session_state.get("eval_bulk", 3)) - 1,
+            key="eval_bulk_select",
+            label_visibility="collapsed",
+        )
+    with col_bulk[1]:
+        if st.button("일괄 적용", key="eval_bulk_apply", use_container_width=True):
             for iid in items["항목ID"].astype(str):
-                st.session_state[f"eval_{iid}"] = bulk
-            st.session_state["eval_bulk"] = bulk
+                st.session_state[f"eval_{iid}"] = int(bulk)
+            st.session_state["eval_bulk"] = int(bulk)
             st.rerun()
+    
     st.session_state["eval_bulk"] = bulk
 
     # ── 항목 렌더링: 1행(이름 | ⦿1 ⦿2 ⦿3 ⦿4 ⦿5) + 2행(설명) ───────────────
@@ -1496,6 +1490,7 @@ def main():
 # ── 엔트리포인트 ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     main()
+
 
 
 
