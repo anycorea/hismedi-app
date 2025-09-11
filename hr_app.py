@@ -235,21 +235,42 @@ def ensure_auth_sheet():
         return ws
 
 @st.cache_data(ttl=60, show_spinner=False)
-def read_auth_df()->pd.DataFrame:
-    ensure_auth_sheet(); ws=get_workbook().worksheet(AUTH_SHEET)
-    df=pd.DataFrame(ws.get_all_records(numericise_ignore=["all"]))
-    if df.empty: df=pd.DataFrame(columns=AUTH_HEADERS)
-    for c in ["사번","이름","역할","범위유형","부서1","부서2","대상사번","비고"]:
-        if c in df.columns: df[c]=df[c].astype(str)
-    if "활성" in df.columns: df["활성"]=df["활성"].map(_to_bool)
+def read_auth_df() -> pd.DataFrame:
+    """권한 시트를 읽는다. 오류 시 빈 DF를 반환(앱 중단 방지)."""
+    try:
+        ensure_auth_sheet()
+        ws = get_workbook().worksheet(AUTH_SHEET)
+        df = pd.DataFrame(ws.get_all_records(numericise_ignore=["all"]))
+    except Exception:
+        # API 오류/네트워크 문제 등은 조용히 빈 DF로 처리
+        return pd.DataFrame(columns=AUTH_HEADERS)
+
+    if df.empty:
+        return pd.DataFrame(columns=AUTH_HEADERS)
+
+    for c in ["사번", "이름", "역할", "범위유형", "부서1", "부서2", "대상사번", "비고"]:
+        if c in df.columns:
+            df[c] = df[c].astype(str)
+    if "활성" in df.columns:
+        df["활성"] = df["활성"].map(_to_bool)
     return df
 
-def is_admin(sabun:str)->bool:
-    s=str(sabun).strip()
-    if s in {a["사번"] for a in SEED_ADMINS}: return True
-    df=read_auth_df()
-    if df.empty: return False
-    q=df[(df["사번"].astype(str)==s)&(df["역할"].str.lower()=="admin")&(df["활성"]==True)]
+def is_admin(sabun: str) -> bool:
+    """시드 관리자 우선, 시트 조회 실패 시 False로 안전 처리."""
+    s = str(sabun).strip()
+    if s in {a["사번"] for a in SEED_ADMINS}:
+        return True
+    try:
+        df = read_auth_df()
+    except Exception:
+        return False
+    if df.empty:
+        return False
+    q = df[
+        (df["사번"].astype(str) == s)
+        & (df["역할"].str.lower() == "admin")
+        & (df["활성"] == True)
+    ]
     return not q.empty
 
 def _infer_implied_scopes(emp_df:pd.DataFrame,sabun:str)->list[dict]:
@@ -1662,8 +1683,15 @@ def main():
     require_login(emp_df_all)
 
     # 3) 로그인 직후: 관리자 플래그 최신화(시드/시트 기준)
-    st.session_state["user"]["관리자여부"] = is_admin(st.session_state["user"]["사번"])
-
+    try:
+        st.session_state["user"]["관리자여부"] = is_admin(st.session_state["user"]["사번"])
+    except Exception:
+        # 권한 시트 조회 실패 시, 시드만으로 판정하고 경고만 표시
+        st.session_state["user"]["관리자여부"] = (
+            st.session_state["user"]["사번"] in {a["사번"] for a in SEED_ADMINS}
+        )
+        st.warning("권한 시트 조회 오류로 관리자 여부를 시드 기준으로 판정했습니다.", icon="⚠️")
+    
     # 4) 데이터 뷰 분기
     # - 직원 탭: 전체 데이터(의사 포함)
     # - 그 외 탭(평가/직무기술서/직무능력/관리자): '의사' 숨김
@@ -1744,6 +1772,7 @@ def main():
 # ── 엔트리포인트 ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     main()
+
 
 
 
