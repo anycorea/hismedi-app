@@ -568,48 +568,37 @@ def read_my_eval_rows(year: int, sabun: str) -> pd.DataFrame:
 def tab_eval_input(emp_df: pd.DataFrame):
     st.subheader("평가")
 
-    # ── 최소/콤팩트 스타일: 한 줄(항목 | 내용 | 점수) 간격 줄이기
+    # ── 세로 간격만 압축(가로 gap은 기존값 유지)
     st.markdown(
         """
         <style>
-          /* 각 항목 한 줄 */
+          /* 한 항목 블록의 위/아래 여백 최소화 */
           .eval-row{
-            display:grid;
-            grid-template-columns:2fr 6fr 3fr;
-            gap:8px;                      /* 좌우 간격 ↓ */
-            align-items:center;
-            padding:4px 0;                /* 위아래 패딩 ↓ (기존 8px) */
-            border-bottom:1px solid rgba(49,51,63,.06);
+            padding: 2px 0 !important;           /* 세로 패딩 확 줄임 */
+            border-bottom: 1px solid rgba(49,51,63,.06);
           }
           .eval-row .name{
-            font-weight:600;
-            margin:0;                     /* 제목 여백 제거 */
+            margin: 0 !important;
+            line-height: 1.2 !important;         /* 제목 줄간격 ↓ */
           }
           .eval-row .desc{
-            color:#4b5563;
-            margin:0;                     /* 설명 여백 제거 */
-            line-height:1.25;             /* 줄간격 ↓ */
-            font-size:.93rem;             /* 글자 약간 작게 */
-          }
-          /* 점수 라디오: 좌우 간격/여백 축소 + 중앙 정렬 */
-          .eval-row .stRadio{ margin:0; }
-          .eval-row [role="radiogroup"]{
-            display:flex;
-            gap:6px;                      /* 라디오 간격 ↓ */
-            justify-content:center;       /* 가운데 정렬 */
-            align-items:center;
-          }
-          .eval-row [role="radiogroup"] label{
-            margin:0;
-            padding:0 2px;                /* 라벨 좌우 여백 ↓ */
+            margin: .05rem 0 .2rem !important;    /* 설명 위아래 여백 ↓ */
+            line-height: 1.2 !important;          /* 설명 줄간격 ↓ */
           }
 
-          /* 일괄적용 슬라이더/버튼 라인도 살짝 촘촘하게 */
-          .stSlider{ margin-top:.25rem; margin-bottom:.25rem; }
-          .bulk-row .stButton>button{
-            height:48px;                  /* 버튼 살짝 낮춤 */
-            padding:0 14px;
+          /* 라디오(점수) 위/아래 여백 최소화 — 가로 간격은 기존 그대로 */
+          .eval-row .stRadio{ margin: 0 !important; }
+          .eval-row [role="radiogroup"]{
+            margin: 0 !important;
+            align-items: center;
           }
+          .eval-row [role="radiogroup"] label{
+            margin: 0 !important;
+          }
+
+          /* 일괄적용 라인도 세로 여백만 살짝 줄이기 */
+          .bulk-row{ margin: .15rem 0 !important; }
+          .stSlider{ margin-top: .1rem !important; margin-bottom: .1rem !important; }
         </style>
         """,
         unsafe_allow_html=True,
@@ -1725,5 +1714,6 @@ def main():
 # ── 엔트리포인트 ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     main()
+
 
 
