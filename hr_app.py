@@ -433,8 +433,9 @@ EVAL_ITEMS_SHEET = "평가_항목"
 EVAL_ITEM_HEADERS = ["항목ID", "항목", "내용", "순서", "활성", "비고"]
 EVAL_RESP_SHEET_PREFIX = "평가_응답_"
 EVAL_BASE_HEADERS = [
-    "연도","평가유형","평가대상사번","평가대상이름","평가자사번","평가자이름",
-    "총점","상태","제출시각","서명_대상","서명시각_대상","서명_평가자","서명시각_평가자","잠금"
+    "연도", "평가유형", "평가대상사번", "평가대상이름",
+    "평가자사번", "평가자이름", "총점", "상태", "제출시각",
+    "서명_대상", "서명시각_대상", "서명_평가자", "서명시각_평가자", "잠금"
 ]
 EVAL_TYPES = ["자기", "1차", "2차"]
 
@@ -452,18 +453,16 @@ def ensure_eval_items_sheet():
         ws.update("1:1", [header + need])
 
 @st.cache_data(ttl=60, show_spinner=False)
-def read_eval_items_df(only_active: bool = True) -> pd.DataFrame:
+def read_eval_items_df(only_active=True) -> pd.DataFrame:
     ensure_eval_items_sheet()
     ws = get_workbook().worksheet(EVAL_ITEMS_SHEET)
     df = pd.DataFrame(ws.get_all_records(numericise_ignore=["all"]))
     if df.empty:
-        return pd.DataFrame(columns=EVAL_ITEM_HEADERS)
+        df = pd.DataFrame(columns=EVAL_ITEM_HEADERS)
     if "순서" in df.columns:
         def _i(x):
-            try:
-                return int(float(str(x).strip()))
-            except Exception:
-                return 0
+            try: return int(float(str(x).strip()))
+            except: return 0
         df["순서"] = df["순서"].apply(_i)
     if "활성" in df.columns:
         df["활성"] = df["활성"].map(_to_bool)
@@ -517,17 +516,17 @@ def upsert_eval_response(
     header = ws.row_values(1)
     hmap = {n: i + 1 for i, n in enumerate(header)}
 
-    # 점수 리스트(1~5 clamp)
     scores_list = [min(5, max(1, int(scores.get(iid, 3)))) for iid in item_ids]
     total_100 = round(sum(scores_list) * (100.0 / max(1, len(item_ids) * 5)), 1)
-
     t_name = _emp_name_by_sabun(emp_df, target_sabun)
     e_name = _emp_name_by_sabun(emp_df, evaluator_sabun)
     now = kst_now_str()
 
     values = ws.get_all_values()
-    cY, cT = hmap.get("연도"), hmap.get("평가유형")
-    cTS, cES = hmap.get("평가대상사번"), hmap.get("평가자사번")
+    cY = hmap.get("연도")
+    cT = hmap.get("평가유형")
+    cTS = hmap.get("평가대상사번")
+    cES = hmap.get("평가자사번")
     row_idx = 0
     for i in range(2, len(values) + 1):
         r = values[i - 1]
@@ -540,15 +539,14 @@ def upsert_eval_response(
             ):
                 row_idx = i
                 break
-        except Exception:
+        except:
             pass
 
     if row_idx == 0:
         buf = [""] * len(header)
         def put(k, v):
             c = hmap.get(k)
-            if c:
-                buf[c - 1] = v
+            if c: buf[c - 1] = v
         put("연도", int(year)); put("평가유형", eval_type)
         put("평가대상사번", str(target_sabun)); put("평가대상이름", t_name)
         put("평가자사번", str(evaluator_sabun)); put("평가자이름", e_name)
@@ -560,7 +558,6 @@ def upsert_eval_response(
         st.cache_data.clear()
         return {"action": "insert", "row": None, "total": total_100}
 
-    # update
     ws.update_cell(row_idx, hmap["총점"], total_100)
     ws.update_cell(row_idx, hmap["상태"], status)
     ws.update_cell(row_idx, hmap["제출시각"], now)
@@ -585,21 +582,65 @@ def read_my_eval_rows(year: int, sabun: str) -> pd.DataFrame:
     df = df[df["평가자사번"].astype(str) == str(sabun)]
     return df.sort_values(["평가유형", "평가대상사번", "제출시각"], ascending=[True, True, False])
 
+def read_eval_saved_scores(year: int, eval_type: str, target_sabun: str, evaluator_sabun: str) -> tuple[dict[str, int], dict]:
+    """해당 연/유형/대상/평가자에 저장된 점수들을 {항목ID: 점수}로 반환. meta에는 상태/총점/잠금 등."""
+    name = _eval_sheet_name(year)
+    try:
+        ws = get_workbook().worksheet(name)
+    except Exception:
+        return {}, {}
+    header = ws.row_values(1)
+    if not header:
+        return {}, {}
+    hmap = {n: i + 1 for i, n in enumerate(header)}
+    values = ws.get_all_values()
+    cY = hmap.get("연도"); cT = hmap.get("평가유형"); cTS = hmap.get("평가대상사번"); cES = hmap.get("평가자사번")
+    found = None
+    for i in range(2, len(values) + 1):
+        r = values[i - 1]
+        try:
+            if (
+                str(r[cY - 1]).strip() == str(year)
+                and str(r[cT - 1]).strip() == str(eval_type)
+                and str(r[cTS - 1]).strip() == str(target_sabun)
+                and str(r[cES - 1]).strip() == str(evaluator_sabun)
+            ):
+                found = r
+                break
+        except:
+            pass
+    if not found:
+        return {}, {}
+
+    scores = {}
+    for col_name in header:
+        if col_name.startswith("점수_"):
+            iid = col_name[3:]
+            try:
+                cell = found[hmap[col_name] - 1]
+                scores[iid] = int(float(cell)) if str(cell).strip() != "" else None
+            except:
+                scores[iid] = None
+    meta = {}
+    for k in ["상태", "총점", "잠금", "제출시각"]:
+        if k in hmap:
+            meta[k] = found[hmap[k] - 1]
+    return scores, meta
+
 def tab_eval_input(emp_df: pd.DataFrame):
     st.subheader("평가")
 
-    # ── 세로 간격만 압축(가로 간격은 유지)
+    # ── 세로 간격만 압축(가로 간격 변화 X)
     st.markdown(
         """
         <style>
-          .eval-row{ padding: 2px 0 !important; border-bottom:1px solid rgba(49,51,63,.06); }
-          .eval-row .name{ margin:0 !important; line-height:1.2 !important; }
-          .eval-row .desc{ margin:.05rem 0 .2rem !important; line-height:1.2 !important; }
-          .eval-row .stRadio{ margin:0 !important; }
-          .eval-row [role="radiogroup"]{ margin:0 !important; align-items:center; }
-          .eval-row [role="radiogroup"] label{ margin:0 !important; }
-          .bulk-row{ margin:.15rem 0 !important; }
-          .stSlider{ margin-top:.1rem !important; margin-bottom:.1rem !important; }
+          .eval-row{padding:2px 0 !important;border-bottom:1px solid rgba(49,51,63,.06)}
+          .eval-row .name{margin:0 !important;line-height:1.2 !important}
+          .eval-row .desc{margin:.05rem 0 .2rem !important;line-height:1.2 !important}
+          .eval-row .stRadio{margin:0 !important}
+          .eval-row [role="radiogroup"]{margin:0 !important;align-items:center}
+          .eval-row [role="radiogroup"] label{margin:0 !important}
+          .stSlider{margin-top:.1rem !important;margin-bottom:.1rem !important}
         </style>
         """,
         unsafe_allow_html=True,
@@ -618,58 +659,15 @@ def tab_eval_input(emp_df: pd.DataFrame):
         st.warning("활성화된 평가 항목이 없습니다.", icon="⚠️")
         return
 
-    # ── 로그인/권한
+    # ── 권한/대상 선택
     u = st.session_state["user"]
     me_sabun = str(u["사번"])
     me_name = str(u["이름"])
     am_admin = is_admin(me_sabun)
-    am_manager = is_manager(emp_df, me_sabun)
     allowed = get_allowed_sabuns(emp_df, me_sabun, include_self=True)
 
-    # ── 자기평가 제출 여부 확인 → 기본 잠금
-    #     (관리자/매니저는 예외 없이 평가 화면을 사용)
-    self_lock_state_key = f"self_edit_mode_{year}_{me_sabun}"
-    my_rows_all = read_my_eval_rows(int(year), me_sabun)
-    already_submitted_self = False
-    last_self_row = None
-    if not am_admin and not am_manager:
-        try:
-            sub = my_rows_all[
-                (my_rows_all["평가유형"] == "자기") &
-                (my_rows_all["평가대상사번"].astype(str) == me_sabun)
-            ]
-            if not sub.empty and not st.session_state.get(self_lock_state_key, False):
-                already_submitted_self = True
-                last_self_row = sub.sort_values("제출시각").iloc[-1]
-        except Exception:
-            pass
-
-    # ── 잠금 화면(입력 폼 숨김, 현황만 표시)
-    if already_submitted_self:
-        st.info(
-            f"자기평가가 이미 제출되었습니다. "
-            f"(총점 **{last_self_row.get('총점','-')}점**, 제출시각 **{last_self_row.get('제출시각','-')}**)",
-            icon="✅",
-        )
-        c = st.columns([1, 3])
-        with c[0]:
-            if st.button("수정 모드로 전환", use_container_width=True, key=f"btn_self_edit_{year}"):
-                st.session_state[self_lock_state_key] = True
-                st.rerun()
-
-        st.markdown("#### 내 제출 현황")
-        if my_rows_all.empty:
-            st.caption("제출된 평가가 없습니다.")
-        else:
-            st.dataframe(
-                my_rows_all[["평가유형", "평가대상사번", "평가대상이름", "총점", "상태", "제출시각"]],
-                use_container_width=True, height=260
-            )
-        return
-
-    # ── 대상/유형 선택
     c_tgt, c_type, _ = st.columns([2, 1.6, 6.4])
-    if am_admin or am_manager:
+    if am_admin or is_manager(emp_df, me_sabun):
         df = emp_df.copy()
         df = df[df["사번"].astype(str).isin(allowed)]
         if "재직여부" in df.columns:
@@ -690,31 +688,50 @@ def tab_eval_input(emp_df: pd.DataFrame):
                 st.session_state[type_key] = "1차"
             eval_type = st.radio("평가유형", EVAL_TYPES, horizontal=True, key=type_key)
     else:
-        # 일반 직원: 자신의 자기평가만 작성/수정
         target_sabun = me_sabun
         target_name = me_name
         with c_tgt:
-            st.text_input("평가 대상자", f"{target_name} ({target_sabun})",
-                          disabled=True, key="eval_target_me")
+            st.text_input("평가 대상자", f"{target_name} ({target_sabun})", disabled=True, key="eval_target_me")
         with c_type:
             eval_type = "자기"
             st.text_input("평가유형", "자기", disabled=True, key="eval_type_me")
 
-        # (수정 모드 ON일 때만 종료 버튼 제공)
-        if st.session_state.get(self_lock_state_key, False):
-            if st.button("수정 모드 종료", key=f"btn_self_edit_exit_{year}"):
-                st.session_state[self_lock_state_key] = False
-                st.rerun()
-
     evaluator_sabun = me_sabun
     evaluator_name = me_name
+
+    # ── 저장된 점수(있으면) 읽기 & 자기평가 제출 잠금여부 판단
+    saved_scores, saved_meta = read_eval_saved_scores(int(year), eval_type, target_sabun, evaluator_sabun)
+    is_self_case = (eval_type == "자기" and target_sabun == evaluator_sabun)
+    already_submitted = bool(saved_meta) and str(saved_meta.get("상태", "")).strip() in ("제출", "완료")
+    locked_flag = str(saved_meta.get("잠금", "")).strip().lower() in ("true", "1", "y", "yes")
+
+    kbase = f"evalbulk_{year}_{eval_type}_{evaluator_sabun}_{target_sabun}"
+    edit_flag_key = f"__edit_on_{kbase}"
+
+    if is_self_case and (already_submitted or locked_flag) and not st.session_state.get(edit_flag_key, False):
+        st.info("이미 제출된 자기평가입니다. 아래 ‘수정 모드로 전환’ 버튼을 눌러야 편집할 수 있습니다.", icon="ℹ️")
+        if st.button("✏️ 수정 모드로 전환", key=f"{kbase}_edit_on", use_container_width=True):
+            st.session_state[edit_flag_key] = True
+            st.experimental_rerun()
+        st.markdown("#### 내 제출 현황")
+        try:
+            my = read_my_eval_rows(int(year), evaluator_sabun)
+            if my.empty:
+                st.caption("제출된 평가가 없습니다.")
+            else:
+                st.dataframe(
+                    my[["평가유형", "평가대상사번", "평가대상이름", "총점", "상태", "제출시각"]],
+                    use_container_width=True, height=260
+                )
+        except Exception:
+            st.caption("제출 현황을 불러오지 못했습니다.")
+        return
 
     # ── 상단 제목 + (슬라이더 + 일괄적용 버튼)
     c_head, c_slider, c_btn = st.columns([5, 2, 1])
     with c_head:
         st.markdown("#### 점수 입력 (각 1~5)")
 
-    kbase = f"evalbulk_{year}_{evaluator_sabun}_{target_sabun}"
     slider_key = f"{kbase}_slider"
     if slider_key not in st.session_state:
         st.session_state[slider_key] = 3
@@ -722,44 +739,47 @@ def tab_eval_input(emp_df: pd.DataFrame):
         bulk_score = st.slider("일괄 점수", min_value=1, max_value=5, step=1, key=slider_key)
     with c_btn:
         if st.button("일괄 적용", use_container_width=True, key=f"{kbase}_apply"):
-            st.session_state[f"__apply_bulk_{kbase}"] = int(bulk_score)
+            for _iid in read_eval_items_df(True)["항목ID"].astype(str):
+                st.session_state[f"eval_seg_{_iid}_{kbase}"] = str(int(bulk_score))
             st.toast(f"모든 항목에 {bulk_score}점 적용", icon="✅")
 
-    # ── 일괄 적용 플래그 처리(라디오 생성 전에 값 세팅)
-    apply_key = f"__apply_bulk_{kbase}"
-    if st.session_state.get(apply_key) is not None:
-        _v = int(st.session_state[apply_key])
+    # ── (중요) 라디오 생성 전, 최초 진입 시 저장값을 세션에 주입
+    preloaded_key = f"__preloaded_{kbase}"
+    if not st.session_state.get(preloaded_key, False):
         for _iid in items["항목ID"].astype(str):
-            st.session_state[f"eval_seg_{_iid}_{kbase}"] = str(_v)
-        del st.session_state[apply_key]
+            if _iid in saved_scores and saved_scores[_iid] is not None:
+                st.session_state[f"eval_seg_{_iid}_{kbase}"] = str(min(5, max(1, int(saved_scores[_iid]))))
+            else:
+                # 저장 없고 세션에 없으면 기본 3
+                if f"eval_seg_{_iid}_{kbase}" not in st.session_state:
+                    st.session_state[f"eval_seg_{_iid}_{kbase}"] = "3"
+        st.session_state[preloaded_key] = True
 
-    # ── 항목 렌더링 (이름 | 내용 | 점수)
+    # ── 항목 렌더링 (이름 | 설명 | 점수) — 라디오는 ‘index’ 주지 않고 key만 사용(중복 경고 방지)
     items_sorted = items.sort_values(["순서", "항목"]).reset_index(drop=True)
-    scores: dict[str, int] = {}
+    scores = {}
 
     for r in items_sorted.itertuples(index=False):
-        iid = str(getattr(r, "항목ID"))
+        iid  = str(getattr(r, "항목ID"))
         name = getattr(r, "항목") or ""
         desc = getattr(r, "내용") or ""
 
         rkey = f"eval_seg_{iid}_{kbase}"
-        if rkey not in st.session_state:
-            st.session_state[rkey] = "3"
 
         st.markdown('<div class="eval-row">', unsafe_allow_html=True)
         c1, c2, c3 = st.columns([2, 6, 3])
         with c1:
             st.markdown(f'<div class="name">{name}</div>', unsafe_allow_html=True)
         with c2:
-            st.markdown(f'<div class="desc">{desc.replace(chr(10), "<br/>")}</div>', unsafe_allow_html=True)
+            if str(desc).strip():
+                st.markdown(f'<div class="desc">{str(desc).replace(chr(10), "<br/>")}</div>', unsafe_allow_html=True)
         with c3:
-            pick = st.radio(" ", ["1", "2", "3", "4", "5"],
-                            horizontal=True, key=rkey, label_visibility="collapsed")
+            st.radio(" ", ["1", "2", "3", "4", "5"], horizontal=True, key=rkey, label_visibility="collapsed")
         st.markdown('</div>', unsafe_allow_html=True)
 
         scores[iid] = int(st.session_state[rkey])
 
-    # ── 합계/저장 영역
+    # ── 합계/저장
     total_100 = round(sum(scores.values()) * (100.0 / max(1, len(items_sorted) * 5)), 1)
     st.markdown("---")
     cM1, cM2 = st.columns([1, 3])
@@ -770,7 +790,7 @@ def tab_eval_input(emp_df: pd.DataFrame):
 
     col_submit = st.columns([1, 4])
     with col_submit[0]:
-        do_save = st.button("제출/저장", type="primary", use_container_width=True, key=f"eval_save_{kbase}")
+        do_save = st.button("제출/저장", type="primary", use_container_width=True, key=f"{kbase}_save")
 
     if do_save:
         try:
@@ -779,17 +799,14 @@ def tab_eval_input(emp_df: pd.DataFrame):
                 str(target_sabun), str(evaluator_sabun),
                 scores, "제출"
             )
-            st.success(("제출 완료" if rep["action"] == "insert" else "업데이트 완료")
-                       + f" (총점 {rep['total']}점)", icon="✅")
+            st.success(
+                ("제출 완료" if rep["action"] == "insert" else "업데이트 완료") + f" (총점 {rep['total']}점)",
+                icon="✅"
+            )
             st.toast("평가 저장됨", icon="✅")
-
-            # 자기평가를 저장한 일반 직원은 자동으로 수정모드를 종료(다음 진입 시 잠금)
-            if not am_admin and not am_manager and eval_type == "자기" and target_sabun == me_sabun:
-                st.session_state[self_lock_state_key] = False
         except Exception as e:
             st.exception(e)
 
-    # ── 내 제출 현황
     st.markdown("#### 내 제출 현황")
     try:
         my = read_my_eval_rows(int(year), evaluator_sabun)
@@ -1772,11 +1789,3 @@ def main():
 # ── 엔트리포인트 ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
-
-
