@@ -660,23 +660,27 @@ def tab_eval_input(emp_df: pd.DataFrame):
 
     # 같은 줄에 드롭다운(왼쪽) + 버튼(오른쪽), 높이/정렬 일치
     st.markdown('<div class="bulk-row">', unsafe_allow_html=True)
-    c_sel, c_btn, _ = st.columns([2, 1, 6])
+    c_sel, c_btn, _ = st.columns([2, 1, 6], gap="small")
     with c_sel:
         st.markdown('<div class="bulk-score">', unsafe_allow_html=True)
         bulk_score = st.selectbox(
             " ",
             options=[1, 2, 3, 4, 5],
-            index=2,  # 기본 3점
+            index=int(st.session_state.get(f"{kbase}_default", 3)) - 1,  # 기본 3점
             key=f"{kbase}_sel",
             label_visibility="collapsed",
         )
-        st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
     with c_btn:
         if st.button("일괄 적용", use_container_width=True, key=f"{kbase}_apply"):
+            v = int(bulk_score)
             for iid in items["항목ID"].astype(str):
-                st.session_state[f"eval_{iid}"] = int(bulk_score)  # 개별 항목 상태키와 동일하게
-            st.toast(f"모든 항목에 {bulk_score}점 적용", icon="✅")
-    st.markdown('</div>', unsafe_allow_html=True)
+                st.session_state[f"eval_{iid}"] = v          # 내부 점수 상태
+                st.session_state[f"eval_seg_{iid}"] = str(v) # 라디오 위젯 표시값
+            st.session_state[f"{kbase}_default"] = v
+            st.toast(f"모든 항목에 {v}점 적용", icon="✅")
+            st.rerun()
+    st.markdown("</div>", unsafe_allow_html=True)
 
     # ── 항목 렌더링 (제목 | 라디오 1~5, 설명은 다음 줄)
     items_sorted = items.sort_values(["순서", "항목"]).reset_index(drop=True)
@@ -1706,6 +1710,7 @@ def main():
 # ── 엔트리포인트 ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     main()
+
 
 
 
