@@ -8,15 +8,27 @@ import time, re, hashlib, random, secrets as pysecrets
 from datetime import datetime, timedelta
 import pandas as pd, streamlit as st
 
-# KST
+# 👇👇 반드시 페이지에서 가장 첫 번째 Streamlit 명령이어야 함
+st.set_page_config(page_title="HISMEDI - HR App", layout="wide")
+
+# ── KST (secrets는 함수 호출 때 읽도록 변경) ───────────────────────────────
+def _get_app_tz() -> str:
+    try:
+        return (st.secrets.get("app", {}) or {}).get("TZ", "Asia/Seoul")
+    except Exception:
+        # secrets 미설정 시 기본값
+        return "Asia/Seoul"
+
 try:
     from zoneinfo import ZoneInfo
-    def tz_kst(): return ZoneInfo(st.secrets.get("app", {}).get("TZ", "Asia/Seoul"))
+    def tz_kst():
+        return ZoneInfo(_get_app_tz())
 except Exception:
     import pytz
-    def tz_kst(): return pytz.timezone(st.secrets.get("app", {}).get("TZ", "Asia/Seoul"))
+    def tz_kst():
+        return pytz.timezone(_get_app_tz())
 
-# gspread
+# ── gspread ──────────────────────────────────────────────────────────────────
 try:
     import gspread
     from google.oauth2.service_account import Credentials
@@ -26,9 +38,6 @@ except ModuleNotFoundError:
     import gspread
     from google.oauth2.service_account import Credentials
 from gspread.exceptions import WorksheetNotFound, APIError
-
-# ── Page Config (FIRST Streamlit command) ────────────────────────────────────
-st.set_page_config(page_title="HISMEDI - HR App", layout="wide")
 
 # ── Guard Bootstrap (place ABOVE any @guard_page usage) ──────────────────────
 try:
@@ -1700,3 +1709,4 @@ if __name__ == "__main__":
         main()
     except Exception as e:
         show_recovery_card(e)
+
