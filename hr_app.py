@@ -597,15 +597,58 @@ def tab_eval_input(emp_df: pd.DataFrame):
         st.warning("활성화된 평가 항목이 없습니다.", icon="⚠️")
         return
 
-    # ── 권한/대상 선택
+    # ── 로그인/권한
     u = st.session_state["user"]
     me_sabun = str(u["사번"])
     me_name = str(u["이름"])
     am_admin = is_admin(me_sabun)
+    am_manager = is_manager(emp_df, me_sabun)
     allowed = get_allowed_sabuns(emp_df, me_sabun, include_self=True)
 
+    # ── 자기평가 제출 여부 확인 → 기본 잠금
+    #     (관리자/매니저는 예외 없이 평가 화면을 사용)
+    self_lock_state_key = f"self_edit_mode_{year}_{me_sabun}"
+    my_rows_all = read_my_eval_rows(int(year), me_sabun)
+    already_submitted_self = False
+    last_self_row = None
+    if not am_admin and not am_manager:
+        try:
+            sub = my_rows_all[
+                (my_rows_all["평가유형"] == "자기") &
+                (my_rows_all["평가대상사번"].astype(str) == me_sabun)
+            ]
+            if not sub.empty and not st.session_state.get(self_lock_state_key, False):
+                already_submitted_self = True
+                last_self_row = sub.sort_values("제출시각").iloc[-1]
+        except Exception:
+            pass
+
+    # ── 잠금 화면(입력 폼 숨김, 현황만 표시)
+    if already_submitted_self:
+        st.info(
+            f"자기평가가 이미 제출되었습니다. "
+            f"(총점 **{last_self_row.get('총점','-')}점**, 제출시각 **{last_self_row.get('제출시각','-')}**)",
+            icon="✅",
+        )
+        c = st.columns([1, 3])
+        with c[0]:
+            if st.button("수정 모드로 전환", use_container_width=True, key=f"btn_self_edit_{year}"):
+                st.session_state[self_lock_state_key] = True
+                st.rerun()
+
+        st.markdown("#### 내 제출 현황")
+        if my_rows_all.empty:
+            st.caption("제출된 평가가 없습니다.")
+        else:
+            st.dataframe(
+                my_rows_all[["평가유형", "평가대상사번", "평가대상이름", "총점", "상태", "제출시각"]],
+                use_container_width=True, height=260
+            )
+        return
+
+    # ── 대상/유형 선택
     c_tgt, c_type, _ = st.columns([2, 1.6, 6.4])
-    if am_admin or is_manager(emp_df, me_sabun):
+    if am_admin or am_manager:
         df = emp_df.copy()
         df = df[df["사번"].astype(str).isin(allowed)]
         if "재직여부" in df.columns:
@@ -626,6 +669,7 @@ def tab_eval_input(emp_df: pd.DataFrame):
                 st.session_state[type_key] = "1차"
             eval_type = st.radio("평가유형", EVAL_TYPES, horizontal=True, key=type_key)
     else:
+        # 일반 직원: 자신의 자기평가만 작성/수정
         target_sabun = me_sabun
         target_name = me_name
         with c_tgt:
@@ -634,6 +678,12 @@ def tab_eval_input(emp_df: pd.DataFrame):
         with c_type:
             eval_type = "자기"
             st.text_input("평가유형", "자기", disabled=True, key="eval_type_me")
+
+        # (수정 모드 ON일 때만 종료 버튼 제공)
+        if st.session_state.get(self_lock_state_key, False):
+            if st.button("수정 모드 종료", key=f"btn_self_edit_exit_{year}"):
+                st.session_state[self_lock_state_key] = False
+                st.rerun()
 
     evaluator_sabun = me_sabun
     evaluator_name = me_name
@@ -651,7 +701,6 @@ def tab_eval_input(emp_df: pd.DataFrame):
         bulk_score = st.slider("일괄 점수", min_value=1, max_value=5, step=1, key=slider_key)
     with c_btn:
         if st.button("일괄 적용", use_container_width=True, key=f"{kbase}_apply"):
-            # 다음 렌더에서 라디오 기본값으로 바로 반영(탭 유지)
             st.session_state[f"__apply_bulk_{kbase}"] = int(bulk_score)
             st.toast(f"모든 항목에 {bulk_score}점 적용", icon="✅")
 
@@ -712,9 +761,14 @@ def tab_eval_input(emp_df: pd.DataFrame):
             st.success(("제출 완료" if rep["action"] == "insert" else "업데이트 완료")
                        + f" (총점 {rep['total']}점)", icon="✅")
             st.toast("평가 저장됨", icon="✅")
+
+            # 자기평가를 저장한 일반 직원은 자동으로 수정모드를 종료(다음 진입 시 잠금)
+            if not am_admin and not am_manager and eval_type == "자기" and target_sabun == me_sabun:
+                st.session_state[self_lock_state_key] = False
         except Exception as e:
             st.exception(e)
 
+    # ── 내 제출 현황
     st.markdown("#### 내 제출 현황")
     try:
         my = read_my_eval_rows(int(year), evaluator_sabun)
@@ -1690,6 +1744,7 @@ def main():
 # ── 엔트리포인트 ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     main()
+
 
 
 
