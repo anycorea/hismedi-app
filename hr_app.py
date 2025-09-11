@@ -27,6 +27,29 @@ except ModuleNotFoundError:
     from google.oauth2.service_account import Credentials
 from gspread.exceptions import WorksheetNotFound, APIError
 
+# ── Guard Bootstrap (place ABOVE any @guard_page usage) ──────────────────────
+try:
+    guard_page  # already defined?
+except NameError:
+    import streamlit as st
+    import traceback, time
+
+    def show_recovery_card(error):
+        with st.container(border=True):
+            st.error("앱 실행 중 오류가 발생했어요.")
+            st.caption(type(error).__name__ if isinstance(error, Exception) else "Error")
+            with st.expander("자세한 오류 로그"):
+                st.code(traceback.format_exc() if isinstance(error, Exception) else str(error))
+            st.button("🔄 다시 시도", on_click=st.rerun, use_container_width=True)
+
+    def guard_page(fn):
+        def _inner(*args, **kwargs):
+            try:
+                return fn(*args, **kwargs)
+            except Exception as e:
+                show_recovery_card(e)
+        return _inner
+
 # ── Recovery / Retry Utils (ADD) ──────────────────────────────────────────────
 import traceback
 
@@ -1675,3 +1698,4 @@ if __name__ == "__main__":
         main()
     except Exception as e:
         show_recovery_card(e)
+
