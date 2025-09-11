@@ -155,17 +155,10 @@ def call_api_with_refresh(fn, *args, **kwargs):
                 pass
         raise
 
-# ── App Config + Branding (REPLACE) ──────────────────────────────────────────
-import streamlit as st
+# ── App Branding (NO set_page_config here) ───────────────────────────────────
+# 탭 제목은 맨 위에서 이미 설정되어 있어야 합니다.
+DISPLAY_TITLE = (st.secrets.get("app", {}) or {}).get("TITLE", "HISMEDI - 인사/HR")
 
-# 1) 브라우저 탭 제목을 'HISMEDI - 인사/HR'로 고정
-APP_TITLE = "HISMEDI - 인사/HR"
-st.set_page_config(page_title=APP_TITLE, layout="wide", page_icon="🗂️")
-
-# 2) (선택) secrets에 사용자 정의 제목이 있으면 화면 표시는 그걸로 덮어쓰기
-DISPLAY_TITLE = (st.secrets.get("app", {}) or {}).get("TITLE", APP_TITLE)
-
-# 3) 상단 스타일 + 화면 내 큰 타이틀(본문 첫 줄에 표시)
 st.markdown(
     f"""
     <style>
@@ -1858,3 +1851,4 @@ if __name__ == "__main__":
         main()
     except Exception as e:
         show_recovery_card(e)
+
