@@ -620,12 +620,33 @@ def tab_eval_input(emp_df: pd.DataFrame):
         <style>
           .eval-desc{color:#4b5563;margin:.15rem 0 .35rem;}
           .eval-sep{border-bottom:1px solid rgba(49,51,63,.06);margin:.2rem 0 .35rem;}
-          .bulk-score [data-baseweb="select"] > div{
-            min-height:56px;padding:10px 12px;justify-content:center;
+
+          /* 일괄 선택 드롭다운 & 버튼을 같은 높이로 맞추기 */
+          .bulk-row .stButton>button{
+            height:56px;                 /* 버튼 높이 */
+            padding:0 18px;
           }
-          .bulk-score [data-baseweb="select"] span{font-size:22px;line-height:30px;}
-          .bulk-score [data-baseweb="select"] svg{width:22px;height:22px;}
-          div[data-baseweb="menu"] li{font-size:18px;padding:10px 12px;}
+          .bulk-score [data-baseweb="select"] > div{
+            min-height:56px;             /* 드롭다운 높이(버튼과 동일) */
+            display:flex;
+            align-items:center;
+            padding:8px 12px;
+          }
+          /* 선택된 값 숫자를 가운데 정렬 */
+          .bulk-score [data-baseweb="select"] div[aria-live="polite"]{
+            width:100%;
+            display:flex;
+            justify-content:center;
+          }
+          .bulk-score [data-baseweb="select"] span{
+            font-size:22px;
+            line-height:28px;
+          }
+          /* 드롭다운 옵션도 크게 */
+          div[data-baseweb="menu"] li{
+            font-size:18px;
+            padding:10px 12px;
+          }
         </style>
         """,
         unsafe_allow_html=True,
@@ -633,19 +654,29 @@ def tab_eval_input(emp_df: pd.DataFrame):
 
     # ── 상단: 일괄 점수 적용 (한 블록만)
     st.markdown("#### 점수 입력 (각 1~5)")
+
+    # 위젯 키(연도+평가자) 베이스: 중복 방지
+    kbase = f"evalbulk_{year}_{evaluator_sabun}"
+
+    # 같은 줄에 드롭다운(왼쪽) + 버튼(오른쪽), 높이/정렬 일치
+    st.markdown('<div class="bulk-row">', unsafe_allow_html=True)
     c_sel, c_btn, _ = st.columns([2, 1, 6])
     with c_sel:
         st.markdown('<div class="bulk-score">', unsafe_allow_html=True)
         bulk_score = st.selectbox(
-            " ", options=[1, 2, 3, 4, 5], index=2,
-            key=f"{kbase}_bulk_sel", label_visibility="collapsed"
+            " ",
+            options=[1, 2, 3, 4, 5],
+            index=2,  # 기본 3점
+            key=f"{kbase}_sel",
+            label_visibility="collapsed",
         )
         st.markdown('</div>', unsafe_allow_html=True)
     with c_btn:
-        if st.button("일괄 적용", use_container_width=True, key=f"{kbase}_bulk_btn"):
+        if st.button("일괄 적용", use_container_width=True, key=f"{kbase}_apply"):
             for iid in items["항목ID"].astype(str):
-                st.session_state[f"{kbase}_val_{iid}"] = int(bulk_score)
+                st.session_state[f"eval_{iid}"] = int(bulk_score)  # 개별 항목 상태키와 동일하게
             st.toast(f"모든 항목에 {bulk_score}점 적용", icon="✅")
+    st.markdown('</div>', unsafe_allow_html=True)
 
     # ── 항목 렌더링 (제목 | 라디오 1~5, 설명은 다음 줄)
     items_sorted = items.sort_values(["순서", "항목"]).reset_index(drop=True)
@@ -1675,6 +1706,7 @@ def main():
 # ── 엔트리포인트 ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     main()
+
 
 
 
