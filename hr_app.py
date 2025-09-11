@@ -1019,35 +1019,32 @@ def tab_job_desc(emp_df: pd.DataFrame):
         target_name  = me_name
         st.info(f"대상자: {target_name} ({target_sabun})", icon="👤")
 
-    # ── 연도/버전
-    this_year = datetime.now(tz=tz_kst()).year
-    col = st.columns([1, 1, 2, 2])
-    with col[0]:
-        year = st.number_input("연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="job_year")
-    with col[1]:
-        version = st.number_input("버전(없으면 자동)", min_value=0, max_value=999, value=0, step=1, key="job_ver")
-    with col[2]:
-        jobname = st.text_input("직무명", value="", key="job_jobname")
-    with col[3]:
-        memo = st.text_input("비고", value="", key="job_memo")
-
-    # ── 설정 기본값(관리자 탭에서 지정) + 직원 프로필에서 자동 채움
-    today = datetime.now(tz=tz_kst()).strftime("%Y-%m-%d")
-    defval_create = get_setting("JD.제정일", today)
-    defval_update = get_setting("JD.개정일", today)
+    # ── 관리자 설정 기본값 + 대상자 프로필 기본값을 '위젯 생성 이전'에 미리 계산
+    today         = datetime.now(tz=tz_kst()).strftime("%Y-%m-%d")
+    defval_create = get_setting("JD.제정일",   today)
+    defval_update = get_setting("JD.개정일",   today)
     defval_review = get_setting("JD.검토주기", "1년")
 
     row_emp = emp_df.loc[emp_df["사번"].astype(str) == str(target_sabun)]
     pref_dept1  = str(row_emp.iloc[0].get("부서1", "")) if not row_emp.empty else ""
     pref_dept2  = str(row_emp.iloc[0].get("부서2", "")) if not row_emp.empty else ""
-    pref_group  = str(row_emp.iloc[0].get("직군", ""))  if (not row_emp.empty and "직군" in row_emp.columns) else ""
-    pref_series = str(row_emp.iloc[0].get("직종", ""))  if (not row_emp.empty and "직종" in row_emp.columns) else ""
-    pref_job    = str(row_emp.iloc[0].get("직무", ""))  if (not row_emp.empty and "직무" in row_emp.columns) else ""
+    pref_group  = str(row_emp.iloc[0].get("직군",  "")) if (not row_emp.empty and "직군" in row_emp.columns)  else ""
+    pref_series = str(row_emp.iloc[0].get("직종",  "")) if (not row_emp.empty and "직종" in row_emp.columns)  else ""
+    pref_job    = str(row_emp.iloc[0].get("직무",  "")) if (not row_emp.empty and "직무" in row_emp.columns)  else ""
 
-    # 직무명 빈값이면 프로필의 '직무'를 기본값으로
-    if not jobname and pref_job:
-        st.session_state["job_jobname"] = pref_job
-        jobname = pref_job
+    # 직무명 입력 위젯의 기본값을 사전에 결정(세션상태를 나중에 건드리지 않음)
+    jobname_default = pref_job or ""
+
+    # ── 연도/버전/직무명/비고
+    col = st.columns([1, 1, 2, 2])
+    with col[0]:
+        year = st.number_input("연도", min_value=2000, max_value=2100, value=int(datetime.now(tz=tz_kst()).year), step=1, key="job_year")
+    with col[1]:
+        version = st.number_input("버전(없으면 자동)", min_value=0, max_value=999, value=0, step=1, key="job_ver")
+    with col[2]:
+        jobname = st.text_input("직무명", value=jobname_default, key="job_jobname")
+    with col[3]:
+        memo = st.text_input("비고", value="", key="job_memo")
 
     # ── 조직/직무 기본값(자동 채움 — 필요 시 수정 가능)
     c2 = st.columns([1, 1, 1, 1])
@@ -1095,7 +1092,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
     with c5[1]:
         career   = st.text_input("경력(자격요건)", "", key="job_career")
     with c5[2]:
-        pass     # memo는 위에서 입력
+        pass
 
     # ── 서명
     c6 = st.columns([1, 2, 1])
@@ -1111,7 +1108,6 @@ def tab_job_desc(emp_df: pd.DataFrame):
             "사번": str(target_sabun),
             "연도": int(year),
             "버전": int(version or 0),
-            # "소속":  ← 요청에 따라 사용 안함 (시트 헤더에 있으면 공란으로 저장됨)
             "부서1": dept1,
             "부서2": dept2,
             "작성자사번": me_sabun,
@@ -1856,6 +1852,7 @@ def main():
 # ── 엔트리포인트 ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     main()
+
 
 
 
