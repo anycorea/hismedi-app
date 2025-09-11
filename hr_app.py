@@ -7,17 +7,18 @@ HISMEDI - 인사/HR (Google Sheets 연동)
 import os
 import time, re, hashlib, random, secrets as pysecrets
 from datetime import datetime, timedelta
-import pandas as pd, streamlit as st
+import pandas as pd
+import streamlit as st  # ← import만 (호출 X)
 
 # ── Page Config: 반드시 "첫 번째 Streamlit 명령"이어야 함 ────────────────────
-# ⚠️ 여기서는 st.secrets를 절대 참조하지 마세요.
-APP_TITLE = os.environ.get("APP_TITLE", "HISMEDI - HR App")  # st.secrets대신 환경변수/상수 사용
+# ⚠ 전역에서 st.secrets, st.sidebar, st.write, @st.cache_* 등 "모든 st.*" 금지. (이 줄보다 위에서는!)
+APP_TITLE = os.environ.get("APP_TITLE", "HISMEDI - HR App")
 st.set_page_config(page_title=APP_TITLE, layout="wide")
 
 # ── KST (secrets는 "호출 시점"에만 읽도록 lazy) ────────────────────────────
 def _get_app_tz() -> str:
     try:
-        # st.secrets 접근은 이제 안전(이미 set_page_config 호출 완료)
+        # set_page_config 이후이므로 이제 접근 OK
         return (st.secrets.get("app", {}) or {}).get("TZ", "Asia/Seoul")
     except Exception:
         return "Asia/Seoul"
@@ -37,7 +38,8 @@ try:
     from google.oauth2.service_account import Credentials
 except ModuleNotFoundError:
     import subprocess, sys
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "gspread==6.1.2", "google-auth==2.31.0"])
+    subprocess.check_call([sys.executable, "-m", "pip", "install",
+                           "gspread==6.1.2", "google-auth==2.31.0"])
     import gspread
     from google.oauth2.service_account import Credentials
 from gspread.exceptions import WorksheetNotFound, APIError
@@ -65,21 +67,22 @@ except NameError:
                 show_recovery_card(e)
         return _inner
 
-# ── Recovery / Retry Utils (ADD) ──────────────────────────────────────────────
+# ── Recovery / Retry Utils ────────────────────────────────────────────────────
 import traceback
 
-# 로그인/인증 상태를 보존할 세션 키 (현재 파일 구조 기준)
-AUTH_KEYS = {"authed", "user", "auth_expires_at"}
+# 로그인/인증 관련 세션키: 프로젝트에 맞게 수정
+AUTH_KEYS = {"auth_user", "auth_token", "auth_refresh", "auth_profile"}
+
+def init_state():
+    st.session_state.setdefault("app_ready", True)
 
 def soft_reset():
-    """인증키는 보존하고 나머지 상태만 초기화 후 재실행"""
     for k in list(st.session_state.keys()):
-        if k not in AUTH_KEYS:
+        if (k not in AUTH_KEYS) and (not k.startswith("auth_")):
             del st.session_state[k]
     st.rerun()
 
 def hard_reload():
-    """쿼리스트링에 타임스탬프를 붙여 강제 리로드 느낌 + rerun"""
     try:
         st.experimental_set_query_params(_ts=str(int(time.time())))
     except Exception:
@@ -87,7 +90,6 @@ def hard_reload():
     st.rerun()
 
 def show_recovery_card(error):
-    """에러 발생 시 복구 UI 카드 표시"""
     with st.container(border=True):
         st.error("앱 실행 중 오류가 발생했어요.")
         st.caption(type(error).__name__ if isinstance(error, Exception) else "Error")
@@ -99,12 +101,32 @@ def show_recovery_card(error):
         c3.button("♻️ 강제 리로드(캐시 무시)", on_click=hard_reload, use_container_width=True)
 
 def render_global_actions():
-    """사이드बार에 항상 보이는 복구 버튼 3종"""
     with st.sidebar:
         st.markdown("### ⚙️ 빠른 복구")
         st.button("🔄 다시 시도", on_click=st.rerun, use_container_width=True)
         st.button("🧹 상태 초기화", on_click=soft_reset, use_container_width=True)
         st.button("♻️ 강제 리로드", on_click=hard_reload, use_container_width=True)
+
+def guard_page(fn):
+    def _inner(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except Exception as e:
+            show_recovery_card(e)
+    return _inner
+
+def call_api_with_refresh(fn, *args, **kwargs):
+    try:
+        return fn(*args, **kwargs)
+    except Exception as e:
+        msg = str(e).lower()
+        if ("401" in msg) or ("unauthorized" in msg):
+            try:
+                # TODO: 토큰 리프레시 로직 구현 (성공 시 아래 재시도)
+                return fn(*args, **kwargs)
+            except Exception:
+                pass
+        raise
 
 # ── App Config ────────────────────────────────────────────────────────────────
 APP_TITLE = st.secrets.get("app", {}).get("TITLE", "HISMEDI - 인사/HR")
@@ -1449,28 +1471,25 @@ def section_dept_history_min():
     st.header("🏷️ 부서이력/이동 (필수 최소)")
     st.button("🔄 다시 불러오기", on_click=st.rerun)
 
-    # gspread 클라이언트 준비 (세션 캐시)
     try:
         if "gc" not in st.session_state:
-            scopes = [
-                "https://www.googleapis.com/auth/spreadsheets",
-                "https://www.googleapis.com/auth/drive.readonly",
-            ]
+            scopes = ["https://www.googleapis.com/auth/spreadsheets",
+                      "https://www.googleapis.com/auth/drive.readonly"]
             sa = st.secrets.get("gcp_service_account", {})
             creds = Credentials.from_service_account_info(sa, scopes=scopes)
             st.session_state.gc = gspread.authorize(creds)
         gc = st.session_state.gc
 
-        # 시트 키/워크시트명은 secrets 또는 텍스트 입력으로
         colk, colw = st.columns(2)
-        sheet_key = colk.text_input("스프레드시트 KEY", value=st.secrets.get("gspread", {}).get("SHEET_KEY", ""), type="default")
-        ws_name   = colw.text_input("워크시트명", value=st.secrets.get("gspread", {}).get("WS_DEPT_HISTORY", "부서이동"))
+        sheet_key = colk.text_input("스프레드시트 KEY",
+            value=st.secrets.get("gspread", {}).get("SHEET_KEY", ""), type="default")
+        ws_name   = colw.text_input("워크시트명",
+            value=st.secrets.get("gspread", {}).get("WS_DEPT_HISTORY", "부서이동"))
 
         if not sheet_key or not ws_name:
             st.info("스프레드시트 KEY와 워크시트명을 입력/설정하세요.")
             return
 
-        # 데이터 로드
         def _fetch_rows():
             ws = gc.open_by_key(sheet_key).worksheet(ws_name)
             return ws.get_all_records()
@@ -1483,13 +1502,10 @@ def section_dept_history_min():
             st.dataframe(df, use_container_width=True)
 
     except (WorksheetNotFound, APIError) as e:
-        show_recovery_card(e)
-        return
+        show_recovery_card(e); return
     except Exception as e:
-        show_recovery_card(e)
-        return
+        show_recovery_card(e); return
 
-    # (선택) 간단 등록 폼
     with st.expander("➕ 부서 이동 기록 추가"):
         with st.form("dept_move_form", clear_on_submit=True):
             c1, c2, c3, c4 = st.columns([1,1,1,1])
@@ -1522,28 +1538,23 @@ def section_admin():
     st.header("🛠️ 관리자")
     st.button("🔄 다시 불러오기", on_click=st.rerun)
 
-    tabs = st.tabs(["PIN", "부서이동 설정", "평가항목", "권한"])
-
-    # 공통: gspread 준비
     try:
         if "gc" not in st.session_state:
-            scopes = [
-                "https://www.googleapis.com/auth/spreadsheets",
-                "https://www.googleapis.com/auth/drive",
-            ]
+            scopes = ["https://www.googleapis.com/auth/spreadsheets",
+                      "https://www.googleapis.com/auth/drive"]
             sa = st.secrets.get("gcp_service_account", {})
             creds = Credentials.from_service_account_info(sa, scopes=scopes)
             st.session_state.gc = gspread.authorize(creds)
         gc = st.session_state.gc
         sheet_key = st.secrets.get("gspread", {}).get("SHEET_KEY", "")
         if not sheet_key:
-            st.info("secrets.gspread.SHEET_KEY가 필요합니다.")
-            return
+            st.info("secrets.gspread.SHEET_KEY가 필요합니다."); return
     except Exception as e:
-        show_recovery_card(e)
-        return
+        show_recovery_card(e); return
 
-    # ── PIN
+    tabs = st.tabs(["PIN", "부서이동 설정", "평가항목", "권한"])
+
+    # PIN
     with tabs[0]:
         st.subheader("관리자 PIN")
         ws_name = st.secrets.get("gspread", {}).get("WS_ADMIN_PIN", "ADMIN_PIN")
@@ -1553,7 +1564,7 @@ def section_admin():
                 return ws.get_all_records()
             rows = call_api_with_refresh(_read)
             st.dataframe(pd.DataFrame(rows), use_container_width=True)
-        except (WorksheetNotFound, APIError) as e:
+        except (WorksheetNotFound, APIError):
             st.warning(f"워크시트 '{ws_name}' 없음. 생성 후 사용하세요.")
         except Exception as e:
             show_recovery_card(e)
@@ -1569,7 +1580,9 @@ def section_admin():
                 try:
                     def _append():
                         ws = gc.open_by_key(sheet_key).worksheet(ws_name)
-                        ws.append_row([admin_id, hashlib.sha256(new_pin.encode()).hexdigest(), datetime.now(tz_kst()).strftime("%Y-%m-%d %H:%M:%S")])
+                        ws.append_row([admin_id,
+                                       hashlib.sha256(new_pin.encode()).hexdigest(),
+                                       datetime.now(tz_kst()).strftime("%Y-%m-%d %H:%M:%S")])
                         return True
                     call_api_with_refresh(_append)
                     st.success("저장되었습니다.")
@@ -1577,7 +1590,7 @@ def section_admin():
                 except Exception as e:
                     show_recovery_card(e)
 
-    # ── 부서이동 설정
+    # 부서이동 설정
     with tabs[1]:
         st.subheader("부서 마스터/이동 규칙")
         ws_dept = st.secrets.get("gspread", {}).get("WS_DEPT_MASTER", "DEPT_MASTER")
@@ -1601,7 +1614,8 @@ def section_admin():
             try:
                 def _append():
                     ws = gc.open_by_key(sheet_key).worksheet(ws_dept)
-                    ws.append_row([dept_code, dept_name, datetime.now(tz_kst()).strftime("%Y-%m-%d %H:%M:%S")])
+                    ws.append_row([dept_code, dept_name,
+                                   datetime.now(tz_kst()).strftime("%Y-%m-%d %H:%M:%S")])
                     return True
                 call_api_with_refresh(_append)
                 st.success("추가되었습니다.")
@@ -1609,7 +1623,7 @@ def section_admin():
             except Exception as e:
                 show_recovery_card(e)
 
-    # ── 평가항목
+    # 평가항목
     with tabs[2]:
         st.subheader("평가 항목 관리")
         ws_eval = st.secrets.get("gspread", {}).get("WS_EVAL_ITEMS", "EVAL_ITEMS")
@@ -1627,13 +1641,15 @@ def section_admin():
         with st.form("eval_add", clear_on_submit=True):
             c1, c2 = st.columns([2,1])
             item = c1.text_input("평가항목")
-            weight = c2.number_input("가중치", min_value=0.0, max_value=100.0, value=10.0, step=1.0)
+            weight = c2.number_input("가중치", min_value=0.0, max_value=100.0,
+                                     value=10.0, step=1.0)
             s = st.form_submit_button("항목 추가")
         if s:
             try:
                 def _append():
                     ws = gc.open_by_key(sheet_key).worksheet(ws_eval)
-                    ws.append_row([item, weight, datetime.now(tz_kst()).strftime("%Y-%m-%d %H:%M:%S")])
+                    ws.append_row([item, weight,
+                                   datetime.now(tz_kst()).strftime("%Y-%m-%d %H:%M:%S")])
                     return True
                 call_api_with_refresh(_append)
                 st.success("추가되었습니다.")
@@ -1641,7 +1657,7 @@ def section_admin():
             except Exception as e:
                 show_recovery_card(e)
 
-    # ── 권한
+    # 권한
     with tabs[3]:
         st.subheader("권한 관리 (역할별)")
         ws_role = st.secrets.get("gspread", {}).get("WS_ROLES", "ROLES")
@@ -1665,7 +1681,8 @@ def section_admin():
             try:
                 def _append():
                     ws = gc.open_by_key(sheet_key).worksheet(ws_role)
-                    ws.append_row([role, perms, datetime.now(tz_kst()).strftime("%Y-%m-%d %H:%M:%S")])
+                    ws.append_row([role, perms,
+                                   datetime.now(tz_kst()).strftime("%Y-%m-%d %H:%M:%S")])
                     return True
                 call_api_with_refresh(_append)
                 st.success("추가되었습니다.")
@@ -1678,16 +1695,12 @@ def section_main():
     st.header("👤 메인")
     st.button("🔄 다시 불러오기", on_click=st.rerun)
 
-    # 예시: 간단 라우팅
     page = st.sidebar.selectbox("페이지", ["메인", "부서이력/이동", "관리자"])
     if page == "부서이력/이동":
-        section_dept_history_min()
-        return
+        section_dept_history_min(); return
     if page == "관리자":
-        section_admin()
-        return
+        section_admin(); return
 
-    # 메인 카드/요약 영역
     try:
         c1, c2, c3 = st.columns(3)
         with c1:
@@ -1696,7 +1709,6 @@ def section_main():
             st.metric("랜덤 토큰", pysecrets.token_hex(4))
         with c3:
             st.metric("앱 상태", "Ready" if st.session_state.get("app_ready") else "Init")
-
         st.write("필요한 위젯/요약을 여기에 구성하세요.")
     except Exception as e:
         show_recovery_card(e)
