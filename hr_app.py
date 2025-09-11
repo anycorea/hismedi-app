@@ -93,21 +93,18 @@ st.markdown(
 st.markdown(f"<div class='app-title'>{DISPLAY_TITLE}</div>", unsafe_allow_html=True)
 
 # ── Recovery / Retry Utils ───────────────────────────────────────────────────
-#  ※ 여기에는 st.* "정의"만 있고, 호출은 섹션/메인에서 이뤄집니다.
 AUTH_KEYS = {"auth_user", "auth_token", "auth_refresh", "auth_profile"}  # 필요시 수정
 
 def init_state():
     st.session_state.setdefault("app_ready", True)
 
 def soft_reset():
-    # 인증 관련 키는 보존하고, 나머지 상태만 초기화
     for k in list(st.session_state.keys()):
         if (k not in AUTH_KEYS) and (not k.startswith("auth_")):
             del st.session_state[k]
     st.rerun()
 
 def hard_reload():
-    # 캐시 꼬임 회피용 쿼리 파라미터 갱신 후 재실행
     try:
         st.experimental_set_query_params(_ts=str(int(time.time())))
     except Exception:
@@ -130,7 +127,7 @@ def render_global_actions():
         st.markdown("### ⚙️ 빠른 복구")
         st.button("🔄 다시 시도", on_click=st.rerun, use_container_width=True)
         st.button("🧹 상태 초기화", on_click=soft_reset, use_container_width=True)
-        st.button("♻️ 강제 리로드", on_click=hard_reload, use_container_width=True)
+        st.button("♻️ 강제 리ロード", on_click=hard_reload, use_container_width=True)
 
 def guard_page(fn):
     def _inner(*args, **kwargs):
@@ -141,53 +138,17 @@ def guard_page(fn):
     return _inner
 
 def call_api_with_refresh(fn, *args, **kwargs):
-    """
-    API 호출 시 401/Unauthorized 감지 → (필요 시) 토큰 리프레시 후 1회 재시도.
-    실제 리프레시는 프로젝트 로직에 맞게 채우세요.
-    """
     try:
         return fn(*args, **kwargs)
     except Exception as e:
         msg = str(e).lower()
         if ("401" in msg) or ("unauthorized" in msg):
             try:
-                # TODO: st.session_state["auth_refresh"] 등을 이용한 리프레시 로직
-                # refresh 성공 시 재시도
+                # TODO: 토큰 리프레시 로직 (성공 시 재시도)
                 return fn(*args, **kwargs)
             except Exception:
                 pass
         raise
-
-# ── App Config (REPLACE THIS WHOLE BLOCK) ────────────────────────────────────
-import os
-
-# set_page_config 는 페이지의 "첫 번째 Streamlit 호출"이어야 합니다.
-# 여기서는 st.secrets 를 참조하지 말고, 환경변수/리터럴만 사용하세요.
-APP_TITLE = os.environ.get("APP_TITLE", "HISMEDI - 인사/HR")
-st.set_page_config(page_title=APP_TITLE, layout="wide")
-
-# 이제부터는 st.secrets 접근 OK (화면 내부 표기용 제목에만 사용)
-DISPLAY_TITLE = (st.secrets.get("app", {}) or {}).get("TITLE", APP_TITLE)
-
-st.markdown(
-    """
-    <style>
-      .block-container { padding-top: 1.35rem !important; }
-      .stTabs [role='tab']{ padding:10px 16px !important; font-size:1.02rem !important; }
-      .grid-head{ font-size:.9rem; color:#6b7280; margin:.2rem 0 .5rem; }
-      .app-title{
-        font-size: 1.28rem; line-height: 1.45rem; margin: .2rem 0 .6rem; font-weight: 800;
-      }
-      @media (min-width:1280px){
-        .app-title{ font-size: 1.34rem; line-height: 1.5rem; }
-      }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-# (선택) 화면 상단 제목 표시
-st.markdown(f"<div class='app-title'>{DISPLAY_TITLE}</div>", unsafe_allow_html=True)
 
 # ── Utils ─────────────────────────────────────────────────────────────────────
 def kst_now_str(): return datetime.now(tz=tz_kst()).strftime("%Y-%m-%d %H:%M:%S (%Z)")
@@ -1765,6 +1726,7 @@ if __name__ == "__main__":
         main()
     except Exception as e:
         show_recovery_card(e)
+
 
 
 
