@@ -568,125 +568,40 @@ def read_my_eval_rows(year: int, sabun: str) -> pd.DataFrame:
 def tab_eval_input(emp_df: pd.DataFrame):
     st.subheader("평가")
 
-    # ── 세로 간격만 압축(가로 gap은 기존값 유지)
+    # ── 스타일: 세로 간격만 압축(가로 배치는 기존 유지)
     st.markdown(
         """
         <style>
-          /* 한 항목 블록의 위/아래 여백 최소화 */
+          /* 한 항목 행 전체 */
           .eval-row{
-            padding: 1px 0 !important;           /* 세로 패딩 확 줄임 */
+            padding: 2px 0 !important;                          /* 위/아래 여백 최소화 */
             border-bottom: 1px solid rgba(49,51,63,.06);
           }
-          .eval-row .name{
-            margin: 0 !important;
-            line-height: 1.2 !important;         /* 제목 줄간격 ↓ */
+          /* 제목/설명 컨테이너와 그 안의 p 기본 여백 제거 */
+          .eval-name, .eval-desc{ margin: 0 !important; }
+          .eval-name p, .eval-desc p{ margin: 0 !important; }
+
+          .eval-name{
+            font-weight: 700;
+            line-height: 1.15 !important;
           }
-          .eval-row .desc{
-            margin: .05rem 0 .2rem !important;    /* 설명 위아래 여백 ↓ */
-            line-height: 1.2 !important;          /* 설명 줄간격 ↓ */
+          .eval-desc{
+            color:#4b5563;
+            line-height: 1.2 !important;
+            margin-top: .1rem !important;
+            margin-bottom: .15rem !important;
           }
 
-          /* 라디오(점수) 위/아래 여백 최소화 — 가로 간격은 기존 그대로 */
-          .eval-row .stRadio{ margin: 0 !important; }
-          .eval-row [role="radiogroup"]{
-            margin: 0 !important;
-            align-items: center;
-          }
-          .eval-row [role="radiogroup"] label{
-            margin: 0 !important;
-          }
-
-          /* 일괄적용 라인도 세로 여백만 살짝 줄이기 */
-          .bulk-row{ margin: .15rem 0 !important; }
-          .stSlider{ margin-top: .1rem !important; margin-bottom: .1rem !important; }
+          /* 점수 라디오: 세로 여백 0 (가로 간격은 기본 유지) */
+          .eval-score .stRadio{ margin: 0 !important; }
+          .eval-score [role="radiogroup"]{ margin: 0 !important; align-items:center; }
+          .eval-score [role="radiogroup"] label{ margin: 0 !important; }
         </style>
         """,
         unsafe_allow_html=True,
     )
 
-    # ── 연도
-    this_year = datetime.now(tz=tz_kst()).year
-    colY = st.columns([1, 3])
-    with colY[0]:
-        year = st.number_input("평가 연도", min_value=2000, max_value=2100,
-                               value=int(this_year), step=1, key="eval_year")
-
-    # ── 항목 로드
-    items = read_eval_items_df(only_active=True)
-    if items.empty:
-        st.warning("활성화된 평가 항목이 없습니다.", icon="⚠️")
-        return
-
-    # ── 권한/대상 선택
-    u = st.session_state["user"]
-    me_sabun = str(u["사번"])
-    me_name = str(u["이름"])
-    am_admin = is_admin(me_sabun)
-    allowed = get_allowed_sabuns(emp_df, me_sabun, include_self=True)
-
-    c_tgt, c_type, _ = st.columns([2, 1.6, 6.4])
-    if am_admin or is_manager(emp_df, me_sabun):
-        df = emp_df.copy()
-        df = df[df["사번"].astype(str).isin(allowed)]
-        if "재직여부" in df.columns:
-            df = df[df["재직여부"] == True]
-        df["표시"] = df.apply(lambda r: f"{str(r.get('사번',''))} - {str(r.get('이름',''))}", axis=1)
-        df = df.sort_values(["사번"])
-        with c_tgt:
-            sel = st.selectbox("평가 대상자", ["(선택)"] + df["표시"].tolist(),
-                               index=0, key="eval_target_select")
-        if sel == "(선택)":
-            st.info("평가 대상자를 선택하세요.")
-            return
-        target_sabun = sel.split(" - ", 1)[0]
-        target_name = _emp_name_by_sabun(emp_df, target_sabun)
-        with c_type:
-            type_key = f"eval_type_{year}_{me_sabun}_{target_sabun}"
-            if type_key not in st.session_state:
-                st.session_state[type_key] = "1차"
-            eval_type = st.radio("평가유형", EVAL_TYPES, horizontal=True, key=type_key)
-    else:
-        target_sabun = me_sabun
-        target_name = me_name
-        with c_tgt:
-            st.text_input("평가 대상자", f"{target_name} ({target_sabun})", disabled=True, key="eval_target_me")
-        with c_type:
-            eval_type = "자기"
-            st.text_input("평가유형", "자기", disabled=True, key="eval_type_me")
-
-    evaluator_sabun = me_sabun
-    evaluator_name = me_name
-
-    # ── 상단 제목 + (슬라이더 + 일괄적용 버튼) : st.rerun() 없이 플래그로 반영
-    c_head, c_slider, c_btn = st.columns([5, 2, 1])
-    with c_head:
-        st.markdown("#### 점수 입력 (각 1~5)")
-
-    kbase = f"evalbulk_{year}_{evaluator_sabun}_{target_sabun}"
-    slider_key = f"{kbase}_slider"
-    if slider_key not in st.session_state:
-        st.session_state[slider_key] = 3
-    with c_slider:
-        bulk_score = st.slider(
-            "일괄 점수",
-            min_value=1, max_value=5, step=1,
-            key=slider_key
-        )
-    with c_btn:
-        if st.button("일괄 적용", use_container_width=True, key=f"{kbase}_apply"):
-            # 다음 렌더에서 항목 라디오 값 주입 (rerun 없이 탭 유지)
-            st.session_state[f"__apply_bulk_{kbase}"] = int(bulk_score)
-            st.toast(f"모든 항목에 {bulk_score}점 적용", icon="✅")
-
-    # ── 일괄 적용 플래그 처리(라디오 생성 전에 값 세팅)
-    apply_key = f"__apply_bulk_{kbase}"
-    if st.session_state.get(apply_key) is not None:
-        _v = int(st.session_state[apply_key])
-        for _iid in items["항목ID"].astype(str):
-            st.session_state[f"eval_seg_{_iid}_{kbase}"] = str(_v)
-        del st.session_state[apply_key]
-
-    # ── 항목 렌더링 (이름 | 내용 | 점수)
+    # ── (항목 렌더링) : 제목 | 설명 | 점수(라디오) — 가로 배치는 예전과 동일
     items_sorted = items.sort_values(["순서", "항목"]).reset_index(drop=True)
     scores = {}
 
@@ -695,22 +610,43 @@ def tab_eval_input(emp_df: pd.DataFrame):
         name = getattr(r, "항목") or ""
         desc = getattr(r, "내용") or ""
 
-        rkey = f"eval_seg_{iid}_{kbase}"
-        if rkey not in st.session_state:
-            st.session_state[rkey] = "3"
+        # 현재 값(세션에 없으면 3)
+        cur = int(st.session_state.get(f"eval_{iid}", 3))
+        if cur < 1 or cur > 5:
+            cur = 3
 
+        # 한 행 시작(세로 여백을 CSS로만 제어하기 위해 wrapper 사용)
         st.markdown('<div class="eval-row">', unsafe_allow_html=True)
-        c1, c2, c3 = st.columns([2, 6, 3])
-        with c1:
-            st.markdown(f'<div class="name">{name}</div>', unsafe_allow_html=True)
-        with c2:
-            st.markdown(f'<div class="desc">{desc.replace(chr(10), "<br/>")}</div>', unsafe_allow_html=True)
-        with c3:
-            pick = st.radio(" ", ["1","2","3","4","5"],
-                            horizontal=True, key=rkey, label_visibility="collapsed")
-        st.markdown('</div>', unsafe_allow_html=True)
 
-        scores[iid] = int(st.session_state[rkey])
+        c_name, c_desc, c_score = st.columns([5, 7, 4.5])
+
+        with c_name:
+            st.markdown(f"<div class='eval-name'>{name}</div>", unsafe_allow_html=True)
+
+        with c_desc:
+            # 줄바꿈 보존
+            st.markdown(
+                f"<div class='eval-desc'>{desc.replace(chr(10), '<br/>')}</div>",
+                unsafe_allow_html=True,
+            )
+
+        with c_score:
+            with st.container():  # 라디오 주변 세로 여백 0
+                pick = st.radio(
+                    " ",
+                    ["1", "2", "3", "4", "5"],
+                    index=(cur - 1),
+                    horizontal=True,
+                    key=f"eval_seg_{iid}",
+                    label_visibility="collapsed",
+                )
+                cur = int(pick)
+
+        st.markdown("</div>", unsafe_allow_html=True)  # 한 행 끝
+
+        # 상태 반영
+        st.session_state[f"eval_{iid}"] = cur
+        scores[iid] = cur
 
     # ── 합계/저장
     total_100 = round(sum(scores.values()) * (100.0 / max(1, len(items_sorted) * 5)), 1)
@@ -1714,6 +1650,7 @@ def main():
 # ── 엔트리포인트 ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     main()
+
 
 
 
