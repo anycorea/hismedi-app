@@ -10,44 +10,37 @@ import time, re, hashlib, random, secrets as pysecrets
 from datetime import datetime, timedelta
 import pandas as pd
 import traceback
+import streamlit as st  # import만, 아래에서 set_page_config가 첫 호출
 
-# Streamlit은 import만! (호출 금지; set_page_config가 첫 호출이어야 함)
-import streamlit as st
+# ── Page Config: 반드시 "첫 번째 Streamlit 호출" ────────────────────────────
+# ⚠ 이 줄보다 위에는 어떠한 st.* 호출/데코레이터도 있으면 안 됩니다.
+APP_TITLE = os.environ.get("APP_TITLE", "HISMEDI - 인사/HR")
+st.set_page_config(page_title=APP_TITLE, layout="wide")
 
-# ── Page Config: 반드시 "첫 번째 Streamlit 명령" ────────────────────────────
-# ⚠ 이 줄보다 위에서는 st.sidebar, st.write, st.secrets 접근, @st.cache_* 등
-#    어떤 형태든 "st.* 호출"이 있으면 안 됩니다.
-APP_TITLE = os.environ.get("APP_TITLE", "HISMEDI - HR App")
-st.set_page_config(page_title=APP_TITLE, layout="wide", layout="wide")
-
-# ── Secrets 접근 헬퍼 (lazy) ────────────────────────────────────────────────
-def _s(path: str, default=None):
+# ── Secrets 헬퍼 (set_page_config 이후에만 사용) ────────────────────────────
+def S(path: str, default=None):
     """
-    st.secrets를 안전하게 참조하는 헬퍼.
-    path 예: "app.TZ", "gspread.SHEET_KEY"
+    st.secrets 안전 참조. 예: S("app.TZ", "Asia/Seoul"), S("gspread.SHEET_KEY", "")
     """
     try:
         cur = st.secrets
-        for key in path.split("."):
-            cur = cur.get(key, {})
+        for k in path.split("."):
+            cur = cur.get(k, {})
         return cur if cur != {} else default
     except Exception:
         return default
 
-# ── KST 타임존 (secrets는 "호출 시점"에만 읽도록) ───────────────────────────
+# ── Timezone (lazy secrets 접근) ─────────────────────────────────────────────
 try:
     from zoneinfo import ZoneInfo
     def tz_kst():
-        tzname = _s("app.TZ", "Asia/Seoul")
-        return ZoneInfo(tzname)
+        return ZoneInfo(S("app.TZ", "Asia/Seoul"))
 except Exception:
     import pytz
     def tz_kst():
-        tzname = _s("app.TZ", "Asia/Seoul")
-        return pytz.timezone(tzname)
+        return pytz.timezone(S("app.TZ", "Asia/Seoul"))
 
-# ── gspread (지연 초기화) ───────────────────────────────────────────────────
-#  - 전역에서 authorize 호출하지 말고, 함수 호출 시점에만 생성
+# ── gspread (필요 시 지연 설치/초기화) ───────────────────────────────────────
 try:
     import gspread
     from google.oauth2.service_account import Credentials
@@ -57,13 +50,11 @@ except ModuleNotFoundError:
                            "gspread==6.1.2", "google-auth==2.31.0"])
     import gspread
     from google.oauth2.service_account import Credentials
-
 from gspread.exceptions import WorksheetNotFound, APIError
 
 def get_gspread_client(scope_drive_write: bool = False):
     """
-    gspread Client를 lazy하게 생성해 st.session_state.gc에 캐싱.
-    scope_drive_write=True면 Drive 쓰기 권한 포함.
+    gspread Client를 lazy 생성 + 세션 캐시.
     """
     if "gc" in st.session_state and st.session_state.get("gc_scope_write") == scope_drive_write:
         return st.session_state.gc
@@ -72,15 +63,34 @@ def get_gspread_client(scope_drive_write: bool = False):
     scopes.append("https://www.googleapis.com/auth/drive" if scope_drive_write
                   else "https://www.googleapis.com/auth/drive.readonly")
 
-    sa_info = _s("gcp_service_account", {})
+    sa_info = S("gcp_service_account", {})
     if not sa_info:
         raise RuntimeError("gcp_service_account secrets가 설정되지 않았습니다.")
-
     creds = Credentials.from_service_account_info(sa_info, scopes=scopes)
     gc = gspread.authorize(creds)
     st.session_state.gc = gc
     st.session_state.gc_scope_write = scope_drive_write
     return gc
+
+# ── App CSS + 화면 표시용 제목 (set_page_config 이후이므로 안전) ─────────────
+DISPLAY_TITLE = S("app.TITLE", APP_TITLE)
+st.markdown(
+    """
+    <style>
+      .block-container { padding-top: 1.35rem !important; }
+      .stTabs [role='tab']{ padding:10px 16px !important; font-size:1.02rem !important; }
+      .grid-head{ font-size:.9rem; color:#6b7280; margin:.2rem 0 .5rem; }
+      .app-title{
+        font-size: 1.28rem; line-height: 1.45rem; margin: .2rem 0 .6rem; font-weight: 800;
+      }
+      @media (min-width:1280px){
+        .app-title{ font-size: 1.34rem; line-height: 1.5rem; }
+      }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+st.markdown(f"<div class='app-title'>{DISPLAY_TITLE}</div>", unsafe_allow_html=True)
 
 # ── Recovery / Retry Utils ───────────────────────────────────────────────────
 #  ※ 여기에는 st.* "정의"만 있고, 호출은 섹션/메인에서 이뤄집니다.
@@ -1755,5 +1765,6 @@ if __name__ == "__main__":
         main()
     except Exception as e:
         show_recovery_card(e)
+
 
 
