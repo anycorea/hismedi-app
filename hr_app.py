@@ -33,19 +33,11 @@ st.set_page_config(page_title=APP_TITLE, layout="wide")
 st.markdown(
     """
     <style>
-      /* 상단 여백을 조금 늘려 잘림 방지 */
       .block-container { padding-top: 1.35rem !important; }
-
-      /* 탭/보조 텍스트 */
       .stTabs [role='tab']{ padding:10px 16px !important; font-size:1.02rem !important; }
       .grid-head{ font-size:.9rem; color:#6b7280; margin:.2rem 0 .5rem; }
-
-      /* 앱 제목: 전용 클래스 사용 (글자 살짝 작게) */
       .app-title{
-        font-size: 1.28rem;
-        line-height: 1.45rem;
-        margin: .2rem 0 .6rem;
-        font-weight: 800;
+        font-size: 1.28rem; line-height: 1.45rem; margin: .2rem 0 .6rem; font-weight: 800;
       }
       @media (min-width:1280px){
         .app-title{ font-size: 1.34rem; line-height: 1.5rem; }
@@ -62,25 +54,37 @@ def _to_bool(x) -> bool: return str(x).strip().lower() in ("true","1","y","yes",
 def _normalize_private_key(raw: str) -> str:
     if not raw: return raw
     return raw.replace("\\n","\n") if "\\n" in raw and "BEGIN PRIVATE KEY" in raw else raw
+
 def _gs_retry(callable_fn, tries: int = 5, base: float = 0.6, factor: float = 2.0):
     """gspread API 호출을 지수 백오프로 재시도."""
     for i in range(tries):
         try:
             return callable_fn()
         except APIError:
-            # 짧은 지수 백오프 + 지터
             time.sleep(base * (factor ** i) + random.uniform(0, 0.2))
-    # 마지막 시도도 실패 시 예외 재던짐
     return callable_fn()
 
 # ── Non-critical error silencer ───────────────────────────────────────────────
 SILENT_NONCRITICAL_ERRORS = True  # 읽기/표시 오류는 숨김, 저장 오류만 노출
 
 def _silent_df_exception(e: Exception, where: str, empty_columns: list[str] | None = None) -> pd.DataFrame:
-    """표시/읽기 단계의 에러는 빈 DF로 대체하고 메시지는 숨깁니다."""
     if not SILENT_NONCRITICAL_ERRORS:
         st.error(f"{where}: {e}")
     return pd.DataFrame(columns=empty_columns or [])
+
+# ── Google API Retry Helper ───────────────────────────────────────────────────
+API_MAX_RETRY = 4
+API_BACKOFF_SEC = [0.0, 0.6, 1.2, 2.4]
+
+def _retry_call(fn, *args, **kwargs):
+    err = None
+    for i in range(API_MAX_RETRY):
+        try:
+            return fn(*args, **kwargs)
+        except (APIError, Exception) as e:
+            err = e
+            time.sleep(API_BACKOFF_SEC[min(i, len(API_BACKOFF_SEC) - 1)])
+    raise err
 
 # ── Google Auth / Sheets ──────────────────────────────────────────────────────
 @st.cache_resource(show_spinner=False)
@@ -98,39 +102,65 @@ def get_workbook():
 EMP_SHEET = st.secrets.get("sheets", {}).get("EMP_SHEET", "직원")
 
 # ── Sheet Helpers ─────────────────────────────────────────────────────────────
-@st.cache_data(ttl=60, show_spinner=True)
+@st.cache_data(ttl=90, show_spinner=False)
 def read_sheet_df(sheet_name: str) -> pd.DataFrame:
-    ws = get_workbook().worksheet(sheet_name)
-    df = pd.DataFrame(ws.get_all_records(numericise_ignore=["all"]))
-    if "관리자여부" in df.columns: df["관리자여부"] = df["관리자여부"].map(_to_bool)
-    if "재직여부" in df.columns: df["재직여부"] = df["재직여부"].map(_to_bool)
-    for c in ["입사일","퇴사일"]: 
-        if c in df.columns: df[c] = df[c].astype(str)
-    for c in ["사번","이름","PIN_hash"]:
-        if c not in df.columns: df[c] = ""
-    if "사번" in df.columns: df["사번"] = df["사번"].astype(str)
+    try:
+        ws = _retry_call(get_workbook().worksheet, sheet_name)
+        records = _retry_call(ws.get_all_records, numericise_ignore=["all"])
+        df = pd.DataFrame(records)
+    except Exception:
+        if sheet_name == EMP_SHEET and "emp_df_cache" in st.session_state:
+            st.caption("※ 직원 시트 실시간 로딩 실패 → 캐시 사용")
+            df = st.session_state["emp_df_cache"].copy()
+        else:
+            raise
+
+    if "관리자여부" in df.columns:
+        df["관리자여부"] = df["관리자여부"].map(_to_bool)
+    if "재직여부" in df.columns:
+        df["재직여부"] = df["재직여부"].map(_to_bool)
+
+    for c in ["입사일", "퇴사일"]:
+        if c in df.columns:
+            df[c] = df[c].astype(str)
+
+    for c in ["사번", "이름", "PIN_hash"]:
+        if c not in df.columns:
+            df[c] = ""
+
+    if "사번" in df.columns:
+        df["사번"] = df["사번"].astype(str)
+
     return df
 
 def _get_ws_and_headers(sheet_name: str):
-    ws = get_workbook().worksheet(sheet_name); header = ws.row_values(1) or []
-    if not header: raise RuntimeError(f"'{sheet_name}' 헤더(1행) 없음")
+    ws = get_workbook().worksheet(sheet_name)
+    header = ws.row_values(1) or []
+    if not header:
+        raise RuntimeError(f"'{sheet_name}' 헤더(1행) 없음")
     return ws, header, {n:i+1 for i,n in enumerate(header)}
 
 def _find_row_by_sabun(ws, hmap, sabun: str) -> int:
     c = hmap.get("사번")
     if not c: return 0
     for i, v in enumerate(ws.col_values(c)[1:], start=2):
-        if str(v).strip() == str(sabun).strip(): return i
+        if str(v).strip() == str(sabun).strip():
+            return i
     return 0
 
 def _update_cell(ws, row, col, value): ws.update_cell(row, col, value)
 
 def _hide_doctors(df: pd.DataFrame) -> pd.DataFrame:
-    """직무가 '의사'인 행을 숨깁니다. (대소문자/공백 안전)"""
     if "직무" not in df.columns:
         return df
     col = df["직무"].astype(str).str.strip().str.lower()
     return df[~col.eq("의사")]
+
+@st.cache_data(ttl=120, show_spinner=False)
+def _build_name_map(df: pd.DataFrame) -> dict:
+    if df.empty:
+        return {}
+    return {str(r["사번"]): str(r.get("이름", "")) for _, r in df.iterrows()}
 
 # ── Session/Auth ──────────────────────────────────────────────────────────────
 SESSION_TTL_MIN = 30
@@ -151,14 +181,11 @@ def show_login_form(emp_df: pd.DataFrame):
 
     st.header("로그인")
 
-    # 폼으로 묶으면 Enter 로 제출 가능
     with st.form("login_form", clear_on_submit=False):
         sabun = st.text_input("사번", placeholder="예) 123456", key="login_sabun")
         pin   = st.text_input("PIN (숫자)", type="password", key="login_pin")
         submitted = st.form_submit_button("로그인", use_container_width=True, type="primary")
 
-    # ⌨️ Enter UX 보강: 사번 → PIN, PIN → 로그인
-    #   (DOM 탐색으로 해당 위젯을 찾아 포커스/클릭)
     components.html("""
     <script>
     (function(){
@@ -167,7 +194,6 @@ def show_login_form(emp_df: pd.DataFrame):
         const doc = qdoc();
         const label = [...doc.querySelectorAll('label')].find(l => l.textContent.trim() === labelText);
         if (!label) return null;
-        // streamlit 구조상 label의 부모에 input이 하나 들어있음
         return label.parentElement.querySelector('input');
       }
       function setup(){
@@ -175,9 +201,7 @@ def show_login_form(emp_df: pd.DataFrame):
         const sabun = labelInput('사번');
         const pin   = labelInput('PIN (숫자)');
         const loginBtn = [...doc.querySelectorAll('button')].find(b => b.innerText.trim() === '로그인');
-
         if (sabun && !sabun.value) sabun.focus();
-
         doc.addEventListener('keydown', function(e){
           const active = doc.activeElement;
           if (e.key === 'Enter'){
@@ -191,7 +215,6 @@ def show_login_form(emp_df: pd.DataFrame):
     </script>
     """, height=0)
 
-    # 폼 제출 처리
     if not submitted:
         st.stop()
 
@@ -215,7 +238,7 @@ def show_login_form(emp_df: pd.DataFrame):
     _start_session({
         "사번": str(r.get("사번","")),
         "이름": str(r.get("이름","")),
-        "관리자여부": False,  # 로그인 직후 main()에서 is_admin으로 재계산
+        "관리자여부": False,
     })
     st.success(f"{str(r.get('이름',''))}님 환영합니다!")
     st.rerun()
@@ -260,7 +283,6 @@ def read_auth_df() -> pd.DataFrame:
         ws = get_workbook().worksheet(AUTH_SHEET)
         df = pd.DataFrame(ws.get_all_records(numericise_ignore=["all"]))
     except Exception as e:
-        # 시드 관리자(SEED_ADMINS)로 최소 권한은 작동 ⇒ 읽기 실패 시 빈 DF 반환
         return _silent_df_exception(e, "권한 시트 읽기", AUTH_HEADERS)
 
     if df.empty:
@@ -273,7 +295,6 @@ def read_auth_df() -> pd.DataFrame:
     return df
 
 def is_admin(sabun: str) -> bool:
-    """시드 관리자 우선, 시트 조회 실패 시 False로 안전 처리."""
     s = str(sabun).strip()
     if s in {a["사번"] for a in SEED_ADMINS}:
         return True
@@ -380,7 +401,6 @@ def get_setting(key: str, default: str = "") -> str:
     return str(q.iloc[-1].get("값", default))
 
 def set_setting(key: str, value: str, memo: str, editor_sabun: str, editor_name: str):
-    """설정값 업서트. 실패해도 앱 흐름은 중단하지 않음."""
     try:
         ws = ensure_settings_sheet()
         header = ws.row_values(1) or SETTINGS_HEADERS
@@ -402,23 +422,14 @@ def set_setting(key: str, value: str, memo: str, editor_sabun: str, editor_name:
                 c = hmap.get(k)
                 if c:
                     row[c - 1] = v
-            put("키", key)
-            put("값", value)
-            put("메모", memo)
-            put("수정시각", now)
-            put("수정자사번", editor_sabun)
-            put("수정자이름", editor_name)
-            put("활성", True)
+            put("키", key); put("값", value); put("메모", memo); put("수정시각", now)
+            put("수정자사번", editor_sabun); put("수정자이름", editor_name); put("활성", True)
             _gs_retry(lambda: ws.append_row(row, value_input_option="USER_ENTERED"))
         else:
             updates = []
             for k, v in [
-                ("값", value),
-                ("메모", memo),
-                ("수정시각", now),
-                ("수정자사번", editor_sabun),
-                ("수정자이름", editor_name),
-                ("활성", True),
+                ("값", value), ("메모", memo), ("수정시각", now),
+                ("수정자사번", editor_sabun), ("수정자이름", editor_name), ("활성", True),
             ]:
                 c = hmap.get(k)
                 if c:
@@ -428,15 +439,12 @@ def set_setting(key: str, value: str, memo: str, editor_sabun: str, editor_name:
                 _gs_retry(lambda: ws.batch_update(updates))
         st.cache_data.clear()
     except Exception:
-        # 설정 저장 실패는 치명적이지 않음
         pass
 
 # ── Status Line ───────────────────────────────────────────────────────────────
 def render_status_line():
     try:
-        # 연결만 점검(예외가 안 나면 OK)
         _ = get_workbook()
-        # 간결한 상태 표기
         st.caption(f"DB연결 {kst_now_str()}")
     except Exception as e:
         st.error(f"DB 연결 실패: {e}", icon="🛑")
@@ -505,7 +513,6 @@ def ensure_eval_items_sheet():
 
 @st.cache_data(ttl=60, show_spinner=False)
 def read_eval_items_df(only_active: bool = True) -> pd.DataFrame:
-    """평가 항목 목록 (표시용, 에러는 조용히 무시)"""
     try:
         ensure_eval_items_sheet()
         ws = get_workbook().worksheet(EVAL_ITEMS_SHEET)
@@ -527,7 +534,6 @@ def read_eval_items_df(only_active: bool = True) -> pd.DataFrame:
     if "활성" in df.columns:
         df["활성"] = df["활성"].map(_to_bool)
 
-    # 정렬 및 필터
     cols = [c for c in ["순서", "항목"] if c in df.columns]
     if cols:
         df = df.sort_values(cols).reset_index(drop=True)
@@ -555,15 +561,21 @@ def _ensure_eval_response_sheet(year: int, item_ids: list[str]):
     return ws
 
 def _emp_name_by_sabun(emp_df: pd.DataFrame, sabun: str) -> str:
-    row = emp_df.loc[emp_df["사번"].astype(str) == str(sabun)]
+    s = str(sabun)
+    try:
+        m = st.session_state.get("name_by_sabun")
+        if isinstance(m, dict) and s in m:
+            return m[s]
+    except Exception:
+        pass
+    row = emp_df.loc[emp_df["사번"].astype(str) == s]
     if not row.empty:
         return str(row.iloc[0].get("이름", ""))
-    try:
-        full = read_sheet_df(EMP_SHEET)  # 직원 탭 필터 영향 회피용
-        row2 = full.loc[full["사번"].astype(str) == str(sabun)]
-        return "" if row2.empty else str(row2.iloc[0].get("이름", ""))
-    except Exception:
-        return ""
+    if "emp_df_cache" in st.session_state:
+        row2 = st.session_state["emp_df_cache"].loc[st.session_state["emp_df_cache"]["사번"].astype(str) == s]
+        if not row2.empty:
+            return str(row2.iloc[0].get("이름", ""))
+    return ""
 
 def upsert_eval_response(
     emp_df: pd.DataFrame,
@@ -574,14 +586,12 @@ def upsert_eval_response(
     scores: dict[str, int],
     status: str = "제출"
 ) -> dict:
-    """응답 업서트(없으면 append, 있으면 update). 에러는 호출부에서 처리."""
     items = read_eval_items_df(True)
     item_ids = [str(x) for x in items["항목ID"].tolist()]
     ws = _ensure_eval_response_sheet(year, item_ids)
     header = ws.row_values(1)
     hmap = {n: i + 1 for i, n in enumerate(header)}
 
-    # 점수 리스트(1~5 보정)
     def clamp5(v):
         try:
             v = int(v)
@@ -590,15 +600,12 @@ def upsert_eval_response(
         return min(5, max(1, v))
 
     scores_list = [clamp5(scores.get(iid, 3)) for iid in item_ids]
-
-    # 총점(100점 환산)
     total_100 = round(sum(scores_list) * (100.0 / max(1, len(item_ids) * 5)), 1)
 
     t_name = _emp_name_by_sabun(emp_df, target_sabun)
     e_name = _emp_name_by_sabun(emp_df, evaluator_sabun)
     now = kst_now_str()
 
-    # 기존 행 탐색
     values = ws.get_all_values()
     cY = hmap.get("연도"); cT = hmap.get("평가유형")
     cTS = hmap.get("평가대상사번"); cES = hmap.get("평가자사번")
@@ -619,27 +626,22 @@ def upsert_eval_response(
 
     if row_idx == 0:
         buf = [""] * len(header)
-
         def put(k, v):
             c = hmap.get(k)
             if c:
                 buf[c - 1] = v
-
         put("연도", int(year)); put("평가유형", eval_type)
         put("평가대상사번", str(target_sabun)); put("평가대상이름", t_name)
         put("평가자사번", str(evaluator_sabun)); put("평가자이름", e_name)
         put("총점", total_100); put("상태", status); put("제출시각", now)
-
         for iid, sc in zip(item_ids, scores_list):
             c = hmap.get(f"점수_{iid}")
             if c:
                 buf[c - 1] = sc
-
         ws.append_row(buf, value_input_option="USER_ENTERED")
         st.cache_data.clear()
         return {"action": "insert", "row": None, "total": total_100}
 
-    # update
     ws.update_cell(row_idx, hmap["총점"], total_100)
     ws.update_cell(row_idx, hmap["상태"], status)
     ws.update_cell(row_idx, hmap["제출시각"], now)
@@ -654,7 +656,6 @@ def upsert_eval_response(
 
 @st.cache_data(ttl=60, show_spinner=False)
 def read_my_eval_rows(year: int, sabun: str) -> pd.DataFrame:
-    """내가 제출한 평가 목록 (표시용, 에러는 조용히 무시)"""
     name = _eval_sheet_name(year)
     try:
         ws = get_workbook().worksheet(name)
@@ -674,10 +675,6 @@ def read_my_eval_rows(year: int, sabun: str) -> pd.DataFrame:
     return df
 
 def read_eval_saved_scores(year: int, eval_type: str, target_sabun: str, evaluator_sabun: str) -> tuple[dict, dict]:
-    """
-    저장된 점수 맵 {항목ID: 1~5}와 메타데이터 행(dict) 반환.
-    없으면 ({}, {}).
-    """
     try:
         items = read_eval_items_df(True)
         item_ids = [str(x) for x in items["항목ID"].tolist()]
@@ -812,12 +809,14 @@ def tab_eval_input(emp_df: pd.DataFrame):
     # 유니크 키 베이스
     kbase = f"evalbulk_{year}_{eval_type}_{evaluator_sabun}_{target_sabun}"
     edit_flag_key = f"__edit_on_{kbase}"
+    apply_saved_once_key = f"__apply_saved_once_{kbase}"
 
     # 자기평가 잠금 상태면: 제출 현황만 노출 (수정 모드로 전환 버튼 제공)
     if is_self_case and (already_submitted or locked_flag) and not st.session_state.get(edit_flag_key, False):
         st.info("이미 제출된 자기평가입니다. 아래 ‘수정 모드로 전환’ 버튼을 눌러야 편집할 수 있습니다.", icon="ℹ️")
         if st.button("✏️ 수정 모드로 전환", key=f"{kbase}_edit_on", use_container_width=True):
-            st.session_state[edit_flag_key] = True  # rerun 없이 그대로 진행
+            st.session_state[edit_flag_key] = True      # rerun 없이 그대로 진행
+            st.session_state[apply_saved_once_key] = False  # 저장값 강제 반영 플래그 초기화
         st.markdown("#### 내 제출 현황")
         try:
             my = read_my_eval_rows(int(year), evaluator_sabun)
@@ -839,7 +838,6 @@ def tab_eval_input(emp_df: pd.DataFrame):
 
     slider_key = f"{kbase}_slider"
     if slider_key not in st.session_state:
-        # 초기값: 저장된 점수 평균이 있으면 반영, 없으면 3
         if saved_scores:
             avg = round(sum(saved_scores.values()) / max(1, len(saved_scores)))
             st.session_state[slider_key] = int(min(5, max(1, avg)))
@@ -850,7 +848,7 @@ def tab_eval_input(emp_df: pd.DataFrame):
         bulk_score = st.slider("일괄 점수", min_value=1, max_value=5, step=1, key=slider_key)
     with c_btn:
         if st.button("일괄 적용", use_container_width=True, key=f"{kbase}_apply"):
-            st.session_state[f"__apply_bulk_{kbase}"] = int(bulk_score)  # 라디오 생성 전에 주입 플래그
+            st.session_state[f"__apply_bulk_{kbase}"] = int(bulk_score)
             st.toast(f"모든 항목에 {bulk_score}점 적용", icon="✅")
 
     # ── 일괄 적용 플래그 처리(라디오 생성 전에 값 세팅)
@@ -861,9 +859,15 @@ def tab_eval_input(emp_df: pd.DataFrame):
             st.session_state[f"eval_seg_{_iid}_{kbase}"] = str(_v)
         del st.session_state[apply_key]
 
-    # ── 항목 렌더링 (이름 | 설명 | 점수) — 기본값: 저장값 → 없으면 3
+    # ── 항목 렌더링 (이름 | 설명 | 점수)
     items_sorted = items.sort_values(["순서", "항목"]).reset_index(drop=True)
     scores = {}
+
+    # 수정 모드로 막 전환했거나(locked case) / 처음 로드 시 저장값을 강제 1회 주입
+    if st.session_state.get(edit_flag_key, False) and not st.session_state.get(apply_saved_once_key, False):
+        for _iid, _v in saved_scores.items():
+            st.session_state[f"eval_seg_{_iid}_{kbase}"] = str(int(_v))
+        st.session_state[apply_saved_once_key] = True
 
     for r in items_sorted.itertuples(index=False):
         iid = str(getattr(r, "항목ID"))
@@ -885,7 +889,6 @@ def tab_eval_input(emp_df: pd.DataFrame):
             if desc.strip():
                 st.markdown(f'<div class="desc">{desc.replace(chr(10), "<br/>")}</div>', unsafe_allow_html=True)
         with c3:
-            # default/index 주지 않음: 세션키 값으로만 제어 → DuplicateWidgetID 경고 방지
             st.radio(" ", ["1", "2", "3", "4", "5"], horizontal=True, key=rkey, label_visibility="collapsed")
         st.markdown('</div>', unsafe_allow_html=True)
 
@@ -914,7 +917,6 @@ def tab_eval_input(emp_df: pd.DataFrame):
             st.success(("제출 완료" if rep["action"] == "insert" else "업데이트 완료") + f" (총점 {rep['total']}점)", icon="✅")
             st.toast("평가 저장됨", icon="✅")
         except Exception:
-            # 저장 실패도 과한 스택은 숨기고 간단 안내만
             st.error("저장 중 문제가 발생했습니다. 네트워크/권한을 확인하세요.", icon="🛑")
 
     st.markdown("#### 내 제출 현황")
@@ -963,7 +965,7 @@ def read_jobdesc_df()->pd.DataFrame:
         if c in df.columns: df[c]=df[c].astype(str)
     for c in ["연도","버전"]:
         if c in df.columns:
-            def _i(x): 
+            def _i(x):
                 try: return int(float(str(x).strip()))
                 except: return 0
             df[c]=df[c].apply(_i)
@@ -1019,13 +1021,11 @@ def upsert_jobdesc(rec:dict, as_new_version:bool=False)->dict:
 def tab_job_desc(emp_df: pd.DataFrame):
     st.subheader("직무기술서")
 
-    # ── 로그인 사용자/권한
     u = st.session_state["user"]
     me_sabun = str(u["사번"])
     me_name  = str(u["이름"])
     allowed  = get_allowed_sabuns(emp_df, me_sabun, include_self=True)
 
-    # ── 대상자 선택
     st.markdown("#### 대상/연도 선택")
     if is_admin(me_sabun) or is_manager(emp_df, me_sabun):
         df = emp_df.copy()
@@ -1045,7 +1045,6 @@ def tab_job_desc(emp_df: pd.DataFrame):
         target_name  = me_name
         st.info(f"대상자: {target_name} ({target_sabun})", icon="👤")
 
-    # ── 관리자 설정 기본값 + 대상자 프로필 기본값을 '위젯 생성 이전'에 미리 계산
     today         = datetime.now(tz=tz_kst()).strftime("%Y-%m-%d")
     defval_create = get_setting("JD.제정일",   today)
     defval_update = get_setting("JD.개정일",   today)
@@ -1058,10 +1057,8 @@ def tab_job_desc(emp_df: pd.DataFrame):
     pref_series = str(row_emp.iloc[0].get("직종",  "")) if (not row_emp.empty and "직종" in row_emp.columns)  else ""
     pref_job    = str(row_emp.iloc[0].get("직무",  "")) if (not row_emp.empty and "직무" in row_emp.columns)  else ""
 
-    # 직무명 입력 위젯의 기본값을 사전에 결정(세션상태를 나중에 건드리지 않음)
     jobname_default = pref_job or ""
 
-    # ── 연도/버전/직무명/비고
     col = st.columns([1, 1, 2, 2])
     with col[0]:
         year = st.number_input("연도", min_value=2000, max_value=2100, value=int(datetime.now(tz=tz_kst()).year), step=1, key="job_year")
@@ -1072,7 +1069,6 @@ def tab_job_desc(emp_df: pd.DataFrame):
     with col[3]:
         memo = st.text_input("비고", value="", key="job_memo")
 
-    # ── 조직/직무 기본값(자동 채움 — 필요 시 수정 가능)
     c2 = st.columns([1, 1, 1, 1])
     with c2[0]:
         dept1 = st.text_input("부서1", value=pref_dept1, key="job_dept1")
@@ -1083,7 +1079,6 @@ def tab_job_desc(emp_df: pd.DataFrame):
     with c2[3]:
         series = st.text_input("직종",  value=pref_series, key="job_series")
 
-    # ── 날짜/검토주기: 관리자 설정값을 기본값으로
     c3 = st.columns([1, 1, 1])
     with c3[0]:
         d_create = st.text_input("제정일", value=defval_create, key="job_d_create")
@@ -1092,12 +1087,10 @@ def tab_job_desc(emp_df: pd.DataFrame):
     with c3[2]:
         review   = st.text_input("검토주기", value=defval_review, key="job_review")
 
-    # ── 본문
     job_summary = st.text_area("직무개요", "", height=80,  key="job_summary")
     job_main    = st.text_area("주업무",   "", height=120, key="job_main")
     job_other   = st.text_area("기타업무", "", height=80,  key="job_other")
 
-    # ── 교육/자격
     c4 = st.columns([1, 1, 1, 1, 1, 1])
     with c4[0]:
         edu_req    = st.text_input("필요학력", "", key="job_edu")
@@ -1120,7 +1113,6 @@ def tab_job_desc(emp_df: pd.DataFrame):
     with c5[2]:
         pass
 
-    # ── 서명
     c6 = st.columns([1, 2, 1])
     with c6[0]:
         sign_type = st.selectbox("서명방식", ["", "text", "image"], index=0, key="job_sign_type")
@@ -1386,7 +1378,7 @@ def read_dept_history_df()->pd.DataFrame:
     ensure_dept_history_sheet(); ws=get_workbook().worksheet(HIST_SHEET)
     df=pd.DataFrame(ws.get_all_records(numericise_ignore=["all"]))
     if df.empty: return df
-    for c in ["시작일","종료일","등록시각"]: 
+    for c in ["시작일","종료일","등록시각"]:
         if c in df.columns: df[c]=df[c].astype(str)
     if "사번" in df.columns: df["사번"]=df["사번"].astype(str)
     return df
@@ -1399,15 +1391,12 @@ def apply_department_change(emp_df:pd.DataFrame, sabun:str, new_dept1:str, new_d
     if row.empty: raise RuntimeError("사번을 찾지 못했습니다.")
     name=str(row.iloc[0].get("이름",""))
     header=ws_hist.row_values(1); hmap={n:i+1 for i,n in enumerate(header)}
-    # close open range
     values=ws_hist.get_all_values(); cS=hmap.get("사번"); cE=hmap.get("종료일")
     for i in range(2,len(values)+1):
         if values[i-1][cS-1].strip()==str(sabun).strip() and values[i-1][cE-1].strip()=="":
             ws_hist.update_cell(i, cE, prev_end)
-    # append new
     rec={"사번":str(sabun),"이름":name,"부서1":new_dept1,"부서2":new_dept2,"시작일":start_str,"종료일":"","변경사유":reason,"승인자":approver,"메모":"","등록시각":kst_now_str()}
     rowbuf=[rec.get(h,"") for h in header]; ws_hist.append_row(rowbuf, value_input_option="USER_ENTERED")
-    # apply now
     applied=False
     if start_date<=datetime.now(tz=tz_kst()).date():
         ws_emp, header_emp, hmap_emp = _get_ws_and_headers(EMP_SHEET)
@@ -1595,12 +1584,11 @@ def tab_admin_eval_items():
                                              "순서":st.column_config.NumberColumn(step=1, min_value=0)}, num_rows="fixed")
         if st.button("순서 일괄 저장", use_container_width=True, key="adm_eval_order_save"):
             try:
-                # 간단 일괄 반영
                 ws=get_workbook().worksheet(EVAL_ITEMS_SHEET); header=ws.row_values(1); hmap={n:i+1 for i,n in enumerate(header)}
                 col_id=hmap.get("항목ID"); col_ord=hmap.get("순서")
                 vals=ws.col_values(col_id); pos={str(v).strip():i for i,v in enumerate(vals[1:],start=2)}
                 for _, r in edited.iterrows():
-                    iid=str(r["항목ID"]).strip(); 
+                    iid=str(r["항목ID"]).strip()
                     if iid in pos: ws.update_cell(pos[iid], col_ord, int(r["순서"]))
                 st.cache_data.clear(); st.success("순서가 반영되었습니다."); st.rerun()
             except Exception as e:
@@ -1625,12 +1613,10 @@ def tab_admin_eval_items():
             if not name.strip(): st.error("항목명을 입력하세요.")
             else:
                 try:
-                    # upsert
                     ensure_eval_items_sheet(); ws=get_workbook().worksheet(EVAL_ITEMS_SHEET)
                     header=ws.row_values(1); hmap={n:i+1 for i,n in enumerate(header)}
                     if not item_id:
-                        # new id
-                        vals=ws.col_values(hmap.get("항목ID"))[1:]; nums=[]; 
+                        vals=ws.col_values(hmap.get("항목ID"))[1:]; nums=[]
                         for v in vals:
                             s=str(v).strip()
                             if s.startswith("ITM"):
@@ -1641,12 +1627,12 @@ def tab_admin_eval_items():
                         def put(k,v):
                             c=hmap.get(k)
                             if c: rowbuf[c-1]=v
-                        put("항목ID", new_id); put("항목", name.strip()); put("내용", desc.strip()); put("순서", int(order)); put("활성", bool(active)); 
+                        put("항목ID", new_id); put("항목", name.strip()); put("내용", desc.strip()); put("순서", int(order)); put("활성", bool(active))
                         if "비고" in hmap: put("비고", memo.strip())
                         ws.append_row(rowbuf, value_input_option="USER_ENTERED")
                         st.success(f"저장 완료 (항목ID: {new_id})"); st.cache_data.clear(); st.rerun()
                     else:
-                        idx=0; col_id=hmap.get("항목ID"); vals=ws.col_values(col_id); 
+                        idx=0; col_id=hmap.get("항목ID"); vals=ws.col_values(col_id)
                         for i,v in enumerate(vals[1:], start=2):
                             if str(v).strip()==str(item_id).strip(): idx=i; break
                         if idx==0:
@@ -1774,33 +1760,31 @@ def tab_admin_acl(emp_df: pd.DataFrame):
 
 # ── 메인 ──────────────────────────────────────────────────────────────────────
 def main():
-    # 제목을 조금 작게 (H2)
     st.markdown(f"## {APP_TITLE}")
     render_status_line()
 
-    # 1) 직원 시트 로딩
+    # 1) 직원 시트 로딩 + 세션 캐시/네임맵 구성
     try:
         emp_df_all = read_sheet_df(EMP_SHEET)
     except Exception as e:
         st.error(f"'{EMP_SHEET}' 시트 로딩 실패: {e}")
         return
+    st.session_state["emp_df_cache"] = emp_df_all.copy()
+    st.session_state["name_by_sabun"] = _build_name_map(emp_df_all)
 
     # 2) 로그인 요구
     require_login(emp_df_all)
 
-    # 3) 로그인 직후: 관리자 플래그 최신화(시드/시트 기준)
+    # 3) 로그인 직후: 관리자 플래그 최신화
     try:
         st.session_state["user"]["관리자여부"] = is_admin(st.session_state["user"]["사번"])
     except Exception:
-        # 권한 시트 조회 실패 시, 시드만으로 판정하고 경고만 표시
         st.session_state["user"]["관리자여부"] = (
             st.session_state["user"]["사번"] in {a["사번"] for a in SEED_ADMINS}
         )
         st.warning("권한 시트 조회 오류로 관리자 여부를 시드 기준으로 판정했습니다.", icon="⚠️")
-    
+
     # 4) 데이터 뷰 분기
-    # - 직원 탭: 전체 데이터(의사 포함)
-    # - 그 외 탭(평가/직무기술서/직무능력/관리자): '의사' 숨김
     emp_df_for_staff = emp_df_all
     emp_df_for_rest  = _hide_doctors(emp_df_all)
 
@@ -1815,29 +1799,24 @@ def main():
         if st.button("로그아웃", use_container_width=True):
             logout()
 
-    # 6) 탭 구성 (한 번만!)
+    # 6) 탭 구성
     if u.get("관리자여부", False):
         tabs = st.tabs(["직원", "평가", "직무기술서", "직무능력평가", "관리자", "도움말"])
     else:
         tabs = st.tabs(["직원", "평가", "직무기술서", "직무능력평가", "도움말"])
 
-    # 직원 탭: 전체 데이터
     with tabs[0]:
         tab_staff(emp_df_for_staff)
 
-    # 평가: 의사 숨김
     with tabs[1]:
         tab_eval_input(emp_df_for_rest)
 
-    # 직무기술서: 의사 숨김
     with tabs[2]:
         tab_job_desc(emp_df_for_rest)
 
-    # 직무능력평가: 의사 숨김
     with tabs[3]:
         tab_competency(emp_df_for_rest)
 
-    # 관리자 탭: 의사 숨김 데이터 사용
     if u.get("관리자여부", False):
         with tabs[4]:
             st.subheader("관리자 메뉴")
@@ -1857,7 +1836,6 @@ def main():
             else:
                 tab_admin_acl(emp_df_for_rest)
 
-    # 도움말
     with tabs[-1]:
         st.markdown(
             """
@@ -1867,7 +1845,6 @@ def main():
             - 상태표시: 상단에 'DB연결 ... (KST)'
             """
         )
-        # (선택) 원본 스프레드시트 빠른 이동 링크
         try:
             sheet_id = st.secrets["sheets"]["HR_SHEET_ID"]
             url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit"
@@ -1878,9 +1855,3 @@ def main():
 # ── 엔트리포인트 ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
