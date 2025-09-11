@@ -291,6 +291,80 @@ def get_allowed_sabuns(emp_df:pd.DataFrame,sabun:str,include_self:bool=True)->se
 def is_manager(emp_df:pd.DataFrame,sabun:str)->bool:
     return len(get_allowed_sabuns(emp_df,sabun,include_self=False))>0
 
+# ── Settings: 직무기술서 기본값 ────────────────────────────────────────────────
+SETTINGS_SHEET = "설정"
+SETTINGS_HEADERS = ["키", "값", "메모", "수정시각", "수정자사번", "수정자이름", "활성"]
+
+def ensure_settings_sheet():
+    wb = get_workbook()
+    try:
+        ws = wb.worksheet(SETTINGS_SHEET)
+        header = ws.row_values(1) or []
+        need = [h for h in SETTINGS_HEADERS if h not in header]
+        if need:
+            ws.update("1:1", [header + need])
+        return ws
+    except WorksheetNotFound:
+        ws = wb.add_worksheet(title=SETTINGS_SHEET, rows=200, cols=10)
+        ws.update("A1", [SETTINGS_HEADERS])
+        return ws
+
+@st.cache_data(ttl=60, show_spinner=False)
+def read_settings_df() -> pd.DataFrame:
+    ensure_settings_sheet()
+    ws = get_workbook().worksheet(SETTINGS_SHEET)
+    df = pd.DataFrame(ws.get_all_records(numericise_ignore=["all"]))
+    if df.empty:
+        return pd.DataFrame(columns=SETTINGS_HEADERS)
+    if "활성" in df.columns:
+        df["활성"] = df["활성"].map(_to_bool)
+    for c in ["키", "값", "메모", "수정자사번", "수정자이름"]:
+        if c in df.columns:
+            df[c] = df[c].astype(str)
+    return df
+
+def get_setting(key: str, default: str = "") -> str:
+    df = read_settings_df()
+    if df.empty or "키" not in df.columns:
+        return default
+    q = df[(df["키"].astype(str) == str(key)) & (df.get("활성", True) == True)]
+    if q.empty:
+        return default
+    return str(q.iloc[-1].get("값", default))
+
+def set_setting(key: str, value: str, memo: str, editor_sabun: str, editor_name: str):
+    ensure_settings_sheet()
+    ws = get_workbook().worksheet(SETTINGS_SHEET)
+    header = ws.row_values(1)
+    hmap = {n: i + 1 for i, n in enumerate(header)}
+
+    col_key = hmap.get("키")
+    row_idx = 0
+    if col_key:
+        vals = ws.col_values(col_key)
+        for i, v in enumerate(vals[1:], start=2):
+            if str(v).strip() == str(key).strip():
+                row_idx = i
+                break
+
+    now = kst_now_str()
+    if row_idx == 0:
+        row = [""] * len(header)
+        def put(k, v):
+            c = hmap.get(k)
+            if c: row[c - 1] = v
+        put("키", key); put("값", value); put("메모", memo); put("수정시각", now)
+        put("수정자사번", editor_sabun); put("수정자이름", editor_name); put("활성", True)
+        ws.append_row(row, value_input_option="USER_ENTERED")
+    else:
+        ws.update_cell(row_idx, hmap["값"], value)
+        if "메모" in hmap: ws.update_cell(row_idx, hmap["메모"], memo)
+        if "수정시각" in hmap: ws.update_cell(row_idx, hmap["수정시각"], now)
+        if "수정자사번" in hmap: ws.update_cell(row_idx, hmap["수정자사번"], editor_sabun)
+        if "수정자이름" in hmap: ws.update_cell(row_idx, hmap["수정자이름"], editor_name)
+        if "활성" in hmap: ws.update_cell(row_idx, hmap["활성"], True)
+    st.cache_data.clear()
+
 # ── Status Line ───────────────────────────────────────────────────────────────
 def render_status_line():
     try:
@@ -692,11 +766,14 @@ def upsert_jobdesc(rec:dict, as_new_version:bool=False)->dict:
 
 def tab_job_desc(emp_df: pd.DataFrame):
     st.subheader("직무기술서")
+
+    # 로그인 사용자/권한
     u = st.session_state["user"]
     me_sabun = str(u["사번"])
     me_name = str(u["이름"])
-    allowed = get_allowed_sabuns(emp_df, me_sabun, include_self=True)
 
+    # 대상 선택(관리자/매니저는 범위 내에서 선택, 직원은 본인)
+    allowed = get_allowed_sabuns(emp_df, me_sabun, include_self=True)
     st.markdown("#### 대상/연도 선택")
     if is_admin(me_sabun) or is_manager(emp_df, me_sabun):
         df = emp_df.copy()
@@ -716,24 +793,27 @@ def tab_job_desc(emp_df: pd.DataFrame):
         target_name = me_name
         st.info(f"대상자: {target_name} ({target_sabun})", icon="👤")
 
-    # 대상 직원의 현재 정보로 기본값 구성
-    row_emp = emp_df.loc[emp_df["사번"].astype(str) == str(target_sabun)]
-    base = row_emp.iloc[0] if not row_emp.empty else {}
-    pref_dept1 = str(base.get("부서1", "")) if isinstance(base, pd.Series) else ""
-    pref_dept2 = str(base.get("부서2", "")) if isinstance(base, pd.Series) else ""
-    pref_group = str(base.get("직군", "")) if isinstance(base, pd.Series) else ""
-    pref_series = str(base.get("직종", base.get("직무", ""))) if isinstance(base, pd.Series) else ""
-    pref_jobname = str(base.get("직무명", base.get("직무", ""))) if isinstance(base, pd.Series) else ""
-
+    # 연도
     this_year = datetime.now(tz=tz_kst()).year
-    today = datetime.now(tz=tz_kst()).strftime("%Y-%m-%d")
-    col = st.columns([1, 2, 2])
-    with col[0]:
+    col_year = st.columns([1, 3])
+    with col_year[0]:
         year = st.number_input("연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="job_year")
 
-    # 이번 저장에 사용될 자동 버전 안내
-    next_ver = _jobdesc_next_version(target_sabun, int(year))
-    st.caption(f"이번 저장 시 자동 버전: v{next_ver:02d}")
+    # 대상자 기본값(조직/직무)
+    tgt_row = emp_df.loc[emp_df["사번"].astype(str) == str(target_sabun)]
+    pref_dept1  = ("" if tgt_row.empty else str(tgt_row.iloc[0].get("부서1", "")))
+    pref_dept2  = ("" if tgt_row.empty else str(tgt_row.iloc[0].get("부서2", "")))
+    pref_group  = ("" if tgt_row.empty else str(tgt_row.iloc[0].get("직군", "")))
+    pref_series = ("" if tgt_row.empty else str(tgt_row.iloc[0].get("직종", "")))
+    pref_jobname = ("" if tgt_row.empty else str(tgt_row.iloc[0].get("직무", "")))
+
+    # 날짜 기본값(관리자 설정 → 없으면 오늘/1년)
+    today = datetime.now(tz=tz_kst()).strftime("%Y-%m-%d")
+    defval_create = get_setting("JD.제정일", today)
+    defval_update = get_setting("JD.개정일", today)
+    defval_review = get_setting("JD.검토주기", "1년")
+
+    st.markdown("#### 기본 정보")
 
     # 조직/직무 기본값(자동 채움 — 필요 시 수정 가능)
     c2 = st.columns([1, 1, 1, 1])
@@ -746,86 +826,111 @@ def tab_job_desc(emp_df: pd.DataFrame):
     with c2[3]:
         series = st.text_input("직종", value=pref_series, key="job_series")
 
+    # 직무명 + 제정/검토
     c3 = st.columns([2, 2, 1])
     with c3[0]:
         jobname = st.text_input("직무명", value=pref_jobname, key="job_jobname")
     with c3[1]:
-        d_create = st.text_input("제정일", value=today, key="job_d_create")
+        d_create = st.text_input("제정일", value=st.session_state.get("job_d_create", defval_create), key="job_d_create")
     with c3[2]:
-        review = st.text_input("검토주기", value="1년", key="job_review")
+        review = st.text_input("검토주기", value=st.session_state.get("job_review", defval_review), key="job_review")
 
+    # 개정/비고
     c4 = st.columns([2, 2])
     with c4[0]:
-        d_update = st.text_input("개정일", value=today, key="job_d_update")
+        d_update = st.text_input("개정일", value=st.session_state.get("job_d_update", defval_update), key="job_d_update")
     with c4[1]:
         memo = st.text_input("비고", value="", key="job_memo")
 
     # 본문
+    st.markdown("#### 직무 내용")
     job_summary = st.text_area("직무개요", "", height=80, key="job_summary")
     job_main    = st.text_area("주업무", "", height=120, key="job_main")
     job_other   = st.text_area("기타업무", "", height=80, key="job_other")
 
-    # 교육 요건 (직원공통필수교육만 크게)
-    cEdu1 = st.columns([1, 1, 1])
-    with cEdu1[0]:
-        edu_req = st.text_input("필요학력", "", key="job_edu")
-    with cEdu1[1]:
+    # 교육/자격 (직원공통필수교육: 크게)
+    st.markdown("#### 요건/교육")
+    c5 = st.columns([1, 1, 1])
+    with c5[0]:
+        edu_req   = st.text_input("필요학력", "", key="job_edu")
+    with c5[1]:
         major_req = st.text_input("전공계열", "", key="job_major")
-    with cEdu1[2]:
-        license_ = st.text_input("면허", "", key="job_license")
+    with c5[2]:
+        license_  = st.text_input("면허", "", key="job_license")
 
-    edu_common = st.text_area("직원공통필수교육", "", height=180, key="job_edu_common")
-    cEdu2 = st.columns([1, 1, 1])
-    with cEdu2[0]:
-        edu_cont = st.text_input("보수교육", "", key="job_edu_cont")
-    with cEdu2[1]:
-        edu_etc = st.text_input("기타교육", "", key="job_edu_etc")
-    with cEdu2[2]:
-        edu_spec = st.text_input("특성화교육", "", key="job_edu_spec")
-
-    career = st.text_input("경력(자격요건)", "", key="job_career")
-
-    # 서명
-    c6 = st.columns([1, 1, 2])
+    c6 = st.columns([1, 1, 1])
     with c6[0]:
-        sign_type = st.selectbox("서명방식", ["", "text", "image"], index=0, key="job_sign_type")
+        edu_common = st.text_area("직원공통필수교육", "", height=200, key="job_edu_common")
     with c6[1]:
-        sign_data = st.text_input("서명데이터", "", key="job_sign_data")
+        edu_cont   = st.text_input("보수교육", "", key="job_edu_cont")
     with c6[2]:
+        edu_spec   = st.text_input("특성화교육", "", key="job_edu_spec")
+
+    c7 = st.columns([1, 1, 1])
+    with c7[0]:
+        edu_etc  = st.text_input("기타교육", "", key="job_edu_etc")
+    with c7[1]:
+        career   = st.text_input("경력(자격요건)", "", key="job_career")
+    with c7[2]:
+        pass
+
+    # 서명(선택)
+    st.markdown("#### 서명(선택)")
+    c8 = st.columns([1, 2])
+    with c8[0]:
+        sign_type = st.selectbox("서명방식", ["", "text", "image"], index=0, key="job_sign_type")
+    with c8[1]:
+        sign_data = st.text_input("서명데이터", "", key="job_sign_data")
+
+    # 저장 버튼
+    st.markdown("---")
+    col_btn = st.columns([1, 3])
+    with col_btn[0]:
         do_save = st.button("저장/업서트", type="primary", use_container_width=True, key="job_save_btn")
 
     if do_save:
-        rec = {
-            "사번": str(target_sabun),
-            "연도": int(year),
-            "버전": int(next_ver),  # 자동 버전
-            "부서1": dept1,
-            "부서2": dept2,
-            "작성자사번": me_sabun,
-            "작성자이름": _emp_name_by_sabun(emp_df, me_sabun),
-            "직군": group,
-            "직종": series,
-            "직무명": jobname,
-            "제정일": d_create,
-            "개정일": d_update,
-            "검토주기": review,
-            "직무개요": job_summary,
-            "주업무": job_main,
-            "기타업무": job_other,
-            "필요학력": edu_req,
-            "전공계열": major_req,
-            "직원공통필수교육": edu_common,
-            "보수교육": edu_cont,
-            "기타교육": edu_etc,
-            "특성화교육": edu_spec,
-            "면허": license_,
-            "경력(자격요건)": career,
-            "비고": memo,
-            "서명방식": sign_type,
-            "서명데이터": sign_data,
-        }
+        # 기존 버전 존재 시 → 최신 버전 업데이트, 없으면 자동 신버전
         try:
-            rep = upsert_jobdesc(rec, as_new_version=False)  # 버전은 위에서 지정
+            df_exist = read_jobdesc_df()
+            latest_ver = 0
+            if not df_exist.empty:
+                sub = df_exist[(df_exist["사번"].astype(str) == str(target_sabun)) &
+                               (df_exist["연도"].astype(int) == int(year))]
+                if not sub.empty:
+                    latest_ver = int(sub["버전"].astype(int).max())
+
+            rec = {
+                "사번": str(target_sabun),
+                "연도": int(year),
+                "버전": int(latest_ver),  # 0이면 upsert에서 자동 신버전, >0이면 해당 버전 업데이트
+                # "소속": 생략(필요 시 추가)
+                "부서1": dept1,
+                "부서2": dept2,
+                "작성자사번": me_sabun,
+                "작성자이름": _emp_name_by_sabun(emp_df, me_sabun),
+                "직군": group,
+                "직종": series,
+                "직무명": jobname,
+                "제정일": d_create,
+                "개정일": d_update,
+                "검토주기": review,
+                "직무개요": job_summary,
+                "주업무": job_main,
+                "기타업무": job_other,
+                "필요학력": edu_req,
+                "전공계열": major_req,
+                "직원공통필수교육": edu_common,
+                "보수교육": edu_cont,
+                "기타교육": edu_etc,
+                "특성화교육": edu_spec,
+                "면허": license_,
+                "경력(자격요건)": career,
+                "비고": memo,
+                "서명방식": sign_type,
+                "서명데이터": sign_data,
+            }
+
+            rep = upsert_jobdesc(rec, as_new_version=False)
             st.success(f"저장 완료 (버전 {rep['version']})", icon="✅")
         except Exception as e:
             st.exception(e)
@@ -1344,6 +1449,39 @@ def tab_admin_eval_items():
                 except Exception as e:
                     st.exception(e)
 
+def tab_admin_jobdesc_defaults():
+    st.markdown("### 직무기술서 기본값")
+    cur_create = get_setting("JD.제정일", "")
+    cur_update = get_setting("JD.개정일", "")
+    cur_review = get_setting("JD.검토주기", "")
+
+    c = st.columns([1, 1, 1])
+    with c[0]:
+        v_create = st.text_input("제정일 기본값", value=cur_create, key="adm_jd_create")
+    with c[1]:
+        v_update = st.text_input("개정일 기본값", value=cur_update, key="adm_jd_update")
+    with c[2]:
+        v_review = st.text_input("검토주기 기본값", value=cur_review, key="adm_jd_review")
+
+    memo = st.text_input("비고(선택)", value="", key="adm_jd_memo")
+
+    if st.button("저장", type="primary", use_container_width=True, key="adm_jd_save"):
+        u = st.session_state.get("user", {"사번": "", "이름": ""})
+        try:
+            set_setting("JD.제정일", v_create, memo, str(u.get("사번", "")), str(u.get("이름", "")))
+            set_setting("JD.개정일", v_update, memo, str(u.get("사번", "")), str(u.get("이름", "")))
+            set_setting("JD.검토주기", v_review, memo, str(u.get("사번", "")), str(u.get("이름", "")))
+            st.success("저장되었습니다.", icon="✅")
+        except Exception as e:
+            st.exception(e)
+
+    st.divider()
+    df = read_settings_df()
+    if df.empty:
+        st.caption("설정 데이터가 없습니다.")
+    else:
+        st.dataframe(df.sort_values("키"), use_container_width=True, height=240)
+
 def tab_admin_acl(emp_df: pd.DataFrame):
     st.markdown("### 권한 관리")
     df_auth=read_auth_df()
@@ -1460,19 +1598,21 @@ def main():
             st.subheader("관리자 메뉴")
             admin_page = st.radio(
                 "기능 선택",
-                ["PIN 관리", "부서(근무지) 이동", "평가 항목 관리", "권한 관리"],
+                ["PIN 관리", "부서(근무지) 이동", "평가 항목 관리", "권한 관리", "직무기술서 설정"],
                 horizontal=True,
                 key="admin_page_selector",
             )
             st.divider()
             if admin_page == "PIN 관리":
-                tab_admin_pin(emp_df_nodoctor)
+                tab_admin_pin(emp_df_no_md)
             elif admin_page == "부서(근무지) 이동":
-                tab_admin_transfer(emp_df_nodoctor)
+                tab_admin_transfer(emp_df_no_md)
             elif admin_page == "평가 항목 관리":
                 tab_admin_eval_items()
-            else:
-                tab_admin_acl(emp_df_nodoctor)
+            elif admin_page == "권한 관리":
+                tab_admin_acl(emp_df_no_md)
+            else:  # 직무기술서 설정
+                tab_admin_jobdesc_defaults()
 
     # 도움말
     with tabs[-1]:
@@ -1488,6 +1628,7 @@ def main():
 # ── 엔트리포인트 ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     main()
+
 
 
 
