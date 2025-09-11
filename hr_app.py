@@ -27,6 +27,9 @@ except ModuleNotFoundError:
     from google.oauth2.service_account import Credentials
 from gspread.exceptions import WorksheetNotFound, APIError
 
+# ── Page Config (FIRST Streamlit command) ────────────────────────────────────
+st.set_page_config(page_title="HISMEDI - HR App", layout="wide")
+
 # ── Guard Bootstrap (place ABOVE any @guard_page usage) ──────────────────────
 try:
     guard_page  # already defined?
@@ -1688,7 +1691,6 @@ def section_main():
 
 # ── 엔트리포인트 ─────────────────────────────────────────────────────────────
 def main():
-    st.set_page_config(page_title="HR App", layout="wide")
     init_state()
     render_global_actions()
     section_main()
@@ -1698,4 +1700,3 @@ if __name__ == "__main__":
         main()
     except Exception as e:
         show_recovery_card(e)
-
