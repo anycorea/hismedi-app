@@ -1663,22 +1663,15 @@ def section_main():
     except Exception as e:
         show_recovery_card(e)
 
-
-# (엔트리) hr_app.py 최하단의 실행부 예시
-def run_app():
+# ── 엔트리포인트 ─────────────────────────────────────────────────────────────
+def main():
     st.set_page_config(page_title="HR App", layout="wide")
     init_state()
     render_global_actions()
     section_main()
 
-# Streamlit single-file 실행 환경이면 아래 한 줄로 충분합니다.
 if __name__ == "__main__":
     try:
-        run_app()
+        main()
     except Exception as e:
         show_recovery_card(e)
-
-# ── 엔트리포인트 ─────────────────────────────────────────────────────────────
-if __name__ == "__main__":
-    main()
-
