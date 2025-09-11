@@ -127,7 +127,12 @@ def render_global_actions():
         st.markdown("### ⚙️ 빠른 복구")
         st.button("🔄 다시 시도", on_click=st.rerun, use_container_width=True)
         st.button("🧹 상태 초기화", on_click=soft_reset, use_container_width=True)
-        st.button("♻️ 강제 리ロード", on_click=hard_reload, use_container_width=True)
+        st.button("♻️ 강제 리로드", on_click=hard_reload, use_container_width=True)
+
+        st.divider()
+        if st.session_state.get("auth_user"):
+            st.markdown(f"**사용자:** {st.session_state['auth_user']}")
+            st.button("🚪 로그아웃", on_click=logout, use_container_width=True)
 
 def guard_page(fn):
     def _inner(*args, **kwargs):
@@ -149,6 +154,125 @@ def call_api_with_refresh(fn, *args, **kwargs):
             except Exception:
                 pass
         raise
+
+# ── App Config + Branding (REPLACE) ──────────────────────────────────────────
+import streamlit as st
+
+# 1) 브라우저 탭 제목을 'HISMEDI - 인사/HR'로 고정
+APP_TITLE = "HISMEDI - 인사/HR"
+st.set_page_config(page_title=APP_TITLE, layout="wide", page_icon="🗂️")
+
+# 2) (선택) secrets에 사용자 정의 제목이 있으면 화면 표시는 그걸로 덮어쓰기
+DISPLAY_TITLE = (st.secrets.get("app", {}) or {}).get("TITLE", APP_TITLE)
+
+# 3) 상단 스타일 + 화면 내 큰 타이틀(본문 첫 줄에 표시)
+st.markdown(
+    f"""
+    <style>
+      .block-container {{ padding-top: 1.35rem !important; }}
+      .stTabs [role='tab']{{ padding:10px 16px !important; font-size:1.02rem !important; }}
+      .grid-head{{ font-size:.9rem; color:#6b7280; margin:.2rem 0 .5rem; }}
+      .app-title{{
+        font-size: 1.32rem; line-height: 1.5rem; margin: .1rem 0 .8rem; font-weight: 800;
+      }}
+      @media (min-width:1280px){{
+        .app-title{{ font-size: 1.38rem; line-height: 1.55rem; }}
+      }}
+    </style>
+    <div class='app-title'>🗂️ {DISPLAY_TITLE}</div>
+    """,
+    unsafe_allow_html=True,
+)
+
+# ── Auth: 사번+PIN 로그인 유틸 ───────────────────────────────────────────────
+import hashlib
+
+def _sha256(s:str) -> str:
+    return hashlib.sha256((s or "").encode()).hexdigest()
+
+def _get_pin_sheet(gc, sheet_key:str, ws_name:str):
+    ws = gc.open_by_key(sheet_key).worksheet(ws_name)
+    # 기대 컬럼: id / pin 또는 pin_hash / role(옵션)
+    rows = ws.get_all_records()
+    return rows
+
+def _check_pin(staff_id:str, pin_input:str, rows:list[dict]) -> dict | None:
+    """rows에서 ID 매칭 후 PIN 검증(평문 또는 sha256 둘 다 지원). 맞으면 해당 row 리턴"""
+    sid = (staff_id or "").strip()
+    p = (pin_input or "").strip()
+    if not sid or not p:
+        return None
+    for r in rows:
+        rid = str(r.get("id") or r.get("ID") or r.get("사번") or "").strip()
+        if rid != sid:
+            continue
+        stored_plain = str(r.get("pin") or r.get("PIN") or "").strip()
+        stored_hash  = str(r.get("pin_hash") or r.get("PIN_HASH") or "").strip()
+        if (stored_plain and stored_plain == p) or (stored_hash and stored_hash == _sha256(p)):
+            return r
+    return None
+
+def logout():
+    for k in list(st.session_state.keys()):
+        if k.startswith("auth_"):
+            del st.session_state[k]
+    st.rerun()
+
+def login_gate() -> bool:
+    """로그인 폼을 그리고 통과 여부를 반환."""
+    # 잠금/지연(과도한 시도 방지)
+    fail = st.session_state.get("auth_fail", 0)
+    lock_until = st.session_state.get("auth_lock_until")
+    now = datetime.now(tz_kst())
+    if lock_until and now < lock_until:
+        st.warning(f"잠금 상태입니다. {int((lock_until - now).total_seconds())}초 후 다시 시도하세요.")
+        return False
+
+    st.header("🔐 로그인")
+    with st.form("login_form", clear_on_submit=False, border=True):
+        c1, c2 = st.columns([1,1])
+        staff_id = c1.text_input("사번 / ID", value=st.session_state.get("auth_last_id",""))
+        pin_input = c2.text_input("PIN", type="password")
+        submitted = st.form_submit_button("로그인")
+
+    if not submitted:
+        return False
+
+    try:
+        gc = get_gspread_client(scope_drive_write=False)
+        sheet_key = S("gspread.SHEET_KEY", "")
+        ws_name   = S("gspread.WS_USER_PIN", "USER_PIN")  # 없으면 USER_PIN 사용
+        if not sheet_key:
+            st.error("secrets.gspread.SHEET_KEY 가 필요합니다.")
+            return False
+
+        rows = _get_pin_sheet(gc, sheet_key, ws_name)
+        row = _check_pin(staff_id, pin_input, rows)
+        if row:
+            # 성공
+            st.session_state["auth_user"] = staff_id
+            st.session_state["auth_role"] = str(row.get("role") or row.get("ROLE") or "user")
+            st.session_state["auth_profile"] = row
+            st.session_state["auth_fail"] = 0
+            st.success("로그인 성공")
+            st.rerun()
+            return True
+        else:
+            # 실패 누적
+            st.session_state["auth_last_id"] = staff_id
+            st.session_state["auth_fail"] = fail + 1
+            if st.session_state["auth_fail"] >= 5:
+                st.session_state["auth_lock_until"] = now + timedelta(seconds=30)
+                st.error("실패가 5회 누적되어 30초 잠금되었습니다.")
+            else:
+                st.error("ID 또는 PIN이 올바르지 않습니다.")
+            return False
+    except WorksheetNotFound:
+        st.error(f"워크시트 '{ws_name}' 를 찾을 수 없습니다.")
+        return False
+    except Exception as e:
+        show_recovery_card(e)
+        return False
 
 # ── Utils ─────────────────────────────────────────────────────────────────────
 def kst_now_str(): return datetime.now(tz=tz_kst()).strftime("%Y-%m-%d %H:%M:%S (%Z)")
@@ -1719,6 +1843,14 @@ def section_main():
 def main():
     init_state()
     render_global_actions()
+
+    # 1) 로그인 여부 확인
+    if not st.session_state.get("auth_user"):
+        ok = login_gate()
+        if not ok:
+            return  # 로그인 전엔 아래 페이지 렌더링 안 함
+
+    # 2) 로그인 후 실제 앱
     section_main()
 
 if __name__ == "__main__":
@@ -1726,7 +1858,3 @@ if __name__ == "__main__":
         main()
     except Exception as e:
         show_recovery_card(e)
-
-
-
-
