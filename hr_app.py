@@ -4,19 +4,22 @@ HISMEDI - 인사/HR (Google Sheets 연동)
 """
 
 # ── Imports ───────────────────────────────────────────────────────────────────
+import os
 import time, re, hashlib, random, secrets as pysecrets
 from datetime import datetime, timedelta
 import pandas as pd, streamlit as st
 
-# 👇👇 반드시 페이지에서 가장 첫 번째 Streamlit 명령이어야 함
-st.set_page_config(page_title="HISMEDI - HR App", layout="wide")
+# ── Page Config: 반드시 "첫 번째 Streamlit 명령"이어야 함 ────────────────────
+# ⚠️ 여기서는 st.secrets를 절대 참조하지 마세요.
+APP_TITLE = os.environ.get("APP_TITLE", "HISMEDI - HR App")  # st.secrets대신 환경변수/상수 사용
+st.set_page_config(page_title=APP_TITLE, layout="wide")
 
-# ── KST (secrets는 함수 호출 때 읽도록 변경) ───────────────────────────────
+# ── KST (secrets는 "호출 시점"에만 읽도록 lazy) ────────────────────────────
 def _get_app_tz() -> str:
     try:
+        # st.secrets 접근은 이제 안전(이미 set_page_config 호출 완료)
         return (st.secrets.get("app", {}) or {}).get("TZ", "Asia/Seoul")
     except Exception:
-        # secrets 미설정 시 기본값
         return "Asia/Seoul"
 
 try:
@@ -1709,4 +1712,3 @@ if __name__ == "__main__":
         main()
     except Exception as e:
         show_recovery_card(e)
-
