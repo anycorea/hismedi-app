@@ -151,14 +151,13 @@ def call_api_with_refresh(fn, *args, **kwargs):
 # ── App Config (REPLACE THIS WHOLE BLOCK) ────────────────────────────────────
 import os
 
-# ❗ set_page_config는 반드시 "첫 번째 Streamlit 호출"이어야 하므로
-#    여기서는 st.secrets에 접근하지 않습니다.
-DEFAULT_TITLE = os.environ.get("APP_TITLE", "HISMEDI - 인사/HR")
-st.set_page_config(page_title=DEFAULT_TITLE, layout="wide")
+# set_page_config 는 페이지의 "첫 번째 Streamlit 호출"이어야 합니다.
+# 여기서는 st.secrets 를 참조하지 말고, 환경변수/리터럴만 사용하세요.
+APP_TITLE = os.environ.get("APP_TITLE", "HISMEDI - 인사/HR")
+st.set_page_config(page_title=APP_TITLE, layout="wide")
 
-# 이제부터는 st.secrets 접근 OK (set_page_config 이후)
-# 비록 탭 제목은 이미 설정되었지만, 화면 상단에 제목을 표시하는 용도로는 사용 가능
-APP_TITLE = (st.secrets.get("app", {}) or {}).get("TITLE", DEFAULT_TITLE)
+# 이제부터는 st.secrets 접근 OK (화면 내부 표기용 제목에만 사용)
+DISPLAY_TITLE = (st.secrets.get("app", {}) or {}).get("TITLE", APP_TITLE)
 
 st.markdown(
     """
@@ -176,6 +175,9 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+
+# (선택) 화면 상단 제목 표시
+st.markdown(f"<div class='app-title'>{DISPLAY_TITLE}</div>", unsafe_allow_html=True)
 
 # ── Utils ─────────────────────────────────────────────────────────────────────
 def kst_now_str(): return datetime.now(tz=tz_kst()).strftime("%Y-%m-%d %H:%M:%S (%Z)")
@@ -1753,4 +1755,5 @@ if __name__ == "__main__":
         main()
     except Exception as e:
         show_recovery_card(e)
+
 
