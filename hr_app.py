@@ -415,7 +415,7 @@ EVAL_RESP_SHEET_PREFIX = "평가_응답_"
 EVAL_BASE_HEADERS = [
     "연도", "평가유형", "평가대상사번", "평가대상이름",
     "평가자사번", "평가자이름", "총점", "상태", "제출시각",
-    "서명_대상", "서명시각_대상", "서명_평가자", "서명시각_평가자", "잠금"
+    "서명_대상", "서명시각_대상", "서명_평가자", "서명시각_평가자", "잠금",
 ]
 EVAL_TYPES = ["자기", "1차", "2차"]
 
@@ -433,7 +433,7 @@ def ensure_eval_items_sheet():
         ws.update("1:1", [header + need])
 
 @st.cache_data(ttl=60, show_spinner=False)
-def read_eval_items_df(only_active=True) -> pd.DataFrame:
+def read_eval_items_df(only_active: bool = True) -> pd.DataFrame:
     ensure_eval_items_sheet()
     ws = get_workbook().worksheet(EVAL_ITEMS_SHEET)
     df = pd.DataFrame(ws.get_all_records(numericise_ignore=["all"]))
@@ -443,7 +443,7 @@ def read_eval_items_df(only_active=True) -> pd.DataFrame:
         def _i(x):
             try:
                 return int(float(str(x).strip()))
-            except:
+            except Exception:
                 return 0
         df["순서"] = df["순서"].apply(_i)
     if "활성" in df.columns:
@@ -506,8 +506,10 @@ def upsert_eval_response(
     now = kst_now_str()
 
     values = ws.get_all_values()
-    cY = hmap.get("연도"); cT = hmap.get("평가유형")
-    cTS = hmap.get("평가대상사번"); cES = hmap.get("평가자사번")
+    cY = hmap.get("연도")
+    cT = hmap.get("평가유형")
+    cTS = hmap.get("평가대상사번")
+    cES = hmap.get("평가자사번")
 
     row_idx = 0
     for i in range(2, len(values) + 1):
@@ -521,21 +523,23 @@ def upsert_eval_response(
             ):
                 row_idx = i
                 break
-        except:
+        except Exception:
             pass
 
     if row_idx == 0:
         buf = [""] * len(header)
         def put(k, v):
             c = hmap.get(k)
-            if c: buf[c - 1] = v
+            if c:
+                buf[c - 1] = v
         put("연도", int(year)); put("평가유형", eval_type)
         put("평가대상사번", str(target_sabun)); put("평가대상이름", t_name)
         put("평가자사번", str(evaluator_sabun)); put("평가자이름", e_name)
         put("총점", total_100); put("상태", status); put("제출시각", now)
         for iid, sc in zip(item_ids, scores_list):
             c = hmap.get(f"점수_{iid}")
-            if c: buf[c - 1] = sc
+            if c:
+                buf[c - 1] = sc
         ws.append_row(buf, value_input_option="USER_ENTERED")
         st.cache_data.clear()
         return {"action": "insert", "row": None, "total": total_100}
@@ -547,7 +551,8 @@ def upsert_eval_response(
     ws.update_cell(row_idx, hmap["평가자이름"], e_name)
     for iid, sc in zip(item_ids, scores_list):
         c = hmap.get(f"점수_{iid}")
-        if c: ws.update_cell(row_idx, c, sc)
+        if c:
+            ws.update_cell(row_idx, c, sc)
     st.cache_data.clear()
     return {"action": "update", "row": row_idx, "total": total_100}
 
@@ -584,7 +589,8 @@ def tab_eval_input(emp_df: pd.DataFrame):
 
     # 권한/대상
     u = st.session_state["user"]
-    me_sabun = str(u["사번"]); me_name = str(u["이름"])
+    me_sabun = str(u["사번"])
+    me_name = str(u["이름"])
     am_admin = is_admin(me_sabun)
     allowed = get_allowed_sabuns(emp_df, me_sabun, include_self=True)
 
@@ -596,95 +602,92 @@ def tab_eval_input(emp_df: pd.DataFrame):
             df = df[df["재직여부"] == True]
         df["표시"] = df.apply(lambda r: f"{str(r.get('사번',''))} - {str(r.get('이름',''))}", axis=1)
         df = df.sort_values(["사번"])
-        sel = st.selectbox("평가 **대상자** (사번 - 이름)", ["(선택)"] + df["표시"].tolist(), index=0, key="eval_target_select")
+        sel = st.selectbox(
+            "평가 **대상자** (사번 - 이름)",
+            ["(선택)"] + df["표시"].tolist(),
+            index=0,
+            key="eval_target_select",
+        )
         if sel == "(선택)":
             st.info("평가 대상자를 선택하세요.")
             return
         target_sabun = sel.split(" - ", 1)[0]
         target_name = _emp_name_by_sabun(emp_df, target_sabun)
         eval_type = st.radio("평가유형", EVAL_TYPES, horizontal=True, key="eval_type_radio")
-        evaluator_sabun = me_sabun; evaluator_name = me_name
+        evaluator_sabun = me_sabun
+        evaluator_name = me_name
     else:
-        target_sabun = me_sabun; target_name = me_name
+        target_sabun = me_sabun
+        target_name = me_name
         eval_type = "자기"
-        evaluator_sabun = me_sabun; evaluator_name = me_name
+        evaluator_sabun = me_sabun
+        evaluator_name = me_name
         st.info(f"대상자: {target_name} ({target_sabun}) · 평가유형: 자기", icon="👤")
 
-    # ── 상단: 제목 + 일괄 점수 드롭다운 + 적용 버튼 (같은 줄)
+    # 스타일(간격)
     st.markdown(
         """
         <style>
           .eval-desc{color:#4b5563;margin:.15rem 0 .35rem;}
           .eval-sep{border-bottom:1px solid rgba(49,51,63,.06);margin:.2rem 0 .35rem;}
-          .bulk-top .stButton > button{height:48px;padding:0 18px;}
-          .bulk-top .bulk-score [data-baseweb="select"] > div{
-            min-height:48px;display:flex;align-items:center;padding:6px 12px;
-          }
-          .bulk-top .bulk-score [data-baseweb="select"] div[aria-live="polite"]{
-            width:100%;display:flex;justify-content:center;
-          }
-          .bulk-top .bulk-score [data-baseweb="select"] span{font-size:20px;line-height:26px;}
-          div[data-baseweb="menu"] li{font-size:18px;padding:10px 12px;}
+          .bulk-top .stButton>button{height:48px;padding:0 18px;}
+          .bulk-top div[data-testid="stSlider"]{padding:6px 6px 0;}
         </style>
         """,
         unsafe_allow_html=True,
     )
 
+    # 상단: 제목 + 일괄 슬라이더 + 적용 버튼
     st.markdown('<div class="bulk-top">', unsafe_allow_html=True)
     kbase = f"evalbulk_{year}_{evaluator_sabun}"
-    col_head, col_sel, col_btn, _ = st.columns([2.4, 1.0, 1.0, 5.6], gap="small")
+    col_head, col_slider, col_btn, _ = st.columns([2.4, 2.2, 1.0, 6.4], gap="small")
     with col_head:
         st.markdown("#### 점수 입력 (각 1~5)")
-    with col_sel:
-        st.markdown('<div class="bulk-score">', unsafe_allow_html=True)
-        bulk_score = st.selectbox(
+    with col_slider:
+        bulk_key = f"{kbase}_slider"
+        bulk_val = st.select_slider(
             " ", options=[1, 2, 3, 4, 5],
-            index=int(st.session_state.get(f"{kbase}_default", 3)) - 1,
-            key=f"{kbase}_sel", label_visibility="collapsed",
+            value=st.session_state.get(bulk_key, 3),
+            key=bulk_key, label_visibility="collapsed",
         )
-        st.markdown("</div>", unsafe_allow_html=True)
     with col_btn:
         if st.button("일괄 적용", use_container_width=True, key=f"{kbase}_apply"):
-            v = int(bulk_score)
-            # 개별 라디오에 사용하는 key에 직접 주입 → 같은 런에서 즉시 반영
+            v = int(bulk_val)
             for iid in items["항목ID"].astype(str):
+                # 라디오의 값 타입에 맞춰 문자열로 저장
                 st.session_state[f"eval_score_{iid}"] = str(v)
-            st.session_state[f"{kbase}_default"] = v
             st.toast(f"모든 항목에 {v}점 적용", icon="✅")
     st.markdown("</div>", unsafe_allow_html=True)
 
     # 항목 렌더링
     items_sorted = items.sort_values(["순서", "항목"]).reset_index(drop=True)
     scores: dict[str, int] = {}
-
     for r in items_sorted.itertuples(index=False):
-        iid  = str(getattr(r, "항목ID"))
+        iid = str(getattr(r, "항목ID"))
         name = getattr(r, "항목") or ""
         desc = getattr(r, "내용") or ""
-
-        # 현재 값(없으면 3)
-        cur_str = st.session_state.get(f"eval_score_{iid}", "3")
-        if cur_str not in {"1", "2", "3", "4", "5"}:
-            cur_str = "3"
 
         row = st.columns([6, 4])
         with row[0]:
             st.markdown(f"**{name}**")
         with row[1]:
-            pick = st.radio(
-                " ", ["1", "2", "3", "4", "5"],
-                index=["1","2","3","4","5"].index(cur_str),
-                horizontal=True, key=f"eval_score_{iid}",  # ← 이 key에 값이 저장됨
-                label_visibility="collapsed",
-            )
+            key_score = f"eval_score_{iid}"
+            opts = ["1", "2", "3", "4", "5"]
+            if key_score in st.session_state:
+                _ = st.radio(" ", opts, key=key_score, horizontal=True, label_visibility="collapsed")
+            else:
+                _ = st.radio(" ", opts, index=2, key=key_score, horizontal=True, label_visibility="collapsed")
 
-        if desc.strip():
-            st.markdown(f"<div class='eval-desc'>{desc.replace(chr(10), '<br/>')}</div>", unsafe_allow_html=True)
+        if str(desc).strip():
+            st.markdown(
+                f"<div class='eval-desc'>{str(desc).replace(chr(10), '<br/>')}</div>",
+                unsafe_allow_html=True,
+            )
         st.markdown("<div class='eval-sep'></div>", unsafe_allow_html=True)
 
-        scores[iid] = int(st.session_state.get(f"eval_score_{iid}", "3"))
+        scores[iid] = int(st.session_state.get(key_score, "3"))
 
-    # 합계/저장
+    # 합계 / 저장
     total_100 = round(sum(scores.values()) * (100.0 / max(1, len(items_sorted) * 5)), 1)
     st.markdown("---")
     cM1, cM2 = st.columns([1, 3])
@@ -704,7 +707,10 @@ def tab_eval_input(emp_df: pd.DataFrame):
                 str(target_sabun), str(evaluator_sabun),
                 scores, "제출",
             )
-            st.success(("제출 완료" if rep["action"] == "insert" else "업데이트 완료") + f" (총점 {rep['total']}점)", icon="✅")
+            st.success(
+                ("제출 완료" if rep["action"] == "insert" else "업데이트 완료") + f" (총점 {rep['total']}점)",
+                icon="✅",
+            )
             st.toast("평가 저장됨", icon="✅")
         except Exception as e:
             st.exception(e)
@@ -1683,6 +1689,7 @@ def main():
 # ── 엔트리포인트 ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     main()
+
 
 
 
