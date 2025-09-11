@@ -190,9 +190,8 @@ def show_login_form(emp_df: pd.DataFrame):
         st.error("재직 상태가 아닙니다.")
         st.stop()
 
-    if str(r.get("PIN_hash","")).strip().lower() != _sha256_hex(pin):
-        st.error("PIN이 올바르지 않습니다.")
-        st.stop()
+    if str(r.get("PIN_hash","")).strip().lower() != _sha256_hex(pin.strip()):
+        st.error("PIN이 올바르지 않습니다."); st.stop()
 
     _start_session({
         "사번": str(r.get("사번","")),
@@ -1291,7 +1290,8 @@ def tab_admin_pin(emp_df: pd.DataFrame):
             if "PIN_hash" not in hmap: st.error(f"'{EMP_SHEET}' 시트에 PIN_hash가 없습니다."); return
             r=_find_row_by_sabun(ws,hmap,sabun)
             if r==0: st.error("시트에서 사번을 찾지 못했습니다."); return
-            _update_cell(ws, r, hmap["PIN_hash"], _sha256_hex(pin1)); st.cache_data.clear()
+            _update_cell(ws, r, hmap["PIN_hash"], _sha256_hex(pin1.strip()))
+            st.cache_data.clear()
             st.success("PIN 저장 완료", icon="✅")
         if do_clear:
             ws, header, hmap = _get_ws_and_headers(EMP_SHEET)
@@ -1689,6 +1689,7 @@ def main():
 # ── 엔트리포인트 ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     main()
+
 
 
 
