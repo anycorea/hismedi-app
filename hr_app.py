@@ -746,7 +746,9 @@ def tab_eval_input(emp_df: pd.DataFrame):
         st.info("이미 제출된 자기평가입니다. 아래 ‘수정 모드로 전환’ 버튼을 눌러야 편집할 수 있습니다.", icon="ℹ️")
         if st.button("✏️ 수정 모드로 전환", key=f"{kbase}_edit_on", use_container_width=True):
             st.session_state[edit_flag_key] = True
-            st.experimental_rerun()
+            st.rerun()  # ← 여기로 교체
+            return      # 안전 종료(동일 런에서 아래 UI 렌더 방지)
+
         st.markdown("#### 내 제출 현황")
         try:
             my = read_my_eval_rows(int(year), evaluator_sabun)
@@ -1823,4 +1825,5 @@ def main():
 # ── 엔트리포인트 ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     main()
+
 
