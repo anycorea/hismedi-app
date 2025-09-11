@@ -441,6 +441,8 @@ def read_my_eval_rows(year:int, sabun:str)->pd.DataFrame:
 
 def tab_eval_input(emp_df: pd.DataFrame):
     st.subheader("평가")
+
+    # 연도 선택
     this_year = datetime.now(tz=tz_kst()).year
     colY = st.columns([1, 3])
     with colY[0]:
@@ -449,13 +451,16 @@ def tab_eval_input(emp_df: pd.DataFrame):
             value=int(this_year), step=1, key="eval_year"
         )
 
+    # 활성 항목 로드
     items = read_eval_items_df(only_active=True)
     if items.empty:
         st.warning("활성화된 평가 항목이 없습니다.", icon="⚠️")
         return
 
+    # 권한/대상 선택
     u = st.session_state["user"]
-    me_sabun = str(u["사번"]); me_name = str(u["이름"])
+    me_sabun = str(u["사번"])
+    me_name = str(u["이름"])
     am_admin = is_admin(me_sabun)
     allowed = get_allowed_sabuns(emp_df, me_sabun, include_self=True)
 
@@ -469,35 +474,28 @@ def tab_eval_input(emp_df: pd.DataFrame):
         df = df.sort_values(["사번"])
         sel = st.selectbox(
             "평가 **대상자** (사번 - 이름)",
-            ["(선택)"] + df["표시"].tolist(), index=0, key="eval_target_select"
+            ["(선택)"] + df["표시"].tolist(),
+            index=0, key="eval_target_select"
         )
         if sel == "(선택)":
             st.info("평가 대상자를 선택하세요.")
             return
         target_sabun = sel.split(" - ", 1)[0]
-        target_name  = _emp_name_by_sabun(emp_df, target_sabun)
+        target_name = _emp_name_by_sabun(emp_df, target_sabun)
         eval_type = st.radio("평가유형", EVAL_TYPES, horizontal=True, key="eval_type_radio")
-        evaluator_sabun = me_sabun; evaluator_name = me_name
+        evaluator_sabun = me_sabun
+        evaluator_name = me_name
     else:
-        target_sabun = me_sabun; target_name = me_name
+        target_sabun = me_sabun
+        target_name = me_name
         eval_type = "자기"
-        evaluator_sabun = me_sabun; evaluator_name = me_name
+        evaluator_sabun = me_sabun
+        evaluator_name = me_name
         st.info(f"대상자: {target_name} ({target_sabun}) · 평가유형: 자기", icon="👤")
 
-    # ── 스타일(간격 축소/구분선/뱃지) ─────────────────────────────────────────
-    st.markdown(
-        """
-        <style>
-          .eval-badge{display:inline-block;min-width:36px;text-align:center;font-weight:700;
-                      padding:4px 8px;border-radius:8px;background:rgba(49,51,63,.06);}
-          .eval-desc{color:#4b5563;margin:.15rem 0 .35rem;}
-          .eval-sep{border-bottom:1px solid rgba(49,51,63,.06);margin:.2rem 0 .35rem;}
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    # ── 상단: 일괄 점수 선택 + 일괄 적용 (라벨 숨김·콤팩트) ─────────────────────
+    # ─────────────────────────────────────────────────────────────────────
+    # 상단: 일괄 점수 선택(1~5) + '일괄 적용' 버튼  (rerun 없이 현재 탭 유지)
+    # ─────────────────────────────────────────────────────────────────────
     st.markdown("#### 점수 입력 (각 1~5)")
 
     col_bulk = st.columns([0.6, 1.2, 8])
@@ -510,38 +508,51 @@ def tab_eval_input(emp_df: pd.DataFrame):
         )
     with col_bulk[1]:
         if st.button("일괄 적용", key="eval_bulk_apply", use_container_width=True):
-            for iid in items["항목ID"].astype(str):
-                st.session_state[f"eval_{iid}"] = int(bulk)
             st.session_state["eval_bulk"] = int(bulk)
-            st.rerun()
-    
-    st.session_state["eval_bulk"] = bulk
+            # rerun 대신 이번 렌더 사이클에서 바로 반영하도록 플래그만 세팅
+            st.session_state["__eval_bulk_to_apply"] = int(bulk)
 
-    # ── 항목 렌더링: 1행(이름 | ⦿1 ⦿2 ⦿3 ⦿4 ⦿5) + 2행(설명) ───────────────
+    # 간단한 스타일(간격 축소)
+    st.markdown(
+        """
+        <style>
+          .eval-desc{color:#4b5563;margin:.15rem 0 .35rem;}
+          .eval-sep{border-bottom:1px solid rgba(49,51,63,.06);margin:.2rem 0 .35rem;}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # 일괄 적용 플래그가 있으면 이번 런에서 바로 값 주입
+    if "__eval_bulk_to_apply" in st.session_state:
+        _v = int(st.session_state["__eval_bulk_to_apply"])
+        for _iid in items["항목ID"].astype(str):
+            st.session_state[f"eval_{_iid}"] = _v
+        del st.session_state["__eval_bulk_to_apply"]
+
+    # 항목 렌더링: 1행(항목명 | 라디오 1~5) + 2행(설명)
     items_sorted = items.sort_values(["순서", "항목"]).reset_index(drop=True)
     scores = {}
 
     for r in items_sorted.itertuples(index=False):
-        iid  = str(getattr(r, "항목ID"))
+        iid = str(getattr(r, "항목ID"))
         name = getattr(r, "항목") or ""
         desc = getattr(r, "내용") or ""
 
         cur = int(st.session_state.get(f"eval_{iid}", 3))
         cur = min(5, max(1, cur))
 
-        # 1행: 항목명 | 라디오(1~5)
         row = st.columns([6, 4])
         with row[0]:
             st.markdown(f"**{name}**")
         with row[1]:
             pick = st.radio(
-                " ", ["1","2","3","4","5"],
-                index=(cur-1), horizontal=True,
+                " ", ["1", "2", "3", "4", "5"],
+                index=(cur - 1), horizontal=True,
                 key=f"eval_seg_{iid}", label_visibility="collapsed"
             )
             cur = int(pick)
 
-        # 2행: 설명
         if desc.strip():
             st.markdown(
                 f"<div class='eval-desc'>{desc.replace(chr(10), '<br/>')}</div>",
@@ -552,7 +563,7 @@ def tab_eval_input(emp_df: pd.DataFrame):
         st.session_state[f"eval_{iid}"] = cur
         scores[iid] = cur
 
-    # ── 합계(100점 만점) & 저장 ─────────────────────────────────────────────
+    # 합계/저장
     total_100 = round(sum(scores.values()) * (100.0 / max(1, len(items_sorted) * 5)), 1)
     st.markdown("---")
     cM1, cM2 = st.columns([1, 3])
@@ -573,7 +584,8 @@ def tab_eval_input(emp_df: pd.DataFrame):
                 scores, "제출"
             )
             st.success(
-                ("제출 완료" if rep["action"] == "insert" else "업데이트 완료") + f" (총점 {rep['total']}점)",
+                ("제출 완료" if rep["action"] == "insert" else "업데이트 완료")
+                + f" (총점 {rep['total']}점)",
                 icon="✅"
             )
             st.toast("평가 저장됨", icon="✅")
@@ -589,20 +601,6 @@ def tab_eval_input(emp_df: pd.DataFrame):
             st.dataframe(
                 my[["평가유형", "평가대상사번", "평가대상이름", "총점", "상태", "제출시각"]],
                 use_container_width=True, height=260
-            )
-    except Exception:
-        st.caption("제출 현황을 불러오지 못했습니다.")
-
-    st.markdown("#### 내 제출 현황")
-    try:
-        my = read_my_eval_rows(int(year), evaluator_sabun)
-        if my.empty:
-            st.caption("제출된 평가가 없습니다.")
-        else:
-            st.dataframe(
-                my[["평가유형", "평가대상사번", "평가대상이름", "총점", "상태", "제출시각"]],
-                use_container_width=True,
-                height=260,
             )
     except Exception:
         st.caption("제출 현황을 불러오지 못했습니다.")
@@ -1490,6 +1488,7 @@ def main():
 # ── 엔트리포인트 ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     main()
+
 
 
 
