@@ -4,7 +4,7 @@ HISMEDI - 인사/HR (Google Sheets 연동)
 """
 
 # ── Imports ───────────────────────────────────────────────────────────────────
-import time, re, hashlib, secrets as pysecrets
+import time, re, hashlib, random, secrets as pysecrets
 from datetime import datetime, timedelta
 import pandas as pd, streamlit as st
 
@@ -62,6 +62,16 @@ def _to_bool(x) -> bool: return str(x).strip().lower() in ("true","1","y","yes",
 def _normalize_private_key(raw: str) -> str:
     if not raw: return raw
     return raw.replace("\\n","\n") if "\\n" in raw and "BEGIN PRIVATE KEY" in raw else raw
+def _gs_retry(callable_fn, tries: int = 5, base: float = 0.6, factor: float = 2.0):
+    """gspread API 호출을 지수 백오프로 재시도."""
+    for i in range(tries):
+        try:
+            return callable_fn()
+        except APIError:
+            # 짧은 지수 백오프 + 지터
+            time.sleep(base * (factor ** i) + random.uniform(0, 0.2))
+    # 마지막 시도도 실패 시 예외 재던짐
+    return callable_fn()
 
 # ── Google Auth / Sheets ──────────────────────────────────────────────────────
 @st.cache_resource(show_spinner=False)
@@ -441,24 +451,44 @@ EVAL_TYPES = ["자기", "1차", "2차"]
 
 def ensure_eval_items_sheet():
     wb = get_workbook()
+
+    # 시트 열기(재시도)
     try:
-        ws = wb.worksheet(EVAL_ITEMS_SHEET)
+        ws = _gs_retry(lambda: wb.worksheet(EVAL_ITEMS_SHEET))
     except WorksheetNotFound:
-        ws = wb.add_worksheet(title=EVAL_ITEMS_SHEET, rows=200, cols=10)
-        ws.update("A1", [EVAL_ITEM_HEADERS])
-        return
-    header = ws.row_values(1) or []
+        # 없으면 생성(재시도)
+        ws = _gs_retry(lambda: wb.add_worksheet(title=EVAL_ITEMS_SHEET, rows=200, cols=10))
+        _gs_retry(lambda: ws.update("A1", [EVAL_ITEM_HEADERS]))
+        return ws
+
+    # 헤더 보정(재시도)
+    header = _gs_retry(lambda: ws.row_values(1)) or []
     need = [h for h in EVAL_ITEM_HEADERS if h not in header]
     if need:
-        ws.update("1:1", [header + need])
+        _gs_retry(lambda: ws.update("1:1", [header + need]))
+    return ws    
 
 @st.cache_data(ttl=60, show_spinner=False)
 def read_eval_items_df(only_active=True) -> pd.DataFrame:
-    ensure_eval_items_sheet()
-    ws = get_workbook().worksheet(EVAL_ITEMS_SHEET)
-    df = pd.DataFrame(ws.get_all_records(numericise_ignore=["all"]))
+    """APIError 발생 시 마지막 정상값(st.session_state 캐시)으로 폴백."""
+    # 시트 보장 + 로드 (재시도)
+    try:
+        ws = ensure_eval_items_sheet()
+        df = pd.DataFrame(_gs_retry(lambda: ws.get_all_records(numericise_ignore=["all"])))
+    except APIError:
+        # 폴백: 마지막 정상값
+        cached = st.session_state.get("__eval_items_cache_df")
+        if isinstance(cached, pd.DataFrame):
+            st.warning("평가 항목을 실시간으로 가져오지 못해 마지막 정상값으로 표시합니다.", icon="⚠️")
+            df = cached.copy()
+        else:
+            st.error("평가 항목을 불러오는 중 Google API 일시 오류가 발생했습니다. 잠시 후 다시 시도하세요.", icon="🛑")
+            return pd.DataFrame(columns=EVAL_ITEM_HEADERS)
+
     if df.empty:
         df = pd.DataFrame(columns=EVAL_ITEM_HEADERS)
+
+    # 전처리
     if "순서" in df.columns:
         def _i(x):
             try: return int(float(str(x).strip()))
@@ -466,9 +496,13 @@ def read_eval_items_df(only_active=True) -> pd.DataFrame:
         df["순서"] = df["순서"].apply(_i)
     if "활성" in df.columns:
         df["활성"] = df["활성"].map(_to_bool)
+
     df = df.sort_values(["순서", "항목"]).reset_index(drop=True)
     if only_active and "활성" in df.columns:
         df = df[df["활성"] == True]
+
+    # 성공적으로 로드했으면 세션 폴백 캐시에 저장
+    st.session_state["__eval_items_cache_df"] = df.copy()
     return df
 
 def _eval_sheet_name(year: int | str) -> str:
@@ -1789,3 +1823,4 @@ def main():
 # ── 엔트리포인트 ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     main()
+
