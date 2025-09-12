@@ -49,8 +49,20 @@ st.markdown(
 
 # ── Utils ─────────────────────────────────────────────────────────────────────
 def kst_now_str(): return datetime.now(tz=tz_kst()).strftime("%Y-%m-%d %H:%M:%S (%Z)")
-def _sha256_hex(s: str) -> str: return hashlib.sha256(str(s).encode()).hexdigest()
+
+def _sha256_hex(s: str) -> str:
+    return hashlib.sha256(str(s).encode()).hexdigest()
+
+def _pin_hash(pin: str, sabun: str) -> str:
+    """
+    PIN 해시(솔트 포함): 사번을 솔트로 사용하여 동일 PIN이라도 사번마다 다른 해시가 되도록 함.
+    내부망 기준 간단/일관한 방식.
+    """
+    plain = f"{str(sabun).strip()}:{str(pin).strip()}"
+    return hashlib.sha256(plain.encode()).hexdigest()
+
 def _to_bool(x) -> bool: return str(x).strip().lower() in ("true","1","y","yes","t")
+
 def _normalize_private_key(raw: str) -> str:
     if not raw: return raw
     return raw.replace("\\n","\n") if "\\n" in raw and "BEGIN PRIVATE KEY" in raw else raw
@@ -63,6 +75,22 @@ def _gs_retry(callable_fn, tries: int = 5, base: float = 0.6, factor: float = 2.
         except APIError:
             time.sleep(base * (factor ** i) + random.uniform(0, 0.2))
     return callable_fn()
+def _batch_update_row(ws, row_idx: int, hmap: dict, kv: dict):
+    """주어진 키-값(헤더명 기준)을 같은 행에 일괄 반영."""
+    updates = []
+    for k, v in kv.items():
+        c = hmap.get(k)
+        if c:
+            a1 = gspread.utils.rowcol_to_a1(row_idx, c)
+            updates.append({"range": a1, "values": [[v]]})
+    if updates:
+        _retry_call(ws.batch_update, updates)
+def _ws_get_all_records(ws):
+    """gspread 버전별 get_all_records 인자 호환 보장."""
+    try:
+        return _retry_call(ws.get_all_records, numericise_ignore=["all"])
+    except TypeError:
+        return _retry_call(ws.get_all_records)
 
 # ── Non-critical error silencer ───────────────────────────────────────────────
 SILENT_NONCRITICAL_ERRORS = True  # 읽기/표시 오류는 숨김, 저장 오류만 노출
@@ -75,16 +103,19 @@ def _silent_df_exception(e: Exception, where: str, empty_columns: list[str] | No
 # ── Google API Retry Helper ───────────────────────────────────────────────────
 API_MAX_RETRY = 4
 API_BACKOFF_SEC = [0.0, 0.6, 1.2, 2.4]
+RETRY_EXC = (APIError,)
 
 def _retry_call(fn, *args, **kwargs):
-    err = None
-    for i in range(API_MAX_RETRY):
+    last = None
+    for i, backoff in enumerate(API_BACKOFF_SEC):
         try:
             return fn(*args, **kwargs)
-        except (APIError, Exception) as e:
-            err = e
-            time.sleep(API_BACKOFF_SEC[min(i, len(API_BACKOFF_SEC) - 1)])
-    raise err
+        except RETRY_EXC as e:
+            last = e
+            time.sleep(backoff + random.uniform(0, 0.15))
+    if last:
+        raise last
+    return fn(*args, **kwargs)
 
 # ── Google Auth / Sheets ──────────────────────────────────────────────────────
 @st.cache_resource(show_spinner=False)
@@ -103,14 +134,15 @@ EMP_SHEET = st.secrets.get("sheets", {}).get("EMP_SHEET", "직원")
 
 # ── Sheet Helpers ─────────────────────────────────────────────────────────────
 @st.cache_data(ttl=90, show_spinner=False)
-def read_sheet_df(sheet_name: str) -> pd.DataFrame:
+def read_sheet_df(sheet_name: str, *, silent: bool = False) -> pd.DataFrame:
     try:
         ws = _retry_call(get_workbook().worksheet, sheet_name)
-        records = _retry_call(ws.get_all_records, numericise_ignore=["all"])
+        records = _ws_get_all_records(ws)
         df = pd.DataFrame(records)
     except Exception:
         if sheet_name == EMP_SHEET and "emp_df_cache" in st.session_state:
-            st.caption("※ 직원 시트 실시간 로딩 실패 → 캐시 사용")
+            if not silent:
+                st.caption("※ 직원 시트 실시간 로딩 실패 → 캐시 사용")
             df = st.session_state["emp_df_cache"].copy()
         else:
             raise
@@ -154,7 +186,7 @@ def _hide_doctors(df: pd.DataFrame) -> pd.DataFrame:
     if "직무" not in df.columns:
         return df
     col = df["직무"].astype(str).str.strip().str.lower()
-    return df[~col.eq("의사")]
+    return df[~col.str.contains("의사", na=False)]
 
 @st.cache_data(ttl=120, show_spinner=False)
 def _build_name_map(df: pd.DataFrame) -> dict:
@@ -232,8 +264,12 @@ def show_login_form(emp_df: pd.DataFrame):
         st.error("재직 상태가 아닙니다.")
         st.stop()
 
-    if str(r.get("PIN_hash","")).strip().lower() != _sha256_hex(pin.strip()):
+    stored = str(r.get("PIN_hash","")).strip().lower()
+    entered_plain = _sha256_hex(pin.strip())
+    entered_salted = _pin_hash(pin.strip(), str(r.get("사번","")))
+    if stored not in (entered_plain, entered_salted):
         st.error("PIN이 올바르지 않습니다."); st.stop()
+
 
     _start_session({
         "사번": str(r.get("사번","")),
@@ -262,7 +298,10 @@ def ensure_auth_sheet():
         ws=wb.worksheet(AUTH_SHEET)
         header=ws.row_values(1) or []
         need=[h for h in AUTH_HEADERS if h not in header]
-        if need: ws.update("1:1",[header+need]); header=ws.row_values(1)
+        need=[h for h in AUTH_HEADERS if h not in header]
+        if need:
+            ws.update("1:1",[header+need])
+            header = ws.row_values(1) or []  # ← 재로딩 추가
         vals=ws.get_all_records(numericise_ignore=["all"])
         cur_admins={str(r.get("사번","")).strip() for r in vals if str(r.get("역할","")).strip()=="admin"}
         add=[r for r in SEED_ADMINS if r["사번"] not in cur_admins]
@@ -361,6 +400,7 @@ def ensure_settings_sheet():
         need = [h for h in SETTINGS_HEADERS if h not in header]
         if need:
             ws.update("1:1", [header + need])
+            header = ws.row_values(1) or []  # ← 재로딩 추가
         return ws
     except WorksheetNotFound:
         ws = wb.add_worksheet(title=SETTINGS_SHEET, rows=200, cols=10)
@@ -409,7 +449,7 @@ def set_setting(key: str, value: str, memo: str, editor_sabun: str, editor_name:
         col_key = hmap.get("키")
         row_idx = 0
         if col_key:
-            vals = _gs_retry(lambda: ws.col_values(col_key))
+            vals = _retry_call(ws.col_values, col_key)
             for i, v in enumerate(vals[1:], start=2):
                 if str(v).strip() == str(key).strip():
                     row_idx = i
@@ -424,7 +464,7 @@ def set_setting(key: str, value: str, memo: str, editor_sabun: str, editor_name:
                     row[c - 1] = v
             put("키", key); put("값", value); put("메모", memo); put("수정시각", now)
             put("수정자사번", editor_sabun); put("수정자이름", editor_name); put("활성", True)
-            _gs_retry(lambda: ws.append_row(row, value_input_option="USER_ENTERED"))
+            _retry_call(ws.append_row, row, value_input_option="USER_ENTERED")
         else:
             updates = []
             for k, v in [
@@ -436,7 +476,7 @@ def set_setting(key: str, value: str, memo: str, editor_sabun: str, editor_name:
                     a1 = gspread.utils.rowcol_to_a1(row_idx, c)
                     updates.append({"range": a1, "values": [[v]]})
             if updates:
-                _gs_retry(lambda: ws.batch_update(updates))
+                _retry_call(ws.batch_update, updates)
         st.cache_data.clear()
     except Exception:
         pass
@@ -510,6 +550,7 @@ def ensure_eval_items_sheet():
     need = [h for h in EVAL_ITEM_HEADERS if h not in header]
     if need:
         ws.update("1:1", [header + need])
+        header = ws.row_values(1) or []  # ← 재로딩 추가
 
 @st.cache_data(ttl=60, show_spinner=False)
 def read_eval_items_df(only_active: bool = True) -> pd.DataFrame:
@@ -642,15 +683,17 @@ def upsert_eval_response(
         st.cache_data.clear()
         return {"action": "insert", "row": None, "total": total_100}
 
-    ws.update_cell(row_idx, hmap["총점"], total_100)
-    ws.update_cell(row_idx, hmap["상태"], status)
-    ws.update_cell(row_idx, hmap["제출시각"], now)
-    ws.update_cell(row_idx, hmap["평가대상이름"], t_name)
-    ws.update_cell(row_idx, hmap["평가자이름"], e_name)
+    payload = {
+        "총점": total_100,
+        "상태": status,
+        "제출시각": now,
+        "평가대상이름": t_name,
+        "평가자이름": e_name,
+    }
     for iid, sc in zip(item_ids, scores_list):
-        c = hmap.get(f"점수_{iid}")
-        if c:
-            ws.update_cell(row_idx, c, sc)
+        payload[f"점수_{iid}"] = sc
+
+    _batch_update_row(ws, row_idx, hmap, payload)
     st.cache_data.clear()
     return {"action": "update", "row": row_idx, "total": total_100}
 
@@ -1169,8 +1212,11 @@ def ensure_comp_items_sheet():
         ws=wb.worksheet(COMP_ITEM_SHEET)
     except WorksheetNotFound:
         ws=wb.add_worksheet(title=COMP_ITEM_SHEET, rows=200, cols=12); ws.update("A1",[COMP_ITEM_HEADERS]); return ws
-    header=ws.row_values(1) or []; need=[h for h in COMP_ITEM_HEADERS if h not in header]
-    if need: ws.update("1:1",[header+need]); return ws
+    header=ws.row_values(1) or []
+    need=[h for h in COMP_ITEM_HEADERS if h not in header]
+    if need
+        ws.update("1:1",[header+need])
+        header = ws.row_values(1) or []  # ← 재로딩 추가
     return ws
 
 @st.cache_data(ttl=60, show_spinner=False)
@@ -1236,14 +1282,17 @@ def upsert_comp_response(emp_df:pd.DataFrame, year:int, target_sabun:str, evalua
         ws.append_row(buf, value_input_option="USER_ENTERED"); st.cache_data.clear()
         return {"action":"insert","total":total_100}
     else:
-        ws.update_cell(row_idx, hmap["총점"], total_100)
-        ws.update_cell(row_idx, hmap["상태"], status)
-        ws.update_cell(row_idx, hmap["제출시각"], now)
-        ws.update_cell(row_idx, hmap["평가대상이름"], t_name)
-        ws.update_cell(row_idx, hmap["평가자이름"], e_name)
+        payload = {
+            "총점": total_100,
+            "상태": status,
+            "제출시각": now,
+            "평가대상이름": t_name,
+            "평가자이름": e_name,
+        }
         for iid in item_ids:
-            c=hmap.get(f"점수_{iid}")
-            if c: ws.update_cell(row_idx, c, int(scores.get(iid,0) or 0))
+            payload[f"점수_{iid}"] = int(scores.get(iid, 0) or 0)
+
+        _batch_update_row(ws, row_idx, hmap, payload)
         st.cache_data.clear()
         return {"action":"update","total":total_100}
 
@@ -1461,7 +1510,7 @@ def tab_admin_pin(emp_df: pd.DataFrame):
             if "PIN_hash" not in hmap: st.error(f"'{EMP_SHEET}' 시트에 PIN_hash가 없습니다."); return
             r=_find_row_by_sabun(ws,hmap,sabun)
             if r==0: st.error("시트에서 사번을 찾지 못했습니다."); return
-            _update_cell(ws, r, hmap["PIN_hash"], _sha256_hex(pin1.strip()))
+            _update_cell(ws, r, hmap["PIN_hash"], _pin_hash(pin1.strip(), str(sabun)))
             st.cache_data.clear()
             st.success("PIN 저장 완료", icon="✅")
         if do_clear:
@@ -1510,20 +1559,45 @@ def tab_admin_pin(emp_df: pd.DataFrame):
     if do_issue and preview is not None:
         try:
             ws, header, hmap = _get_ws_and_headers(EMP_SHEET)
-            if "PIN_hash" not in hmap or "사번" not in hmap: st.error(f"'{EMP_SHEET}' 시트에 '사번' 또는 'PIN_hash' 헤더가 없습니다."); return
-            sabun_col=hmap["사번"]; pin_col=hmap["PIN_hash"]
-            sabun_values=ws.col_values(sabun_col)[1:]; pos={str(v).strip():i for i,v in enumerate(sabun_values,start=2)}
-            updates=[]
+            if "PIN_hash" not in hmap or "사번" not in hmap:
+                st.error(f"'{EMP_SHEET}' 시트에 '사번' 또는 'PIN_hash' 헤더가 없습니다.")
+                return
+
+            sabun_col = hmap["사번"]
+            pin_col   = hmap["PIN_hash"]
+
+            # 시트 내 사번 → 행번호 맵 구성
+            sabun_values = _retry_call(ws.col_values, sabun_col)[1:]
+            pos = {str(v).strip(): i for i, v in enumerate(sabun_values, start=2)}
+
+            # 업데이트 payload 구성(솔트 적용)
+            updates = []
             for _, row in preview.iterrows():
-                sabun=str(row["사번"]).strip(); r_idx=pos.get(sabun,0)
+                sabun = str(row["사번"]).strip()
+                r_idx = pos.get(sabun, 0)
                 if r_idx:
-                    a1=gspread.utils.rowcol_to_a1(r_idx, pin_col)
-                    updates.append({"range":a1,"values":[[_sha256_hex(row["새_PIN"])]]})
-            if not updates: st.warning("업데이트할 대상이 없습니다.", icon="⚠️"); return
-            CHUNK=100; pbar=st.progress(0.0, text="시트 업데이트(배치) 중...")
-            for i in range(0,len(updates),CHUNK):
-                ws.batch_update(updates[i:i+CHUNK]); pbar.progress(min(1.0,(i+CHUNK)/len(updates))); time.sleep(0.2)
-            st.cache_data.clear(); st.success(f"일괄 발급 완료: {len(updates):,}명 반영", icon="✅"); st.toast("PIN 일괄 발급 반영됨", icon="✅")
+                    a1 = gspread.utils.rowcol_to_a1(r_idx, pin_col)
+                    hashed = _pin_hash(str(row["새_PIN"]), sabun)  # ← 솔트(사번) 적용
+                    updates.append({"range": a1, "values": [[hashed]]})
+
+            if not updates:
+                st.warning("업데이트할 대상이 없습니다.", icon="⚠️")
+                return
+
+            # 배치 반영 + 진행률(정확도 개선)
+            CHUNK = 100
+            total = len(updates)
+            pbar = st.progress(0.0, text="시트 업데이트(배치) 중...")
+            for i in range(0, total, CHUNK):
+                _retry_call(ws.batch_update, updates[i:i+CHUNK])
+                done = min(i + CHUNK, total)
+                pbar.progress(done / total, text=f"{done}/{total} 반영 중…")
+                time.sleep(0.2)
+
+            st.cache_data.clear()
+            st.success(f"일괄 발급 완료: {total:,}명 반영", icon="✅")
+            st.toast("PIN 일괄 발급 반영됨", icon="✅")
+
         except Exception as e:
             st.exception(e)
 
@@ -1765,7 +1839,7 @@ def main():
 
     # 1) 직원 시트 로딩 + 세션 캐시/네임맵 구성
     try:
-        emp_df_all = read_sheet_df(EMP_SHEET)
+        emp_df_all = read_sheet_df(EMP_SHEET, silent=True)
     except Exception as e:
         st.error(f"'{EMP_SHEET}' 시트 로딩 실패: {e}")
         return
