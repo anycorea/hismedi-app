@@ -854,26 +854,37 @@ def tab_eval_input(emp_df: pd.DataFrame):
     kbase = f"evalbulk_{year}_{eval_type}_{evaluator_sabun}_{target_sabun}"
     edit_flag_key = f"__edit_on_{kbase}"
     apply_saved_once_key = f"__apply_saved_once_{kbase}"
+    # 편집/저장값 주입 플래그 기본값 보정
+    if edit_flag_key not in st.session_state:
+        st.session_state[edit_flag_key] = False
+    if apply_saved_once_key not in st.session_state:
+        st.session_state[apply_saved_once_key] = False
+
 
     # 자기평가 잠금 상태면: 제출 현황만 노출 (수정 모드로 전환 버튼 제공)
     if is_self_case and (already_submitted or locked_flag) and not st.session_state.get(edit_flag_key, False):
-        st.info("이미 제출된 자기평가입니다. 아래 ‘수정 모드로 전환’ 버튼을 눌러야 편집할 수 있습니다.", icon="ℹ️")
+        st.info("이미 제출된 자기평가입니다. 아래 ‘수정 모드로 전환’ 버튼을 누르면 편집 가능합니다.", icon="ℹ️")
+
+        # 한 번 클릭하면 즉시 편집 모드로 들어가도록 rerun
         if st.button("✏️ 수정 모드로 전환", key=f"{kbase}_edit_on", use_container_width=True):
-            st.session_state[edit_flag_key] = True      # rerun 없이 그대로 진행
+            st.session_state[edit_flag_key] = True
             st.session_state[apply_saved_once_key] = False  # 저장값 강제 반영 플래그 초기화
+            st.rerun()  # ← 즉시 재실행하여 두 번 클릭 문제 해결
+
         st.markdown("#### 내 제출 현황")
         try:
             my = read_my_eval_rows(int(year), evaluator_sabun)
-            if my.empty:
-                st.caption("제출된 평가가 없습니다.")
-            else:
-                st.dataframe(
-                    my[["평가유형", "평가대상사번", "평가대상이름", "총점", "상태", "제출시각"]],
-                    use_container_width=True, height=260
-                )
-        except Exception:
-            st.caption("제출 현황을 불러오지 못했습니다.")
-        return
+        if my.empty:
+            st.caption("제출된 평가가 없습니다.")
+        else:
+            st.dataframe(
+                my[["평가유형", "평가대상사번", "평가대상이름", "총점", "상태", "제출시각"]],
+                use_container_width=True, height=260
+            )
+    except Exception:
+        st.caption("제출 현황을 불러오지 못했습니다.")
+    st.stop()  # return 대신 stop으로 현재 렌더 종료
+
 
     # ── 제목 + (일괄 슬라이더 + 적용 버튼) : rerun 없이 세션키로 주입
     c_head, c_slider, c_btn = st.columns([5, 2, 1])
