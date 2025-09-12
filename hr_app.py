@@ -293,26 +293,27 @@ SEED_ADMINS=[
     {"사번":"524003","이름":"이영하","역할":"admin","범위유형":"","부서1":"행정부","부서2":"총무팀","대상사번":"","활성":True,"비고":"seed"},
 ]
 def ensure_auth_sheet():
-    wb=get_workbook()
+    wb = get_workbook()
     try:
-        ws=wb.worksheet(AUTH_SHEET)
-        header=ws.row_values(1) or []
-        need=[h for h in AUTH_HEADERS if h not in header]
-        need=[h for h in AUTH_HEADERS if h not in header]
+        ws = wb.worksheet(AUTH_SHEET)
+        header = ws.row_values(1) or []
+        need = [h for h in AUTH_HEADERS if h not in header]
         if need:
-            ws.update("1:1",[header+need])
-            header = ws.row_values(1) or []  # ← 재로딩 추가
-        vals=ws.get_all_records(numericise_ignore=["all"])
-        cur_admins={str(r.get("사번","")).strip() for r in vals if str(r.get("역할","")).strip()=="admin"}
-        add=[r for r in SEED_ADMINS if r["사번"] not in cur_admins]
+            ws.update("1:1", [header + need])
+            header = ws.row_values(1) or []  # 재로딩
+        # 시드 admin 보충
+        vals = ws.get_all_records(numericise_ignore=["all"])
+        cur_admins = {str(r.get("사번", "")).strip() for r in vals if str(r.get("역할", "")).strip() == "admin"}
+        add = [r for r in SEED_ADMINS if r["사번"] not in cur_admins]
         if add:
-            rows=[[r.get(h,"") for h in header] for r in add]
+            rows = [[r.get(h, "") for h in header] for r in add]
             ws.append_rows(rows, value_input_option="USER_ENTERED")
         return ws
     except WorksheetNotFound:
-        ws=wb.add_worksheet(title=AUTH_SHEET, rows=1000, cols=20)
-        ws.update("A1",[AUTH_HEADERS])
-        ws.append_rows([[r.get(h,"") for h in AUTH_HEADERS] for r in SEED_ADMINS], value_input_option="USER_ENTERED")
+        ws = wb.add_worksheet(title=AUTH_SHEET, rows=1000, cols=20)
+        ws.update("A1", [AUTH_HEADERS])
+        # 시드 주입
+        ws.append_rows([[r.get(h, "") for h in AUTH_HEADERS] for r in SEED_ADMINS], value_input_option="USER_ENTERED")
         return ws
 
 @st.cache_data(ttl=60, show_spinner=False)
@@ -400,7 +401,7 @@ def ensure_settings_sheet():
         need = [h for h in SETTINGS_HEADERS if h not in header]
         if need:
             ws.update("1:1", [header + need])
-            header = ws.row_values(1) or []  # ← 재로딩 추가
+            header = ws.row_values(1) or []  # 재로딩
         return ws
     except WorksheetNotFound:
         ws = wb.add_worksheet(title=SETTINGS_SHEET, rows=200, cols=10)
@@ -550,7 +551,7 @@ def ensure_eval_items_sheet():
     need = [h for h in EVAL_ITEM_HEADERS if h not in header]
     if need:
         ws.update("1:1", [header + need])
-        header = ws.row_values(1) or []  # ← 재로딩 추가
+        header = ws.row_values(1) or []  # 재로딩
 
 @st.cache_data(ttl=60, show_spinner=False)
 def read_eval_items_df(only_active: bool = True) -> pd.DataFrame:
@@ -1207,16 +1208,18 @@ COMP_RESP_PREFIX="직무능력_응답_"
 COMP_BASE_HEADERS=["연도","평가대상사번","평가대상이름","평가자사번","평가자이름","총점","상태","제출시각"]
 
 def ensure_comp_items_sheet():
-    wb=get_workbook()
+    wb = get_workbook()
     try:
-        ws=wb.worksheet(COMP_ITEM_SHEET)
+        ws = wb.worksheet(COMP_ITEM_SHEET)
     except WorksheetNotFound:
-        ws=wb.add_worksheet(title=COMP_ITEM_SHEET, rows=200, cols=12); ws.update("A1",[COMP_ITEM_HEADERS]); return ws
-    header=ws.row_values(1) or []
-    need=[h for h in COMP_ITEM_HEADERS if h not in header]
-    if need
-        ws.update("1:1",[header+need])
-        header = ws.row_values(1) or []  # ← 재로딩 추가
+        ws = wb.add_worksheet(title=COMP_ITEM_SHEET, rows=200, cols=12)
+        ws.update("A1", [COMP_ITEM_HEADERS])
+        return ws
+    header = ws.row_values(1) or []
+    need = [h for h in COMP_ITEM_HEADERS if h not in header]
+    if need:
+        ws.update("1:1", [header + need])
+        header = ws.row_values(1) or []  # 재로딩
     return ws
 
 @st.cache_data(ttl=60, show_spinner=False)
