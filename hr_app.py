@@ -219,121 +219,76 @@ def show_login_form(emp_df: pd.DataFrame):
         pin   = st.text_input("PIN (숫자)", type="password", key="login_pin")
         submitted = st.form_submit_button("로그인", use_container_width=True, type="primary")
 
-    # ── Enter 키 처리: 로그인 화면에서만 동작 (렌더된 동안에만 바인딩)
+    # ── Enter 키 처리: input에 직접 keydown 바인딩 (부모 DOM에 접근)
     components.html("""
     <script>
     (function(){
-      // 이미 바인딩되어 있으면 재바인딩 방지
-      if (window.__hismediLoginEnterBound) return;
-      window.__hismediLoginEnterBound = true;
-
-      // 부모/호스트 문서를 안전하게 가져오기
-      function qdoc(){
-        try { return window.frameElement?.ownerDocument || window.parent.document; }
+      // 부모/호스트 문서 핸들
+      function hostDoc(){
+        try { return window.parent && window.parent.document ? window.parent.document : document; }
         catch(e){ return document; }
       }
-      const doc = qdoc();
+      const doc = hostDoc();
 
-      // 라벨 텍스트로 대응 input 찾기
-      function inputByLabel(labelText){
-        const labels = Array.from(doc.querySelectorAll('label'));
-        const lb = labels.find(l => (l.textContent || '').trim() === labelText);
-        if (!lb) return null;
-        // Streamlit은 label의 부모에 input이 들어있는 구조가 흔함
-        const wrap = lb.closest('[data-testid]') || lb.parentElement;
-        if (!wrap) return null;
-        const inp = wrap.querySelector('input');
-        return inp || null;
-      }
+      function qInput(){
+        // aria-label 기반으로 먼저 시도(가장 안정적)
+        let sabun = doc.querySelector('input[aria-label="사번"]') || doc.querySelector('input[aria-label*="사번"]');
+        let pin   = doc.querySelector('input[aria-label="PIN (숫자)"]') || doc.querySelector('input[aria-label*="PIN"]');
 
-      function findLoginControls(){
-        // 기본: 라벨 기준
-        const sabun = inputByLabel('사번');
-        const pin   = inputByLabel('PIN (숫자)');
+        // 버튼은 텍스트로 찾기 (여러 개면 첫 번째)
+        let loginBtn = Array.from(doc.querySelectorAll('button')).find(b => (b.textContent || '').trim() === '로그인');
 
-        // 버튼은 텍스트로 탐색
-        const loginBtn = Array.from(doc.querySelectorAll('button'))
-          .find(b => (b.innerText || '').trim() === '로그인');
-
+        // 라벨 기반 보조(aria-label을 못 찾을 때)
+        if (!sabun) {
+          const lab = Array.from(doc.querySelectorAll('label')).find(l => (l.textContent || '').trim() === '사번');
+          if (lab) sabun = lab.closest('[data-testid]')?.querySelector('input');
+        }
+        if (!pin) {
+          const lab = Array.from(doc.querySelectorAll('label')).find(l => (l.textContent || '').trim() === 'PIN (숫자)');
+          if (lab) pin = lab.closest('[data-testid]')?.querySelector('input[type="password"], input');
+        }
         return { sabun, pin, loginBtn };
       }
 
-      function focusFirstAvailable(els){
-        if (els.sabun && !els.sabun.value) { els.sabun.focus(); return; }
-        if (els.pin && !els.pin.value)     { els.pin.focus(); return; }
-        if (els.loginBtn) els.loginBtn.focus();
-      }
+      function bind(){
+        const { sabun, pin, loginBtn } = qInput();
+        if (!sabun || !pin || !loginBtn) return false;
 
-      function bindEnterNavigation(){
-        const els = findLoginControls();
-        if (!els.sabun || !els.pin || !els.loginBtn) return false;
-
-        // 최초 포커스
-        if (els.sabun && !els.sabun.value) els.sabun.focus();
-
-        // 전역 keydown 핸들러 (로그인 화면에서만 렌더되므로 안전)
-        const handler = function(e){
-          // IME 조합 중 엔터 무시, 엔터만 처리
-          if (e.isComposing || e.key !== 'Enter') return;
-
-          const active = doc.activeElement;
-
-          // 사번에서 Enter → PIN으로
-          if (active === els.sabun) {
+        // 중복 바인딩 방지: data-attr로 표식
+        if (!sabun.dataset.enterBound) {
+          sabun.dataset.enterBound = '1';
+          sabun.addEventListener('keydown', function(e){
+            if (e.isComposing || e.key !== 'Enter') return;
             e.preventDefault();
-            if (els.pin) els.pin.focus();
-            return;
-          }
-
-          // PIN에서 Enter → 로그인 버튼 클릭
-          if (active === els.pin) {
-            e.preventDefault();
-            if (els.loginBtn) els.loginBtn.click();
-            return;
-          }
-
-          // 어디에도 포커스 없거나 다른 곳에서 Enter → 로그인 플로우로 유도
-          if (!active || active === doc.body) {
-            e.preventDefault();
-            if (els.sabun && !els.sabun.value) { els.sabun.focus(); return; }
-            if (els.pin && !els.pin.value)     { els.pin.focus(); return; }
-            if (els.loginBtn) els.loginBtn.click();
-            return;
-          }
-
-          // 버튼에서 Enter → 클릭
-          if (active === els.loginBtn) {
-            e.preventDefault();
-            els.loginBtn.click();
-            return;
-          }
-        };
-
-        // 중복 바인딩 방지용 저장
-        if (!window.__hismediLoginEnterListener) {
-          doc.addEventListener('keydown', handler, true);
-          window.__hismediLoginEnterListener = handler;
+            pin && pin.focus();
+          }, true);
         }
 
-        // DOM이 다시 그려져도 컨트롤 재탐색
-        const mo = new MutationObserver(() => {
-          const ok = findLoginControls();
-          if (!ok.sabun || !ok.pin || !ok.loginBtn) return;
-          // 입력 필드가 교체되는 경우 포커스를 자연스럽게 유지/보정
-          if (doc.activeElement === doc.body) focusFirstAvailable(ok);
-        });
-        mo.observe(doc, { subtree: true, childList: true });
+        if (!pin.dataset.enterBound) {
+          pin.dataset.enterBound = '1';
+          pin.addEventListener('keydown', function(e){
+            if (e.isComposing || e.key !== 'Enter') return;
+            e.preventDefault();
+            if (loginBtn) loginBtn.click();
+          }, true);
+        }
+
+        // 초기 포커스
+        if (sabun && !sabun.value) sabun.focus();
 
         return true;
       }
 
-      // 지연 후 바인딩 시도 (Streamlit 렌더 타이밍 대응)
+      // 렌더 타이밍 대응: 여러 번 시도
       let tries = 0;
-      (function tryBind(){
-        tries++;
-        if (bindEnterNavigation()) return;
-        if (tries < 20) setTimeout(tryBind, 120);
+      (function wait(){
+        if (bind()) return;
+        if (++tries < 60) setTimeout(wait, 100);
       })();
+
+      // DOM 변화에도 재바인딩 시도 (입력이 교체될 수 있음)
+      const mo = new MutationObserver(() => { bind(); });
+      mo.observe(doc, { subtree: true, childList: true });
     })();
     </script>
     """, height=0)
