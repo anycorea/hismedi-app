@@ -213,40 +213,132 @@ def show_login_form(emp_df: pd.DataFrame):
 
     st.header("로그인")
 
+    # ── 로그인 폼
     with st.form("login_form", clear_on_submit=False):
         sabun = st.text_input("사번", placeholder="예) 123456", key="login_sabun")
         pin   = st.text_input("PIN (숫자)", type="password", key="login_pin")
         submitted = st.form_submit_button("로그인", use_container_width=True, type="primary")
 
+    # ── Enter 키 처리: 로그인 화면에서만 동작 (렌더된 동안에만 바인딩)
     components.html("""
     <script>
     (function(){
-      function qdoc(){ try{ return window.frameElement?.ownerDocument || window.parent.document; }catch(e){ return document; } }
-      function labelInput(labelText){
-        const doc = qdoc();
-        const label = [...doc.querySelectorAll('label')].find(l => l.textContent.trim() === labelText);
-        if (!label) return null;
-        return label.parentElement.querySelector('input');
+      // 이미 바인딩되어 있으면 재바인딩 방지
+      if (window.__hismediLoginEnterBound) return;
+      window.__hismediLoginEnterBound = true;
+
+      // 부모/호스트 문서를 안전하게 가져오기
+      function qdoc(){
+        try { return window.frameElement?.ownerDocument || window.parent.document; }
+        catch(e){ return document; }
       }
-      function setup(){
-        const doc = qdoc();
-        const sabun = labelInput('사번');
-        const pin   = labelInput('PIN (숫자)');
-        const loginBtn = [...doc.querySelectorAll('button')].find(b => b.innerText.trim() === '로그인');
-        if (sabun && !sabun.value) sabun.focus();
-        doc.addEventListener('keydown', function(e){
+      const doc = qdoc();
+
+      // 라벨 텍스트로 대응 input 찾기
+      function inputByLabel(labelText){
+        const labels = Array.from(doc.querySelectorAll('label'));
+        const lb = labels.find(l => (l.textContent || '').trim() === labelText);
+        if (!lb) return null;
+        // Streamlit은 label의 부모에 input이 들어있는 구조가 흔함
+        const wrap = lb.closest('[data-testid]') || lb.parentElement;
+        if (!wrap) return null;
+        const inp = wrap.querySelector('input');
+        return inp || null;
+      }
+
+      function findLoginControls(){
+        // 기본: 라벨 기준
+        const sabun = inputByLabel('사번');
+        const pin   = inputByLabel('PIN (숫자)');
+
+        // 버튼은 텍스트로 탐색
+        const loginBtn = Array.from(doc.querySelectorAll('button'))
+          .find(b => (b.innerText || '').trim() === '로그인');
+
+        return { sabun, pin, loginBtn };
+      }
+
+      function focusFirstAvailable(els){
+        if (els.sabun && !els.sabun.value) { els.sabun.focus(); return; }
+        if (els.pin && !els.pin.value)     { els.pin.focus(); return; }
+        if (els.loginBtn) els.loginBtn.focus();
+      }
+
+      function bindEnterNavigation(){
+        const els = findLoginControls();
+        if (!els.sabun || !els.pin || !els.loginBtn) return false;
+
+        // 최초 포커스
+        if (els.sabun && !els.sabun.value) els.sabun.focus();
+
+        // 전역 keydown 핸들러 (로그인 화면에서만 렌더되므로 안전)
+        const handler = function(e){
+          // IME 조합 중 엔터 무시, 엔터만 처리
+          if (e.isComposing || e.key !== 'Enter') return;
+
           const active = doc.activeElement;
-          if (e.key === 'Enter'){
-            if (active === sabun && pin){ e.preventDefault(); pin.focus(); }
-            else if (active === pin && loginBtn){ e.preventDefault(); loginBtn.click(); }
+
+          // 사번에서 Enter → PIN으로
+          if (active === els.sabun) {
+            e.preventDefault();
+            if (els.pin) els.pin.focus();
+            return;
           }
-        }, true);
+
+          // PIN에서 Enter → 로그인 버튼 클릭
+          if (active === els.pin) {
+            e.preventDefault();
+            if (els.loginBtn) els.loginBtn.click();
+            return;
+          }
+
+          // 어디에도 포커스 없거나 다른 곳에서 Enter → 로그인 플로우로 유도
+          if (!active || active === doc.body) {
+            e.preventDefault();
+            if (els.sabun && !els.sabun.value) { els.sabun.focus(); return; }
+            if (els.pin && !els.pin.value)     { els.pin.focus(); return; }
+            if (els.loginBtn) els.loginBtn.click();
+            return;
+          }
+
+          // 버튼에서 Enter → 클릭
+          if (active === els.loginBtn) {
+            e.preventDefault();
+            els.loginBtn.click();
+            return;
+          }
+        };
+
+        // 중복 바인딩 방지용 저장
+        if (!window.__hismediLoginEnterListener) {
+          doc.addEventListener('keydown', handler, true);
+          window.__hismediLoginEnterListener = handler;
+        }
+
+        // DOM이 다시 그려져도 컨트롤 재탐색
+        const mo = new MutationObserver(() => {
+          const ok = findLoginControls();
+          if (!ok.sabun || !ok.pin || !ok.loginBtn) return;
+          // 입력 필드가 교체되는 경우 포커스를 자연스럽게 유지/보정
+          if (doc.activeElement === doc.body) focusFirstAvailable(ok);
+        });
+        mo.observe(doc, { subtree: true, childList: true });
+
+        return true;
       }
-      setTimeout(setup, 120);
+
+      // 지연 후 바인딩 시도 (Streamlit 렌더 타이밍 대응)
+      let tries = 0;
+      (function tryBind(){
+        tries++;
+        if (bindEnterNavigation()) return;
+        if (tries < 20) setTimeout(tryBind, 120);
+      })();
     })();
     </script>
     """, height=0)
 
+    # ── 서버측 검증/세션 시작
     if not submitted:
         st.stop()
 
@@ -264,12 +356,13 @@ def show_login_form(emp_df: pd.DataFrame):
         st.error("재직 상태가 아닙니다.")
         st.stop()
 
+    # 솔트/무솔트 모두 허용 (이전 데이터 호환)
     stored = str(r.get("PIN_hash","")).strip().lower()
-    entered_plain = _sha256_hex(pin.strip())
+    entered_plain  = _sha256_hex(pin.strip())
     entered_salted = _pin_hash(pin.strip(), str(r.get("사번","")))
     if stored not in (entered_plain, entered_salted):
-        st.error("PIN이 올바르지 않습니다."); st.stop()
-
+        st.error("PIN이 올바르지 않습니다.")
+        st.stop()
 
     _start_session({
         "사번": str(r.get("사번","")),
