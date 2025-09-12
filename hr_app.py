@@ -874,17 +874,17 @@ def tab_eval_input(emp_df: pd.DataFrame):
         st.markdown("#### 내 제출 현황")
         try:
             my = read_my_eval_rows(int(year), evaluator_sabun)
-        if my.empty:
-            st.caption("제출된 평가가 없습니다.")
-        else:
-            st.dataframe(
-                my[["평가유형", "평가대상사번", "평가대상이름", "총점", "상태", "제출시각"]],
-                use_container_width=True, height=260
-            )
-    except Exception:
-        st.caption("제출 현황을 불러오지 못했습니다.")
-    st.stop()  # return 대신 stop으로 현재 렌더 종료
+            if my.empty:
+                st.caption("제출된 평가가 없습니다.")
+            else:
+                st.dataframe(
+                    my[["평가유형", "평가대상사번", "평가대상이름", "총점", "상태", "제출시각"]],
+                    use_container_width=True, height=260
+                )
+        except Exception:
+            st.caption("제출 현황을 불러오지 못했습니다.")
 
+        st.stop()  # 아래 입력 UI 렌더 중단
 
     # ── 제목 + (일괄 슬라이더 + 적용 버튼) : rerun 없이 세션키로 주입
     c_head, c_slider, c_btn = st.columns([5, 2, 1])
