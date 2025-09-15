@@ -1338,6 +1338,137 @@ def tab_job_desc(emp_df: pd.DataFrame):
         except Exception as e:
             st.exception(e)
 
+# ── 직무능력평가(간편·직무기술서 연동) ──────────────────────────────────────────
+COMP_SIMPLE_PREFIX = "직무능력_간편_응답_"
+COMP_SIMPLE_HEADERS = [
+    "연도","평가대상사번","평가대상이름","평가자사번","평가자이름",
+    "평가일자","주업무평가","기타업무평가","교육이수","자격유지","종합의견",
+    "상태","제출시각","잠금"
+]
+
+def _simp_sheet_name(year:int|str)->str:
+    return f"{COMP_SIMPLE_PREFIX}{int(year)}"
+
+def _ensure_comp_simple_sheet(year:int):
+    wb = get_workbook()
+    name = _simp_sheet_name(year)
+    try:
+        ws = wb.worksheet(name)
+    except WorksheetNotFound:
+        ws = wb.add_worksheet(title=name, rows=1000, cols=50)
+        ws.update("A1", [COMP_SIMPLE_HEADERS])
+        return ws
+    header = ws.row_values(1) or []
+    need = [h for h in COMP_SIMPLE_HEADERS if h not in header]
+    if need:
+        ws.update("1:1", [header + need])
+    return ws
+
+def _jd_latest_for(sabun:str, year:int) -> dict:
+    """대상자의 직무기술서(해당 연도, 최대 버전) 1건 반환 또는 {}."""
+    try:
+        df = read_jobdesc_df()
+        if df.empty: return {}
+        q = df[(df["사번"].astype(str)==str(sabun)) & (df["연도"].astype(int)==int(year))]
+        if q.empty: return {}
+        q = q.sort_values("버전").iloc[-1]
+        return {c: q.get(c, "") for c in q.index}
+    except Exception:
+        return {}
+
+def _edu_completion_from_jd(jd_row:dict) -> str:
+    """직원공통필수교육이 비어있지 않으면 '완료', 아니면 '미완료'."""
+    val = str(jd_row.get("직원공통필수교육","")).strip()
+    return "완료" if val else "미완료"
+
+def upsert_comp_simple_response(
+    emp_df: pd.DataFrame,
+    year: int,
+    target_sabun: str,
+    evaluator_sabun: str,
+    main_grade: str,   # A/B/C/D/E
+    extra_grade: str,  # 해당없음 또는 A/B/C/D/E
+    qual_status: str,  # 직무 유지 / 직무 변경 / 직무비부여
+    opinion: str,
+    eval_date: str     # YYYY-MM-DD
+) -> dict:
+    ws = _ensure_comp_simple_sheet(year)
+    header = ws.row_values(1) or COMP_SIMPLE_HEADERS
+    hmap = {n:i+1 for i,n in enumerate(header)}
+
+    # 교육이수: JD 기준 자동
+    jd = _jd_latest_for(target_sabun, int(year))
+    edu_status = _edu_completion_from_jd(jd)
+
+    t_name = _emp_name_by_sabun(emp_df, target_sabun)
+    e_name = _emp_name_by_sabun(emp_df, evaluator_sabun)
+    now = kst_now_str()
+
+    # upsert 키: 연도 + 평가대상사번 + 평가자사번
+    values = ws.get_all_values()
+    cY   = hmap.get("연도")
+    cTS  = hmap.get("평가대상사번")
+    cES  = hmap.get("평가자사번")
+    row_idx = 0
+    for i in range(2, len(values)+1):
+        r = values[i-1]
+        try:
+            if (str(r[cY-1]).strip()==str(year)
+                and str(r[cTS-1]).strip()==str(target_sabun)
+                and str(r[cES-1]).strip()==str(evaluator_sabun)):
+                row_idx = i
+                break
+        except:
+            pass
+
+    if row_idx == 0:
+        buf = [""]*len(header)
+        def put(k,v):
+            c=hmap.get(k)
+            if c: buf[c-1]=v
+        put("연도", int(year))
+        put("평가대상사번", str(target_sabun)); put("평가대상이름", t_name)
+        put("평가자사번", str(evaluator_sabun)); put("평가자이름", e_name)
+        put("평가일자", eval_date)
+        put("주업무평가", main_grade)
+        put("기타업무평가", extra_grade)
+        put("교육이수", edu_status)
+        put("자격유지", qual_status)
+        put("종합의견", opinion)
+        put("상태", "제출")
+        put("제출시각", now)
+        put("잠금", "")
+        ws.append_row(buf, value_input_option="USER_ENTERED")
+        st.cache_data.clear()
+        return {"action":"insert"}
+    else:
+        def upd(k,v):
+            c=hmap.get(k)
+            if c: ws.update_cell(row_idx, c, v)
+        upd("평가일자", eval_date)
+        upd("주업무평가", main_grade)
+        upd("기타업무평가", extra_grade)
+        upd("교육이수", edu_status)
+        upd("자격유지", qual_status)
+        upd("종합의견", opinion)
+        upd("상태", "제출")
+        upd("제출시각", now)
+        st.cache_data.clear()
+        return {"action":"update"}
+
+@st.cache_data(ttl=60, show_spinner=False)
+def read_my_comp_simple_rows(year:int, sabun:str)->pd.DataFrame:
+    try:
+        ws = get_workbook().worksheet(_simp_sheet_name(year))
+        df = pd.DataFrame(ws.get_all_records(numericise_ignore=["all"]))
+    except Exception:
+        return pd.DataFrame(columns=COMP_SIMPLE_HEADERS)
+    if df.empty: return df
+    df = df[df["평가자사번"].astype(str)==str(sabun)]
+    sort_cols = [c for c in ["평가대상사번","평가일자","제출시각"] if c in df.columns]
+    if sort_cols: df = df.sort_values(sort_cols, ascending=[True, False, False])
+    return df
+
 # ── 직무능력평가(가중치) ─────────────────────────────────────────────────────
 COMP_ITEM_SHEET="직무능력_항목"
 COMP_ITEM_HEADERS=["항목ID","영역","항목","내용","가중치","순서","활성","비고"]
@@ -1448,110 +1579,222 @@ def read_my_comp_rows(year:int, sabun:str)->pd.DataFrame:
 
 def tab_competency(emp_df: pd.DataFrame):
     st.subheader("직무능력평가")
-    this_year = datetime.now(tz=tz_kst()).year
-    colY = st.columns([1,3])
-    with colY[0]:
-        year = st.number_input("평가 연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="cmp_year")
 
-    items = read_comp_items_df(only_active=True)
-    if items.empty:
-        st.warning("활성화된 직무능력 항목이 없습니다.", icon="⚠️"); return
+    tabs = st.tabs(["간편(직무기술서 연동)", "기존(가중치)"])
 
-    u = st.session_state["user"]
-    me_sabun = str(u["사번"]); me_name = str(u["이름"])
-    allowed = get_allowed_sabuns(emp_df, me_sabun, include_self=True)
+    # ──────────────────────────────────────────────────────────────────────────
+    # 1) 간편(직무기술서 연동)
+    # ──────────────────────────────────────────────────────────────────────────
+    with tabs[0]:
+        this_year = datetime.now(tz=tz_kst()).year
+        colY = st.columns([1,3])
+        with colY[0]:
+            year = st.number_input("평가 연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="cmpS_year")
 
-    st.markdown("#### 대상 선택")
-    if is_admin(me_sabun) or is_manager(emp_df, me_sabun):
-        df = emp_df.copy(); df=df[df["사번"].astype(str).isin(allowed)]
-        if "재직여부" in df.columns: df=df[df["재직여부"]==True]
-        df["표시"]=df.apply(lambda r: f"{str(r.get('사번',''))} - {str(r.get('이름',''))}", axis=1)
-        df=df.sort_values(["사번"])
-        sel=st.selectbox("평가 **대상자** (사번 - 이름)", ["(선택)"]+df["표시"].tolist(), index=0, key="cmp_target")
-        if sel=="(선택)": st.info("평가 대상자를 선택하세요."); return
-        target_sabun=sel.split(" - ",1)[0]; target_name=_emp_name_by_sabun(emp_df, target_sabun)
-        evaluator_sabun=me_sabun; evaluator_name=me_name
-    else:
-        target_sabun=me_sabun; target_name=me_name
-        evaluator_sabun=me_sabun; evaluator_name=me_name
-        st.info(f"대상자: {target_name} ({target_sabun})", icon="👤")
+        # 권한/대상 선택 (관리자/매니저는 범위 내 선택, 직원은 본인)
+        u = st.session_state["user"]
+        me_sabun = str(u["사번"]); me_name = str(u["이름"])
+        allowed = get_allowed_sabuns(emp_df, me_sabun, include_self=True)
 
-    st.markdown("#### 점수 입력")
-    st.caption("각 항목 1~5점, 가중치 자동 정규화.")
-    st.markdown(
-        """
-        <style>
-          .cmp-grid{display:grid;grid-template-columns:2fr 6fr 2fr 2fr;gap:.5rem;
-                    align-items:center;padding:10px 6px;border-bottom:1px solid rgba(49,51,63,.10)}
-          .cmp-grid .name{font-weight:700}
-          .cmp-grid .desc{color:#4b5563}
-          .cmp-grid .input{display:flex;align-items:center;justify-content:center}
-          .cmp-grid .input div[role="radiogroup"]{display:flex;gap:10px;align-items:center;justify-content:center}
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-    st.markdown('<div class="grid-head">영역/항목 / 내용 / 가중치 / 점수</div>', unsafe_allow_html=True)
-
-    items_sorted=items.sort_values(["영역","순서","항목"]).reset_index(drop=True)
-    scores={}; weight_sum=0.0
-    for r in items_sorted.itertuples(index=False):
-        iid=getattr(r,"항목ID"); area=getattr(r,"영역") or ""; name=getattr(r,"항목") or ""
-        desc=getattr(r,"내용") or ""; w=float(getattr(r,"가중치") or 0.0)
-        label=f"[{area}] {name}" if area else name
-        cur=int(st.session_state.get(f"cmp_{iid}",3))
-        if cur<1 or cur>5: cur=3
-
-        st.markdown('<div class="cmp-grid">', unsafe_allow_html=True)
-        st.markdown(f'<div class="name">{label}</div>', unsafe_allow_html=True)
-        st.markdown(f'<div class="desc">{desc.replace(chr(10), "<br/>")}</div>', unsafe_allow_html=True)
-        st.markdown(f'<div class="desc" style="text-align:center">{w:g}</div>', unsafe_allow_html=True)
-        st.markdown('<div class="input">', unsafe_allow_html=True)
-        if getattr(st, "segmented_control", None):
-            new_val = st.segmented_control(" ", options=[1,2,3,4,5], default_value=cur, key=f"cmp_seg_{iid}")
+        st.markdown("#### 평가 대상 선택")
+        if is_admin(me_sabun) or is_manager(emp_df, me_sabun):
+            df = emp_df.copy()
+            df = df[df["사번"].astype(str).isin(allowed)]
+            if "재직여부" in df.columns:
+                df = df[df["재직여부"] == True]
+            df["표시"] = df.apply(lambda r: f"{str(r.get('사번',''))} - {str(r.get('이름',''))}", axis=1)
+            df = df.sort_values(["사번"])
+            sel = st.selectbox("평가 대상자 (사번 - 이름)", ["(선택)"] + df["표시"].tolist(), index=0, key="cmpS_target")
+            if sel == "(선택)":
+                st.info("평가 대상자를 선택하세요.")
+                return
+            target_sabun = sel.split(" - ", 1)[0]
+            target_name = _emp_name_by_sabun(emp_df, target_sabun)
         else:
-            new_val = int(st.radio(" ", ["1","2","3","4","5"], index=(cur-1), horizontal=True, key=f"cmp_seg_{iid}", label_visibility="collapsed"))
-        st.markdown('</div></div>', unsafe_allow_html=True)
+            target_sabun = me_sabun
+            target_name  = me_name
+            st.info(f"대상자: {target_name} ({target_sabun})", icon="👤")
 
-        v=min(5,max(1,int(new_val))); scores[str(iid)]=v; st.session_state[f"cmp_{iid}"]=v; weight_sum+=max(0.0,w)
+        # JD 요약
+        jd = _jd_latest_for(target_sabun, int(year))
+        with st.expander("직무기술서 요약", expanded=True):
+            st.write(f"**직무명:** {jd.get('직무명','') if jd else ''}")
+            c = st.columns(2)
+            with c[0]:
+                st.markdown("**주업무**")
+                st.write((jd.get("주업무","") or "").strip() or "—")
+            with c[1]:
+                st.markdown("**기타업무**")
+                st.write((jd.get("기타업무","") or "").strip() or "—")
+            st.caption("※ 해당 연도의 직무기술서 최신 버전을 표시합니다. (없으면 빈 값)")
 
-    total=0.0
-    if len(items_sorted)>0:
-        for r in items_sorted.itertuples(index=False):
-            iid=getattr(r,"항목ID"); w=float(getattr(r,"가중치") or 0.0); s=scores.get(str(iid),0)
-            total+=(s/5.0)*(w if weight_sum>0 else 1.0)
-        total_100=round((total/(weight_sum if weight_sum>0 else len(items_sorted)))*100.0, 1)
-    else:
-        total_100=0.0
+        # 입력 UI
+        st.markdown("#### 평가 입력")
+        grade_options = [("A","탁월(A)"), ("B","우수(B)"), ("C","보통(C)"), ("D","부족(D)"), ("E","저조(E)")]
+        grade_labels  = [lbl for _, lbl in grade_options]
+        label2code    = {lbl:code for code,lbl in grade_options}
 
-    st.markdown("---")
-    cM1,cM2=st.columns([1,3])
-    with cM1: st.metric("합계(100점 만점)", total_100)
-    with cM2: st.progress(min(1.0,total_100/100.0), text=f"총점 {total_100}점")
+        colG = st.columns([1,1,1,2])
+        with colG[0]:
+            g_main_lbl = st.radio("주업무", grade_labels, index=2, horizontal=False, key="cmpS_main")
+            g_main = label2code[g_main_lbl]
+        with colG[1]:
+            extra_labels = ["해당없음"] + grade_labels
+            g_extra_lbl = st.radio("기타업무", extra_labels, index=0, horizontal=False, key="cmpS_extra")
+            g_extra = "해당없음" if g_extra_lbl=="해당없음" else label2code[g_extra_lbl]
+        with colG[2]:
+            qual = st.radio("직무 자격 유지 여부", ["직무 유지","직무 변경","직무비부여"], index=0, key="cmpS_qual")
+        with colG[3]:
+            eval_date = st.date_input("평가일자", datetime.now(tz=tz_kst()).date(), key="cmpS_date").strftime("%Y-%m-%d")
 
-    cbtn=st.columns([1,1,3])
-    with cbtn[0]: do_save=st.button("제출/저장", type="primary", use_container_width=True, key="cmp_save")
-    with cbtn[1]: do_reset=st.button("모든 점수 3점으로", use_container_width=True, key="cmp_reset")
+        edu_status = _edu_completion_from_jd(jd)
+        st.metric("교육이수 (자동)", edu_status)
 
-    if do_reset:
-        for r in items_sorted.itertuples(index=False): st.session_state[f"cmp_{getattr(r,'항목ID')}"]=3
-        st.rerun()
+        opinion = st.text_area("종합평가 의견", value="", height=150, key="cmpS_opinion")
 
-    if do_save:
+        cbtn = st.columns([1,1,3])
+        with cbtn[0]:
+            do_save = st.button("제출/저장", type="primary", use_container_width=True, key="cmpS_save")
+        with cbtn[1]:
+            do_reset = st.button("초기화", use_container_width=True, key="cmpS_reset")
+
+        if do_reset:
+            for k in ["cmpS_main","cmpS_extra","cmpS_qual","cmpS_opinion"]:
+                if k in st.session_state: del st.session_state[k]
+            st.rerun()
+
+        if do_save:
+            try:
+                rep = upsert_comp_simple_response(
+                    emp_df, int(year), str(target_sabun), str(me_sabun),
+                    g_main, g_extra, qual, opinion, eval_date
+                )
+                st.success(("제출 완료" if rep["action"]=="insert" else "업데이트 완료"), icon="✅")
+                st.toast("간편 직무능력평가 저장됨", icon="✅")
+            except Exception as e:
+                st.exception(e)
+
+        st.markdown("#### 내 제출 현황(간편)")
         try:
-            rep=upsert_comp_response(emp_df,int(year),str(target_sabun),str(evaluator_sabun),scores,"제출")
-            st.success(("제출 완료" if rep["action"]=="insert" else "업데이트 완료")+f" (총점 {rep['total']}점)", icon="✅")
-            st.toast("직무능력평가 저장됨", icon="✅")
-        except Exception as e:
-            st.exception(e)
+            my = read_my_comp_simple_rows(int(year), me_sabun)
+            if my.empty:
+                st.caption("제출된 평가가 없습니다.")
+            else:
+                st.dataframe(
+                    my[["평가대상사번","평가대상이름","평가일자","주업무평가","기타업무평가","교육이수","자격유지","상태","제출시각"]],
+                    use_container_width=True, height=260
+                )
+        except Exception:
+            st.caption("제출 현황을 불러오지 못했습니다.")
 
-    st.markdown("#### 내 제출 현황")
-    try:
-        my=read_my_comp_rows(int(year), evaluator_sabun)
-        if my.empty: st.caption("제출된 평가가 없습니다.")
-        else: st.dataframe(my[["평가대상사번","평가대상이름","총점","상태","제출시각"]], use_container_width=True, height=260)
-    except Exception:
-        st.caption("제출 현황을 불러오지 못했습니다.")
+    # ──────────────────────────────────────────────────────────────────────────
+    # 2) 기존(가중치) — 기존 코드 재사용
+    # ──────────────────────────────────────────────────────────────────────────
+    with tabs[1]:
+        # 기존 가중치 버전 UI 그대로 호출: 아래는 현재 파일에 이미 있는 로직을 간단히 재구성
+        this_year = datetime.now(tz=tz_kst()).year
+        colY = st.columns([1,3])
+        with colY[0]:
+            year = st.number_input("평가 연도(가중치)", min_value=2000, max_value=2100, value=int(this_year), step=1, key="cmpW_year")
+
+        items = read_comp_items_df(only_active=True)
+        if items.empty:
+            st.warning("활성화된 직무능력 항목(가중치)이 없습니다.", icon="⚠️")
+            return
+
+        u = st.session_state["user"]
+        me_sabun = str(u["사번"]); me_name = str(u["이름"])
+        allowed = get_allowed_sabuns(emp_df, me_sabun, include_self=True)
+
+        st.markdown("#### 대상 선택(가중치)")
+        if is_admin(me_sabun) or is_manager(emp_df, me_sabun):
+            df = emp_df.copy(); df=df[df["사번"].astype(str).isin(allowed)]
+            if "재직여부" in df.columns: df=df[df["재직여부"]==True]
+            df["표시"]=df.apply(lambda r:f"{str(r.get('사번',''))} - {str(r.get('이름',''))}", axis=1)
+            df=df.sort_values(["사번"])
+            sel=st.selectbox("평가 대상자(가중치) (사번 - 이름)", ["(선택)"]+df["표시"].tolist(), index=0, key="cmpW_target")
+            if sel=="(선택)":
+                st.info("평가 대상자를 선택하세요."); return
+            target_sabun=sel.split(" - ",1)[0]; target_name=_emp_name_by_sabun(emp_df, target_sabun)
+            evaluator_sabun=me_sabun; evaluator_name=me_name
+        else:
+            target_sabun=me_sabun; target_name=me_name
+            evaluator_sabun=me_sabun; evaluator_name=me_name
+            st.info(f"대상자: {target_name} ({target_sabun})", icon="👤")
+
+        st.markdown("#### 점수 입력(가중치)")
+        st.caption("각 항목 1~5점, 가중치 자동 정규화.")
+        st.markdown(
+            """
+            <style>
+              .cmp-grid{display:grid;grid-template-columns:2fr 6fr 2fr 2fr;gap:.5rem;
+                        align-items:center;padding:10px 6px;border-bottom:1px solid rgba(49,51,63,.10)}
+              .cmp-grid .name{font-weight:700}
+              .cmp-grid .desc{color:#4b5563}
+              .cmp-grid .input{display:flex;align-items:center;justify-content:center}
+              .cmp-grid .input div[role="radiogroup"]{display:flex;gap:10px;align-items:center;justify-content:center}
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.markdown('<div class="grid-head">영역/항목 / 내용 / 가중치 / 점수</div>', unsafe_allow_html=True)
+
+        items_sorted=items.sort_values(["영역","순서","항목"]).reset_index(drop=True)
+        scores={}; weight_sum=0.0
+        for r in items_sorted.itertuples(index=False):
+            iid=getattr(r,"항목ID"); area=getattr(r,"영역") or ""; name=getattr(r,"항목") or ""
+            desc=getattr(r,"내용") or ""; w=float(getattr(r,"가중치") or 0.0)
+            label=f"[{area}] {name}" if area else name
+            cur=int(st.session_state.get(f"cmp_{iid}",3))
+            if cur<1 or cur>5: cur=3
+
+            st.markdown('<div class="cmp-grid">', unsafe_allow_html=True)
+            st.markdown(f'<div class="name">{label}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="desc">{desc.replace(chr(10), "<br/>")}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="desc" style="text-align:center">{w:g}</div>', unsafe_allow_html=True)
+            st.markdown('<div class="input">', unsafe_allow_html=True)
+            new_val = int(st.radio(" ", ["1","2","3","4","5"], index=(cur-1), horizontal=True, key=f"cmp_seg_{iid}", label_visibility="collapsed"))
+            st.markdown('</div></div>', unsafe_allow_html=True)
+
+            v=min(5,max(1,int(new_val))); scores[str(iid)]=v; st.session_state[f"cmp_{iid}"]=v; weight_sum+=max(0.0,w)
+
+        total=0.0
+        if len(items_sorted)>0:
+            for r in items_sorted.itertuples(index=False):
+                iid=getattr(r,"항목ID"); w=float(getattr(r,"가중치") or 0.0); s=scores.get(str(iid),0)
+                total+=(s/5.0)*(w if weight_sum>0 else 1.0)
+            total_100=round((total/(weight_sum if weight_sum>0 else len(items_sorted)))*100.0, 1)
+        else:
+            total_100=0.0
+
+        st.markdown("---")
+        cM1,cM2=st.columns([1,3])
+        with cM1: st.metric("합계(100점 만점)", total_100)
+        with cM2: st.progress(min(1.0,total_100/100.0), text=f"총점 {total_100}점")
+
+        cbtn=st.columns([1,1,3])
+        with cbtn[0]: do_save=st.button("제출/저장(가중치)", type="primary", use_container_width=True, key="cmpW_save")
+        with cbtn[1]: do_reset=st.button("모든 점수 3점으로", use_container_width=True, key="cmpW_reset")
+
+        if do_reset:
+            for r in items_sorted.itertuples(index=False): st.session_state[f"cmp_{getattr(r,'항목ID')}"]=3
+            st.rerun()
+
+        if do_save:
+            try:
+                rep=upsert_comp_response(emp_df,int(year),str(target_sabun),str(evaluator_sabun),scores,"제출")
+                st.success(("제출 완료" if rep["action"]=="insert" else "업데이트 완료")+f" (총점 {rep['total']}점)", icon="✅")
+                st.toast("직무능력평가 저장됨(가중치)", icon="✅")
+            except Exception as e:
+                st.exception(e)
+
+        st.markdown("#### 내 제출 현황(가중치)")
+        try:
+            my=read_my_comp_rows(int(year), evaluator_sabun)
+            if my.empty: st.caption("제출된 평가가 없습니다.")
+            else: st.dataframe(my[["평가대상사번","평가대상이름","총점","상태","제출시각"]], use_container_width=True, height=260)
+        except Exception:
+            st.caption("제출 현황을 불러오지 못했습니다.")
 
 # ── 부서이력/이동(필수 최소) ──────────────────────────────────────────────────
 HIST_SHEET="부서이력"
