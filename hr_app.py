@@ -132,6 +132,57 @@ def get_workbook():
 
 EMP_SHEET = st.secrets.get("sheets", {}).get("EMP_SHEET", "직원")
 
+# >>> PATCH: GSpread Throttle Helpers (BEGIN)
+# 읽기 과다(429) 방지용: 워크시트/헤더 캐시 + 백오프 재시도
+import time, random
+
+# 간단 캐시 (제한적 TTL)
+_WS_CACHE: dict[str, tuple[float, any]] = {}
+_HDR_CACHE: dict[str, tuple[float, list[str], dict]] = {}
+_WS_TTL  = 60   # sec
+_HDR_TTL = 60   # sec
+
+def _ws_cached(title: str):
+    """title에 해당하는 Worksheet를 TTL 동안 캐시해서 Read를 줄입니다."""
+    now = time.time()
+    ent = _WS_CACHE.get(title)
+    if ent and now - ent[0] < _WS_TTL:
+        return ent[1]
+    wb = get_workbook()
+    ws = _retry_call(wb.worksheet, title)  # _retry_call은 아래/기존 것 사용
+    _WS_CACHE[title] = (now, ws)
+    return ws
+
+def _sheet_header_cached(ws, title: str):
+    """1행 헤더/맵을 TTL 동안 캐시."""
+    now = time.time()
+    ent = _HDR_CACHE.get(title)
+    if ent and now - ent[0] < _HDR_TTL:
+        return ent[1], ent[2]
+    header = _retry_call(ws.row_values, 1) or []
+    hmap = {n: i + 1 for i, n in enumerate(header)}
+    _HDR_CACHE[title] = (now, header, hmap)
+    return header, hmap
+
+# 프로젝트에 _retry_call 이 이미 있으면 이 블럭은 무시됩니다.
+try:
+    _retry_call  # type: ignore
+except NameError:
+    def _retry_call(fn, *args, **kwargs):
+        """429 등 일시 오류에 백오프 재시도."""
+        for i in range(6):
+            try:
+                return fn(*args, **kwargs)
+            except Exception as e:
+                msg = str(e)
+                if "429" in msg or "rate" in msg.lower():
+                    time.sleep(0.5 * (2 ** i) + random.random() * 0.2)
+                    continue
+                raise
+        # 마지막 시도
+        return fn(*args, **kwargs)
+# >>> PATCH: GSpread Throttle Helpers (END)
+
 # ── Sheet Helpers ─────────────────────────────────────────────────────────────
 @st.cache_data(ttl=90, show_spinner=False)
 def read_sheet_df(sheet_name: str, *, silent: bool = False) -> pd.DataFrame:
@@ -876,19 +927,45 @@ def _eval_sheet_name(year: int | str) -> str:
     return f"{EVAL_RESP_SHEET_PREFIX}{int(year)}"
 
 def _ensure_eval_response_sheet(year: int, item_ids: list[str]):
+    """
+    평가 응답 시트 보장 + 헤더 보정.
+    - worksheet 메타데이터 조회를 캐시/백오프로 최소화
+    - 헤더 읽기도 캐시 사용
+    """
+    title = f"평가응답_{year}"
     wb = get_workbook()
-    s = _eval_sheet_name(year)
+
+    # 1) 시트 존재/생성
     try:
-        ws = wb.worksheet(s)
+        ws = _ws_cached(title)  # 캐시 + _retry_call 로 rate-limit 완화
     except WorksheetNotFound:
-        ws = wb.add_worksheet(title=s, rows=800, cols=100)
-        ws.update("A1", [EVAL_BASE_HEADERS + [f"점수_{i}" for i in item_ids]])
-        return ws
-    header = ws.row_values(1) or []
-    need = list(EVAL_BASE_HEADERS) + [f"점수_{i}" for i in item_ids]
-    add = [h for h in need if h not in header]
-    if add:
-        ws.update("1:1", [header + add])
+        # 생성은 write 요청이므로 quota 영향 적음
+        ws = _retry_call(wb.add_worksheet, title=title,
+                         rows=5000, cols=max(50, len(item_ids) + 16))
+        _WS_CACHE[title] = (time.time(), ws)  # 캐시에 갱신
+
+    # 2) 헤더 보정(최소 컬럼 + 항목ID들)
+    base_cols = ["평가유형","평가대상사번","평가대상이름",
+                 "평가자사번","평가자이름","제출시각","총점","상태"]
+
+    header, hmap = _sheet_header_cached(ws, title)
+    if not header:
+        new_header = base_cols + [str(i) for i in item_ids]
+        _retry_call(ws.update, "1:1", [new_header])
+        _HDR_CACHE[title] = (time.time(), new_header,
+                             {n: i+1 for i, n in enumerate(new_header)})
+    else:
+        need = []
+        for c in base_cols:
+            if c not in header: need.append(c)
+        for c in [str(i) for i in item_ids]:
+            if c not in header: need.append(c)
+        if need:
+            new_header = header + need
+            _retry_call(ws.update, "1:1", [new_header])
+            _HDR_CACHE[title] = (time.time(), new_header,
+                                 {n: i+1 for i, n in enumerate(new_header)})
+
     return ws
 
 def _emp_name_by_sabun(emp_df: pd.DataFrame, sabun: str) -> str:
