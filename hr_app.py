@@ -1669,29 +1669,30 @@ def tab_competency(emp_df: pd.DataFrame):
         with colY[0]:
             year = st.number_input("평가 연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="cmpS_year")
 
-        # 권한/대상 선택 (관리자/매니저는 범위 내 선택, 직원은 본인)
+        # 권한/대상 선택 — 팀장만, 팀장 부재 시 본부장 대행
         u = st.session_state["user"]
         me_sabun = str(u["사번"]); me_name = str(u["이름"])
-        allowed = get_allowed_sabuns(emp_df, me_sabun, include_self=True)
 
-        st.markdown("#### 평가 대상 선택")
-        if is_admin(me_sabun) or is_manager(emp_df, me_sabun):
-            df = emp_df.copy()
-            df = df[df["사번"].astype(str).isin(allowed)]
-            if "재직여부" in df.columns:
-                df = df[df["재직여부"] == True]
-            df["표시"] = df.apply(lambda r: f"{str(r.get('사번',''))} - {str(r.get('이름',''))}", axis=1)
-            df = df.sort_values(["사번"])
-            sel = st.selectbox("평가 대상자 (사번 - 이름)", ["(선택)"] + df["표시"].tolist(), index=0, key="cmpS_target")
-            if sel == "(선택)":
-                st.info("평가 대상자를 선택하세요.")
-                return
-            target_sabun = sel.split(" - ", 1)[0]
-            target_name = _emp_name_by_sabun(emp_df, target_sabun)
-        else:
-            target_sabun = me_sabun
-            target_name  = me_name
-            st.info(f"대상자: {target_name} ({target_sabun})", icon="👤")
+        st.markdown("#### 평가 대상 선택 (팀장만, 팀장 부재 시 본부장)")
+        evaluable = get_evaluable_targets(emp_df, me_sabun)
+
+        df = emp_df.copy()
+        df = df[df["사번"].astype(str).isin(evaluable)]
+        if "재직여부" in df.columns:
+            df = df[df["재직여부"] == True]
+
+        if df.empty:
+            st.warning("현재 맡은 팀(또는 부서)에 대한 평가 권한이 없습니다. 권한관리에서 'evaluator'를 확인하세요.", icon="⚠️")
+            return
+
+        df["표시"] = df.apply(lambda r: f"{str(r.get('사번',''))} - {str(r.get('이름',''))}", axis=1)
+        df = df.sort_values(["사번"])
+        sel = st.selectbox("평가 대상자 (사번 - 이름)", ["(선택)"] + df["표시"].tolist(), index=0, key="cmpS_target")
+        if sel == "(선택)":
+            st.info("평가 대상자를 선택하세요.")
+            return
+        target_sabun = sel.split(" - ", 1)[0]
+        target_name = _emp_name_by_sabun(emp_df, target_sabun)
 
         # JD 요약
         jd = _jd_latest_for(target_sabun, int(year))
@@ -1769,7 +1770,7 @@ def tab_competency(emp_df: pd.DataFrame):
     # 2) 기존(가중치) — 기존 코드 재사용
     # ──────────────────────────────────────────────────────────────────────────
     with tabs[1]:
-        # 기존 가중치 버전 UI 그대로 호출: 아래는 현재 파일에 이미 있는 로직을 간단히 재구성
+        # 기존 가중치 버전 UI
         this_year = datetime.now(tz=tz_kst()).year
         colY = st.columns([1,3])
         with colY[0]:
@@ -1780,25 +1781,33 @@ def tab_competency(emp_df: pd.DataFrame):
             st.warning("활성화된 직무능력 항목(가중치)이 없습니다.", icon="⚠️")
             return
 
+        # 권한/대상 선택 — 팀장만, 팀장 부재 시 본부장 대행
         u = st.session_state["user"]
         me_sabun = str(u["사번"]); me_name = str(u["이름"])
-        allowed = get_allowed_sabuns(emp_df, me_sabun, include_self=True)
 
-        st.markdown("#### 대상 선택(가중치)")
-        if is_admin(me_sabun) or is_manager(emp_df, me_sabun):
-            df = emp_df.copy(); df=df[df["사번"].astype(str).isin(allowed)]
-            if "재직여부" in df.columns: df=df[df["재직여부"]==True]
-            df["표시"]=df.apply(lambda r:f"{str(r.get('사번',''))} - {str(r.get('이름',''))}", axis=1)
-            df=df.sort_values(["사번"])
-            sel=st.selectbox("평가 대상자(가중치) (사번 - 이름)", ["(선택)"]+df["표시"].tolist(), index=0, key="cmpW_target")
-            if sel=="(선택)":
-                st.info("평가 대상자를 선택하세요."); return
-            target_sabun=sel.split(" - ",1)[0]; target_name=_emp_name_by_sabun(emp_df, target_sabun)
-            evaluator_sabun=me_sabun; evaluator_name=me_name
-        else:
-            target_sabun=me_sabun; target_name=me_name
-            evaluator_sabun=me_sabun; evaluator_name=me_name
-            st.info(f"대상자: {target_name} ({target_sabun})", icon="👤")
+        st.markdown("#### 대상 선택(가중치) — 팀장만, 팀장 부재 시 본부장")
+        evaluable = get_evaluable_targets(emp_df, me_sabun)
+
+        df = emp_df.copy()
+        df = df[df["사번"].astype(str).isin(evaluable)]
+        if "재직여부" in df.columns:
+            df = df[df["재직여부"] == True]
+
+        if df.empty:
+            st.warning("현재 맡은 팀(또는 부서)에 대한 평가 권한이 없습니다. 권한관리에서 'evaluator'를 확인하세요.", icon="⚠️")
+            return
+
+        df["표시"]=df.apply(lambda r:f"{str(r.get('사번',''))} - {str(r.get('이름',''))}", axis=1)
+        df=df.sort_values(["사번"])
+        sel=st.selectbox("평가 대상자(가중치) (사번 - 이름)", ["(선택)"]+df["표시"].tolist(), index=0, key="cmpW_target")
+        if sel=="(선택)":
+            st.info("평가 대상자를 선택하세요.")
+            return
+
+        target_sabun=sel.split(" - ",1)[0]
+        target_name=_emp_name_by_sabun(emp_df, target_sabun)
+        evaluator_sabun=me_sabun
+        evaluator_name=me_name
 
         st.markdown("#### 점수 입력(가중치)")
         st.caption("각 항목 1~5점, 가중치 자동 정규화.")
