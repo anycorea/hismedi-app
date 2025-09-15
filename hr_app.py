@@ -1837,6 +1837,147 @@ def tab_admin_jobdesc_defaults():
 
 def tab_admin_acl(emp_df: pd.DataFrame):
     st.markdown("### 권한 관리")
+    # ── [Proto] 표 기반 권한 편집 (미리보기/저장 없음) ──────────────────────────
+    with st.expander("▶ [Proto] 표 기반 권한 편집 (미리보기)", expanded=True):
+
+        # 1) 필터 바
+        base = emp_df[["사번","이름","부서1","부서2","직급","재직여부"]].copy()
+        base["사번"] = base["사번"].astype(str)
+        if "재직여부" not in base.columns: base["재직여부"] = True
+
+        cflt = st.columns([1,1,1,2,1])
+        with cflt[0]:
+            opt_d1 = ["(전체)"] + sorted([x for x in base.get("부서1",[]).dropna().unique() if x])
+            f_d1 = st.selectbox("부서1", opt_d1, index=0, key="aclp_d1")
+        with cflt[1]:
+            sub = base if f_d1=="(전체)" else base[base["부서1"].astype(str)==f_d1]
+            opt_d2 = ["(전체)"] + sorted([x for x in sub.get("부서2",[]).dropna().unique() if x])
+            f_d2 = st.selectbox("부서2", opt_d2, index=0, key="aclp_d2")
+        with cflt[2]:
+            opt_g  = ["(전체)"] + sorted([x for x in base.get("직급",[]).dropna().unique() if x])
+            f_g = st.selectbox("직급", opt_g, index=0, key="aclp_grade")
+        with cflt[3]:
+            f_q = st.text_input("검색(사번/이름)", "", key="aclp_q")
+        with cflt[4]:
+            only_active = st.checkbox("재직만", True, key="aclp_active")
+
+        view = base.copy()
+        if only_active and "재직여부" in view.columns:
+            view = view[view["재직여부"]==True]
+        if f_d1!="(전체)":
+            view = view[view["부서1"].astype(str)==f_d1]
+        if f_d2!="(전체)":
+            view = view[view["부서2"].astype(str)==f_d2]
+        if f_g!="(전체)":
+            view = view[view["직급"].astype(str)==f_g]
+        if f_q.strip():
+            k = f_q.strip().lower()
+            view = view[view.apply(lambda r: k in str(r["사번"]).lower() or k in str(r["이름"]).lower(), axis=1)]
+
+        # 2) 현재 권한 플래그 계산 (AUTH 시트 읽기만)
+        df_auth = read_auth_df()
+
+        def _has_master(s):
+            sub = df_auth[(df_auth["사번"].astype(str)==str(s)) & (df_auth["역할"].str.lower()=="admin") & (df_auth["활성"]==True)]
+            return not sub.empty
+
+        def _has_dall(s, d1):
+            if not d1: return False
+            sub = df_auth[
+                (df_auth["사번"].astype(str)==str(s)) &
+                (df_auth["역할"].str.lower()=="manager") &
+                (df_auth["범위유형"]=="부서") &
+                (df_auth["부서1"].astype(str)==str(d1)) &
+                (df_auth["부서2"].astype(str).fillna("")=="") &
+                (df_auth["활성"]==True)
+            ]
+            return not sub.empty
+
+        def _has_team(s, d1, d2):
+            if not d1 or not d2: return False
+            sub = df_auth[
+                (df_auth["사번"].astype(str)==str(s)) &
+                (df_auth["역할"].str.lower()=="manager") &
+                (df_auth["범위유형"]=="부서") &
+                (df_auth["부서1"].astype(str)==str(d1)) &
+                (df_auth["부서2"].astype(str)==str(d2)) &
+                (df_auth["활성"]==True)
+            ]
+            return not sub.empty
+
+        grid = view.sort_values(["부서1","부서2","사번"]).reset_index(drop=True)
+        grid["선택"]       = False
+        grid["Master"]     = grid.apply(lambda r: _has_master(r["사번"]), axis=1)
+        grid["부서1 전체"]  = grid.apply(lambda r: _has_dall(r["사번"], r["부서1"]), axis=1)
+        grid["부서1+부서2"] = grid.apply(lambda r: _has_team(r["사번"], r["부서1"], r["부서2"]), axis=1)
+
+        st.caption(f"대상: **{len(grid):,}명**  · 체크 변경은 ‘미리보기’에만 반영됩니다. (시트 저장 없음)")
+
+        edited = st.data_editor(
+            grid[["선택","사번","이름","부서1","부서2","직급","Master","부서1 전체","부서1+부서2"]],
+            use_container_width=True, height=420, key="aclp_editor",
+            column_config={
+                "선택": st.column_config.CheckboxColumn(),
+                "Master": st.column_config.CheckboxColumn(),
+                "부서1 전체": st.column_config.CheckboxColumn(),
+                "부서1+부서2": st.column_config.CheckboxColumn(),
+            },
+            num_rows="fixed"
+        )
+
+        cact = st.columns([1,1,1,3])
+        with cact[0]:
+            target_scope = st.selectbox("대상", ["표에서 선택한 행", "필터된 전체"], index=0, key="aclp_scope")
+        with cact[1]:
+            bulk_tpl = st.selectbox("템플릿(일괄 체크)", ["(없음)","팀장 → 부서1+부서2 ON","부장/본부장 → 부서1 전체 ON","Master ON","모두 OFF"], index=0, key="aclp_tpl")
+        with cact[2]:
+            do_apply_tpl = st.button("템플릿 적용(표만)", use_container_width=True, key="aclp_tpl_apply")
+        with cact[3]:
+            do_preview = st.button("변경 미리보기", type="primary", use_container_width=True, key="aclp_preview")
+
+        # 템플릿: 에디터 결과를 로컬에서만 조정
+        if do_apply_tpl:
+            import numpy as np
+            tgt = edited.copy()
+            if target_scope == "표에서 선택한 행":
+                tgt = tgt[tgt["선택"]==True]
+            if not tgt.empty:
+                if bulk_tpl == "팀장 → 부서1+부서2 ON":
+                    edited.loc[tgt.index, "부서1+부서2"] = True
+                elif bulk_tpl == "부장/본부장 → 부서1 전체 ON":
+                    edited.loc[tgt.index, "부서1 전체"] = True
+                elif bulk_tpl == "Master ON":
+                    edited.loc[tgt.index, "Master"] = True
+                elif bulk_tpl == "모두 OFF":
+                    edited.loc[tgt.index, ["Master","부서1 전체","부서1+부서2"]] = False
+                st.toast("표에 템플릿 적용(미리보기용)", icon="✅")
+
+        # 변경 미리보기
+        if do_preview:
+            orig = grid.set_index("사번")[["Master","부서1 전체","부서1+부서2"]].astype(bool)
+            cur  = edited.set_index("사번")[["Master","부서1 전체","부서1+부서2"]].astype(bool)
+            sab_common = orig.index.intersection(cur.index)
+
+            changes = []
+            for s in sab_common:
+                for col, label in [("Master","admin"),("부서1 전체","dept_all"),("부서1+부서2","team")]:
+                    if bool(orig.loc[s,col]) != bool(cur.loc[s,col]):
+                        row = edited[edited["사번"]==s].iloc[0]
+                        action = "ADD" if bool(cur.loc[s,col]) else "DEL"
+                        scope1 = str(row.get("부서1","")); scope2 = str(row.get("부서2",""))
+                        changes.append({
+                            "사번": s, "이름": row["이름"], "변경": f"{label}:{action}",
+                            "부서1": scope1, "부서2": scope2
+                        })
+
+            st.markdown("##### 변경 요약 (저장 없음 / 프로토타입)")
+            if not changes:
+                st.info("변경 없음", icon="ℹ️")
+            else:
+                dfc = pd.DataFrame(changes)
+                st.dataframe(dfc, use_container_width=True, height=240)
+                st.warning("※ 프로토타입: 여기에 '일괄 적용' 버튼을 연결하면 AUTH 시트에 반영됩니다.", icon="⚠️")
+
     df_auth=read_auth_df()
     st.markdown("#### 권한 규칙 추가")
     df_pick=emp_df.copy(); df_pick["표시"]=df_pick.apply(lambda r:f"{str(r.get('사번',''))} - {str(r.get('이름',''))}",axis=1); df_pick=df_pick.sort_values(["사번"])
