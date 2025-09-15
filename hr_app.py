@@ -30,6 +30,15 @@ from gspread.exceptions import WorksheetNotFound, APIError
 # ── App Config ────────────────────────────────────────────────────────────────
 APP_TITLE = st.secrets.get("app", {}).get("TITLE", "HISMEDI - 인사/HR")
 st.set_page_config(page_title=APP_TITLE, layout="wide")
+
+# ▼ 도움말 패널(st.help) 전역 비활성화 — 상단 ‘No docs available’ 제거
+if not getattr(st, "_help_disabled", False):
+    def _noop_help(*args, **kwargs):
+        return None
+    st.help = _noop_help
+    st._help_disabled = True
+
+# ▼ 전역 스타일 (도움말 패널까지 함께 숨김)
 st.markdown(
     """
     <style>
@@ -42,6 +51,8 @@ st.markdown(
       @media (min-width:1280px){
         .app-title{ font-size: 1.34rem; line-height: 1.5rem; }
       }
+      /* 도움말 패널 완전 숨김 (혹시 렌더되더라도) */
+      section[data-testid="stHelp"], div[data-testid="stHelp"]{ display:none!important; }
     </style>
     """,
     unsafe_allow_html=True,
