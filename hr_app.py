@@ -2496,6 +2496,52 @@ def tab_admin_acl(emp_df: pd.DataFrame):
         except Exception as e:
             st.exception(e)
 
+# ── Startup Sanity Checks & Safe Runner (BEGIN) ──────────────────────────────
+def startup_sanity_checks():
+    problems = []
+    try:
+        emp = read_sheet_df(EMP_SHEET, silent=True)
+        needed = ["사번", "이름"]
+        miss = [c for c in needed if c not in emp.columns]
+        if miss:
+            problems.append(f"[직원시트] 필수 컬럼 누락: {', '.join(miss)}")
+        if "사번" in emp.columns and emp["사번"].dtype != object:
+            try:
+                emp["사번"] = emp["사번"].astype(str)
+            except Exception:
+                problems.append("[직원시트] 사번 문자열 변환 실패")
+    except Exception as e:
+        problems.append(f"[직원시트] 로딩 실패: {e}")
+
+    try:
+        ensure_auth_sheet()
+    except Exception as e:
+        problems.append(f"[권한시트] 보장 실패: {e}")
+
+    try:
+        _ = read_settings_df()
+    except Exception as e:
+        problems.append(f"[설정시트] 로딩 실패: {e}")
+    try:
+        _ = read_jobdesc_df()
+    except Exception as e:
+        problems.append(f"[직무기술서] 로딩 실패: {e}")
+    try:
+        _ = read_eval_items_df(only_active=False)
+    except Exception as e:
+        problems.append(f"[평가항목] 로딩 실패: {e}")
+
+    return problems
+
+def safe_run(render_fn, *args, title: str = "", **kwargs):
+    """탭/섹션 하나를 안전하게 감싸서, 예외가 나도 전체 앱이 멈추지 않도록."""
+    try:
+        return render_fn(*args, **kwargs)
+    except Exception as e:
+        msg = f"[{title}] 렌더 실패: {e}" if title else f"렌더 실패: {e}"
+        st.error(msg, icon="🛑")
+        return None
+# ── Startup Sanity Checks & Safe Runner (END) ────────────────────────────────
 
 # ── 메인 ──────────────────────────────────────────────────────────────────────
 def main():
@@ -2508,6 +2554,11 @@ def main():
     except Exception as e:
         st.error(f"'{EMP_SHEET}' 시트 로딩 실패: {e}")
         return
+
+    # ▶ 스타트업 헬스체크: 경고만 출력(앱은 계속 실행)
+    for warn in startup_sanity_checks():
+        st.warning(warn, icon="⚠️")
+
     st.session_state["emp_df_cache"] = emp_df_all.copy()
     st.session_state["name_by_sabun"] = _build_name_map(emp_df_all)
 
@@ -2523,7 +2574,7 @@ def main():
         )
         st.warning("권한 시트 조회 오류로 관리자 여부를 시드 기준으로 판정했습니다.", icon="⚠️")
 
-    # 4) 데이터 뷰 분기
+    # 4) 데이터 뷰 분기 (의료진 포함, 필터 없음)
     emp_df_for_staff = emp_df_all
     emp_df_for_rest  = emp_df_all
 
@@ -2545,16 +2596,16 @@ def main():
         tabs = st.tabs(["직원", "평가", "직무기술서", "직무능력평가", "도움말"])
 
     with tabs[0]:
-        tab_staff(emp_df_for_staff)
+        safe_run(tab_staff, emp_df_for_staff, title="직원")
 
     with tabs[1]:
-        tab_eval_input(emp_df_for_rest)
+        safe_run(tab_eval_input, emp_df_for_rest, title="평가")
 
     with tabs[2]:
-        tab_job_desc(emp_df_for_rest)
+        safe_run(tab_job_desc, emp_df_for_rest, title="직무기술서")
 
     with tabs[3]:
-        tab_competency(emp_df_for_rest)
+        safe_run(tab_competency, emp_df_for_rest, title="직무능력평가")
 
     if u.get("관리자여부", False):
         with tabs[4]:
@@ -2567,21 +2618,21 @@ def main():
             )
             st.divider()
             if admin_page == "PIN 관리":
-                tab_admin_pin(emp_df_for_rest)
+                safe_run(tab_admin_pin,       emp_df_for_rest, title="관리자·PIN")
             elif admin_page == "부서(근무지) 이동":
-                tab_admin_transfer(emp_df_for_rest)
+                safe_run(tab_admin_transfer,  emp_df_for_rest, title="관리자·부서이동")
             elif admin_page == "평가 항목 관리":
-                tab_admin_eval_items()
+                safe_run(tab_admin_eval_items,                  title="관리자·평가항목")
             else:
-                tab_admin_acl(emp_df_for_rest)
+                safe_run(tab_admin_acl,       emp_df_for_rest, title="관리자·권한")
 
-    with tabs[-1]:
+    def _render_help():
         st.markdown(
             """
             ### 사용 안내
             - 직원 탭: 전체 데이터(의사 포함), 권한에 따라 행 제한
-            - 평가/직무기술서/직무능력평가/관리자: '의사' 직무는 숨김
-            - 상태표시: 상단에 'DB연결 ... (KST)'
+            - 평가/직무기술서/직무능력평가/관리자: 동일 데이터 기반, 권한에 따라 접근
+            - 상태표시: 상단에 ‘DB연결 … (KST)’
             """
         )
         try:
@@ -2590,6 +2641,9 @@ def main():
             st.caption(f"📄 원본 스프레드시트: [{url}]({url})")
         except Exception:
             pass
+
+    with tabs[-1]:
+        safe_run(_render_help, title="도움말")
 
 # ── 엔트리포인트 ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
