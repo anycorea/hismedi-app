@@ -2027,63 +2027,63 @@ def tab_admin_eval_items():
 
     st.markdown("### 평가 항목 관리")
 
-    # 원본 로드
     df = read_eval_items_df(only_active=False).copy()
 
-    # ▶ 안전 캐스팅 (NaN/타입 꼬임 방지)
+    # ▶ 안전 캐스팅
     for c in ["항목ID", "항목", "내용", "비고"]:
         if c in df.columns:
             df[c] = df[c].astype(str)
     if "순서" in df.columns:
         df["순서"] = pd.to_numeric(df["순서"], errors="coerce").fillna(0).astype(int)
     if "활성" in df.columns:
-        df["활성"] = df["활성"].map(lambda x: str(x).strip().lower() in ("true","1","y","yes","t"))
+        df["활성"] = df["활성"].map(lambda x: str(x).strip().lower() in ("true", "1", "y", "yes", "t"))
 
     st.write(f"현재 등록: **{len(df)}개** (활성 {df[df.get('활성', False)==True].shape[0]}개)")
 
-    # 목록/순서 편집 표
+    # ── 목록/순서 편집
     with st.expander("목록 보기 / 순서 일괄 편집", expanded=True):
-        # 표시용 서브 DF
         base_cols = [c for c in ["항목ID","항목","순서","활성"] if c in df.columns]
         edit_df = df[base_cols].copy().reset_index(drop=True)
 
-        # ▶ data_editor: 컬럼/타입 확실히 맞추고 고유 키 사용
+        # ▶ JSON-safe: 파이썬 기본형으로 강제
+        for c in edit_df.columns:
+            if c == "순서":
+                edit_df[c] = pd.to_numeric(edit_df[c], errors="coerce").fillna(0).astype(int)
+            elif c == "활성":
+                edit_df[c] = edit_df[c].astype(bool)
+            else:
+                edit_df[c] = edit_df[c].astype(str)
+
+        # column_config는 실제 존재하는 컬럼만
+        cfg = {}
+        if "순서" in edit_df.columns:
+            cfg["순서"] = st.column_config.NumberColumn(step=1, min_value=0)
+
         edited = st.data_editor(
             edit_df,
             use_container_width=True,
             height=380,
             num_rows="fixed",
-            key="adm_eval_editor_v2",
-            column_config={
-                "항목ID": st.column_config.TextColumn(disabled=True),
-                "항목":   st.column_config.TextColumn(disabled=True),
-                "순서":   st.column_config.NumberColumn(step=1, min_value=0),
-                "활성":   st.column_config.CheckboxColumn(disabled=True),
-            },
+            key="adm_eval_editor_v3",
+            column_config=cfg,   # 최소한만 설정
         )
 
-        if st.button("순서 일괄 저장", use_container_width=True, key="adm_eval_order_save"):
+        if st.button("순서 일괄 저장", use_container_width=True, key="adm_eval_order_save_v3"):
             try:
                 ws = get_workbook().worksheet(EVAL_ITEMS_SHEET)
                 header = ws.row_values(1) or []
                 hmap   = {n: i + 1 for i, n in enumerate(header)}
-
                 col_id  = hmap.get("항목ID")
                 col_ord = hmap.get("순서")
                 if not (col_id and col_ord):
                     st.error("시트에 '항목ID' 또는 '순서' 컬럼이 없습니다.")
                 else:
-                    # 시트 내 항목ID → 행 번호 맵
                     vals = _retry_call(ws.col_values, col_id)
                     pos  = {str(v).strip(): i for i, v in enumerate(vals[1:], start=2)}
-
-                    # NumberColumn이 보장하는 int형 기반으로 업데이트
                     for _, r in edited.iterrows():
                         iid = str(r.get("항목ID","")).strip()
-                        if not iid or iid not in pos:
-                            continue
-                        ws.update_cell(pos[iid], col_ord, int(r.get("순서", 0) or 0))
-
+                        if iid and iid in pos:
+                            ws.update_cell(pos[iid], col_ord, int(r.get("순서", 0) or 0))
                     st.cache_data.clear()
                     st.success("순서가 반영되었습니다.")
                     st.rerun()
@@ -2096,7 +2096,6 @@ def tab_admin_eval_items():
     choices = ["(신규)"] + [f"{r['항목ID']} - {r['항목']}" for _, r in df.iterrows()] if not df.empty else ["(신규)"]
     sel = st.selectbox("대상 선택", choices, index=0, key="adm_eval_pick")
 
-    # 기본값
     item_id = None
     name = ""
     desc = ""
@@ -2113,11 +2112,9 @@ def tab_admin_eval_items():
             name    = str(row.get("항목",""))
             desc    = str(row.get("내용",""))
             memo    = str(row.get("비고",""))
-            try:
-                order = int(row.get("순서", 0) or 0)
-            except:
-                order = 0
-            active = bool(str(row.get("활성","")).strip().lower() in ("true","1","y","yes","t"))
+            try: order = int(row.get("순서", 0) or 0)
+            except: order = 0
+            active = (str(row.get("활성","")).strip().lower() in ("true","1","y","yes","t"))
 
     c1, c2 = st.columns([3,1])
     with c1:
@@ -2126,9 +2123,9 @@ def tab_admin_eval_items():
         memo = st.text_input("비고(선택)", value=memo, key="adm_eval_memo")
     with c2:
         order = st.number_input("순서", min_value=0, step=1, value=int(order), key="adm_eval_order")
-        active = st.checkbox("활성", value=active, key="adm_eval_active")
+        active = st.checkbox("활성", value=bool(active), key="adm_eval_active")
 
-        if st.button("저장(신규/수정)", type="primary", use_container_width=True, key="adm_eval_save"):
+        if st.button("저장(신규/수정)", type="primary", use_container_width=True, key="adm_eval_save_v3"):
             if not name.strip():
                 st.error("항목명을 입력하세요.")
             else:
@@ -2139,7 +2136,6 @@ def tab_admin_eval_items():
                     hmap   = {n: i + 1 for i, n in enumerate(header)}
 
                     if not item_id:
-                        # 신규: ID 채번
                         col_id = hmap.get("항목ID")
                         nums = []
                         if col_id:
@@ -2147,24 +2143,20 @@ def tab_admin_eval_items():
                             for v in vals:
                                 s = str(v).strip()
                                 if s.startswith("ITM"):
-                                    try:
-                                        nums.append(int(s[3:]))
-                                    except:
-                                        pass
+                                    try: nums.append(int(s[3:]))
+                                    except: pass
                         new_id = f"ITM{((max(nums)+1) if nums else 1):04d}"
 
                         rowbuf = [""] * len(header)
                         def put(k, v):
                             c = hmap.get(k)
-                            if c:
-                                rowbuf[c - 1] = v
+                            if c: rowbuf[c - 1] = v
                         put("항목ID", new_id)
                         put("항목", name.strip())
                         put("내용", desc.strip())
                         put("순서", int(order))
                         put("활성", bool(active))
-                        if "비고" in hmap:
-                            put("비고", memo.strip())
+                        if "비고" in hmap: put("비고", memo.strip())
 
                         _retry_call(ws.append_row, rowbuf, value_input_option="USER_ENTERED")
                         st.cache_data.clear()
@@ -2172,15 +2164,13 @@ def tab_admin_eval_items():
                         st.rerun()
 
                     else:
-                        # 수정
                         col_id = hmap.get("항목ID")
                         idx = 0
                         if col_id:
                             vals = _retry_call(ws.col_values, col_id)
                             for i, v in enumerate(vals[1:], start=2):
                                 if str(v).strip() == str(item_id).strip():
-                                    idx = i
-                                    break
+                                    idx = i; break
                         if idx == 0:
                             st.error("대상 항목을 찾을 수 없습니다.")
                         else:
@@ -2188,8 +2178,7 @@ def tab_admin_eval_items():
                             ws.update_cell(idx, hmap["내용"], desc.strip())
                             ws.update_cell(idx, hmap["순서"], int(order))
                             ws.update_cell(idx, hmap["활성"], bool(active))
-                            if "비고" in hmap:
-                                ws.update_cell(idx, hmap["비고"], memo.strip())
+                            if "비고" in hmap: ws.update_cell(idx, hmap["비고"], memo.strip())
                             st.cache_data.clear()
                             st.success("업데이트 완료")
                             st.rerun()
@@ -2197,7 +2186,7 @@ def tab_admin_eval_items():
                     st.exception(e)
 
         if item_id:
-            if st.button("비활성화(소프트 삭제)", use_container_width=True, key="adm_eval_disable"):
+            if st.button("비활성화(소프트 삭제)", use_container_width=True, key="adm_eval_disable_v3"):
                 try:
                     ws = get_workbook().worksheet(EVAL_ITEMS_SHEET)
                     header = ws.row_values(1); hmap = {n: i + 1 for i, n in enumerate(header)}
@@ -2208,15 +2197,13 @@ def tab_admin_eval_items():
                         vals = _retry_call(ws.col_values, col_id)
                         for i, v in enumerate(vals[1:], start=2):
                             if str(v).strip() == str(item_id).strip():
-                                ws.update_cell(i, col_active, False)
-                                break
+                                ws.update_cell(i, col_active, False); break
                         st.cache_data.clear()
-                        st.success("비활성화 완료")
-                        st.rerun()
+                        st.success("비활성화 완료"); st.rerun()
                 except Exception as e:
                     st.exception(e)
 
-            if st.button("행 삭제(완전 삭제)", use_container_width=True, key="adm_eval_delete"):
+            if st.button("행 삭제(완전 삭제)", use_container_width=True, key="adm_eval_delete_v3"):
                 try:
                     ws = get_workbook().worksheet(EVAL_ITEMS_SHEET)
                     header = ws.row_values(1); hmap = {n: i + 1 for i, n in enumerate(header)}
@@ -2227,11 +2214,9 @@ def tab_admin_eval_items():
                         vals = _retry_call(ws.col_values, col_id)
                         for i, v in enumerate(vals[1:], start=2):
                             if str(v).strip() == str(item_id).strip():
-                                ws.delete_rows(i)
-                                break
+                                ws.delete_rows(i); break
                         st.cache_data.clear()
-                        st.success("삭제 완료")
-                        st.rerun()
+                        st.success("삭제 완료"); st.rerun()
                 except Exception as e:
                     st.exception(e)
 
@@ -2274,14 +2259,12 @@ def tab_admin_acl(emp_df: pd.DataFrame):
 
     st.markdown("### 권한 관리")
 
-    # ── 표 기반 권한 편집 (Master 전용)
     with st.expander("▶ 표 기반 권한 편집 (Master 전용)", expanded=True):
         me = st.session_state.get("user", {})
         am_master = is_admin(str(me.get("사번", "")))
         if not am_master:
             st.error("Master만 저장할 수 있습니다. (표는 읽기 전용으로 표시됩니다)", icon="🛡️")
 
-        # 1) 필터
         base = emp_df[["사번", "이름", "부서1", "부서2", "직급", "재직여부"]].copy()
         base["사번"] = base["사번"].astype(str)
         if "재직여부" not in base.columns:
@@ -2316,7 +2299,6 @@ def tab_admin_acl(emp_df: pd.DataFrame):
             k = f_q.strip().lower()
             view = view[view.apply(lambda r: k in str(r["사번"]).lower() or k in str(r["이름"]).lower(), axis=1)]
 
-        # 2) 현재 권한 플래그 계산
         df_auth = read_auth_df()
 
         def _has_master(s):
@@ -2376,7 +2358,6 @@ def tab_admin_acl(emp_df: pd.DataFrame):
             return not sub.empty
 
         grid = view.sort_values(["부서1", "부서2", "사번"]).reset_index(drop=True)
-        # ▶ 안전한 bool 캐스팅
         grid["선택"] = False
         grid["Master"] = grid.apply(lambda r: _has_master(r["사번"]), axis=1).astype(bool)
         grid["부서1 전체"] = grid.apply(lambda r: _has_mgr_dall(r["사번"], r["부서1"]), axis=1).astype(bool)
@@ -2384,7 +2365,13 @@ def tab_admin_acl(emp_df: pd.DataFrame):
         grid["평가(부서1 전체)"] = grid.apply(lambda r: _has_eval_dall(r["사번"], r["부서1"]), axis=1).astype(bool)
         grid["평가(부서1+부서2)"] = grid.apply(lambda r: _has_eval_team(r["사번"], r["부서1"], r["부서2"]), axis=1).astype(bool)
 
-        st.caption(f"대상: **{len(grid):,}명**  · 체크 후 ‘변경 미리보기’ → ‘일괄 적용’ 순서로 진행하세요.")
+        # ▶ JSON-safe: 표에 들어가는 모든 컬럼 강제 캐스팅
+        for c in ["사번","이름","부서1","부서2","직급"]:
+            grid[c] = grid[c].astype(str)
+        for c in ["선택","Master","부서1 전체","부서1+부서2","평가(부서1 전체)","평가(부서1+부서2)"]:
+            grid[c] = grid[c].astype(bool)
+
+        st.caption(f"대상: **{len(grid):,}명**  · 체크 후 ‘변경 미리보기’ → ‘일괄 적용’")
 
         edited = st.data_editor(
             grid[[
@@ -2393,17 +2380,9 @@ def tab_admin_acl(emp_df: pd.DataFrame):
             ]],
             use_container_width=True,
             height=460,
-            key="aclp_editor_v2",
+            key="aclp_editor_v3",
             num_rows="fixed",
-            column_config={
-                "선택": st.column_config.CheckboxColumn(),
-                "Master": st.column_config.CheckboxColumn(),
-                "부서1 전체": st.column_config.CheckboxColumn(),
-                "부서1+부서2": st.column_config.CheckboxColumn(),
-                "평가(부서1 전체)": st.column_config.CheckboxColumn(),
-                "평가(부서1+부서2)": st.column_config.CheckboxColumn(),
-            },
-            disabled=not am_master,  # 전체 비활성화(버전 호환: 지원되는 스트림릿에선 정상)
+            # column_config 최소화(환경 의존성 제거)
         )
 
         cact = st.columns([1,1,2,2])
@@ -2425,8 +2404,8 @@ def tab_admin_acl(emp_df: pd.DataFrame):
         with cact[3]:
             do_apply = st.button("일괄 적용 (AUTH 반영)", type="primary", use_container_width=True, key="aclp_apply", disabled=not am_master)
 
-        # 템플릿(표만 수정)
-        if am_master and bulk_tpl != "(없음)":
+        # 템플릿 적용(표만 수정)
+        if bulk_tpl != "(없음)":
             tgt = edited.copy()
             if target_scope == "표에서 선택한 행":
                 tgt = tgt[tgt["선택"] == True]
@@ -2463,7 +2442,7 @@ def tab_admin_acl(emp_df: pd.DataFrame):
                 ]:
                     if bool(orig.loc[s, col]) != bool(cur.loc[s, col]):
                         action = "ADD" if bool(cur.loc[s, col]) else "DEL"
-                        changes.append({"사번": s, "이름": row["이름"], "변경": f"{label}:{action}", "부서1": d1, "부서2": d2})
+                        changes.append({"사번": s, "이름": str(row["이름"]), "변경": f"{label}:{action}", "부서1": d1, "부서2": d2})
             return changes
 
         if do_preview:
@@ -2472,31 +2451,46 @@ def tab_admin_acl(emp_df: pd.DataFrame):
             if not changes:
                 st.info("변경 없음", icon="ℹ️")
             else:
-                st.dataframe(pd.DataFrame(changes), use_container_width=True, height=260)
+                # JSON-safe
+                chdf = pd.DataFrame(changes)
+                for c in chdf.columns:
+                    chdf[c] = chdf[c].astype(str)
+                st.dataframe(chdf, use_container_width=True, height=260)
 
-        # 효과 미리보기(데이터 접근 가능한 인원 수)
+        # ── 효과 미리보기 (JSON-safe 보장)
         st.markdown("##### 효과 미리보기 (데이터 접근 가능한 인원 수)")
         with st.container():
             tot = len(emp_df["사번"].astype(str).unique())
             def _count_allowed(row):
                 if bool(row.get("Master", False)):
-                    return tot
+                    return int(tot)
                 allowed = {str(row["사번"]).strip()}
                 d1 = str(row.get("부서1","")).strip(); d2 = str(row.get("부서2","")).strip()
                 if bool(row.get("부서1 전체", False)) and d1:
                     allowed.update(emp_df.loc[emp_df["부서1"].astype(str)==d1, "사번"].astype(str).tolist())
                 if bool(row.get("부서1+부서2", False)) and d1 and d2:
                     allowed.update(emp_df.loc[(emp_df["부서1"].astype(str)==d1) & (emp_df["부서2"].astype(str)==d2), "사번"].astype(str).tolist())
-                return len(allowed)
+                return int(len(allowed))
 
             try:
                 prev = edited.copy()
                 prev["접근가능_인원수"] = prev.apply(_count_allowed, axis=1)
+
+                # JSON-safe 강제
+                for c in ["사번","이름","부서1","부서2","직급"]:
+                    prev[c] = prev[c].astype(str)
+                for c in ["Master","부서1 전체","부서1+부서2"]:
+                    prev[c] = prev[c].astype(bool)
+                prev["접근가능_인원수"] = pd.to_numeric(prev["접근가능_인원수"], errors="coerce").fillna(0).astype(int)
+
                 st.dataframe(prev[["사번","이름","부서1","부서2","직급","Master","부서1 전체","부서1+부서2","접근가능_인원수"]],
                              use_container_width=True, height=240)
                 st.caption("※ 데이터 접근 기준 참고 수치입니다. (평가권과는 별개)")
             except Exception:
                 st.caption("미리보기 계산 실패")
+
+        # (이하 '일괄 적용', '규칙 추가/삭제' 로직은 기존과 동일 — 필요 시 그대로 두세요)
+        # ... 원래의 apply/append/delete 구현부를 이어서 두시면 됩니다 ...
 
         # 3) 일괄 적용(AUTH 반영)
         if do_apply and am_master:
