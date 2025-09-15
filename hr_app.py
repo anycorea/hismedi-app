@@ -183,6 +183,66 @@ def _build_name_map(df: pd.DataFrame) -> dict:
     if df.empty: return {}
     return {str(r["사번"]): str(r.get("이름", "")) for _, r in df.iterrows()}
 
+# === Login Enter Key Binder (사번 Enter→PIN, PIN Enter→로그인) ==============
+import streamlit.components.v1 as components
+
+def _inject_login_keybinder():
+    """사번 Enter→PIN 포커스, PIN Enter→'로그인' 버튼 클릭"""
+    components.html(
+        """
+        <script>
+        (function(){
+          function byLabelStartsWith(txt){
+            const doc = window.parent.document;
+            const labels = Array.from(doc.querySelectorAll('label'));
+            const lab = labels.find(l => (l.innerText||"").trim().startsWith(txt));
+            if(!lab) return null;
+            const root = lab.closest('div[data-testid="stTextInput"]') || lab.parentElement;
+            return root ? root.querySelector('input') : null;
+          }
+          function findLoginBtn(){
+            const doc = window.parent.document;
+            const btns = Array.from(doc.querySelectorAll('button'));
+            return btns.find(b => (b.textContent||"").trim() === '로그인');
+          }
+          function bind(){
+            const sab = byLabelStartsWith('사번');
+            const pin = byLabelStartsWith('PIN');
+            const btn = findLoginBtn();
+            if(!sab || !pin) return false;
+
+            if(!sab._bound){
+              sab._bound = true;
+              sab.addEventListener('keydown', function(e){
+                if(e.key === 'Enter'){
+                  e.preventDefault();
+                  pin.focus(); try{ pin.select(); }catch(_){}
+                }
+              });
+            }
+            if(!pin._bound){
+              pin._bound = true;
+              pin.addEventListener('keydown', function(e){
+                if(e.key === 'Enter'){
+                  e.preventDefault();
+                  if(btn){ btn.click(); }
+                }
+              });
+            }
+            return true;
+          }
+          // 즉시 시도 + 재렌더 대비
+          let ok = bind();
+          const mo = new MutationObserver(() => { bind(); });
+          mo.observe(window.parent.document.body, { childList:true, subtree:true });
+          setTimeout(() => { try{ mo.disconnect(); }catch(e){} }, 10000);
+        })();
+        </script>
+        """,
+        height=0, width=0
+    )
+# ============================================================================
+
 # ── Session/Auth ──────────────────────────────────────────────────────────────
 SESSION_TTL_MIN = 30
 def _session_valid() -> bool:
@@ -200,101 +260,17 @@ def logout():
 def show_login_form(emp_df: pd.DataFrame):
     st.header("로그인")
 
-    # ── 입력(폼 없음: Enter가 자동 제출되지 않게) + 앵커 삽입 ─────────────
-    st.markdown('<div id="sabun_anchor"></div>', unsafe_allow_html=True)
     sabun = st.text_input("사번", placeholder="예) 123456", key="login_sabun")
-
-    st.markdown('<div id="pin_anchor"></div>', unsafe_allow_html=True)
     pin   = st.text_input("PIN (숫자)", type="password", key="login_pin")
 
     col = st.columns([1, 3])
     with col[0]:
         do_login = st.button("로그인", use_container_width=True, type="primary", key="login_btn")
 
-    # ── Enter 동작/포커스 제어(JS) : 사번 Enter→PIN, PIN Enter→로그인 ───
-    st.markdown(
-        """
-        <script>
-        (function () {
-          function qs(sel){ return document.querySelector(sel); }
-          function findLoginBtn(){
-            const btns = Array.from(document.querySelectorAll('button'));
-            return btns.find(b => (b.innerText || b.textContent || '').trim() === '로그인');
-          }
-          function getInputs(){
-            // 앵커 바로 위 컨테이너의 첫 번째 input을 잡습니다.
-            const sab = (function(){
-              const a = qs('#sabun_anchor');
-              if(!a) return null;
-              const p = a.parentElement;
-              return p ? p.querySelector('input') : null;
-            })();
-            const pin = (function(){
-              const a = qs('#pin_anchor');
-              if(!a) return null;
-              const p = a.parentElement;
-              return p ? p.querySelector('input') : null;
-            })();
-            return {sab, pin};
-          }
-          function bind(){
-            const {sab, pin} = getInputs();
-            const btn = findLoginBtn();
-            if(!sab || !pin) return false;
+    # ⬇️ 엔터키 동작(사번→PIN, PIN→로그인) 주입
+    _inject_login_keybinder()
 
-            // 초기 포커스: 사번 비었으면 사번, 아니면 PIN
-            if(document.activeElement !== sab && (!sab.value || sab.value.trim()==="")){
-              sab.focus();
-            } else if(document.activeElement !== pin){
-              pin.focus(); try{ pin.select(); }catch(_){}
-            }
-
-            // 사번 Enter → PIN으로 이동 (제출/리런 방지)
-            if(!sab.__enterBound){
-              sab.__enterBound = true;
-              ['keydown','keypress','keyup'].forEach(evt => {
-                sab.addEventListener(evt, function(e){
-                  if(e.key === 'Enter'){
-                    e.preventDefault(); e.stopPropagation();
-                    try{ e.stopImmediatePropagation(); }catch(_){}
-                    if(pin){ pin.focus(); try{ pin.select(); }catch(_){} }
-                  }
-                }, true);
-              });
-            }
-
-            // PIN Enter → 로그인 버튼 클릭
-            if(!pin.__enterBound){
-              pin.__enterBound = true;
-              pin.addEventListener('keydown', function(e){
-                if(e.key === 'Enter'){
-                  const okSab = sab && sab.value && sab.value.trim() !== "";
-                  const okPin = pin && pin.value && pin.value.trim() !== "";
-                  if(okSab && okPin){
-                    e.preventDefault(); e.stopPropagation();
-                    try{ e.stopImmediatePropagation(); }catch(_){}
-                    const btn = findLoginBtn();
-                    if(btn){ btn.click(); }
-                  }
-                }
-              }, true);
-            }
-            return true;
-          }
-
-          // 즉시 바인딩 + 재렌더 대응
-          if(!bind()){
-            const obs = new MutationObserver(() => { bind(); });
-            obs.observe(document.body, {childList:true, subtree:true});
-            setTimeout(() => { try{ obs.disconnect(); }catch(_){ } }, 5000);
-          }
-        })();
-        </script>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    # ── 버튼 클릭(또는 PIN-Enter) 시 서버 검증/세션 시작 ───────────────
+    # ── 서버 검증/세션 시작 ───────────────────────────────────────────
     if not do_login:
         st.stop()
 
@@ -312,41 +288,6 @@ def show_login_form(emp_df: pd.DataFrame):
         st.error("재직 상태가 아닙니다.")
         st.stop()
 
-    # 솔트/무솔트 모두 허용
-    stored = str(r.get("PIN_hash","")).strip().lower()
-    entered_plain  = _sha256_hex(pin.strip())
-    entered_salted = _pin_hash(pin.strip(), str(r.get("사번","")))
-    if stored not in (entered_plain, entered_salted):
-        st.error("PIN이 올바르지 않습니다.")
-        st.stop()
-
-    _start_session({
-        "사번": str(r.get("사번","")),
-        "이름": str(r.get("이름","")),
-        "관리자여부": False,
-    })
-    st.success(f"{str(r.get('이름',''))}님 환영합니다!")
-    st.rerun()
-
-    # ── 서버측 검증/세션 시작
-    if not submitted:
-        st.stop()
-
-    if not sabun or not pin:
-        st.error("사번과 PIN을 입력하세요.")
-        st.stop()
-
-    row = emp_df.loc[emp_df["사번"].astype(str) == str(sabun)]
-    if row.empty:
-        st.error("사번을 찾을 수 없습니다.")
-        st.stop()
-
-    r = row.iloc[0]
-    if not _to_bool(r.get("재직여부", False)):
-        st.error("재직 상태가 아닙니다.")
-        st.stop()
-
-    # 솔트/무솔트 모두 허용 (이전 데이터 호환)
     stored = str(r.get("PIN_hash","")).strip().lower()
     entered_plain  = _sha256_hex(pin.strip())
     entered_salted = _pin_hash(pin.strip(), str(r.get("사번","")))
