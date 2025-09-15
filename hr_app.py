@@ -206,7 +206,6 @@ def show_login_form(emp_df: pd.DataFrame):
         pin   = st.text_input("PIN (숫자)", type="password", key="login_pin")
         submitted = st.form_submit_button("로그인", use_container_width=True, type="primary")
 
-    # ── [엔터키 + 최초 포커스] JS 주입
     # ── [엔터키 + 최초 포커스] JS 주입 (업데이트)
     st.markdown(
         """
