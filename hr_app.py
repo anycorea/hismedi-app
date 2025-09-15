@@ -200,62 +200,63 @@ def logout():
 def show_login_form(emp_df: pd.DataFrame):
     st.header("로그인")
 
-    # ── 로그인 폼
-    with st.form("login_form", clear_on_submit=False):
-        sabun = st.text_input("사번", placeholder="예) 123456", key="login_sabun")
-        pin   = st.text_input("PIN (숫자)", type="password", key="login_pin")
-        submitted = st.form_submit_button("로그인", use_container_width=True, type="primary")
+    # ── 입력(폼 없음: Enter가 자동 제출되지 않게)
+    sabun = st.text_input("사번", placeholder="예) 123456", key="login_sabun")
+    pin   = st.text_input("PIN (숫자)", type="password", key="login_pin")
 
-    # ── [엔터키/포커스] 사번 → PIN → 로그인 (DOM 변경에도 견고)
+    col = st.columns([1, 3])
+    with col[0]:
+        do_login = st.button("로그인", use_container_width=True, type="primary")
+
+    # ── [엔터키/포커스] 사번 → PIN → 로그인
     st.markdown(
         """
         <script>
-        (function() {
-          function findNodes() {
-            // 로그인 화면에선 보통 입력이 2개뿐: 첫 번째 텍스트 = 사번, 첫 번째 password = PIN
-            const sab = (function(){
-              const t1 = document.querySelector('input[type="text"]');
-              if (t1) return t1;
-              // 일부 버전에선 type이 비어있는 텍스트 인풋일 수 있음
-              return document.querySelector('input:not([type])');
-            })();
-            const pin = document.querySelector('input[type="password"]');
-            const btn = Array.from(document.querySelectorAll('button'))
-                        .find(b => (b.textContent || '').trim() === '로그인');
-            return { sab, pin, btn };
+        (function () {
+          function qs(sel){ return document.querySelector(sel); }
+          function byText(tag, txt){
+            const els = Array.from(document.getElementsByTagName(tag));
+            return els.find(el => (el.textContent || '').trim() === txt);
           }
+          function bind(){
+            // 라벨 기반으로 안정적으로 찾기
+            let sab = qs('input[aria-label="사번"]');
+            let pin = qs('input[aria-label="PIN (숫자)"]');
+            let btn = byText('button', '로그인');
+            if(!sab || !pin) return false;
 
-          function bind() {
-            const { sab, pin, btn } = findNodes();
-            if (!sab || !pin) return false;
-
-            // 최초 포커스: 사번이 비어있으면 사번, 아니면 PIN
-            if (document.activeElement !== sab && (!sab.value || sab.value.trim() === "")) {
+            // 최초 포커스: 사번 비었으면 사번, 아니면 PIN
+            if(document.activeElement !== sab && (!sab.value || sab.value.trim()==="")){
               sab.focus();
-            } else if (document.activeElement !== pin && sab.value && sab.value.trim() !== "") {
-              pin.focus();
+            } else if(document.activeElement !== pin){
+              pin.focus(); try{ pin.select(); }catch(_){}
             }
 
-            // 중복 바인딩 방지
-            if (!sab.__boundEnter) {
-              sab.__boundEnter = true;
-              sab.addEventListener('keydown', function(e) {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  if (pin) { pin.focus(); try { pin.select(); } catch(_){} }
-                }
-              }, true);
+            // 사번 입력칸: Enter → PIN으로 이동(제출 방지)
+            if(!sab.__enterBound){
+              sab.__enterBound = true;
+              ['keydown','keypress','keyup'].forEach(evt => {
+                sab.addEventListener(evt, function(e){
+                  if(e.key === 'Enter'){
+                    e.preventDefault(); e.stopPropagation();
+                    try{ e.stopImmediatePropagation(); }catch(_){}
+                    if(pin){ pin.focus(); try{ pin.select(); }catch(_){} }
+                  }
+                }, true);
+              });
             }
-            if (!pin.__boundEnter) {
-              pin.__boundEnter = true;
-              pin.addEventListener('keydown', function(e) {
-                if (e.key === 'Enter') {
-                  // 두 칸이 채워져 있으면 바로 제출
+
+            // PIN 입력칸: Enter → 로그인 버튼 클릭
+            if(!pin.__enterBound){
+              pin.__enterBound = true;
+              pin.addEventListener('keydown', function(e){
+                if(e.key === 'Enter'){
                   const ok = sab && sab.value && sab.value.trim() !== "" &&
                              pin && pin.value && pin.value.trim() !== "";
-                  if (ok) {
-                    e.preventDefault();
-                    if (btn) btn.click();
+                  if(ok){
+                    e.preventDefault(); e.stopPropagation();
+                    try{ e.stopImmediatePropagation(); }catch(_){}
+                    if(btn){ btn.click(); }
                   }
                 }
               }, true);
@@ -263,19 +264,52 @@ def show_login_form(emp_df: pd.DataFrame):
             return true;
           }
 
-          // 즉시 바인딩 시도 + Streamlit 재렌더 대응
-          let attached = bind();
-          if (!attached) {
+          // 즉시 바인딩 + 재렌더 대응
+          let ok = bind();
+          if(!ok){
             const obs = new MutationObserver(() => { bind(); });
-            obs.observe(document.body, { childList: true, subtree: true });
-            // 몇 초 후 자동 해제(불필요한 관찰 방지)
-            setTimeout(() => { try { obs.disconnect(); } catch(_){} }, 4000);
+            obs.observe(document.body, {childList:true, subtree:true});
+            setTimeout(() => { try{ obs.disconnect(); }catch(_){ } }, 5000);
           }
         })();
         </script>
         """,
         unsafe_allow_html=True,
     )
+
+    # ── 버튼 클릭(또는 PIN-Enter) 시 서버 검증/세션 시작
+    if not do_login:
+        st.stop()
+
+    if not sabun or not pin:
+        st.error("사번과 PIN을 입력하세요.")
+        st.stop()
+
+    row = emp_df.loc[emp_df["사번"].astype(str) == str(sabun)]
+    if row.empty:
+        st.error("사번을 찾을 수 없습니다.")
+        st.stop()
+
+    r = row.iloc[0]
+    if not _to_bool(r.get("재직여부", False)):
+        st.error("재직 상태가 아닙니다.")
+        st.stop()
+
+    # 솔트/무솔트 모두 허용 (이전 데이터 호환)
+    stored = str(r.get("PIN_hash","")).strip().lower()
+    entered_plain  = _sha256_hex(pin.strip())
+    entered_salted = _pin_hash(pin.strip(), str(r.get("사번","")))
+    if stored not in (entered_plain, entered_salted):
+        st.error("PIN이 올바르지 않습니다.")
+        st.stop()
+
+    _start_session({
+        "사번": str(r.get("사번","")),
+        "이름": str(r.get("이름","")),
+        "관리자여부": False,
+    })
+    st.success(f"{str(r.get('이름',''))}님 환영합니다!")
+    st.rerun()
 
     # ── 서버측 검증/세션 시작
     if not submitted:
