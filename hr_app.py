@@ -42,7 +42,7 @@ if not getattr(st, "_help_disabled", False):
 st.markdown(
     """
     <style>
-      .block-container { padding-top: 1.1rem !important; }
+      .block-container { padding-top: 1.35rem !important; }
       .stTabs [role='tab']{ padding:10px 16px !important; font-size:1.02rem !important; }
       .grid-head{ font-size:.9rem; color:#6b7280; margin:.2rem 0 .5rem; }
       .app-title{ font-weight:800; font-size:1.28rem; margin: .2rem 0 .6rem; }
