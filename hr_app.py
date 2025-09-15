@@ -200,18 +200,60 @@ def logout():
 def show_login_form(emp_df: pd.DataFrame):
     st.header("로그인")
 
-    # 폼: Enter 키로 제출됨
+    # ── 로그인 폼
     with st.form("login_form", clear_on_submit=False):
-        sabun = st.text_input("사번", placeholder="예) 123456", key="login_sabun")
+        sabun = st.text_input("사번", placeholder="예) 123456", key="login_sabun", autofocus=True)
         pin   = st.text_input("PIN (숫자)", type="password", key="login_pin")
-        submitted = st.form_submit_button("로그인 (Enter)", use_container_width=True, type="primary")
+        submitted = st.form_submit_button("로그인", use_container_width=True, type="primary")
 
+    # ── [엔터키 동작] 폼 바로 아래 JS 삽입 (사번/핀 입력 중 Enter 시 제출)
+    st.markdown(
+        """
+        <script>
+        (function () {
+          if (window.__loginEnterBound) return;
+          window.__loginEnterBound = true;
+
+          document.addEventListener('keydown', function (e) {
+            if (e.key !== 'Enter') return;
+
+            // Streamlit은 label이 aria-label로 매핑됩니다.
+            const sab = document.querySelector('input[aria-label="사번"]');
+            const pin = document.querySelector('input[aria-label="PIN (숫자)"]');
+            if (!sab || !pin) return;
+
+            const active = document.activeElement;
+            const inSabOrPin = (active === sab || active === pin);
+            if (!inSabOrPin) return;
+
+            // 1) 사번 필드에서 Enter → PIN으로 포커스 이동(빈 경우)
+            if (active === sab && (!pin.value || !pin.value.trim())) {
+              e.preventDefault();
+              pin.focus();
+              return;
+            }
+
+            // 2) 두 값이 모두 있으면 제출 버튼 클릭
+            if ((sab.value && sab.value.trim()) && (pin.value && pin.value.trim())) {
+              e.preventDefault();
+              // 버튼 텍스트로 찾기(가장 안전)
+              const btn = Array.from(document.querySelectorAll('button'))
+                .find(b => (b.innerText || '').trim() === '로그인');
+              if (btn) btn.click();
+            }
+          }, true);
+        })();
+        </script>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # ── 서버측 검증/세션 시작
     if not submitted:
         st.stop()
 
     if not sabun or not pin:
-        # 예전처럼 Enter를 눌렀는데 PIN이 비었을 수 있으니, 과한 에러 대신 안내만
-        st.warning("사번과 PIN을 모두 입력하세요. (Tab으로 이동, Enter는 로그인)", icon="⚠️")
+        st.error("사번과 PIN을 입력하세요.")
         st.stop()
 
     row = emp_df.loc[emp_df["사번"].astype(str) == str(sabun)]
@@ -224,6 +266,7 @@ def show_login_form(emp_df: pd.DataFrame):
         st.error("재직 상태가 아닙니다.")
         st.stop()
 
+    # 솔트/무솔트 모두 허용 (이전 데이터 호환)
     stored = str(r.get("PIN_hash","")).strip().lower()
     entered_plain  = _sha256_hex(pin.strip())
     entered_salted = _pin_hash(pin.strip(), str(r.get("사번","")))
