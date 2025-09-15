@@ -187,7 +187,10 @@ def _build_name_map(df: pd.DataFrame) -> dict:
 import streamlit.components.v1 as components
 
 def _inject_login_keybinder():
-    """사번 Enter→PIN 포커스, PIN Enter→'로그인' 버튼 클릭"""
+    """사번 Enter→PIN 포커스, PIN Enter→'로그인' 버튼 클릭
+    (입력값 커밋 후 클릭하도록 보강: input/change/blur + 지연 클릭)
+    """
+    import streamlit.components.v1 as components
     components.html(
         """
         <script>
@@ -205,6 +208,14 @@ def _inject_login_keybinder():
             const btns = Array.from(doc.querySelectorAll('button'));
             return btns.find(b => (b.textContent||"").trim() === '로그인');
           }
+          function commit(el){
+            if(!el) return;
+            try{
+              el.dispatchEvent(new Event('input',  {bubbles:true}));
+              el.dispatchEvent(new Event('change', {bubbles:true}));
+              el.blur();
+            }catch(e){}
+          }
           function bind(){
             const sab = byLabelStartsWith('사번');
             const pin = byLabelStartsWith('PIN');
@@ -216,26 +227,38 @@ def _inject_login_keybinder():
               sab.addEventListener('keydown', function(e){
                 if(e.key === 'Enter'){
                   e.preventDefault();
-                  pin.focus(); try{ pin.select(); }catch(_){}
+                  commit(sab);
+                  // 커밋 후 다음 필드로 포커스
+                  setTimeout(function(){
+                    try{ pin.focus(); pin.select(); }catch(_){}
+                  }, 0);
                 }
               });
             }
+
             if(!pin._bound){
               pin._bound = true;
               pin.addEventListener('keydown', function(e){
                 if(e.key === 'Enter'){
                   e.preventDefault();
-                  if(btn){ btn.click(); }
+                  // 두 필드 모두 커밋 후 약간 지연하여 버튼 클릭
+                  commit(pin);
+                  commit(sab);
+                  const b = findLoginBtn();
+                  setTimeout(function(){
+                    try{ if(b){ b.click(); } }catch(_){}
+                  }, 60); // 동기화 여유
                 }
               });
             }
             return true;
           }
-          // 즉시 시도 + 재렌더 대비
-          let ok = bind();
+
+          // 초기 바인딩 + 재렌더 대비(짧은 기간 관찰)
+          bind();
           const mo = new MutationObserver(() => { bind(); });
           mo.observe(window.parent.document.body, { childList:true, subtree:true });
-          setTimeout(() => { try{ mo.disconnect(); }catch(e){} }, 10000);
+          setTimeout(() => { try{ mo.disconnect(); }catch(e){} }, 8000);
         })();
         </script>
         """,
