@@ -171,6 +171,14 @@ def _find_row_by_sabun(ws, hmap, sabun: str) -> int:
 
 def _update_cell(ws, row, col, value): _retry_call(ws.update_cell, row, col, value)
 
+def _hide_doctors(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    (의료진 포함 버전)
+    이전엔 '직무'에 '의사'가 포함된 행을 숨겼는데,
+    지금은 아무도 숨기지 않고 원본을 그대로 반환합니다.
+    """
+    return df
+
 def _build_name_map(df: pd.DataFrame) -> dict:
     if df.empty: return {}
     return {str(r["사번"]): str(r.get("이름", "")) for _, r in df.iterrows()}
