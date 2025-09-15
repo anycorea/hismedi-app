@@ -2234,30 +2234,82 @@ def read_dept_history_df()->pd.DataFrame:
     if "사번" in df.columns: df["사번"]=df["사번"].astype(str)
     return df
 
-def apply_department_change(emp_df:pd.DataFrame, sabun:str, new_dept1:str, new_dept2:str, start_date:datetime.date, reason:str="", approver:str="")->dict:
-    ensure_dept_history_sheet()
-    wb=get_workbook(); ws_hist=wb.worksheet(HIST_SHEET)
-    start_str=start_date.strftime("%Y-%m-%d"); prev_end=(start_date-timedelta(days=1)).strftime("%Y-%m-%d")
-    row=emp_df.loc[emp_df["사번"].astype(str)==str(sabun)]
-    if row.empty: raise RuntimeError("사번을 찾지 못했습니다.")
-    name=str(row.iloc[0].get("이름",""))
-    header=ws_hist.row_values(1); hmap={n:i+1 for i,n in enumerate(header)}
-    values=ws_hist.get_all_values(); cS=hmap.get("사번"); cE=hmap.get("종료일")
-    for i in range(2,len(values)+1):
-        if values[i-1][cS-1].strip()==str(sabun).strip() and values[i-1][cE-1].strip()=="":
-            ws_hist.update_cell(i, cE, prev_end)
-    rec={"사번":str(sabun),"이름":name,"부서1":new_dept1,"부서2":new_dept2,"시작일":start_str,"종료일":"","변경사유":reason,"승인자":approver,"메모":"","등록시각":kst_now_str()}
-    rowbuf=[rec.get(h,"") for h in header]; ws_hist.append_row(rowbuf, value_input_option="USER_ENTERED")
-    applied=False
-    if start_date<=datetime.now(tz=tz_kst()).date():
-        ws_emp, header_emp, hmap_emp = _get_ws_and_headers(EMP_SHEET)
-        row_idx=_find_row_by_sabun(ws_emp,hmap_emp,str(sabun))
-        if row_idx>0:
-            if "부서1" in hmap_emp: _update_cell(ws_emp,row_idx,hmap_emp["부서1"],new_dept1)
-            if "부서2" in hmap_emp: _update_cell(ws_emp,row_idx,hmap_emp["부서2"],new_dept2)
-            applied=True
+def apply_department_change(
+    emp_df: pd.DataFrame,
+    sabun: str,
+    new_dept1: str,
+    new_dept2: str,
+    start_date: datetime.date,
+    reason: str = "",
+    approver: str = "",
+) -> dict:
+    # 1) 이력 시트 핸들(캐시 사용)
+    ws_hist = ensure_dept_history_sheet()  # ← 여기서 ws 반환받음(재조회 금지)
+
+    # 2) 날짜 계산
+    start_str = start_date.strftime("%Y-%m-%d")
+    prev_end = (start_date - timedelta(days=1)).strftime("%Y-%m-%d")
+
+    # 3) 대상자 기본 정보
+    row = emp_df.loc[emp_df["사번"].astype(str) == str(sabun)]
+    if row.empty:
+        raise RuntimeError("사번을 찾지 못했습니다.")
+    name = str(row.iloc[0].get("이름", ""))
+
+    # 4) 헤더/맵(캐시) + 기존 미종료 레코드 종료일 업데이트
+    header, hmap = _sheet_header_cached(ws_hist, HIST_SHEET)
+    values = _retry_call(ws_hist.get_all_values)  # 전체 1회 읽기
+
+    cS = hmap.get("사번")
+    cE = hmap.get("종료일")  # ※ 이 컬럼명이 이력 시트에 실제로 존재해야 합니다.
+    if cS and cE:
+        for i in range(2, len(values) + 1):
+            row_i = values[i - 1]
+            try:
+                if str(row_i[cS - 1]).strip() == str(sabun).strip() and str(row_i[cE - 1]).strip() == "":
+                    _retry_call(ws_hist.update_cell, i, cE, prev_end)
+            except IndexError:
+                # 행 길이가 짧은 경우(빈 셀 꼬임) 무시
+                continue
+
+    # 5) 신규 이력 추가
+    rec = {
+        "사번": str(sabun),
+        "이름": name,
+        "부서1": new_dept1,
+        "부서2": new_dept2,
+        "시작일": start_str,
+        "종료일": "",
+        "변경사유": reason,
+        "승인자": approver,
+        "메모": "",
+        "등록시각": kst_now_str(),
+    }
+    rowbuf = [rec.get(h, "") for h in header]
+    _retry_call(ws_hist.append_row, rowbuf, value_input_option="USER_ENTERED")
+
+    # 6) 효력 즉시 반영(오늘 이후면 미적용)
+    applied = False
+    if start_date <= datetime.now(tz=tz_kst()).date():
+        # EMP 시트도 캐시 헬퍼 사용
+        ws_emp = _ws_cached(EMP_SHEET)
+        header_emp, hmap_emp = _sheet_header_cached(ws_emp, EMP_SHEET)
+
+        row_idx = _find_row_by_sabun(ws_emp, hmap_emp, str(sabun))
+        if row_idx > 0:
+            if "부서1" in hmap_emp:
+                _update_cell(ws_emp, row_idx, hmap_emp["부서1"], new_dept1)
+            if "부서2" in hmap_emp:
+                _update_cell(ws_emp, row_idx, hmap_emp["부서2"], new_dept2)
+            applied = True
+
     st.cache_data.clear()
-    return {"applied_now":applied,"start_date":start_str,"new_dept1":new_dept1,"new_dept2":new_dept2}
+    return {
+        "applied_now": applied,
+        "start_date": start_str,
+        "new_dept1": new_dept1,
+        "new_dept2": new_dept2,
+    }
 
 def sync_current_department_from_history(as_of_date:datetime.date=None)->int:
     ensure_dept_history_sheet()
