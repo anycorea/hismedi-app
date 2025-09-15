@@ -245,6 +245,25 @@ def _build_name_map(df: pd.DataFrame) -> dict:
         return {}
     return {str(r["사번"]): str(r.get("이름", "")) for _, r in df.iterrows()}
 
+# ===== Top of file =====
+import streamlit as st
+import pandas as pd
+import time
+# ... 기타 import ...
+
+# (있는 경우) 페이지 설정
+st.set_page_config(page_title="HISMEDI - 인사/HR", layout="wide", initial_sidebar_state="expanded")
+
+# ▼ Streamlit 도움말 패널 전역 숨김 (단 한 번만)
+st.markdown(
+    """
+    <style>
+      section[data-testid='stHelp']{display:none!important}
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 # ── Session/Auth ──────────────────────────────────────────────────────────────
 SESSION_TTL_MIN = 30
 def _session_valid() -> bool:
