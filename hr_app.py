@@ -206,79 +206,71 @@ def show_login_form(emp_df: pd.DataFrame):
         pin   = st.text_input("PIN (숫자)", type="password", key="login_pin")
         submitted = st.form_submit_button("로그인", use_container_width=True, type="primary")
 
-    # ── [엔터키 + 최초 포커스] JS 주입 (업데이트)
+    # ── [엔터키/포커스] 사번 → PIN → 로그인 (DOM 변경에도 견고)
     st.markdown(
         """
         <script>
-        (function () {
-          // 입력 엘리먼트 찾기(여러 경우 대비: id/key/라벨/placeholder/타입)
-          function getInputs() {
-            const sab =
-              document.querySelector('input[id*="login_sabun"]') ||
-              document.querySelector('input[aria-label^="사번"]') ||
-              document.querySelector('input[placeholder*="123456"]') ||
-              // Streamlit가 구조 바꿔도 첫 번째 텍스트 입력을 Sabun으로 가정
-              (document.querySelectorAll('input[type="text"]')[0] || null);
-
-            const pin =
-              document.querySelector('input[id*="login_pin"]') ||
-              document.querySelector('input[aria-label^="PIN"]') ||
-              document.querySelector('input[type="password"]') ||
-              // 비밀번호가 없으면 두 번째 텍스트 입력을 PIN으로 가정(최후의 보루)
-              (document.querySelectorAll('input[type="text"]')[1] || null);
-
-            return { sab, pin };
+        (function() {
+          function findNodes() {
+            // 로그인 화면에선 보통 입력이 2개뿐: 첫 번째 텍스트 = 사번, 첫 번째 password = PIN
+            const sab = (function(){
+              const t1 = document.querySelector('input[type="text"]');
+              if (t1) return t1;
+              // 일부 버전에선 type이 비어있는 텍스트 인풋일 수 있음
+              return document.querySelector('input:not([type])');
+            })();
+            const pin = document.querySelector('input[type="password"]');
+            const btn = Array.from(document.querySelectorAll('button'))
+                        .find(b => (b.textContent || '').trim() === '로그인');
+            return { sab, pin, btn };
           }
 
-          // 최초 포커스
-          function focusInitial() {
-            const { sab, pin } = getInputs();
-            if (!sab || !pin) return;
-            if (!sab.value || !sab.value.trim()) sab.focus();
-            else pin.focus();
-          }
+          function bind() {
+            const { sab, pin, btn } = findNodes();
+            if (!sab || !pin) return false;
 
-          // 로그인 버튼 찾기
-          function getSubmitBtn() {
-            const btns = Array.from(document.querySelectorAll('button'));
-            return btns.find(b => (b.innerText || '').trim() === '로그인') || null;
-          }
-
-          // 엔터키 처리
-          function onKeyDown(e) {
-            if (e.key !== 'Enter') return;
-            const { sab, pin } = getInputs();
-            if (!sab || !pin) return;
-
-            const active = document.activeElement;
-
-            // 1) 사번 입력칸에서 Enter → 무조건 PIN으로 포커스 이동 (제출 금지)
-            if (active === sab) {
-              e.preventDefault();
+            // 최초 포커스: 사번이 비어있으면 사번, 아니면 PIN
+            if (document.activeElement !== sab && (!sab.value || sab.value.trim() === "")) {
+              sab.focus();
+            } else if (document.activeElement !== pin && sab.value && sab.value.trim() !== "") {
               pin.focus();
-              // 모바일/PC 모두에서 즉시 입력 가능하도록 select
-              if (pin.select) { try { pin.select(); } catch(_){} }
-              return;
             }
 
-            // 2) PIN 입력칸에서 Enter → 두 칸 다 채워졌으면 제출
-            if (active === pin) {
-              if ((sab.value && sab.value.trim()) && (pin.value && pin.value.trim())) {
-                e.preventDefault();
-                const btn = getSubmitBtn();
-                if (btn) btn.click();
-              }
+            // 중복 바인딩 방지
+            if (!sab.__boundEnter) {
+              sab.__boundEnter = true;
+              sab.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  if (pin) { pin.focus(); try { pin.select(); } catch(_){} }
+                }
+              }, true);
             }
+            if (!pin.__boundEnter) {
+              pin.__boundEnter = true;
+              pin.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                  // 두 칸이 채워져 있으면 바로 제출
+                  const ok = sab && sab.value && sab.value.trim() !== "" &&
+                             pin && pin.value && pin.value.trim() !== "";
+                  if (ok) {
+                    e.preventDefault();
+                    if (btn) btn.click();
+                  }
+                }
+              }, true);
+            }
+            return true;
           }
 
-          // 중복 바인딩 방지 + 바인딩
-          if (!window.__loginEnterBound_v2) {
-            window.__loginEnterBound_v2 = true;
-            document.addEventListener('keydown', onKeyDown, true);
+          // 즉시 바인딩 시도 + Streamlit 재렌더 대응
+          let attached = bind();
+          if (!attached) {
+            const obs = new MutationObserver(() => { bind(); });
+            obs.observe(document.body, { childList: true, subtree: true });
+            // 몇 초 후 자동 해제(불필요한 관찰 방지)
+            setTimeout(() => { try { obs.disconnect(); } catch(_){} }, 4000);
           }
-
-          // 렌더 후 포커스
-          setTimeout(focusInitial, 60);
         })();
         </script>
         """,
