@@ -207,51 +207,78 @@ def show_login_form(emp_df: pd.DataFrame):
         submitted = st.form_submit_button("로그인", use_container_width=True, type="primary")
 
     # ── [엔터키 + 최초 포커스] JS 주입
+    # ── [엔터키 + 최초 포커스] JS 주입 (업데이트)
     st.markdown(
         """
         <script>
         (function () {
-          // 최초 포커스 함수
+          // 입력 엘리먼트 찾기(여러 경우 대비: id/key/라벨/placeholder/타입)
+          function getInputs() {
+            const sab =
+              document.querySelector('input[id*="login_sabun"]') ||
+              document.querySelector('input[aria-label^="사번"]') ||
+              document.querySelector('input[placeholder*="123456"]') ||
+              // Streamlit가 구조 바꿔도 첫 번째 텍스트 입력을 Sabun으로 가정
+              (document.querySelectorAll('input[type="text"]')[0] || null);
+
+            const pin =
+              document.querySelector('input[id*="login_pin"]') ||
+              document.querySelector('input[aria-label^="PIN"]') ||
+              document.querySelector('input[type="password"]') ||
+              // 비밀번호가 없으면 두 번째 텍스트 입력을 PIN으로 가정(최후의 보루)
+              (document.querySelectorAll('input[type="text"]')[1] || null);
+
+            return { sab, pin };
+          }
+
+          // 최초 포커스
           function focusInitial() {
-            const sab = document.querySelector('input[aria-label="사번"]');
-            const pin = document.querySelector('input[aria-label="PIN (숫자)"]');
+            const { sab, pin } = getInputs();
             if (!sab || !pin) return;
             if (!sab.value || !sab.value.trim()) sab.focus();
             else pin.focus();
           }
 
-          if (!window.__loginEnterBound) {
-            window.__loginEnterBound = true;
-
-            // Enter 처리: 사번/핀 입력 중 Enter → 제출 또는 포커스 이동
-            document.addEventListener('keydown', function (e) {
-              if (e.key !== 'Enter') return;
-              const sab = document.querySelector('input[aria-label="사번"]');
-              const pin = document.querySelector('input[aria-label="PIN (숫자)"]');
-              if (!sab || !pin) return;
-
-              const active = document.activeElement;
-              const inSabOrPin = (active === sab || active === pin);
-              if (!inSabOrPin) return;
-
-              // 사번칸에서 Enter: PIN이 비었으면 PIN으로 포커스
-              if (active === sab && (!pin.value || !pin.value.trim())) {
-                e.preventDefault();
-                pin.focus();
-                return;
-              }
-
-              // 둘 다 값이 있으면 제출 버튼 클릭
-              if ((sab.value && sab.value.trim()) && (pin.value && pin.value.trim())) {
-                e.preventDefault();
-                const btn = Array.from(document.querySelectorAll('button'))
-                  .find(b => (b.innerText || '').trim() === '로그인');
-                if (btn) btn.click();
-              }
-            }, true);
+          // 로그인 버튼 찾기
+          function getSubmitBtn() {
+            const btns = Array.from(document.querySelectorAll('button'));
+            return btns.find(b => (b.innerText || '').trim() === '로그인') || null;
           }
 
-          // 매 렌더 후 약간의 지연 뒤 포커스 시도 (DOM 준비 대기)
+          // 엔터키 처리
+          function onKeyDown(e) {
+            if (e.key !== 'Enter') return;
+            const { sab, pin } = getInputs();
+            if (!sab || !pin) return;
+
+            const active = document.activeElement;
+
+            // 1) 사번 입력칸에서 Enter → 무조건 PIN으로 포커스 이동 (제출 금지)
+            if (active === sab) {
+              e.preventDefault();
+              pin.focus();
+              // 모바일/PC 모두에서 즉시 입력 가능하도록 select
+              if (pin.select) { try { pin.select(); } catch(_){} }
+              return;
+            }
+
+            // 2) PIN 입력칸에서 Enter → 두 칸 다 채워졌으면 제출
+            if (active === pin) {
+              if ((sab.value && sab.value.trim()) && (pin.value && pin.value.trim())) {
+                e.preventDefault();
+                const btn = getSubmitBtn();
+                if (btn) btn.click();
+              }
+            }
+          }
+
+          // 중복 바인딩 방지 + 바인딩
+          if (!window.__loginEnterBound_v2) {
+            window.__loginEnterBound_v2 = true;
+            document.addEventListener('keydown', onKeyDown, true);
+          }
+
+          // 렌더 후 포커스
           setTimeout(focusInitial, 60);
         })();
         </script>
