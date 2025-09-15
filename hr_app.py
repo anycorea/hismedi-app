@@ -2632,15 +2632,13 @@ def main():
             ### 사용 안내
             - 직원 탭: 전체 데이터(의사 포함), 권한에 따라 행 제한
             - 평가/직무기술서/직무능력평가/관리자: 동일 데이터 기반, 권한에 따라 접근
-            - 상태표시: 상단에 ‘DB연결 … (KST)’
+            - 상태표시: 상단에 'DB연결 … (KST)'
             """
         )
-        try:
-            sheet_id = st.secrets["sheets"]["HR_SHEET_ID"]
+        sheet_id = st.secrets.get("sheets", {}).get("HR_SHEET_ID")
+        if sheet_id:
             url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit"
             st.caption(f"📄 원본 스프레드시트: [{url}]({url})")
-        except Exception:
-            pass
 
     with tabs[-1]:
         safe_run(_render_help, title="도움말")
