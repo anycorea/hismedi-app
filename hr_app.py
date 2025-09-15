@@ -382,6 +382,84 @@ def read_auth_df() -> pd.DataFrame:
         df["활성"] = df["활성"].map(_to_bool)
     return df
 
+# === 표 기반 일괄 편집/저장용 ACL 유틸 ===
+
+def _auth__get_ws_hmap():
+    ws = ensure_auth_sheet()
+    header = ws.row_values(1) or AUTH_HEADERS
+    hmap = {n: i + 1 for i, n in enumerate(header)}
+    return ws, header, hmap
+
+def _auth__find_rows(ws, hmap, **filters) -> list[int]:
+    """AUTH 시트에서 filters(헤더명=값)과 일치하는 행 인덱스(2-base) 리스트."""
+    values = ws.get_all_values()
+    rows = []
+    for i in range(2, len(values) + 1):
+        row = values[i - 1]
+        ok = True
+        for k, v in filters.items():
+            c = hmap.get(k)
+            if not c: ok = False; break
+            if str(row[c - 1]).strip() != str(v).strip(): ok = False; break
+        if ok: rows.append(i)
+    return rows
+
+def _auth_upsert_admin(sabun: str, name: str, active: bool = True, memo: str = "grid"):
+    ws, header, hmap = _auth__get_ws_hmap()
+    rows = _auth__find_rows(ws, hmap, **{"사번": sabun, "역할": "admin"})
+    if rows:
+        c = hmap.get("활성")
+        for r in rows:
+            if c: ws.update_cell(r, c, bool(active))
+        return
+    buf = [""] * len(header)
+    def put(k, v):
+        c = hmap.get(k)
+        if c: buf[c - 1] = v
+    put("사번", sabun); put("이름", name); put("역할", "admin")
+    put("범위유형",""); put("부서1",""); put("부서2",""); put("대상사번","")
+    put("활성", bool(active)); put("비고", memo)
+    ws.append_row(buf, value_input_option="USER_ENTERED")
+
+def _auth_remove_admin(sabun: str):
+    # 시드 Admin은 제거하지 않음
+    if sabun in {a["사번"] for a in SEED_ADMINS}:
+        return
+    ws, header, hmap = _auth__get_ws_hmap()
+    rows = _auth__find_rows(ws, hmap, **{"사번": sabun, "역할": "admin"})
+    for r in sorted(rows, reverse=True):
+        ws.delete_rows(r)
+
+def _auth_upsert_dept(sabun: str, name: str, dept1: str, dept2: str = "", active: bool = True, memo: str = "grid"):
+    """manager/부서 권한 Upsert (부서1 전체: dept2='', 팀장: dept2 값 포함)"""
+    ws, header, hmap = _auth__get_ws_hmap()
+    rows = _auth__find_rows(ws, hmap, **{
+        "사번": sabun, "역할": "manager", "범위유형": "부서",
+        "부서1": dept1, "부서2": (dept2 or "")
+    })
+    if rows:
+        c = hmap.get("활성")
+        for r in rows:
+            if c: ws.update_cell(r, c, bool(active))
+        return
+    buf = [""] * len(header)
+    def put(k, v):
+        c = hmap.get(k)
+        if c: buf[c - 1] = v
+    put("사번", sabun); put("이름", name); put("역할", "manager")
+    put("범위유형", "부서"); put("부서1", dept1); put("부서2", (dept2 or ""))
+    put("대상사번",""); put("활성", bool(active)); put("비고", memo)
+    ws.append_row(buf, value_input_option="USER_ENTERED")
+
+def _auth_remove_dept(sabun: str, dept1: str, dept2: str = ""):
+    ws, header, hmap = _auth__get_ws_hmap()
+    rows = _auth__find_rows(ws, hmap, **{
+        "사번": sabun, "역할": "manager", "범위유형": "부서",
+        "부서1": dept1, "부서2": (dept2 or "")
+    })
+    for r in sorted(rows, reverse=True):
+        ws.delete_rows(r)
+
 def is_admin(sabun: str) -> bool:
     s = str(sabun).strip()
     if s in {a["사번"] for a in SEED_ADMINS}:
@@ -1837,8 +1915,13 @@ def tab_admin_jobdesc_defaults():
 
 def tab_admin_acl(emp_df: pd.DataFrame):
     st.markdown("### 권한 관리")
-    # ── [Proto] 표 기반 권한 편집 (미리보기/저장 없음) ──────────────────────────
-    with st.expander("▶ [Proto] 표 기반 권한 편집 (미리보기)", expanded=True):
+    # ── [Proto] 표 기반 권한 편집 (저장/효과 미리보기 포함) ─────────────────────
+    with st.expander("▶ 표 기반 권한 편집 (Master 전용)", expanded=True):
+
+        # 0) Master 접근 가드(표시는 되지만 저장 차단)
+        me = st.session_state.get("user", {})
+        if not is_admin(str(me.get("사번",""))):
+            st.error("Master만 접근/수정할 수 있습니다. (읽기 전용)", icon="🛡️")
 
         # 1) 필터 바
         base = emp_df[["사번","이름","부서1","부서2","직급","재직여부"]].copy()
@@ -1874,7 +1957,7 @@ def tab_admin_acl(emp_df: pd.DataFrame):
             k = f_q.strip().lower()
             view = view[view.apply(lambda r: k in str(r["사번"]).lower() or k in str(r["이름"]).lower(), axis=1)]
 
-        # 2) 현재 권한 플래그 계산 (AUTH 시트 읽기만)
+        # 2) 현재 권한 플래그 계산 (AUTH 시트 읽기)
         df_auth = read_auth_df()
 
         def _has_master(s):
@@ -1911,7 +1994,7 @@ def tab_admin_acl(emp_df: pd.DataFrame):
         grid["부서1 전체"]  = grid.apply(lambda r: _has_dall(r["사번"], r["부서1"]), axis=1)
         grid["부서1+부서2"] = grid.apply(lambda r: _has_team(r["사번"], r["부서1"], r["부서2"]), axis=1)
 
-        st.caption(f"대상: **{len(grid):,}명**  · 체크 변경은 ‘미리보기’에만 반영됩니다. (시트 저장 없음)")
+        st.caption(f"대상: **{len(grid):,}명**  · 체크 후 ‘변경 미리보기’ → ‘일괄 적용’ 순서로 진행하세요.")
 
         edited = st.data_editor(
             grid[["선택","사번","이름","부서1","부서2","직급","Master","부서1 전체","부서1+부서2"]],
@@ -1925,7 +2008,7 @@ def tab_admin_acl(emp_df: pd.DataFrame):
             num_rows="fixed"
         )
 
-        cact = st.columns([1,1,1,3])
+        cact = st.columns([1,1,1,2,2])
         with cact[0]:
             target_scope = st.selectbox("대상", ["표에서 선택한 행", "필터된 전체"], index=0, key="aclp_scope")
         with cact[1]:
@@ -1934,10 +2017,11 @@ def tab_admin_acl(emp_df: pd.DataFrame):
             do_apply_tpl = st.button("템플릿 적용(표만)", use_container_width=True, key="aclp_tpl_apply")
         with cact[3]:
             do_preview = st.button("변경 미리보기", type="primary", use_container_width=True, key="aclp_preview")
+        with cact[4]:
+            do_apply = st.button("일괄 적용 (AUTH 반영)", type="primary", use_container_width=True, key="aclp_apply")
 
         # 템플릿: 에디터 결과를 로컬에서만 조정
         if do_apply_tpl:
-            import numpy as np
             tgt = edited.copy()
             if target_scope == "표에서 선택한 행":
                 tgt = tgt[tgt["선택"]==True]
@@ -1952,31 +2036,94 @@ def tab_admin_acl(emp_df: pd.DataFrame):
                     edited.loc[tgt.index, ["Master","부서1 전체","부서1+부서2"]] = False
                 st.toast("표에 템플릿 적용(미리보기용)", icon="✅")
 
-        # 변경 미리보기
-        if do_preview:
-            orig = grid.set_index("사번")[["Master","부서1 전체","부서1+부서2"]].astype(bool)
-            cur  = edited.set_index("사번")[["Master","부서1 전체","부서1+부서2"]].astype(bool)
+        # 공통: 변경 diff 계산 함수
+        def _calc_changes(orig_df, cur_df):
+            orig = orig_df.set_index("사번")[["Master","부서1 전체","부서1+부서2"]].astype(bool)
+            cur  = cur_df .set_index("사번")[["Master","부서1 전체","부서1+부서2"]].astype(bool)
             sab_common = orig.index.intersection(cur.index)
-
             changes = []
             for s in sab_common:
+                row = cur_df[cur_df["사번"]==s].iloc[0]
                 for col, label in [("Master","admin"),("부서1 전체","dept_all"),("부서1+부서2","team")]:
                     if bool(orig.loc[s,col]) != bool(cur.loc[s,col]):
-                        row = edited[edited["사번"]==s].iloc[0]
                         action = "ADD" if bool(cur.loc[s,col]) else "DEL"
                         scope1 = str(row.get("부서1","")); scope2 = str(row.get("부서2",""))
-                        changes.append({
-                            "사번": s, "이름": row["이름"], "변경": f"{label}:{action}",
-                            "부서1": scope1, "부서2": scope2
-                        })
+                        changes.append({"사번": s, "이름": row["이름"], "변경": f"{label}:{action}","부서1": scope1, "부서2": scope2})
+            return changes
 
-            st.markdown("##### 변경 요약 (저장 없음 / 프로토타입)")
+        # 3) 변경 미리보기
+        if do_preview:
+            changes = _calc_changes(grid, edited)
+            st.markdown("##### 변경 요약 (시트 저장 전)")
             if not changes:
                 st.info("변경 없음", icon="ℹ️")
             else:
                 dfc = pd.DataFrame(changes)
                 st.dataframe(dfc, use_container_width=True, height=240)
-                st.warning("※ 프로토타입: 여기에 '일괄 적용' 버튼을 연결하면 AUTH 시트에 반영됩니다.", icon="⚠️")
+
+        # 4) 효과 미리보기(접근 가능한 인원 수)
+        with st.expander("효과 미리보기 (접근 가능한 인원 수)"):
+            tot = len(emp_df["사번"].astype(str).unique())
+            def _count_allowed(row):
+                # Master면 전원, 아니면 자기 + (부서1 전체) + (부서1+부서2)
+                if bool(row.get("Master", False)):
+                    return tot
+                allowed = { str(row["사번"]).strip() }  # 본인 포함
+                d1 = str(row.get("부서1","")).strip()
+                d2 = str(row.get("부서2","")).strip()
+                if bool(row.get("부서1 전체", False)) and d1:
+                    allowed.update(emp_df.loc[emp_df["부서1"].astype(str)==d1, "사번"].astype(str).tolist())
+                if bool(row.get("부서1+부서2", False)) and d1 and d2:
+                    allowed.update(emp_df.loc[(emp_df["부서1"].astype(str)==d1) & (emp_df["부서2"].astype(str)==d2), "사번"].astype(str).tolist())
+                return len(allowed)
+            try:
+                prev = edited.copy()
+                prev["접근가능_인원수"] = prev.apply(_count_allowed, axis=1)
+                st.dataframe(prev[["사번","이름","부서1","부서2","직급","Master","부서1 전체","부서1+부서2","접근가능_인원수"]], use_container_width=True, height=260)
+                st.caption("※ 이 수치는 현재 표의 체크 상태를 가정한 추정치입니다. (저장 전)")
+            except Exception:
+                st.caption("미리보기 계산 실패")
+
+        # 5) 일괄 적용 (AUTH 시트 반영)
+        if do_apply:
+            if not is_admin(str(me.get("사번",""))):
+                st.error("Master만 저장할 수 있습니다.", icon="🛡️")
+            else:
+                try:
+                    changes = _calc_changes(grid, edited)
+                    if not changes:
+                        st.info("변경 없음", icon="ℹ️")
+                    else:
+                        add_cnt = del_cnt = 0
+                        seed_set = {a["사번"] for a in SEED_ADMINS}
+                        for ch in changes:
+                            sabun = str(ch["사번"]).strip()
+                            name  = str(ch["이름"]).strip()
+                            d1    = str(ch.get("부서1","")).strip()
+                            d2    = str(ch.get("부서2","")).strip()
+                            kind, action = ch["변경"].split(":")  # admin/dept_all/team : ADD/DEL
+                            if kind == "admin":
+                                if action == "ADD":
+                                    _auth_upsert_admin(sabun, name, True, "grid"); add_cnt += 1
+                                else:
+                                    if sabun not in seed_set:
+                                        _auth_remove_admin(sabun); del_cnt += 1
+                            elif kind == "dept_all" and d1:
+                                if action == "ADD":
+                                    _auth_upsert_dept(sabun, name, d1, "", True, "grid"); add_cnt += 1
+                                else:
+                                    _auth_remove_dept(sabun, d1, ""); del_cnt += 1
+                            elif kind == "team" and d1 and d2:
+                                if action == "ADD":
+                                    _auth_upsert_dept(sabun, name, d1, d2, True, "grid"); add_cnt += 1
+                                else:
+                                    _auth_remove_dept(sabun, d1, d2); del_cnt += 1
+
+                        st.cache_data.clear()
+                        st.success(f"AUTH 반영 완료: 추가/갱신 {add_cnt}건, 삭제 {del_cnt}건", icon="✅")
+                        st.rerun()
+                except Exception as e:
+                    st.exception(e)
 
     df_auth=read_auth_df()
     st.markdown("#### 권한 규칙 추가")
