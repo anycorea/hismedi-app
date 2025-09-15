@@ -202,46 +202,57 @@ def show_login_form(emp_df: pd.DataFrame):
 
     # ── 로그인 폼
     with st.form("login_form", clear_on_submit=False):
-        sabun = st.text_input("사번", placeholder="예) 123456", key="login_sabun", autofocus=True)
+        sabun = st.text_input("사번", placeholder="예) 123456", key="login_sabun")
         pin   = st.text_input("PIN (숫자)", type="password", key="login_pin")
         submitted = st.form_submit_button("로그인", use_container_width=True, type="primary")
 
-    # ── [엔터키 동작] 폼 바로 아래 JS 삽입 (사번/핀 입력 중 Enter 시 제출)
+    # ── [엔터키 + 최초 포커스] JS 주입
     st.markdown(
         """
         <script>
         (function () {
-          if (window.__loginEnterBound) return;
-          window.__loginEnterBound = true;
-
-          document.addEventListener('keydown', function (e) {
-            if (e.key !== 'Enter') return;
-
-            // Streamlit은 label이 aria-label로 매핑됩니다.
+          // 최초 포커스 함수
+          function focusInitial() {
             const sab = document.querySelector('input[aria-label="사번"]');
             const pin = document.querySelector('input[aria-label="PIN (숫자)"]');
             if (!sab || !pin) return;
+            if (!sab.value || !sab.value.trim()) sab.focus();
+            else pin.focus();
+          }
 
-            const active = document.activeElement;
-            const inSabOrPin = (active === sab || active === pin);
-            if (!inSabOrPin) return;
+          if (!window.__loginEnterBound) {
+            window.__loginEnterBound = true;
 
-            // 1) 사번 필드에서 Enter → PIN으로 포커스 이동(빈 경우)
-            if (active === sab && (!pin.value || !pin.value.trim())) {
-              e.preventDefault();
-              pin.focus();
-              return;
-            }
+            // Enter 처리: 사번/핀 입력 중 Enter → 제출 또는 포커스 이동
+            document.addEventListener('keydown', function (e) {
+              if (e.key !== 'Enter') return;
+              const sab = document.querySelector('input[aria-label="사번"]');
+              const pin = document.querySelector('input[aria-label="PIN (숫자)"]');
+              if (!sab || !pin) return;
 
-            // 2) 두 값이 모두 있으면 제출 버튼 클릭
-            if ((sab.value && sab.value.trim()) && (pin.value && pin.value.trim())) {
-              e.preventDefault();
-              // 버튼 텍스트로 찾기(가장 안전)
-              const btn = Array.from(document.querySelectorAll('button'))
-                .find(b => (b.innerText || '').trim() === '로그인');
-              if (btn) btn.click();
-            }
-          }, true);
+              const active = document.activeElement;
+              const inSabOrPin = (active === sab || active === pin);
+              if (!inSabOrPin) return;
+
+              // 사번칸에서 Enter: PIN이 비었으면 PIN으로 포커스
+              if (active === sab && (!pin.value || !pin.value.trim())) {
+                e.preventDefault();
+                pin.focus();
+                return;
+              }
+
+              // 둘 다 값이 있으면 제출 버튼 클릭
+              if ((sab.value && sab.value.trim()) && (pin.value && pin.value.trim())) {
+                e.preventDefault();
+                const btn = Array.from(document.querySelectorAll('button'))
+                  .find(b => (b.innerText || '').trim() === '로그인');
+                if (btn) btn.click();
+              }
+            }, true);
+          }
+
+          // 매 렌더 후 약간의 지연 뒤 포커스 시도 (DOM 준비 대기)
+          setTimeout(focusInitial, 60);
         })();
         </script>
         """,
