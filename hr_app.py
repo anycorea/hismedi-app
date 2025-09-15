@@ -2438,7 +2438,7 @@ def main():
 
     # 4) 데이터 뷰 분기
     emp_df_for_staff = emp_df_all
-    emp_df_for_rest  = _hide_doctors(emp_df_all)
+    emp_df_for_rest  = emp_df_all
 
     # 5) 사이드바 사용자/로그아웃
     u = st.session_state["user"]
