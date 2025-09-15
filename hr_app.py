@@ -2175,11 +2175,54 @@ def tab_competency(emp_df: pd.DataFrame):
 # ── 부서이력/이동(필수 최소) ──────────────────────────────────────────────────
 HIST_SHEET="부서이력"
 def ensure_dept_history_sheet():
-    wb=get_workbook()
-    try: return wb.worksheet(HIST_SHEET)
+    """
+    부서(근무지) 이동 이력 시트를 보장하고, 헤더를 최소 셋으로 맞춘다.
+    - 시트 핸들은 _ws_cached 로 캐시하여 '읽기 과다(429)' 완화
+    - 헤더 조회도 _sheet_header_cached 로 캐시
+    """
+    # 이미 상단에 정의돼 있던 상수를 그대로 사용하세요.
+    # HIST_SHEET = "부서이동이력"  # (프로젝트에 이미 있으면 이 줄은 생략)
+
+    wb = get_workbook()
+
+    # 1) 시트 가져오기(캐시 사용) / 없으면 생성
+    try:
+        ws = _ws_cached(HIST_SHEET)
     except WorksheetNotFound:
-        ws=wb.add_worksheet(title=HIST_SHEET, rows=200, cols=10)
-        ws.update("A1", [["사번","이름","부서1","부서2","시작일","종료일","변경사유","승인자","메모","등록시각"]]); return ws
+        ws = _retry_call(
+            wb.add_worksheet,
+            title=HIST_SHEET,
+            rows=5000,
+            cols=30,
+        )
+        # 새로 만들었으면 캐시에 저장
+        _WS_CACHE[HIST_SHEET] = (time.time(), ws)
+
+    # 2) 헤더 보정 (기본 헤더 세트)
+    default_headers = [
+        "기록시각", "사번", "이름",
+        "부서1(이전)", "부서2(이전)",
+        "부서1(변경)", "부서2(변경)",
+        "시작일", "사유", "승인자",
+        "기록자사번", "기록자이름", "비고",
+    ]
+
+    header, hmap = _sheet_header_cached(ws, HIST_SHEET)
+    if not header:
+        _retry_call(ws.update, "1:1", [default_headers])
+        header = default_headers
+        hmap = {n: i + 1 for i, n in enumerate(header)}
+        _HDR_CACHE[HIST_SHEET] = (time.time(), header, hmap)
+    else:
+        need = [h for h in default_headers if h not in header]
+        if need:
+            new_header = header + need
+            _retry_call(ws.update, "1:1", [new_header])
+            header = new_header
+            hmap = {n: i + 1 for i, n in enumerate(header)}
+            _HDR_CACHE[HIST_SHEET] = (time.time(), header, hmap)
+
+    return ws
 
 @st.cache_data(ttl=60, show_spinner=False)
 def read_dept_history_df()->pd.DataFrame:
