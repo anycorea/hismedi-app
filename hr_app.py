@@ -191,25 +191,43 @@ def logout():
 
 def show_login_form(emp_df: pd.DataFrame):
     st.header("로그인")
+
+    # 폼: Enter 키로 제출됨
     with st.form("login_form", clear_on_submit=False):
         sabun = st.text_input("사번", placeholder="예) 123456", key="login_sabun")
         pin   = st.text_input("PIN (숫자)", type="password", key="login_pin")
-        submitted = st.form_submit_button("로그인", use_container_width=True, type="primary")
-    if not submitted: st.stop()
-    if not sabun or not pin: st.error("사번과 PIN을 입력하세요."); st.stop()
+        submitted = st.form_submit_button("로그인 (Enter)", use_container_width=True, type="primary")
+
+    if not submitted:
+        st.stop()
+
+    if not sabun or not pin:
+        # 예전처럼 Enter를 눌렀는데 PIN이 비었을 수 있으니, 과한 에러 대신 안내만
+        st.warning("사번과 PIN을 모두 입력하세요. (Tab으로 이동, Enter는 로그인)", icon="⚠️")
+        st.stop()
 
     row = emp_df.loc[emp_df["사번"].astype(str) == str(sabun)]
-    if row.empty: st.error("사번을 찾을 수 없습니다."); st.stop()
+    if row.empty:
+        st.error("사번을 찾을 수 없습니다.")
+        st.stop()
+
     r = row.iloc[0]
-    if not _to_bool(r.get("재직여부", False)): st.error("재직 상태가 아닙니다."); st.stop()
+    if not _to_bool(r.get("재직여부", False)):
+        st.error("재직 상태가 아닙니다.")
+        st.stop()
 
     stored = str(r.get("PIN_hash","")).strip().lower()
     entered_plain  = _sha256_hex(pin.strip())
     entered_salted = _pin_hash(pin.strip(), str(r.get("사번","")))
     if stored not in (entered_plain, entered_salted):
-        st.error("PIN이 올바르지 않습니다."); st.stop()
+        st.error("PIN이 올바르지 않습니다.")
+        st.stop()
 
-    _start_session({"사번": str(r.get("사번","")), "이름": str(r.get("이름","")), "관리자여부": False})
+    _start_session({
+        "사번": str(r.get("사번","")),
+        "이름": str(r.get("이름","")),
+        "관리자여부": False,
+    })
     st.success(f"{str(r.get('이름',''))}님 환영합니다!")
     st.rerun()
 
