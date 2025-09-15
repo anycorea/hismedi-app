@@ -58,6 +58,33 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# ▼ 최상단 "No docs available" 도움말 패널 강제 제거 (전역 1회)
+import streamlit.components.v1 as components
+components.html("""
+<script>
+(function(){
+  function hostDoc(){ try { return (window.parent && window.parent.document) ? window.parent.document : document; } catch(e){ return document; } }
+  const doc = hostDoc();
+
+  function hideHelp(){
+    // data-testid 기반
+    doc.querySelectorAll('[data-testid="stHelp"], [data-testid*="Help"]').forEach(el=>{
+      (el.closest('section')||el).style.display='none';
+    });
+    // 텍스트 매칭 보강
+    Array.from(doc.querySelectorAll('section,div')).forEach(el=>{
+      const t=(el.textContent||'').trim();
+      if (/^no docs available$/i.test(t)) { (el.closest('section')||el).style.display='none'; }
+    });
+  }
+  hideHelp();
+  // 이후 재렌더/DOM변경에도 계속 숨김
+  const mo=new MutationObserver(()=>hideHelp());
+  mo.observe(doc.body||doc,{subtree:true,childList:true});
+})();
+</script>
+""", height=0)
+
 # ── Utils ─────────────────────────────────────────────────────────────────────
 def kst_now_str(): return datetime.now(tz=tz_kst()).strftime("%Y-%m-%d %H:%M:%S (%Z)")
 
