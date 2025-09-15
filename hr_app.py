@@ -1363,132 +1363,264 @@ def upsert_jobdesc(rec:dict, as_new_version:bool=False)->dict:
         return {"action":"update","version":ver}
 
 def tab_job_desc(emp_df: pd.DataFrame):
-    # 제목 한 번만
-    st.subheader("직무기술서")
+    import streamlit as st
+    from datetime import datetime
 
-    # 로그인 사용자
-    u = st.session_state.get("user", {"사번": "", "이름": ""})
-    me_sabun = str(u.get("사번", ""))
-    me_name  = str(u.get("이름", ""))
+    st.subheader("직무기술서")  # 제목 한 번만
 
-    is_master  = is_admin(me_sabun)
-    can_manage = is_master or is_manager(emp_df, me_sabun)  # 관리자/매니저는 대상 선택 가능, 일반직원은 본인 고정
-
-    # ── 대상/연도
-    st.markdown("#### 대상/연도 선택")
-
-    if can_manage:
-        df = emp_df.copy()
-        df["사번"] = df["사번"].astype(str)
-        if "재직여부" in df.columns:
-            df = df[df["재직여부"] == True]
-        df["표시"] = df.apply(lambda r: f"{str(r.get('사번',''))} - {str(r.get('이름',''))}", axis=1)
-        df = df.sort_values(["사번"])
-        sel = st.selectbox("대상자 (사번 - 이름)", ["(본인)"] + df["표시"].tolist(), index=0, key="jd_target")
-        if sel == "(본인)":
-            target_sabun, target_name = me_sabun, me_name
-        else:
-            target_sabun = sel.split(" - ", 1)[0]
-            target_name  = _emp_name_by_sabun(emp_df, target_sabun)
-    else:
-        target_sabun, target_name = me_sabun, me_name
-        st.text_input("대상자 (사번 - 이름)", f"{target_name} ({target_sabun})", disabled=True, key="jd_target_ro")
-
-    # 기본값
-    today         = datetime.now(tz=tz_kst()).strftime("%Y-%m-%d")
-    defval_create = get_setting("JD.제정일",   today)
-    defval_update = get_setting("JD.개정일",   today)
-    defval_review = get_setting("JD.검토주기", "1년")
-
-    # 직원 시트 프리필(없어도 렌더링)
-    row_emp    = emp_df.loc[emp_df["사번"].astype(str) == str(target_sabun)]
-    pref_dept1 = (str(row_emp.iloc[0].get("부서1", "")) if not row_emp.empty else "")
-    pref_dept2 = (str(row_emp.iloc[0].get("부서2", "")) if not row_emp.empty else "")
-    pref_group = (str(row_emp.iloc[0].get("직군",  "")) if (not row_emp.empty and "직군" in row_emp.columns)  else "")
-    pref_series= (str(row_emp.iloc[0].get("직종",  "")) if (not row_emp.empty and "직종" in row_emp.columns)  else "")
-    pref_job   = (str(row_emp.iloc[0].get("직무",  "")) if (not row_emp.empty and "직무" in row_emp.columns)  else "")
-
-    # 입력 헤더
-    col = st.columns([1, 1, 2, 2])
-    with col[0]:
-        year = st.number_input("연도", min_value=2000, max_value=2100,
-                               value=int(datetime.now(tz=tz_kst()).year), step=1, key="jd_year")
-    with col[1]:
-        version = st.number_input("버전(없으면 자동)", min_value=0, max_value=999, value=0, step=1, key="jd_ver")
-    with col[2]:
-        jobname = st.text_input("직무명", value=pref_job, key="jd_jobname")
-    with col[3]:
-        memo = st.text_input("비고", value="", key="jd_memo")
-
-    # 해당 연도의 최신 버전 자동 로드(있으면 프리필)
-    def _jd_latest_for_sabun_year(sabun: str, y: int) -> dict:
+    # ── 헬퍼들 ──────────────────────────────────────────────────────────────
+    def _jd_latest_for(sabun: str, year: int) -> dict | None:
+        """해당 사번/연도의 최신 JD 레코드(버전 최대)를 dict로 반환. 없으면 None."""
         try:
             df = read_jobdesc_df()
-            sub = df[(df["사번"].astype(str) == str(sabun)) & (df["연도"].astype(int) == int(y))]
-            if sub.empty: return {}
-            return sub.sort_values("버전").iloc[-1].to_dict()
         except Exception:
-            return {}
+            return None
+        if df.empty:
+            return None
+        sub = df[
+            (df["사번"].astype(str) == str(sabun))
+            & (df["연도"].astype(int) == int(year))
+        ].copy()
+        if sub.empty:
+            return None
+        # 버전 숫자화 후 최대 버전 선택
+        try:
+            sub["버전"] = sub["버전"].astype(int)
+        except Exception:
+            pass
+        sub = sub.sort_values(["버전"], ascending=[False]).reset_index(drop=True)
+        row = sub.iloc[0].to_dict()
+        # 문자열화(폼 초기값 안전)
+        for k, v in row.items():
+            row[k] = "" if v is None else str(v)
+        return row
 
-    latest = _jd_latest_for_sabun_year(target_sabun, int(year))
-    if latest:
-        st.caption(f"▸ 최신 저장본 자동 로드됨: 버전 {latest.get('버전','')} (제출시각 {latest.get('제출시각','')})")
-        jobname = st.text_input("직무명", value=str(latest.get("직무명", jobname or "")), key="jd_jobname_loaded")
+    def _jd_blank_from_emp(emp_df: pd.DataFrame, sabun: str, year: int) -> dict:
+        """기존 JD가 없을 때 emp_df 기본값으로 빈 폼 보장."""
+        me = emp_df.loc[emp_df["사번"].astype(str) == str(sabun)]
+        r = me.iloc[0] if not me.empty else {}
+        today = datetime.now(tz=tz_kst()).date().strftime("%Y-%m-%d")
+        return {
+            "사번": str(sabun),
+            "연도": int(year),
+            "버전": 0,  # 0이면 upsert_jobdesc에서 새 버전 생성
+            "부서1": str(getattr(r, "부서1", "")),
+            "부서2": str(getattr(r, "부서2", "")),
+            "작성자사번": str(sabun),
+            "작성자이름": _emp_name_by_sabun(emp_df, sabun),
+            "직군": str(getattr(r, "직군", "")),
+            "직종": str(getattr(r, "직종", "")),
+            "직무명": str(getattr(r, "직무", "")),
+            "제정일": get_setting("JD.제정일", today),
+            "개정일": get_setting("JD.개정일", today),
+            "검토주기": get_setting("JD.검토주기", "1년"),
+            "직무개요": "",
+            "주업무": "",
+            "기타업무": "",
+            "필요학력": "",
+            "전공계열": "",
+            "직원공통필수교육": "",
+            "보수교육": "",
+            "기타교육": "",
+            "특성화교육": "",
+            "면허": "",
+            "경력(자격요건)": "",
+            "비고": "",
+            "서명방식": "",
+            "서명데이터": "",
+        }
 
-    # 기본 필드
-    c2 = st.columns([1, 1, 1, 1])
+    # ── 로그인/권한/연도 ──────────────────────────────────────────────────
+    this_year = datetime.now(tz=tz_kst()).year
+    year = st.number_input("연도", min_value=2000, max_value=2100,
+                           value=int(this_year), step=1, key="jd2_year")
+
+    u = st.session_state["user"]
+    me_sabun = str(u["사번"]); me_name = str(u["이름"])
+    am_admin_or_mgr = (is_admin(me_sabun) or is_manager(emp_df, me_sabun))
+    allowed_sabuns = get_allowed_sabuns(emp_df, me_sabun, include_self=True)
+
+    # 상태키
+    st.session_state.setdefault("jd2_target_sabun", me_sabun)
+    st.session_state.setdefault("jd2_target_name",  me_name)
+    st.session_state.setdefault("jd2_edit_mode",    False)
+
+    # ── 대상 선택: 직원은 본인 자동, 관리자/매니저는 표에서 선택 ───────────────
+    if not am_admin_or_mgr:
+        target_sabun = me_sabun
+        target_name  = me_name
+        st.info(f"대상자: {target_name} ({target_sabun})", icon="👤")
+    else:
+        base = emp_df.copy()
+        base["사번"] = base["사번"].astype(str)
+        base = base[base["사번"].isin({str(s) for s in allowed_sabuns})]
+        if "재직여부" in base.columns:
+            base = base[base["재직여부"] == True]
+
+        cflt = st.columns([1,1,1,2])
+        with cflt[0]:
+            opt_d1 = ["(전체)"] + sorted([x for x in base.get("부서1", []).dropna().unique() if x])
+            f_d1 = st.selectbox("부서1", opt_d1, index=0, key="jd2_f_d1")
+        with cflt[1]:
+            sub = base if f_d1 == "(전체)" else base[base["부서1"].astype(str) == f_d1]
+            opt_d2 = ["(전체)"] + sorted([x for x in sub.get("부서2", []).dropna().unique() if x])
+            f_d2 = st.selectbox("부서2", opt_d2, index=0, key="jd2_f_d2")
+        with cflt[2]:
+            opt_g = ["(전체)"] + sorted([x for x in base.get("직급", []).dropna().unique() if x])
+            f_g = st.selectbox("직급", opt_g, index=0, key="jd2_f_grade")
+        with cflt[3]:
+            f_q = st.text_input("검색(사번/이름)", key="jd2_f_q")
+
+        view = base[["사번","이름","부서1","부서2","직급"]].copy()
+        if f_d1 != "(전체)": view = view[view["부서1"].astype(str) == f_d1]
+        if f_d2 != "(전체)": view = view[view["부서2"].astype(str) == f_d2]
+        if f_g  != "(전체)": view = view[view["직급"].astype(str) == f_g]
+        if f_q and f_q.strip():
+            k = f_q.strip().lower()
+            view = view[view.apply(lambda r: k in str(r["사번"]).lower() or k in str(r["이름"]).lower(), axis=1)]
+        view = view.sort_values(["부서1","부서2","사번"]).reset_index(drop=True)
+
+        # 표에서 체크 선택
+        view["선택"] = (view["사번"] == st.session_state["jd2_target_sabun"])
+        edited = st.data_editor(
+            view[["선택","사번","이름","부서1","부서2","직급"]],
+            use_container_width=True, height=360, key="jd2_pick_editor",
+            column_config={"선택": st.column_config.CheckboxColumn()},
+            num_rows="fixed",
+        )
+        picked = edited.loc[edited["선택"] == True]
+        if not picked.empty:
+            r = picked.iloc[-1]
+            st.session_state["jd2_target_sabun"] = str(r["사번"])
+            st.session_state["jd2_target_name"]  = str(r["이름"])
+
+        target_sabun = st.session_state["jd2_target_sabun"]
+        target_name  = st.session_state["jd2_target_name"]
+        st.success(f"대상자: {target_name} ({target_sabun})", icon="✅")
+
+    # ── 수정모드 토글 & 모드 표시 ────────────────────────────────────────────
+    col_mode = st.columns([1,3])
+    with col_mode[0]:
+        if st.button(("수정모드로 전환" if not st.session_state["jd2_edit_mode"] else "보기모드로 전환"),
+                     use_container_width=True, key="jd2_toggle"):
+            st.session_state["jd2_edit_mode"] = not st.session_state["jd2_edit_mode"]
+            st.rerun()
+    with col_mode[1]:
+        st.caption(f"현재: **{'수정모드' if st.session_state['jd2_edit_mode'] else '보기모드'}**")
+
+    edit_mode = bool(st.session_state["jd2_edit_mode"])
+
+    # ── 저장된 JD → 없으면 빈 폼 보장 (직원: 최초 작성 시 자동 수정모드 ON) ─────
+    jd_saved   = _jd_latest_for(target_sabun, int(year))
+    jd_current = jd_saved if jd_saved else _jd_blank_from_emp(emp_df, target_sabun, int(year))
+
+    if (not am_admin_or_mgr) and (jd_saved is None) and (not st.session_state["jd2_edit_mode"]):
+        st.session_state["jd2_edit_mode"] = True
+        edit_mode = True
+
+    # ── (선택) 저장 내용 요약 ────────────────────────────────────────────────
+    with st.expander("현재 저장된 직무기술서 요약", expanded=False):
+        st.write(f"**직무명:** {(jd_saved or {}).get('직무명','')}")
+        cc = st.columns(2)
+        with cc[0]:
+            st.markdown("**주업무**");  st.write((jd_saved or {}).get("주업무","") or "—")
+        with cc[1]:
+            st.markdown("**기타업무**"); st.write((jd_saved or {}).get("기타업무","") or "—")
+
+    # ── 입력 폼 (jd_current로 초기화, edit_mode에 따라 disabled) ─────────────
+    # 상단 메타
+    col = st.columns([1,1,2,2])
+    with col[0]:
+        version = st.number_input("버전(없으면 자동)", min_value=0, max_value=999,
+                                  value=int(str(jd_current.get("버전", 0)) or 0),
+                                  step=1, key="jd2_ver", disabled=not edit_mode)
+    with col[1]:
+        jobname = st.text_input("직무명", value=jd_current.get("직무명",""),
+                                key="jd2_jobname", disabled=not edit_mode)
+    with col[2]:
+        memo = st.text_input("비고", value=jd_current.get("비고",""),
+                             key="jd2_memo", disabled=not edit_mode)
+    with col[3]:
+        pass
+
+    # 기본 부서/직군
+    c2 = st.columns([1,1,1,1])
     with c2[0]:
-        dept1 = st.text_input("부서1", value=str(latest.get("부서1", pref_dept1)), key="jd_dept1")
+        dept1 = st.text_input("부서1", value=jd_current.get("부서1",""),
+                              key="jd2_dept1", disabled=not edit_mode)
     with c2[1]:
-        dept2 = st.text_input("부서2", value=str(latest.get("부서2", pref_dept2)), key="jd_dept2")
+        dept2 = st.text_input("부서2", value=jd_current.get("부서2",""),
+                              key="jd2_dept2", disabled=not edit_mode)
     with c2[2]:
-        group = st.text_input("직군",  value=str(latest.get("직군",  pref_group)),  key="jd_group")
+        group = st.text_input("직군", value=jd_current.get("직군",""),
+                              key="jd2_group", disabled=not edit_mode)
     with c2[3]:
-        series= st.text_input("직종",  value=str(latest.get("직종",  pref_series)), key="jd_series")
+        series = st.text_input("직종", value=jd_current.get("직종",""),
+                               key="jd2_series", disabled=not edit_mode)
 
-    c3 = st.columns([1, 1, 1])
+    # 날짜/검토
+    c3 = st.columns([1,1,1])
     with c3[0]:
-        d_create = st.text_input("제정일", value=str(latest.get("제정일", defval_create)), key="jd_d_create")
+        d_create = st.text_input("제정일", value=jd_current.get("제정일",""),
+                                 key="jd2_d_create", disabled=not edit_mode)
     with c3[1]:
-        d_update = st.text_input("개정일", value=str(latest.get("개정일", defval_update)), key="jd_d_update")
+        d_update = st.text_input("개정일", value=jd_current.get("개정일",""),
+                                 key="jd2_d_update", disabled=not edit_mode)
     with c3[2]:
-        review   = st.text_input("검토주기", value=str(latest.get("검토주기", defval_review)), key="jd_review")
+        review = st.text_input("검토주기", value=jd_current.get("검토주기",""),
+                               key="jd2_review", disabled=not edit_mode)
 
-    job_summary = st.text_area("직무개요", str(latest.get("직무개요", "")), height=80,  key="jd_summary")
-    job_main    = st.text_area("주업무",   str(latest.get("주업무",   "")), height=120, key="jd_main")
-    job_other   = st.text_area("기타업무", str(latest.get("기타업무", "")), height=80,  key="jd_other")
+    # 본문
+    job_summary = st.text_area("직무개요", value=jd_current.get("직무개요",""),
+                               height=80, key="jd2_summary", disabled=not edit_mode)
+    job_main    = st.text_area("주업무",   value=jd_current.get("주업무",""),
+                               height=120, key="jd2_main", disabled=not edit_mode)
+    job_other   = st.text_area("기타업무", value=jd_current.get("기타업무",""),
+                               height=80, key="jd2_other", disabled=not edit_mode)
 
-    c4 = st.columns([1, 1, 1, 1, 1, 1])
+    # 교육/자격
+    c4 = st.columns([1,1,1,1,1,1])
     with c4[0]:
-        edu_req    = st.text_input("필요학력",            str(latest.get("필요학력", "")), key="jd_edu")
+        edu_req    = st.text_input("필요학력", value=jd_current.get("필요학력",""),
+                                   key="jd2_edu", disabled=not edit_mode)
     with c4[1]:
-        major_req  = st.text_input("전공계열",            str(latest.get("전공계열", "")), key="jd_major")
+        major_req  = st.text_input("전공계열", value=jd_current.get("전공계열",""),
+                                   key="jd2_major", disabled=not edit_mode)
     with c4[2]:
-        edu_common = st.text_input("직원공통필수교육",      str(latest.get("직원공통필수교육", "")), key="jd_edu_common")
+        edu_common = st.text_input("직원공통필수교육", value=jd_current.get("직원공통필수교육",""),
+                                   key="jd2_edu_common", disabled=not edit_mode)
     with c4[3]:
-        edu_cont   = st.text_input("보수교육",            str(latest.get("보수교육", "")), key="jd_edu_cont")
+        edu_cont   = st.text_input("보수교육", value=jd_current.get("보수교육",""),
+                                   key="jd2_edu_cont", disabled=not edit_mode)
     with c4[4]:
-        edu_etc    = st.text_input("기타교육",            str(latest.get("기타교육", "")), key="jd_edu_etc")
+        edu_etc    = st.text_input("기타교육", value=jd_current.get("기타교육",""),
+                                   key="jd2_edu_etc", disabled=not edit_mode)
     with c4[5]:
-        edu_spec   = st.text_input("특성화교육",           str(latest.get("특성화교육", "")), key="jd_edu_spec")
+        edu_spec   = st.text_input("특성화교육", value=jd_current.get("특성화교육",""),
+                                   key="jd2_edu_spec", disabled=not edit_mode)
 
-    c5 = st.columns([1, 1, 2])
+    c5 = st.columns([1,1,2])
     with c5[0]:
-        license_ = st.text_input("면허",            str(latest.get("면허", "")), key="jd_license")
+        license_ = st.text_input("면허", value=jd_current.get("면허",""),
+                                 key="jd2_license", disabled=not edit_mode)
     with c5[1]:
-        career   = st.text_input("경력(자격요건)",  str(latest.get("경력(자격요건)", "")), key="jd_career")
+        career = st.text_input("경력(자격요건)", value=jd_current.get("경력(자격요건)",""),
+                               key="jd2_career", disabled=not edit_mode)
     with c5[2]:
         pass
 
-    c6 = st.columns([1, 2, 1])
+    # 서명/제출
+    c6 = st.columns([1,2,1])
     with c6[0]:
         sign_type = st.selectbox("서명방식", ["", "text", "image"],
-                                 index=["", "text", "image"].index(str(latest.get("서명방식","")) if str(latest.get("서명방식","")) in ["","text","image"] else ""),
-                                 key="jd_sign_type")
+                                 index=["", "text", "image"].index(jd_current.get("서명방식","") if jd_current.get("서명방식","") in ["","text","image"] else ""),
+                                 key="jd2_sign_type", disabled=not edit_mode)
     with c6[1]:
-        sign_data = st.text_input("서명데이터", str(latest.get("서명데이터","")), key="jd_sign_data")
+        sign_data = st.text_input("서명데이터", value=jd_current.get("서명데이터",""),
+                                  key="jd2_sign_data", disabled=not edit_mode)
     with c6[2]:
-        do_save   = st.button("저장/업서트", type="primary", use_container_width=True, key="jd_save")
+        do_save = st.button("저장/업서트", type="primary",
+                            use_container_width=True, key="jd2_save", disabled=not edit_mode)
 
     if do_save:
         rec = {
@@ -1508,6 +1640,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
         try:
             rep = upsert_jobdesc(rec, as_new_version=(version == 0))
             st.success(f"저장 완료 (버전 {rep['version']})", icon="✅")
+            st.rerun()  # 저장 즉시 최신값으로 재로드
         except Exception as e:
             st.exception(e)
 
