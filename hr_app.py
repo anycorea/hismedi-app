@@ -200,39 +200,56 @@ def logout():
 def show_login_form(emp_df: pd.DataFrame):
     st.header("로그인")
 
-    # ── 입력(폼 없음: Enter가 자동 제출되지 않게)
+    # ── 입력(폼 없음: Enter가 자동 제출되지 않게) + 앵커 삽입 ─────────────
+    st.markdown('<div id="sabun_anchor"></div>', unsafe_allow_html=True)
     sabun = st.text_input("사번", placeholder="예) 123456", key="login_sabun")
+
+    st.markdown('<div id="pin_anchor"></div>', unsafe_allow_html=True)
     pin   = st.text_input("PIN (숫자)", type="password", key="login_pin")
 
     col = st.columns([1, 3])
     with col[0]:
-        do_login = st.button("로그인", use_container_width=True, type="primary")
+        do_login = st.button("로그인", use_container_width=True, type="primary", key="login_btn")
 
-    # ── [엔터키/포커스] 사번 → PIN → 로그인
+    # ── Enter 동작/포커스 제어(JS) : 사번 Enter→PIN, PIN Enter→로그인 ───
     st.markdown(
         """
         <script>
         (function () {
           function qs(sel){ return document.querySelector(sel); }
-          function byText(tag, txt){
-            const els = Array.from(document.getElementsByTagName(tag));
-            return els.find(el => (el.textContent || '').trim() === txt);
+          function findLoginBtn(){
+            const btns = Array.from(document.querySelectorAll('button'));
+            return btns.find(b => (b.innerText || b.textContent || '').trim() === '로그인');
+          }
+          function getInputs(){
+            // 앵커 바로 위 컨테이너의 첫 번째 input을 잡습니다.
+            const sab = (function(){
+              const a = qs('#sabun_anchor');
+              if(!a) return null;
+              const p = a.parentElement;
+              return p ? p.querySelector('input') : null;
+            })();
+            const pin = (function(){
+              const a = qs('#pin_anchor');
+              if(!a) return null;
+              const p = a.parentElement;
+              return p ? p.querySelector('input') : null;
+            })();
+            return {sab, pin};
           }
           function bind(){
-            // 라벨 기반으로 안정적으로 찾기
-            let sab = qs('input[aria-label="사번"]');
-            let pin = qs('input[aria-label="PIN (숫자)"]');
-            let btn = byText('button', '로그인');
+            const {sab, pin} = getInputs();
+            const btn = findLoginBtn();
             if(!sab || !pin) return false;
 
-            // 최초 포커스: 사번 비었으면 사번, 아니면 PIN
+            // 초기 포커스: 사번 비었으면 사번, 아니면 PIN
             if(document.activeElement !== sab && (!sab.value || sab.value.trim()==="")){
               sab.focus();
             } else if(document.activeElement !== pin){
               pin.focus(); try{ pin.select(); }catch(_){}
             }
 
-            // 사번 입력칸: Enter → PIN으로 이동(제출 방지)
+            // 사번 Enter → PIN으로 이동 (제출/리런 방지)
             if(!sab.__enterBound){
               sab.__enterBound = true;
               ['keydown','keypress','keyup'].forEach(evt => {
@@ -246,16 +263,17 @@ def show_login_form(emp_df: pd.DataFrame):
               });
             }
 
-            // PIN 입력칸: Enter → 로그인 버튼 클릭
+            // PIN Enter → 로그인 버튼 클릭
             if(!pin.__enterBound){
               pin.__enterBound = true;
               pin.addEventListener('keydown', function(e){
                 if(e.key === 'Enter'){
-                  const ok = sab && sab.value && sab.value.trim() !== "" &&
-                             pin && pin.value && pin.value.trim() !== "";
-                  if(ok){
+                  const okSab = sab && sab.value && sab.value.trim() !== "";
+                  const okPin = pin && pin.value && pin.value.trim() !== "";
+                  if(okSab && okPin){
                     e.preventDefault(); e.stopPropagation();
                     try{ e.stopImmediatePropagation(); }catch(_){}
+                    const btn = findLoginBtn();
                     if(btn){ btn.click(); }
                   }
                 }
@@ -265,8 +283,7 @@ def show_login_form(emp_df: pd.DataFrame):
           }
 
           // 즉시 바인딩 + 재렌더 대응
-          let ok = bind();
-          if(!ok){
+          if(!bind()){
             const obs = new MutationObserver(() => { bind(); });
             obs.observe(document.body, {childList:true, subtree:true});
             setTimeout(() => { try{ obs.disconnect(); }catch(_){ } }, 5000);
@@ -277,7 +294,7 @@ def show_login_form(emp_df: pd.DataFrame):
         unsafe_allow_html=True,
     )
 
-    # ── 버튼 클릭(또는 PIN-Enter) 시 서버 검증/세션 시작
+    # ── 버튼 클릭(또는 PIN-Enter) 시 서버 검증/세션 시작 ───────────────
     if not do_login:
         st.stop()
 
@@ -295,7 +312,7 @@ def show_login_form(emp_df: pd.DataFrame):
         st.error("재직 상태가 아닙니다.")
         st.stop()
 
-    # 솔트/무솔트 모두 허용 (이전 데이터 호환)
+    # 솔트/무솔트 모두 허용
     stored = str(r.get("PIN_hash","")).strip().lower()
     entered_plain  = _sha256_hex(pin.strip())
     entered_salted = _pin_hash(pin.strip(), str(r.get("사번","")))
