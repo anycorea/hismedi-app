@@ -31,59 +31,29 @@ from gspread.exceptions import WorksheetNotFound, APIError
 APP_TITLE = st.secrets.get("app", {}).get("TITLE", "HISMEDI - 인사/HR")
 st.set_page_config(page_title=APP_TITLE, layout="wide")
 
-# ▼ 도움말 패널(st.help) 전역 비활성화 — 상단 ‘No docs available’ 제거
+# ▼ 도움말 패널(st.help) 전역 비활성화 — 상단 ‘No docs available’ 예방
 if not getattr(st, "_help_disabled", False):
     def _noop_help(*args, **kwargs):
         return None
     st.help = _noop_help
     st._help_disabled = True
 
-# ▼ 전역 스타일 (도움말 패널까지 함께 숨김)
+# ▼ 전역 스타일 (도움말 패널이 혹시 렌더되더라도 숨김)
 st.markdown(
     """
     <style>
       .block-container { padding-top: 1.35rem !important; }
       .stTabs [role='tab']{ padding:10px 16px !important; font-size:1.02rem !important; }
       .grid-head{ font-size:.9rem; color:#6b7280; margin:.2rem 0 .5rem; }
-      .app-title{
-        font-size: 1.28rem; line-height: 1.45rem; margin: .2rem 0 .6rem; font-weight: 800;
-      }
-      @media (min-width:1280px){
-        .app-title{ font-size: 1.34rem; line-height: 1.5rem; }
-      }
-      /* 도움말 패널 완전 숨김 (혹시 렌더되더라도) */
-      section[data-testid="stHelp"], div[data-testid="stHelp"]{ display:none!important; }
+      .app-title{ font-size: 1.28rem; line-height: 1.45rem; margin: .2rem 0 .6rem; font-weight: 800; }
+      @media (min-width:1280px){ .app-title{ font-size: 1.34rem; line-height: 1.5rem; } }
+
+      /* Streamlit 도움말 패널 숨김(혹시 떠도 보이지 않게) */
+      section[data-testid="stHelp"], div[data-testid="stHelp"]{ display:none !important; }
     </style>
     """,
     unsafe_allow_html=True,
 )
-
-# ▼ 최상단 "No docs available" 도움말 패널 강제 제거 (전역 1회)
-import streamlit.components.v1 as components
-components.html("""
-<script>
-(function(){
-  function hostDoc(){ try { return (window.parent && window.parent.document) ? window.parent.document : document; } catch(e){ return document; } }
-  const doc = hostDoc();
-
-  function hideHelp(){
-    // data-testid 기반
-    doc.querySelectorAll('[data-testid="stHelp"], [data-testid*="Help"]').forEach(el=>{
-      (el.closest('section')||el).style.display='none';
-    });
-    // 텍스트 매칭 보강
-    Array.from(doc.querySelectorAll('section,div')).forEach(el=>{
-      const t=(el.textContent||'').trim();
-      if (/^no docs available$/i.test(t)) { (el.closest('section')||el).style.display='none'; }
-    });
-  }
-  hideHelp();
-  // 이후 재렌더/DOM변경에도 계속 숨김
-  const mo=new MutationObserver(()=>hideHelp());
-  mo.observe(doc.body||doc,{subtree:true,childList:true});
-})();
-</script>
-""", height=0)
 
 # ── Utils ─────────────────────────────────────────────────────────────────────
 def kst_now_str(): return datetime.now(tz=tz_kst()).strftime("%Y-%m-%d %H:%M:%S (%Z)")
@@ -298,8 +268,6 @@ def logout():
     st.cache_data.clear(); st.rerun()
 
 def show_login_form(emp_df: pd.DataFrame):
-    import streamlit.components.v1 as components
-
     st.header("로그인")
 
     # ── 로그인 폼
