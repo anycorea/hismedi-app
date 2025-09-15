@@ -245,25 +245,6 @@ def _build_name_map(df: pd.DataFrame) -> dict:
         return {}
     return {str(r["사번"]): str(r.get("이름", "")) for _, r in df.iterrows()}
 
-# ===== Top of file =====
-import streamlit as st
-import pandas as pd
-import time
-# ... 기타 import ...
-
-# (있는 경우) 페이지 설정
-st.set_page_config(page_title="HISMEDI - 인사/HR", layout="wide", initial_sidebar_state="expanded")
-
-# ▼ Streamlit 도움말 패널 전역 숨김 (단 한 번만)
-st.markdown(
-    """
-    <style>
-      section[data-testid='stHelp']{display:none!important}
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
 # ── Session/Auth ──────────────────────────────────────────────────────────────
 SESSION_TTL_MIN = 30
 def _session_valid() -> bool:
@@ -494,48 +475,6 @@ def _auth_remove_evaluator(dept1: str, dept2: str = "", exclude_sabun: str | Non
             rows_to_delete.append(i)
     for r in sorted(rows_to_delete, reverse=True):
         ws.delete_rows(r)
-
-# === 평가 가능 대상 계산 ===
-def get_evaluable_targets(emp_df: pd.DataFrame, me_sabun: str) -> set[str]:
-    """
-    - 관리자(admin): 모든 재직자
-    - evaluator 권한(부서1/부서2) 부여받은 사용자: 해당 부서 직원
-    - (옵션) 매니저 암시 권한: 기존 get_allowed_sabuns 로직 포함
-    """
-    me_sabun = str(me_sabun)
-    # 1) 관리자면 전원
-    if is_admin(me_sabun):
-        df = emp_df.copy()
-        if "재직여부" in df.columns:
-            df = df[df["재직여부"] == True]
-        return set(df["사번"].astype(str).tolist())
-
-    allowed = set()
-    # 2) 기존 암시/명시 매니저 권한(부서 범위) 포함
-    allowed |= set(get_allowed_sabuns(emp_df, me_sabun, include_self=False))
-
-    # 3) evaluator 권한(부서1/부서2)
-    df_auth = read_auth_df()
-    if not df_auth.empty:
-        me_rows = df_auth[
-            (df_auth["사번"].astype(str) == me_sabun) &
-            (df_auth["역할"].str.lower() == "evaluator") &
-            (df_auth["범위유형"] == "부서") &
-            (df_auth["활성"] == True)
-        ]
-        for _, r in me_rows.iterrows():
-            d1 = str(r.get("부서1", "")).strip()
-            d2 = str(r.get("부서2", "")).strip()
-            tgt = emp_df.copy()
-            if d1:
-                tgt = tgt[tgt["부서1"].astype(str) == d1]
-            if d2:
-                tgt = tgt[tgt["부서2"].astype(str) == d2]
-            if "재직여부" in tgt.columns:
-                tgt = tgt[tgt["재직여부"] == True]
-            allowed.update(tgt["사번"].astype(str).tolist())
-
-    return allowed
 
 # === 표 기반 일괄 편집/저장용 ACL 유틸 ===
 
@@ -948,42 +887,36 @@ def _eval_sheet_name(year: int | str) -> str:
 def _ensure_eval_response_sheet(year: int, item_ids: list[str]):
     """
     평가 응답 시트 보장 + 헤더 보정.
-    - worksheet 메타데이터 조회를 캐시/백오프로 최소화
-    - 헤더 읽기도 캐시 사용
+    - 시트명은 _eval_sheet_name(year) 사용 (예: '평가_응답_2025')
+    - 헤더는 EVAL_BASE_HEADERS + 점수_{항목ID}
+    - gspread 캐시(helper) 활용
     """
-    title = f"평가응답_{year}"
+    title = _eval_sheet_name(year)  # ← '평가_응답_{year}'
     wb = get_workbook()
 
-    # 1) 시트 존재/생성
+    # 1) 시트 존재/생성 (캐시 사용)
     try:
-        ws = _ws_cached(title)  # 캐시 + _retry_call 로 rate-limit 완화
+        ws = _ws_cached(title)
     except WorksheetNotFound:
-        # 생성은 write 요청이므로 quota 영향 적음
-        ws = _retry_call(wb.add_worksheet, title=title,
-                         rows=5000, cols=max(50, len(item_ids) + 16))
-        _WS_CACHE[title] = (time.time(), ws)  # 캐시에 갱신
+        ws = _retry_call(
+            wb.add_worksheet, title=title,
+            rows=5000, cols=max(50, len(item_ids) + 16)
+        )
+        _WS_CACHE[title] = (time.time(), ws)
 
-    # 2) 헤더 보정(최소 컬럼 + 항목ID들)
-    base_cols = ["평가유형","평가대상사번","평가대상이름",
-                 "평가자사번","평가자이름","제출시각","총점","상태"]
+    # 2) 헤더 구성: 기본 + 점수 컬럼
+    required = list(EVAL_BASE_HEADERS) + [f"점수_{iid}" for iid in item_ids]
 
-    header, hmap = _sheet_header_cached(ws, title)
+    header, _ = _sheet_header_cached(ws, title)
     if not header:
-        new_header = base_cols + [str(i) for i in item_ids]
-        _retry_call(ws.update, "1:1", [new_header])
-        _HDR_CACHE[title] = (time.time(), new_header,
-                             {n: i+1 for i, n in enumerate(new_header)})
+        _retry_call(ws.update, "1:1", [required])
+        _HDR_CACHE[title] = (time.time(), required, {n: i + 1 for i, n in enumerate(required)})
     else:
-        need = []
-        for c in base_cols:
-            if c not in header: need.append(c)
-        for c in [str(i) for i in item_ids]:
-            if c not in header: need.append(c)
+        need = [h for h in required if h not in header]
         if need:
             new_header = header + need
             _retry_call(ws.update, "1:1", [new_header])
-            _HDR_CACHE[title] = (time.time(), new_header,
-                                 {n: i+1 for i, n in enumerate(new_header)})
+            _HDR_CACHE[title] = (time.time(), new_header, {n: i + 1 for i, n in enumerate(new_header)})
 
     return ws
 
@@ -2195,51 +2128,36 @@ def tab_competency(emp_df: pd.DataFrame):
 HIST_SHEET="부서이력"
 def ensure_dept_history_sheet():
     """
-    부서(근무지) 이동 이력 시트를 보장하고, 헤더를 최소 셋으로 맞춘다.
-    - 시트 핸들은 _ws_cached 로 캐시하여 '읽기 과다(429)' 완화
-    - 헤더 조회도 _sheet_header_cached 로 캐시
+    부서(근무지) 이동 이력 시트 보장 + 최소 헤더 정렬.
+    - 코드에서 사용하는 컬럼명(부서1/부서2/시작일/종료일/변경사유/승인자/등록시각)을 보장
+    - 기존에 다른 컬럼명이 있어도 '추가'만 하므로 호환됨
     """
-    # 이미 상단에 정의돼 있던 상수를 그대로 사용하세요.
-    # HIST_SHEET = "부서이동이력"  # (프로젝트에 이미 있으면 이 줄은 생략)
-
     wb = get_workbook()
-
-    # 1) 시트 가져오기(캐시 사용) / 없으면 생성
     try:
         ws = _ws_cached(HIST_SHEET)
     except WorksheetNotFound:
-        ws = _retry_call(
-            wb.add_worksheet,
-            title=HIST_SHEET,
-            rows=5000,
-            cols=30,
-        )
-        # 새로 만들었으면 캐시에 저장
+        ws = _retry_call(wb.add_worksheet, title=HIST_SHEET, rows=5000, cols=30)
         _WS_CACHE[HIST_SHEET] = (time.time(), ws)
 
-    # 2) 헤더 보정 (기본 헤더 세트)
-    default_headers = [
-        "기록시각", "사번", "이름",
-        "부서1(이전)", "부서2(이전)",
-        "부서1(변경)", "부서2(변경)",
-        "시작일", "사유", "승인자",
-        "기록자사번", "기록자이름", "비고",
+    # 우리가 실제로 쓰는 컬럼들
+    required = [
+        "사번", "이름",
+        "부서1", "부서2",
+        "시작일", "종료일",
+        "변경사유", "승인자",
+        "등록시각", "비고",
     ]
 
-    header, hmap = _sheet_header_cached(ws, HIST_SHEET)
+    header, _ = _sheet_header_cached(ws, HIST_SHEET)
     if not header:
-        _retry_call(ws.update, "1:1", [default_headers])
-        header = default_headers
-        hmap = {n: i + 1 for i, n in enumerate(header)}
-        _HDR_CACHE[HIST_SHEET] = (time.time(), header, hmap)
+        _retry_call(ws.update, "1:1", [required])
+        _HDR_CACHE[HIST_SHEET] = (time.time(), required, {n: i+1 for i, n in enumerate(required)})
     else:
-        need = [h for h in default_headers if h not in header]
+        need = [h for h in required if h not in header]
         if need:
             new_header = header + need
             _retry_call(ws.update, "1:1", [new_header])
-            header = new_header
-            hmap = {n: i + 1 for i, n in enumerate(header)}
-            _HDR_CACHE[HIST_SHEET] = (time.time(), header, hmap)
+            _HDR_CACHE[HIST_SHEET] = (time.time(), new_header, {n: i+1 for i, n in enumerate(new_header)})
 
     return ws
 
