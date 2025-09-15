@@ -382,6 +382,91 @@ def read_auth_df() -> pd.DataFrame:
         df["활성"] = df["활성"].map(_to_bool)
     return df
 
+# === 평가자(evaluator) 유틸 ===
+
+def _auth_upsert_evaluator(sabun: str, name: str, dept1: str, dept2: str = "", active: bool = True, memo: str = "evaluator"):
+    """직무능력평가자: evaluator/부서(부서1,부서2) 권한 Upsert"""
+    ws, header, hmap = _auth__get_ws_hmap()
+    rows = _auth__find_rows(ws, hmap, **{
+        "사번": sabun, "역할": "evaluator", "범위유형": "부서",
+        "부서1": dept1, "부서2": (dept2 or "")
+    })
+    if rows:
+        c = hmap.get("활성")
+        if c:
+            for r in rows:
+                ws.update_cell(r, c, bool(active))
+        return
+    buf = [""] * len(header)
+    def put(k, v):
+        c = hmap.get(k)
+        if c: buf[c - 1] = v
+    put("사번", sabun); put("이름", name); put("역할", "evaluator")
+    put("범위유형", "부서"); put("부서1", dept1); put("부서2", (dept2 or ""))
+    put("대상사번",""); put("활성", bool(active)); put("비고", memo)
+    ws.append_row(buf, value_input_option="USER_ENTERED")
+
+def _auth_remove_evaluator(dept1: str, dept2: str = "", exclude_sabun: str | None = None):
+    """해당 부서의 evaluator 권한 전체 제거(선택적 제외 1명)"""
+    ws, header, hmap = _auth__get_ws_hmap()
+    values = ws.get_all_values()
+    rows_to_delete = []
+    for i in range(2, len(values) + 1):
+        row = values[i - 1]
+        role = row[hmap["역할"] - 1] if hmap.get("역할") else ""
+        scope= row[hmap["범위유형"] - 1] if hmap.get("범위유형") else ""
+        d1   = row[hmap["부서1"] - 1] if hmap.get("부서1") else ""
+        d2   = row[hmap["부서2"] - 1] if hmap.get("부서2") else ""
+        sab  = row[hmap["사번"] - 1]   if hmap.get("사번")   else ""
+        if role == "evaluator" and scope == "부서" and d1 == str(dept1) and (d2 == str(dept2 or "")):
+            if exclude_sabun and str(sab) == str(exclude_sabun):
+                continue
+            rows_to_delete.append(i)
+    for r in sorted(rows_to_delete, reverse=True):
+        ws.delete_rows(r)
+
+# === 평가 가능 대상 계산 ===
+def get_evaluable_targets(emp_df: pd.DataFrame, me_sabun: str) -> set[str]:
+    """
+    - 관리자(admin): 모든 재직자
+    - evaluator 권한(부서1/부서2) 부여받은 사용자: 해당 부서 직원
+    - (옵션) 매니저 암시 권한: 기존 get_allowed_sabuns 로직 포함
+    """
+    me_sabun = str(me_sabun)
+    # 1) 관리자면 전원
+    if is_admin(me_sabun):
+        df = emp_df.copy()
+        if "재직여부" in df.columns:
+            df = df[df["재직여부"] == True]
+        return set(df["사번"].astype(str).tolist())
+
+    allowed = set()
+    # 2) 기존 암시/명시 매니저 권한(부서 범위) 포함
+    allowed |= set(get_allowed_sabuns(emp_df, me_sabun, include_self=False))
+
+    # 3) evaluator 권한(부서1/부서2)
+    df_auth = read_auth_df()
+    if not df_auth.empty:
+        me_rows = df_auth[
+            (df_auth["사번"].astype(str) == me_sabun) &
+            (df_auth["역할"].str.lower() == "evaluator") &
+            (df_auth["범위유형"] == "부서") &
+            (df_auth["활성"] == True)
+        ]
+        for _, r in me_rows.iterrows():
+            d1 = str(r.get("부서1", "")).strip()
+            d2 = str(r.get("부서2", "")).strip()
+            tgt = emp_df.copy()
+            if d1:
+                tgt = tgt[tgt["부서1"].astype(str) == d1]
+            if d2:
+                tgt = tgt[tgt["부서2"].astype(str) == d2]
+            if "재직여부" in tgt.columns:
+                tgt = tgt[tgt["재직여부"] == True]
+            allowed.update(tgt["사번"].astype(str).tolist())
+
+    return allowed
+
 # === 표 기반 일괄 편집/저장용 ACL 유틸 ===
 
 def _auth__get_ws_hmap():
@@ -1285,21 +1370,33 @@ def tab_job_desc(emp_df: pd.DataFrame):
     me_name  = str(u["이름"])
     allowed  = get_allowed_sabuns(emp_df, me_sabun, include_self=True)
 
+    st.subheader("직무기술서")
+
+    u = st.session_state["user"]
+    me_sabun = str(u["사번"])
+    me_name  = str(u["이름"])
+    allowed  = get_allowed_sabuns(emp_df, me_sabun, include_self=True)
+
     st.markdown("#### 대상/연도 선택")
-    if is_admin(me_sabun) or is_manager(emp_df, me_sabun):
+    # (변경) 일반 직원도 '본인' 폼이 항상 보이도록 기본값 고정 + 관리자/매니저만 타인 선택 허용
+    am_admin_or_mgr = is_admin(me_sabun) or is_manager(emp_df, me_sabun)
+
+    if am_admin_or_mgr:
         df = emp_df.copy()
         df = df[df["사번"].astype(str).isin(allowed)]
         if "재직여부" in df.columns:
             df = df[df["재직여부"] == True]
         df["표시"] = df.apply(lambda r: f"{str(r.get('사번',''))} - {str(r.get('이름',''))}", axis=1)
         df = df.sort_values(["사번"])
-        sel = st.selectbox("대상자 (사번 - 이름)", ["(선택)"] + df["표시"].tolist(), index=0, key="job_target")
-        if sel == "(선택)":
-            st.info("대상자를 선택하세요.")
-            return
-        target_sabun = sel.split(" - ", 1)[0]
-        target_name  = _emp_name_by_sabun(emp_df, target_sabun)
+        sel = st.selectbox("대상자 (사번 - 이름)", ["(본인)"] + df["표시"].tolist(), index=0, key="job_target")
+        if sel == "(본인)":
+            target_sabun = me_sabun
+            target_name  = me_name
+        else:
+            target_sabun = sel.split(" - ", 1)[0]
+            target_name  = _emp_name_by_sabun(emp_df, target_sabun)
     else:
+        # 일반 직원: 무조건 본인
         target_sabun = me_sabun
         target_name  = me_name
         st.info(f"대상자: {target_name} ({target_sabun})", icon="👤")
@@ -1669,20 +1766,19 @@ def tab_competency(emp_df: pd.DataFrame):
         with colY[0]:
             year = st.number_input("평가 연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="cmpS_year")
 
-        # 권한/대상 선택 — 팀장만, 팀장 부재 시 본부장 대행
+        # 대상 선택: 관리자=전체, evaluator/매니저=부서권한, 직원=X
         u = st.session_state["user"]
         me_sabun = str(u["사번"]); me_name = str(u["이름"])
 
-        st.markdown("#### 평가 대상 선택 (팀장만, 팀장 부재 시 본부장)")
+        st.markdown("#### 평가 대상 선택")
         evaluable = get_evaluable_targets(emp_df, me_sabun)
-
         df = emp_df.copy()
         df = df[df["사번"].astype(str).isin(evaluable)]
         if "재직여부" in df.columns:
             df = df[df["재직여부"] == True]
 
         if df.empty:
-            st.warning("현재 맡은 팀(또는 부서)에 대한 평가 권한이 없습니다. 권한관리에서 'evaluator'를 확인하세요.", icon="⚠️")
+            st.warning("현재 맡은 팀(또는 부서)에 대한 평가 권한이 없습니다. (관리자는 전체 가능 / evaluator 권한 필요)", icon="⚠️")
             return
 
         df["표시"] = df.apply(lambda r: f"{str(r.get('사번',''))} - {str(r.get('이름',''))}", axis=1)
@@ -1749,11 +1845,11 @@ def tab_competency(emp_df: pd.DataFrame):
                     g_main, g_extra, qual, opinion, eval_date
                 )
                 st.success(("제출 완료" if rep["action"]=="insert" else "업데이트 완료"), icon="✅")
-                st.toast("간편 직무능력평가 저장됨", icon="✅")
+                st.toast("직무능력평가 저장됨", icon="✅")
             except Exception as e:
                 st.exception(e)
 
-        st.markdown("#### 내 제출 현황(간편)")
+        st.markdown("#### 내 제출 현황")
         try:
             my = read_my_comp_simple_rows(int(year), me_sabun)
             if my.empty:
@@ -1767,39 +1863,36 @@ def tab_competency(emp_df: pd.DataFrame):
             st.caption("제출 현황을 불러오지 못했습니다.")
 
     # ──────────────────────────────────────────────────────────────────────────
-    # 2) 기존(가중치) — 기존 코드 재사용
+    # 2) 상세(선택) — 기존 세부 항목 평가가 있다면 사용 (문구에서 '가중치' 제거)
     # ──────────────────────────────────────────────────────────────────────────
     with tabs[1]:
-        # 기존 가중치 버전 UI
         this_year = datetime.now(tz=tz_kst()).year
         colY = st.columns([1,3])
         with colY[0]:
-            year = st.number_input("평가 연도(가중치)", min_value=2000, max_value=2100, value=int(this_year), step=1, key="cmpW_year")
+            year = st.number_input("평가 연도(상세)", min_value=2000, max_value=2100, value=int(this_year), step=1, key="cmpW_year")
 
         items = read_comp_items_df(only_active=True)
         if items.empty:
-            st.warning("활성화된 직무능력 항목(가중치)이 없습니다.", icon="⚠️")
+            st.warning("활성화된 상세 평가 항목이 없습니다.", icon="⚠️")
             return
 
-        # 권한/대상 선택 — 팀장만, 팀장 부재 시 본부장 대행
         u = st.session_state["user"]
         me_sabun = str(u["사번"]); me_name = str(u["이름"])
 
-        st.markdown("#### 대상 선택(가중치) — 팀장만, 팀장 부재 시 본부장")
+        st.markdown("#### 대상 선택(상세)")
         evaluable = get_evaluable_targets(emp_df, me_sabun)
-
         df = emp_df.copy()
         df = df[df["사번"].astype(str).isin(evaluable)]
         if "재직여부" in df.columns:
             df = df[df["재직여부"] == True]
 
         if df.empty:
-            st.warning("현재 맡은 팀(또는 부서)에 대한 평가 권한이 없습니다. 권한관리에서 'evaluator'를 확인하세요.", icon="⚠️")
+            st.warning("현재 맡은 팀(또는 부서)에 대한 평가 권한이 없습니다. (관리자는 전체 가능 / evaluator 권한 필요)", icon="⚠️")
             return
 
         df["표시"]=df.apply(lambda r:f"{str(r.get('사번',''))} - {str(r.get('이름',''))}", axis=1)
         df=df.sort_values(["사번"])
-        sel=st.selectbox("평가 대상자(가중치) (사번 - 이름)", ["(선택)"]+df["표시"].tolist(), index=0, key="cmpW_target")
+        sel=st.selectbox("평가 대상자(상세) (사번 - 이름)", ["(선택)"]+df["표시"].tolist(), index=0, key="cmpW_target")
         if sel=="(선택)":
             st.info("평가 대상자를 선택하세요.")
             return
@@ -1809,8 +1902,8 @@ def tab_competency(emp_df: pd.DataFrame):
         evaluator_sabun=me_sabun
         evaluator_name=me_name
 
-        st.markdown("#### 점수 입력(가중치)")
-        st.caption("각 항목 1~5점, 가중치 자동 정규화.")
+        st.markdown("#### 점수 입력(상세)")
+        st.caption("각 항목 1~5점. (필요 시 내부 가중치가 정의되어 있어도 UI에는 노출하지 않습니다.)")
         st.markdown(
             """
             <style>
@@ -1824,7 +1917,7 @@ def tab_competency(emp_df: pd.DataFrame):
             """,
             unsafe_allow_html=True,
         )
-        st.markdown('<div class="grid-head">영역/항목 / 내용 / 가중치 / 점수</div>', unsafe_allow_html=True)
+        st.markdown('<div class="grid-head">영역/항목 / 내용 / (내부 가중치) / 점수</div>', unsafe_allow_html=True)
 
         items_sorted=items.sort_values(["영역","순서","항목"]).reset_index(drop=True)
         scores={}; weight_sum=0.0
@@ -1845,6 +1938,7 @@ def tab_competency(emp_df: pd.DataFrame):
 
             v=min(5,max(1,int(new_val))); scores[str(iid)]=v; st.session_state[f"cmp_{iid}"]=v; weight_sum+=max(0.0,w)
 
+        # 총점 계산은 기존 로직 재사용 (UI에서는 '가중치' 용어 노출 안 함)
         total=0.0
         if len(items_sorted)>0:
             for r in items_sorted.itertuples(index=False):
@@ -1860,7 +1954,7 @@ def tab_competency(emp_df: pd.DataFrame):
         with cM2: st.progress(min(1.0,total_100/100.0), text=f"총점 {total_100}점")
 
         cbtn=st.columns([1,1,3])
-        with cbtn[0]: do_save=st.button("제출/저장(가중치)", type="primary", use_container_width=True, key="cmpW_save")
+        with cbtn[0]: do_save=st.button("제출/저장(상세)", type="primary", use_container_width=True, key="cmpW_save")
         with cbtn[1]: do_reset=st.button("모든 점수 3점으로", use_container_width=True, key="cmpW_reset")
 
         if do_reset:
@@ -1871,11 +1965,11 @@ def tab_competency(emp_df: pd.DataFrame):
             try:
                 rep=upsert_comp_response(emp_df,int(year),str(target_sabun),str(evaluator_sabun),scores,"제출")
                 st.success(("제출 완료" if rep["action"]=="insert" else "업데이트 완료")+f" (총점 {rep['total']}점)", icon="✅")
-                st.toast("직무능력평가 저장됨(가중치)", icon="✅")
+                st.toast("직무능력평가 저장됨(상세)", icon="✅")
             except Exception as e:
                 st.exception(e)
 
-        st.markdown("#### 내 제출 현황(가중치)")
+        st.markdown("#### 내 제출 현황(상세)")
         try:
             my=read_my_comp_rows(int(year), evaluator_sabun)
             if my.empty: st.caption("제출된 평가가 없습니다.")
@@ -2245,6 +2339,32 @@ def tab_admin_jobdesc_defaults():
 
 def tab_admin_acl(emp_df: pd.DataFrame):
     st.markdown("### 권한 관리")
+
+    # ── (이름 호환) evaluator 유틸 별칭 처리 ─────────────────────────────────
+    # 프로젝트에 _auth_upsert_eval / _auth_remove_eval 이 없고
+    # _auth_upsert_evaluator / _auth_remove_evaluator 로 정의되어 있다면 매핑
+    try:
+        _ = _auth_upsert_eval  # type: ignore  # noqa
+    except NameError:
+        try:
+            _auth_upsert_eval = _auth_upsert_evaluator  # type: ignore  # noqa
+        except NameError:
+            pass
+    try:
+        _ = _auth_remove_eval  # type: ignore  # noqa
+    except NameError:
+        try:
+            # 특정 사번에 대해 evaluator(부서1/부서2) 한 건만 제거하는 구현
+            def _auth_remove_eval(sabun: str, dept1: str, dept2: str = ""):
+                ws, header, hmap = _auth__get_ws_hmap()
+                rows = _auth__find_rows(ws, hmap, **{
+                    "사번": sabun, "역할": "evaluator", "범위유형": "부서",
+                    "부서1": dept1, "부서2": (dept2 or "")
+                })
+                for r in sorted(rows, reverse=True):
+                    ws.delete_rows(r)
+        except NameError:
+            pass
 
     # ── [Proto] 표 기반 권한 편집 (Master 전용) ────────────────────────────────
     with st.expander("▶ 표 기반 권한 편집 (Master 전용)", expanded=True):
