@@ -297,7 +297,7 @@ def _auth_upsert_admin(sabun: str, name: str, active: bool = True, memo: str = "
     put("사번", sabun); put("이름", name); put("역할", "admin")
     put("범위유형",""); put("부서1",""); put("부서2",""); put("대상사번","")
     put("활성", bool(active)); put("비고", memo)
-    _retry_call(ws.append_row, buf, value_input_option="USER_ENTERED"))
+    _retry_call(ws.append_row, buf, value_input_option="USER_ENTERED")
 
 def _auth_remove_admin(sabun: str):
     if sabun in {a["사번"] for a in SEED_ADMINS}: return
@@ -318,7 +318,7 @@ def _auth_upsert_dept(sabun: str, name: str, dept1: str, dept2: str = "", active
     put("사번", sabun); put("이름", name); put("역할", "manager")
     put("범위유형", "부서"); put("부서1", dept1); put("부서2", (dept2 or ""))
     put("대상사번",""); put("활성", bool(active)); put("비고", memo)
-    _retry_call(ws.append_row, buf, value_input_option="USER_ENTERED"))
+    _retry_call(ws.append_row, buf, value_input_option="USER_ENTERED")
 
 def _auth_remove_dept(sabun: str, dept1: str, dept2: str = ""):
     ws, header, hmap = _auth__get_ws_hmap()
@@ -338,7 +338,7 @@ def _auth_upsert_eval(sabun: str, name: str, dept1: str, dept2: str = "", active
     put("사번", sabun); put("이름", name); put("역할", "evaluator")
     put("범위유형", "부서"); put("부서1", dept1); put("부서2", (dept2 or ""))
     put("대상사번",""); put("활성", bool(active)); put("비고", memo)
-    _retry_call(ws.append_row, buf, value_input_option="USER_ENTERED"))
+    _retry_call(ws.append_row, buf, value_input_option="USER_ENTERED")
 
 def _auth_remove_eval(sabun: str, dept1: str, dept2: str = ""):
     ws, header, hmap = _auth__get_ws_hmap()
