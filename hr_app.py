@@ -2022,97 +2022,216 @@ def tab_admin_transfer(emp_df: pd.DataFrame):
             st.exception(e)
 
 def tab_admin_eval_items():
+    import pandas as pd
+    import streamlit as st
+
     st.markdown("### 평가 항목 관리")
-    df=read_eval_items_df(only_active=False)
-    st.write(f"현재 등록: **{len(df)}개** (활성 {df[df['활성']==True].shape[0]}개)")
+
+    # 원본 로드
+    df = read_eval_items_df(only_active=False).copy()
+
+    # ▶ 안전 캐스팅 (NaN/타입 꼬임 방지)
+    for c in ["항목ID", "항목", "내용", "비고"]:
+        if c in df.columns:
+            df[c] = df[c].astype(str)
+    if "순서" in df.columns:
+        df["순서"] = pd.to_numeric(df["순서"], errors="coerce").fillna(0).astype(int)
+    if "활성" in df.columns:
+        df["활성"] = df["활성"].map(lambda x: str(x).strip().lower() in ("true","1","y","yes","t"))
+
+    st.write(f"현재 등록: **{len(df)}개** (활성 {df[df.get('활성', False)==True].shape[0]}개)")
+
+    # 목록/순서 편집 표
     with st.expander("목록 보기 / 순서 일괄 편집", expanded=True):
-        edit_df=df[["항목ID","항목","순서","활성"]].copy().reset_index(drop=True)
-        edited=st.data_editor(edit_df, use_container_width=True, height=380,
-                              column_config={"항목ID":st.column_config.TextColumn(disabled=True),
-                                             "항목":st.column_config.TextColumn(disabled=True),
-                                             "활성":st.column_config.CheckboxColumn(disabled=True),
-                                             "순서":st.column_config.NumberColumn(step=1, min_value=0)}, num_rows="fixed")
+        # 표시용 서브 DF
+        base_cols = [c for c in ["항목ID","항목","순서","활성"] if c in df.columns]
+        edit_df = df[base_cols].copy().reset_index(drop=True)
+
+        # ▶ data_editor: 컬럼/타입 확실히 맞추고 고유 키 사용
+        edited = st.data_editor(
+            edit_df,
+            use_container_width=True,
+            height=380,
+            num_rows="fixed",
+            key="adm_eval_editor_v2",
+            column_config={
+                "항목ID": st.column_config.TextColumn(disabled=True),
+                "항목":   st.column_config.TextColumn(disabled=True),
+                "순서":   st.column_config.NumberColumn(step=1, min_value=0),
+                "활성":   st.column_config.CheckboxColumn(disabled=True),
+            },
+        )
+
         if st.button("순서 일괄 저장", use_container_width=True, key="adm_eval_order_save"):
             try:
-                ws=get_workbook().worksheet(EVAL_ITEMS_SHEET); header=ws.row_values(1); hmap={n:i+1 for i,n in enumerate(header)}
-                col_id=hmap.get("항목ID"); col_ord=hmap.get("순서")
-                vals=ws.col_values(col_id); pos={str(v).strip():i for i,v in enumerate(vals[1:],start=2)}
-                for _, r in edited.iterrows():
-                    iid=str(r["항목ID"]).strip()
-                    if iid in pos: ws.update_cell(pos[iid], col_ord, int(r["순서"]))
-                st.cache_data.clear(); st.success("순서가 반영되었습니다."); st.rerun()
+                ws = get_workbook().worksheet(EVAL_ITEMS_SHEET)
+                header = ws.row_values(1) or []
+                hmap   = {n: i + 1 for i, n in enumerate(header)}
+
+                col_id  = hmap.get("항목ID")
+                col_ord = hmap.get("순서")
+                if not (col_id and col_ord):
+                    st.error("시트에 '항목ID' 또는 '순서' 컬럼이 없습니다.")
+                else:
+                    # 시트 내 항목ID → 행 번호 맵
+                    vals = _retry_call(ws.col_values, col_id)
+                    pos  = {str(v).strip(): i for i, v in enumerate(vals[1:], start=2)}
+
+                    # NumberColumn이 보장하는 int형 기반으로 업데이트
+                    for _, r in edited.iterrows():
+                        iid = str(r.get("항목ID","")).strip()
+                        if not iid or iid not in pos:
+                            continue
+                        ws.update_cell(pos[iid], col_ord, int(r.get("순서", 0) or 0))
+
+                    st.cache_data.clear()
+                    st.success("순서가 반영되었습니다.")
+                    st.rerun()
             except Exception as e:
                 st.exception(e)
+
     st.divider()
     st.markdown("### 신규 등록 / 수정")
-    choices=["(신규)"]+[f"{r['항목ID']} - {r['항목']}" for _,r in df.iterrows()]
-    sel=st.selectbox("대상 선택", choices, index=0, key="adm_eval_pick")
-    item_id=None; name=""; desc=""; order=(df["순서"].max()+1 if not df.empty else 1); active=True; memo=""
-    if sel!="(신규)":
-        iid=sel.split(" - ",1)[0]; row=df.loc[df["항목ID"]==iid].iloc[0]
-        item_id=row["항목ID"]; name=str(row.get("항목","")); desc=str(row.get("내용","")); order=int(row.get("순서",0)); active=bool(row.get("활성",True)); memo=str(row.get("비고",""))
-    c1,c2=st.columns([3,1])
+
+    choices = ["(신규)"] + [f"{r['항목ID']} - {r['항목']}" for _, r in df.iterrows()] if not df.empty else ["(신규)"]
+    sel = st.selectbox("대상 선택", choices, index=0, key="adm_eval_pick")
+
+    # 기본값
+    item_id = None
+    name = ""
+    desc = ""
+    order = int(df["순서"].max() + 1) if ("순서" in df.columns and not df.empty) else 1
+    active = True
+    memo = ""
+
+    if sel != "(신규)" and not df.empty:
+        iid = sel.split(" - ", 1)[0]
+        row = df.loc[df["항목ID"] == iid]
+        if not row.empty:
+            row   = row.iloc[0]
+            item_id = str(row.get("항목ID",""))
+            name    = str(row.get("항목",""))
+            desc    = str(row.get("내용",""))
+            memo    = str(row.get("비고",""))
+            try:
+                order = int(row.get("순서", 0) or 0)
+            except:
+                order = 0
+            active = bool(str(row.get("활성","")).strip().lower() in ("true","1","y","yes","t"))
+
+    c1, c2 = st.columns([3,1])
     with c1:
-        name=st.text_input("항목명", value=name, key="adm_eval_name")
-        desc=st.text_area("설명(문항 내용)", value=desc, height=100, key="adm_eval_desc")
-        memo=st.text_input("비고(선택)", value=memo, key="adm_eval_memo")
+        name = st.text_input("항목명", value=name, key="adm_eval_name")
+        desc = st.text_area("설명(문항 내용)", value=desc, height=100, key="adm_eval_desc")
+        memo = st.text_input("비고(선택)", value=memo, key="adm_eval_memo")
     with c2:
-        order=st.number_input("순서", min_value=0, step=1, value=int(order), key="adm_eval_order")
-        active=st.checkbox("활성", value=active, key="adm_eval_active")
+        order = st.number_input("순서", min_value=0, step=1, value=int(order), key="adm_eval_order")
+        active = st.checkbox("활성", value=active, key="adm_eval_active")
+
         if st.button("저장(신규/수정)", type="primary", use_container_width=True, key="adm_eval_save"):
-            if not name.strip(): st.error("항목명을 입력하세요.")
+            if not name.strip():
+                st.error("항목명을 입력하세요.")
             else:
                 try:
-                    ensure_eval_items_sheet(); ws=get_workbook().worksheet(EVAL_ITEMS_SHEET)
-                    header=ws.row_values(1); hmap={n:i+1 for i,n in enumerate(header)}
+                    ensure_eval_items_sheet()
+                    ws = get_workbook().worksheet(EVAL_ITEMS_SHEET)
+                    header = ws.row_values(1) or EVAL_ITEM_HEADERS
+                    hmap   = {n: i + 1 for i, n in enumerate(header)}
+
                     if not item_id:
-                        vals=ws.col_values(hmap.get("항목ID"))[1:]; nums=[]
-                        for v in vals:
-                            s=str(v).strip()
-                            if s.startswith("ITM"):
-                                try: nums.append(int(s[3:]))
-                                except: pass
-                        new_id=f"ITM{((max(nums)+1) if nums else 1):04d}"
-                        rowbuf=[""]*len(header)
-                        def put(k,v):
-                            c=hmap.get(k)
-                            if c: rowbuf[c-1]=v
-                        put("항목ID", new_id); put("항목", name.strip()); put("내용", desc.strip()); put("순서", int(order)); put("활성", bool(active))
-                        if "비고" in hmap: put("비고", memo.strip())
-                        ws.append_row(rowbuf, value_input_option="USER_ENTERED")
-                        st.success(f"저장 완료 (항목ID: {new_id})"); st.cache_data.clear(); st.rerun()
+                        # 신규: ID 채번
+                        col_id = hmap.get("항목ID")
+                        nums = []
+                        if col_id:
+                            vals = _retry_call(ws.col_values, col_id)[1:]
+                            for v in vals:
+                                s = str(v).strip()
+                                if s.startswith("ITM"):
+                                    try:
+                                        nums.append(int(s[3:]))
+                                    except:
+                                        pass
+                        new_id = f"ITM{((max(nums)+1) if nums else 1):04d}"
+
+                        rowbuf = [""] * len(header)
+                        def put(k, v):
+                            c = hmap.get(k)
+                            if c:
+                                rowbuf[c - 1] = v
+                        put("항목ID", new_id)
+                        put("항목", name.strip())
+                        put("내용", desc.strip())
+                        put("순서", int(order))
+                        put("활성", bool(active))
+                        if "비고" in hmap:
+                            put("비고", memo.strip())
+
+                        _retry_call(ws.append_row, rowbuf, value_input_option="USER_ENTERED")
+                        st.cache_data.clear()
+                        st.success(f"저장 완료 (항목ID: {new_id})")
+                        st.rerun()
+
                     else:
-                        idx=0; col_id=hmap.get("항목ID"); vals=ws.col_values(col_id)
-                        for i,v in enumerate(vals[1:], start=2):
-                            if str(v).strip()==str(item_id).strip(): idx=i; break
-                        if idx==0:
+                        # 수정
+                        col_id = hmap.get("항목ID")
+                        idx = 0
+                        if col_id:
+                            vals = _retry_call(ws.col_values, col_id)
+                            for i, v in enumerate(vals[1:], start=2):
+                                if str(v).strip() == str(item_id).strip():
+                                    idx = i
+                                    break
+                        if idx == 0:
                             st.error("대상 항목을 찾을 수 없습니다.")
                         else:
                             ws.update_cell(idx, hmap["항목"], name.strip())
                             ws.update_cell(idx, hmap["내용"], desc.strip())
                             ws.update_cell(idx, hmap["순서"], int(order))
                             ws.update_cell(idx, hmap["활성"], bool(active))
-                            if "비고" in hmap: ws.update_cell(idx, hmap["비고"], memo.strip())
-                            st.success("업데이트 완료"); st.cache_data.clear(); st.rerun()
+                            if "비고" in hmap:
+                                ws.update_cell(idx, hmap["비고"], memo.strip())
+                            st.cache_data.clear()
+                            st.success("업데이트 완료")
+                            st.rerun()
                 except Exception as e:
                     st.exception(e)
+
         if item_id:
             if st.button("비활성화(소프트 삭제)", use_container_width=True, key="adm_eval_disable"):
                 try:
-                    ws=get_workbook().worksheet(EVAL_ITEMS_SHEET); header=ws.row_values(1); hmap={n:i+1 for i,n in enumerate(header)}
-                    col_id=hmap.get("항목ID"); col_active=hmap.get("활성"); vals=ws.col_values(col_id)
-                    for i,v in enumerate(vals[1:], start=2):
-                        if str(v).strip()==str(item_id).strip(): ws.update_cell(i, col_active, False); break
-                    st.success("비활성화 완료"); st.cache_data.clear(); st.rerun()
+                    ws = get_workbook().worksheet(EVAL_ITEMS_SHEET)
+                    header = ws.row_values(1); hmap = {n: i + 1 for i, n in enumerate(header)}
+                    col_id = hmap.get("항목ID"); col_active = hmap.get("활성")
+                    if not (col_id and col_active):
+                        st.error("'항목ID' 또는 '활성' 컬럼이 없습니다.")
+                    else:
+                        vals = _retry_call(ws.col_values, col_id)
+                        for i, v in enumerate(vals[1:], start=2):
+                            if str(v).strip() == str(item_id).strip():
+                                ws.update_cell(i, col_active, False)
+                                break
+                        st.cache_data.clear()
+                        st.success("비활성화 완료")
+                        st.rerun()
                 except Exception as e:
                     st.exception(e)
+
             if st.button("행 삭제(완전 삭제)", use_container_width=True, key="adm_eval_delete"):
                 try:
-                    ws=get_workbook().worksheet(EVAL_ITEMS_SHEET); header=ws.row_values(1); hmap={n:i+1 for i,n in enumerate(header)}
-                    col_id=hmap.get("항목ID"); vals=ws.col_values(col_id)
-                    for i,v in enumerate(vals[1:], start=2):
-                        if str(v).strip()==str(item_id).strip(): ws.delete_rows(i); break
-                    st.success("삭제 완료"); st.cache_data.clear(); st.rerun()
+                    ws = get_workbook().worksheet(EVAL_ITEMS_SHEET)
+                    header = ws.row_values(1); hmap = {n: i + 1 for i, n in enumerate(header)}
+                    col_id = hmap.get("항목ID")
+                    if not col_id:
+                        st.error("'항목ID' 컬럼이 없습니다.")
+                    else:
+                        vals = _retry_call(ws.col_values, col_id)
+                        for i, v in enumerate(vals[1:], start=2):
+                            if str(v).strip() == str(item_id).strip():
+                                ws.delete_rows(i)
+                                break
+                        st.cache_data.clear()
+                        st.success("삭제 완료")
+                        st.rerun()
                 except Exception as e:
                     st.exception(e)
 
@@ -2155,7 +2274,7 @@ def tab_admin_acl(emp_df: pd.DataFrame):
 
     st.markdown("### 권한 관리")
 
-    # ── 표 기반 권한 편집 (Master 전용) ───────────────────────────────────────
+    # ── 표 기반 권한 편집 (Master 전용)
     with st.expander("▶ 표 기반 권한 편집 (Master 전용)", expanded=True):
         me = st.session_state.get("user", {})
         am_master = is_admin(str(me.get("사번", "")))
@@ -2257,21 +2376,25 @@ def tab_admin_acl(emp_df: pd.DataFrame):
             return not sub.empty
 
         grid = view.sort_values(["부서1", "부서2", "사번"]).reset_index(drop=True)
+        # ▶ 안전한 bool 캐스팅
         grid["선택"] = False
-        # 데이터 권한
-        grid["Master"]      = grid.apply(lambda r: _has_master(r["사번"]), axis=1)
-        grid["부서1 전체"]   = grid.apply(lambda r: _has_mgr_dall(r["사번"], r["부서1"]), axis=1)
-        grid["부서1+부서2"]  = grid.apply(lambda r: _has_mgr_team(r["사번"], r["부서1"], r["부서2"]), axis=1)
-        # 평가 권한
-        grid["평가(부서1 전체)"]  = grid.apply(lambda r: _has_eval_dall(r["사번"], r["부서1"]), axis=1)
-        grid["평가(부서1+부서2)"] = grid.apply(lambda r: _has_eval_team(r["사번"], r["부서1"], r["부서2"]), axis=1)
+        grid["Master"] = grid.apply(lambda r: _has_master(r["사번"]), axis=1).astype(bool)
+        grid["부서1 전체"] = grid.apply(lambda r: _has_mgr_dall(r["사번"], r["부서1"]), axis=1).astype(bool)
+        grid["부서1+부서2"] = grid.apply(lambda r: _has_mgr_team(r["사번"], r["부서1"], r["부서2"]), axis=1).astype(bool)
+        grid["평가(부서1 전체)"] = grid.apply(lambda r: _has_eval_dall(r["사번"], r["부서1"]), axis=1).astype(bool)
+        grid["평가(부서1+부서2)"] = grid.apply(lambda r: _has_eval_team(r["사번"], r["부서1"], r["부서2"]), axis=1).astype(bool)
 
         st.caption(f"대상: **{len(grid):,}명**  · 체크 후 ‘변경 미리보기’ → ‘일괄 적용’ 순서로 진행하세요.")
 
         edited = st.data_editor(
-            grid[["선택","사번","이름","부서1","부서2","직급",
-                  "Master","부서1 전체","부서1+부서2","평가(부서1 전체)","평가(부서1+부서2)"]],
-            use_container_width=True, height=460, key="aclp_editor",
+            grid[[
+                "선택","사번","이름","부서1","부서2","직급",
+                "Master","부서1 전체","부서1+부서2","평가(부서1 전체)","평가(부서1+부서2)"
+            ]],
+            use_container_width=True,
+            height=460,
+            key="aclp_editor_v2",
+            num_rows="fixed",
             column_config={
                 "선택": st.column_config.CheckboxColumn(),
                 "Master": st.column_config.CheckboxColumn(),
@@ -2280,8 +2403,7 @@ def tab_admin_acl(emp_df: pd.DataFrame):
                 "평가(부서1 전체)": st.column_config.CheckboxColumn(),
                 "평가(부서1+부서2)": st.column_config.CheckboxColumn(),
             },
-            disabled=not am_master,
-            num_rows="fixed",
+            disabled=not am_master,  # 전체 비활성화(버전 호환: 지원되는 스트림릿에선 정상)
         )
 
         cact = st.columns([1,1,2,2])
@@ -2323,8 +2445,9 @@ def tab_admin_acl(emp_df: pd.DataFrame):
 
         # 변경 diff
         def _calc_changes(orig_df, cur_df):
-            orig = orig_df.set_index("사번")[["Master","부서1 전체","부서1+부서2","평가(부서1 전체)","평가(부서1+부서2)"]].astype(bool)
-            cur  = cur_df.set_index("사번")[["Master","부서1 전체","부서1+부서2","평가(부서1 전체)","평가(부서1+부서2)"]].astype(bool)
+            cols = ["Master","부서1 전체","부서1+부서2","평가(부서1 전체)","평가(부서1+부서2)"]
+            orig = orig_df.set_index("사번")[cols].astype(bool)
+            cur  = cur_df.set_index("사번")[cols].astype(bool)
             sab_common = orig.index.intersection(cur.index)
             changes = []
             for s in sab_common:
@@ -2332,8 +2455,11 @@ def tab_admin_acl(emp_df: pd.DataFrame):
                 d1  = str(row.get("부서1",""))
                 d2  = str(row.get("부서2",""))
                 for col, label in [
-                    ("Master","admin"), ("부서1 전체","mgr_dept_all"), ("부서1+부서2","mgr_team"),
-                    ("평가(부서1 전체)","eval_dept_all"), ("평가(부서1+부서2)","eval_team")
+                    ("Master","admin"),
+                    ("부서1 전체","mgr_dept_all"),
+                    ("부서1+부서2","mgr_team"),
+                    ("평가(부서1 전체)","eval_dept_all"),
+                    ("평가(부서1+부서2)","eval_team"),
                 ]:
                     if bool(orig.loc[s, col]) != bool(cur.loc[s, col]):
                         action = "ADD" if bool(cur.loc[s, col]) else "DEL"
@@ -2348,7 +2474,7 @@ def tab_admin_acl(emp_df: pd.DataFrame):
             else:
                 st.dataframe(pd.DataFrame(changes), use_container_width=True, height=260)
 
-        # 효과 미리보기(데이터 접근 가능 인원 수) — 평가권과 별개
+        # 효과 미리보기(데이터 접근 가능한 인원 수)
         st.markdown("##### 효과 미리보기 (데이터 접근 가능한 인원 수)")
         with st.container():
             tot = len(emp_df["사번"].astype(str).unique())
@@ -2422,7 +2548,7 @@ def tab_admin_acl(emp_df: pd.DataFrame):
 
     st.divider()
 
-    # ── 권한 규칙 추가 (부서만; 개별 UI 유지하되 evaluator도 허용) ────────────────
+    # ── 권한 규칙 추가 (부서만; evaluator 허용)
     st.markdown("### 권한 규칙 추가 (부서만)")
     df_pick = emp_df.copy()
     df_pick["표시"] = df_pick.apply(lambda r: f"{str(r.get('사번',''))} - {str(r.get('이름',''))}", axis=1)
@@ -2467,7 +2593,7 @@ def tab_admin_acl(emp_df: pd.DataFrame):
             ws = get_workbook().worksheet(AUTH_SHEET)
             header = ws.row_values(1)
             rows = [[r.get(h,"") for h in header] for r in add_rows]
-            ws.append_rows(rows, value_input_option="USER_ENTERED")
+            _retry_call(ws.append_rows, rows, value_input_option="USER_ENTERED")
             st.cache_data.clear()
             st.success(f"규칙 {len(rows)}건 추가 완료", icon="✅")
             st.rerun()
@@ -2489,7 +2615,7 @@ def tab_admin_acl(emp_df: pd.DataFrame):
     if st.button("🗑️ 해당 행 삭제", use_container_width=True, key="acl_del_btn"):
         try:
             ws = get_workbook().worksheet(AUTH_SHEET)
-            ws.delete_rows(int(del_row))
+            _retry_call(ws.delete_rows, int(del_row))
             st.cache_data.clear()
             st.success(f"{del_row}행 삭제 완료", icon="✅")
             st.rerun()
