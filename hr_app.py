@@ -1057,129 +1057,125 @@ def read_eval_saved_scores(year: int, eval_type: str, target_sabun: str, evaluat
         return {}, {}
 
 def tab_eval_input(emp_df: pd.DataFrame):
+    import streamlit as st
+    from datetime import datetime
+
     st.subheader("평가")
 
-    # ── 스타일(세로 간격 최소화)
-    st.markdown(
-        """
-        <style>
-          .eval-row{padding:1px 0 !important;border-bottom:1px solid rgba(49,51,63,.06);}
-          .eval-row .name{margin:0 !important;line-height:1.2 !important;}
-          .eval-row .desc{margin:.05rem 0 .2rem !important;line-height:1.2 !important;color:#4b5563;}
-          .eval-row .stRadio{margin:0 !important;}
-          .eval-row [role="radiogroup"]{margin:0 !important;align-items:center;}
-          .eval-row [role="radiogroup"] label{margin:0 !important;}
-          .bulk-row{margin:.15rem 0 !important;}
-          .stSlider{margin-top:.1rem !important;margin-bottom:.1rem !important;}
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    # ── 연도
+    # ── 기본 세팅 ─────────────────────────────────────────────────────────────
     this_year = datetime.now(tz=tz_kst()).year
-    colY = st.columns([1, 3])
-    with colY[0]:
-        year = st.number_input(
-            "평가 연도", min_value=2000, max_value=2100,
-            value=int(this_year), step=1, key="eval_year"
-        )
+    year = st.number_input("평가 연도", min_value=2000, max_value=2100,
+                           value=int(this_year), step=1, key="eval2_year")
 
-    # ── 항목 로드
+    u = st.session_state["user"]
+    me_sabun = str(u["사번"]); me_name = str(u["이름"])
+    am_admin_or_mgr = (is_admin(me_sabun) or is_manager(emp_df, me_sabun))
+    allowed_sabuns = get_allowed_sabuns(emp_df, me_sabun, include_self=True)
+
+    # 평가 항목 로드
     items = read_eval_items_df(only_active=True)
     if items.empty:
         st.warning("활성화된 평가 항목이 없습니다.", icon="⚠️")
         return
+    items_sorted = items.sort_values(["순서", "항목"]).reset_index(drop=True)
+    item_ids = [str(x) for x in items_sorted["항목ID"].tolist()]
 
-    # ── 권한/대상 선택
-    u = st.session_state["user"]
-    me_sabun = str(u["사번"]); me_name = str(u["이름"])
-    am_admin = is_admin(me_sabun)
-    allowed = get_allowed_sabuns(emp_df, me_sabun, include_self=True)
+    # 상태키
+    st.session_state.setdefault("eval2_target_sabun", me_sabun)
+    st.session_state.setdefault("eval2_target_name",  me_name)
+    st.session_state.setdefault("eval2_edit_mode",    False)
 
-    c_tgt, c_type, _ = st.columns([2, 1.6, 6.4])
-
-    if am_admin or is_manager(emp_df, me_sabun):
-        df = emp_df.copy()
-        df = df[df["사번"].astype(str).isin(allowed)]
-        if "재직여부" in df.columns:
-            df = df[df["재직여부"] == True]
-        df["표시"] = df.apply(lambda r: f"{str(r.get('사번',''))} - {str(r.get('이름',''))}", axis=1)
-        df = df.sort_values(["사번"])
-        with c_tgt:
-            sel = st.selectbox(
-                "평가 대상자", ["(선택)"] + df["표시"].tolist(),
-                index=0, key="eval_target_select"
-            )
-        if sel == "(선택)":
-            st.info("평가 대상자를 선택하세요.")
-            return
-        target_sabun = sel.split(" - ", 1)[0]
-        target_name = _emp_name_by_sabun(emp_df, target_sabun)
-        with c_type:
-            type_key = f"eval_type_{year}_{me_sabun}_{target_sabun}"
-            if type_key not in st.session_state:
-                st.session_state[type_key] = "1차"
-            eval_type = st.radio("평가유형", EVAL_TYPES, horizontal=True, key=type_key)
-    else:
+    # ── 대상 선택 (직원=본인 고정 / 관리자·매니저=그리드에서 선택) ────────────────
+    if not am_admin_or_mgr:
         target_sabun = me_sabun
-        target_name = me_name
-        with c_tgt:
-            st.text_input("평가 대상자", f"{target_name} ({target_sabun})", disabled=True, key="eval_target_me")
-        with c_type:
-            eval_type = "자기"
-            st.text_input("평가유형", "자기", disabled=True, key="eval_type_me")
+        target_name  = me_name
+        st.info(f"대상자: {target_name} ({target_sabun})", icon="👤")
+        eval_type = "자기"
+        st.caption("평가유형: **자기**")
+    else:
+        base = emp_df.copy()
+        base["사번"] = base["사번"].astype(str)
+        base = base[base["사번"].isin({str(s) for s in allowed_sabuns})]
+        if "재직여부" in base.columns:
+            base = base[base["재직여부"] == True]
 
-    evaluator_sabun = me_sabun
-    evaluator_name = me_name
+        cflt = st.columns([1,1,1,2,1])
+        with cflt[0]:
+            opt_d1 = ["(전체)"] + sorted([x for x in base.get("부서1", []).dropna().unique() if x])
+            f_d1 = st.selectbox("부서1", opt_d1, index=0, key="eval2_f_d1")
+        with cflt[1]:
+            sub = base if f_d1 == "(전체)" else base[base["부서1"].astype(str) == f_d1]
+            opt_d2 = ["(전체)"] + sorted([x for x in sub.get("부서2", []).dropna().unique() if x])
+            f_d2 = st.selectbox("부서2", opt_d2, index=0, key="eval2_f_d2")
+        with cflt[2]:
+            opt_g = ["(전체)"] + sorted([x for x in base.get("직급", []).dropna().unique() if x])
+            f_g = st.selectbox("직급", opt_g, index=0, key="eval2_f_grade")
+        with cflt[3]:
+            f_q = st.text_input("검색(사번/이름)", "", key="eval2_f_q")
+        with cflt[4]:
+            only_active = st.checkbox("재직만", True, key="eval2_f_active")
 
-    # ── 저장된 점수/잠금 확인
-    saved_scores, saved_meta = read_eval_saved_scores(int(year), eval_type, target_sabun, evaluator_sabun)
-    is_self_case = (eval_type == "자기" and target_sabun == evaluator_sabun)
-    already_submitted = bool(saved_meta) and str(saved_meta.get("상태", "")).strip() in ("제출", "완료")
-    locked_flag = str(saved_meta.get("잠금", "")).strip().lower() in ("true", "1", "y", "yes")
+        view = base[["사번","이름","부서1","부서2","직급","재직여부"]].copy()
+        if only_active and "재직여부" in view.columns:
+            view = view[view["재직여부"] == True]
+        if f_d1 != "(전체)": view = view[view["부서1"].astype(str) == f_d1]
+        if f_d2 != "(전체)": view = view[view["부서2"].astype(str) == f_d2]
+        if f_g  != "(전체)": view = view[view["직급"].astype(str) == f_g]
+        if f_q and f_q.strip():
+            k = f_q.strip().lower()
+            view = view[view.apply(lambda r: k in str(r["사번"]).lower() or k in str(r["이름"]).lower(), axis=1)]
+        view = view.sort_values(["부서1","부서2","사번"]).reset_index(drop=True)
 
-    # 유니크 키 베이스
-    kbase = f"evalbulk_{year}_{eval_type}_{evaluator_sabun}_{target_sabun}"
-    edit_flag_key = f"__edit_on_{kbase}"
-    apply_saved_once_key = f"__apply_saved_once_{kbase}"
-    # 편집/저장값 주입 플래그 기본값 보정
-    if edit_flag_key not in st.session_state:
-        st.session_state[edit_flag_key] = False
-    if apply_saved_once_key not in st.session_state:
-        st.session_state[apply_saved_once_key] = False
+        # 표에서 '선택' 체크
+        view["선택"] = (view["사번"] == st.session_state["eval2_target_sabun"])
+        edited_pick = st.data_editor(
+            view[["선택","사번","이름","부서1","부서2","직급"]],
+            use_container_width=True, height=360, key="eval2_pick_editor",
+            column_config={"선택": st.column_config.CheckboxColumn()},
+            num_rows="fixed",
+        )
+        picked = edited_pick.loc[edited_pick["선택"] == True]
+        if not picked.empty:
+            r = picked.iloc[-1]
+            st.session_state["eval2_target_sabun"] = str(r["사번"])
+            st.session_state["eval2_target_name"]  = str(r["이름"])
 
+        target_sabun = st.session_state["eval2_target_sabun"]
+        target_name  = st.session_state["eval2_target_name"]
+        st.success(f"대상자: {target_name} ({target_sabun})", icon="✅")
 
-    # 자기평가 잠금 상태면: 제출 현황만 노출 (수정 모드로 전환 버튼 제공)
-    if is_self_case and (already_submitted or locked_flag) and not st.session_state.get(edit_flag_key, False):
-        st.info("이미 제출된 자기평가입니다. 아래 ‘수정 모드로 전환’ 버튼을 누르면 편집 가능합니다.", icon="ℹ️")
+        # 관리자/매니저는 유형 선택
+        eval_type_key = f"eval2_type_{year}_{me_sabun}_{target_sabun}"
+        if eval_type_key not in st.session_state:
+            st.session_state[eval_type_key] = "1차"
+        eval_type = st.radio("평가유형", ["자기","1차","2차"], horizontal=True, key=eval_type_key)
 
-        # 한 번 클릭하면 즉시 편집 모드로 들어가도록 rerun
-        if st.button("✏️ 수정 모드로 전환", key=f"{kbase}_edit_on", use_container_width=True):
-            st.session_state[edit_flag_key] = True
-            st.session_state[apply_saved_once_key] = False  # 저장값 강제 반영 플래그 초기화
-            st.rerun()  # ← 즉시 재실행하여 두 번 클릭 문제 해결
+    # ── 수정모드 토글 ───────────────────────────────────────────────────────
+    col_mode = st.columns([1,3])
+    with col_mode[0]:
+        if st.button(("수정모드로 전환" if not st.session_state["eval2_edit_mode"] else "보기모드로 전환"),
+                     use_container_width=True, key="eval2_toggle"):
+            st.session_state["eval2_edit_mode"] = not st.session_state["eval2_edit_mode"]
+            st.rerun()
+    with col_mode[1]:
+        st.caption(f"현재: **{'수정모드' if st.session_state['eval2_edit_mode'] else '보기모드'}**")
 
-        st.markdown("#### 내 제출 현황")
-        try:
-            my = read_my_eval_rows(int(year), evaluator_sabun)
-            if my.empty:
-                st.caption("제출된 평가가 없습니다.")
-            else:
-                st.dataframe(
-                    my[["평가유형", "평가대상사번", "평가대상이름", "총점", "상태", "제출시각"]],
-                    use_container_width=True, height=260
-                )
-        except Exception:
-            st.caption("제출 현황을 불러오지 못했습니다.")
+    edit_mode = bool(st.session_state["eval2_edit_mode"])
 
-        st.stop()  # 아래 입력 UI 렌더 중단
+    # ── 저장된 점수 로드 ────────────────────────────────────────────────────
+    saved_scores, saved_meta = read_eval_saved_scores(int(year), eval_type, target_sabun, me_sabun)
+    kbase = f"E2_{year}_{eval_type}_{me_sabun}_{target_sabun}"
 
-    # ── 제목 + (일괄 슬라이더 + 적용 버튼) : rerun 없이 세션키로 주입
-    c_head, c_slider, c_btn = st.columns([5, 2, 1])
+    # 직원(본인)이고 저장값이 없으면 최초 진입 시 자동 수정모드
+    if (not am_admin_or_mgr) and (not saved_scores) and (not edit_mode):
+        st.session_state["eval2_edit_mode"] = True
+        edit_mode = True
+
+    # ── 일괄 슬라이더 ──────────────────────────────────────────────────────
+    st.markdown("#### 점수 입력 (각 1~5)")
+    c_head, c_slider, c_btn = st.columns([5,2,1])
     with c_head:
-        st.markdown("#### 점수 입력 (각 1~5)")
-
+        st.caption("라디오로 개별 점수를 고르거나, 슬라이더 ‘일괄 적용’을 사용하세요.")
     slider_key = f"{kbase}_slider"
     if slider_key not in st.session_state:
         if saved_scores:
@@ -1187,38 +1183,28 @@ def tab_eval_input(emp_df: pd.DataFrame):
             st.session_state[slider_key] = int(min(5, max(1, avg)))
         else:
             st.session_state[slider_key] = 3
-
     with c_slider:
-        bulk_score = st.slider("일괄 점수", min_value=1, max_value=5, step=1, key=slider_key)
+        bulk_score = st.slider("일괄 점수", min_value=1, max_value=5, step=1, key=slider_key, disabled=not edit_mode)
     with c_btn:
-        if st.button("일괄 적용", use_container_width=True, key=f"{kbase}_apply"):
+        if st.button("일괄 적용", use_container_width=True, key=f"{kbase}_apply", disabled=not edit_mode):
             st.session_state[f"__apply_bulk_{kbase}"] = int(bulk_score)
             st.toast(f"모든 항목에 {bulk_score}점 적용", icon="✅")
 
-    # ── 일괄 적용 플래그 처리(라디오 생성 전에 값 세팅)
-    apply_key = f"__apply_bulk_{kbase}"
-    if st.session_state.get(apply_key) is not None:
-        _v = int(st.session_state[apply_key])
-        for _iid in items["항목ID"].astype(str):
-            st.session_state[f"eval_seg_{_iid}_{kbase}"] = str(_v)
-        del st.session_state[apply_key]
+    # ── 라디오 구성 전, 일괄적용 플래그 반영 ───────────────────────────────
+    if st.session_state.get(f"__apply_bulk_{kbase}") is not None:
+        _v = int(st.session_state[f"__apply_bulk_{kbase}"])
+        for _iid in item_ids:
+            st.session_state[f"eval2_seg_{_iid}_{kbase}"] = str(_v)
+        del st.session_state[f"__apply_bulk_{kbase}"]
 
-    # ── 항목 렌더링 (이름 | 설명 | 점수)
-    items_sorted = items.sort_values(["순서", "항목"]).reset_index(drop=True)
+    # ── 항목 렌더링 ────────────────────────────────────────────────────────
     scores = {}
-
-    # 수정 모드로 막 전환했거나(locked case) / 처음 로드 시 저장값을 강제 1회 주입
-    if st.session_state.get(edit_flag_key, False) and not st.session_state.get(apply_saved_once_key, False):
-        for _iid, _v in saved_scores.items():
-            st.session_state[f"eval_seg_{_iid}_{kbase}"] = str(int(_v))
-        st.session_state[apply_saved_once_key] = True
-
     for r in items_sorted.itertuples(index=False):
         iid = str(getattr(r, "항목ID"))
         name = getattr(r, "항목") or ""
         desc = getattr(r, "내용") or ""
 
-        rkey = f"eval_seg_{iid}_{kbase}"
+        rkey = f"eval2_seg_{iid}_{kbase}"
         if rkey not in st.session_state:
             if iid in saved_scores:
                 st.session_state[rkey] = str(int(saved_scores[iid]))
@@ -1228,17 +1214,19 @@ def tab_eval_input(emp_df: pd.DataFrame):
         st.markdown('<div class="eval-row">', unsafe_allow_html=True)
         c1, c2, c3 = st.columns([2, 6, 3])
         with c1:
-            st.markdown(f'<div class="name">{name}</div>', unsafe_allow_html=True)
+            st.markdown(f'**{name}**')
         with c2:
             if desc.strip():
-                st.markdown(f'<div class="desc">{desc.replace(chr(10), "<br/>")}</div>', unsafe_allow_html=True)
+                st.caption(desc)
         with c3:
-            st.radio(" ", ["1", "2", "3", "4", "5"], horizontal=True, key=rkey, label_visibility="collapsed")
+            st.radio(" ", ["1","2","3","4","5"],
+                     horizontal=True, key=rkey, label_visibility="collapsed",
+                     disabled=not edit_mode)
         st.markdown('</div>', unsafe_allow_html=True)
 
         scores[iid] = int(st.session_state[rkey])
 
-    # ── 합계/저장
+    # ── 합계/저장 ───────────────────────────────────────────────────────────
     total_100 = round(sum(scores.values()) * (100.0 / max(1, len(items_sorted) * 5)), 1)
     st.markdown("---")
     cM1, cM2 = st.columns([1, 3])
@@ -1249,23 +1237,27 @@ def tab_eval_input(emp_df: pd.DataFrame):
 
     col_submit = st.columns([1, 4])
     with col_submit[0]:
-        do_save = st.button("제출/저장", type="primary", use_container_width=True, key=f"eval_save_{kbase}")
+        do_save = st.button("제출/저장", type="primary", use_container_width=True, key=f"eval2_save_{kbase}", disabled=not edit_mode)
 
     if do_save:
         try:
             rep = upsert_eval_response(
                 emp_df, int(year), eval_type,
-                str(target_sabun), str(evaluator_sabun),
+                str(target_sabun), str(me_sabun),
                 scores, "제출"
             )
             st.success(("제출 완료" if rep["action"] == "insert" else "업데이트 완료") + f" (총점 {rep['total']}점)", icon="✅")
             st.toast("평가 저장됨", icon="✅")
-        except Exception:
-            st.error("저장 중 문제가 발생했습니다. 네트워크/권한을 확인하세요.", icon="🛑")
+            # 저장 후 보기모드로 전환
+            st.session_state["eval2_edit_mode"] = False
+            st.rerun()
+        except Exception as e:
+            st.exception(e)
 
+    # ── 내 제출 현황 ────────────────────────────────────────────────────────
     st.markdown("#### 내 제출 현황")
     try:
-        my = read_my_eval_rows(int(year), evaluator_sabun)
+        my = read_my_eval_rows(int(year), me_sabun)
         if my.empty:
             st.caption("제출된 평가가 없습니다.")
         else:
