@@ -140,36 +140,35 @@ def get_workbook():
 
 EMP_SHEET = st.secrets.get("sheets", {}).get("EMP_SHEET", "직원")
 
-# >>> PATCH: GSpread Throttle Helpers (BEGIN)
-# 읽기 과다(429) 방지용: 워크시트/헤더 캐시 + 백오프 재시도
-import time, random
+# ── gspread read-throttle helpers (cache + retry) ─────────────────────────────
+from typing import Any  # 타입힌트용
 
-# 간단 캐시 (제한적 TTL)
-_WS_CACHE: dict[str, tuple[float, any]] = {}
-_HDR_CACHE: dict[str, tuple[float, list[str], dict]] = {}
-_WS_TTL  = 60   # sec
-_HDR_TTL = 60   # sec
+# Worksheet / Header 캐시 (TTL)
+_WS_CACHE: dict[str, tuple[float, Any]] = {}
+_HDR_CACHE: dict[str, tuple[float, list[str], dict[str, int]]] = {}
+_WS_TTL  = 120  # 초
+_HDR_TTL = 120  # 초
 
 def _ws_cached(title: str):
-    """title에 해당하는 Worksheet를 TTL 동안 캐시해서 Read를 줄입니다."""
+    """workbook.worksheet(title)를 TTL 동안 캐시해서 Read 횟수를 줄임"""
     now = time.time()
-    ent = _WS_CACHE.get(title)
-    if ent and now - ent[0] < _WS_TTL:
-        return ent[1]
+    hit = _WS_CACHE.get(title)
+    if hit and (now - hit[0] < _WS_TTL):
+        return hit[1]
     wb = get_workbook()
-    ws = _retry_call(wb.worksheet, title)  # _retry_call은 아래/기존 것 사용
+    ws = _retry_call(wb.worksheet, title)
     _WS_CACHE[title] = (now, ws)
     return ws
 
-def _sheet_header_cached(ws, title: str):
-    """1행 헤더/맵을 TTL 동안 캐시."""
+def _sheet_header_cached(ws, cache_key: str) -> tuple[list[str], dict[str, int]]:
+    """1행 헤더와 헤더맵({헤더명:열번호 1-base})을 TTL 동안 캐시"""
     now = time.time()
-    ent = _HDR_CACHE.get(title)
-    if ent and now - ent[0] < _HDR_TTL:
-        return ent[1], ent[2]
+    hit = _HDR_CACHE.get(cache_key)
+    if hit and (now - hit[0] < _HDR_TTL):
+        return hit[1], hit[2]
     header = _retry_call(ws.row_values, 1) or []
-    hmap = {n: i + 1 for i, n in enumerate(header)}
-    _HDR_CACHE[title] = (now, header, hmap)
+    hmap = {n: i + 1 for i, n in enumerate(header)} if header else {}
+    _HDR_CACHE[cache_key] = (now, header, hmap)
     return header, hmap
 
 # 프로젝트에 _retry_call 이 이미 있으면 이 블럭은 무시됩니다.
@@ -195,7 +194,7 @@ except NameError:
 @st.cache_data(ttl=90, show_spinner=False)
 def read_sheet_df(sheet_name: str, *, silent: bool = False) -> pd.DataFrame:
     try:
-        ws = _retry_call(get_workbook().worksheet, sheet_name)
+        ws = _ws_cached(sheet_name)
         records = _ws_get_all_records(ws)
         df = pd.DataFrame(records)
     except Exception:
@@ -225,11 +224,11 @@ def read_sheet_df(sheet_name: str, *, silent: bool = False) -> pd.DataFrame:
     return df
 
 def _get_ws_and_headers(sheet_name: str):
-    ws = get_workbook().worksheet(sheet_name)
-    header = ws.row_values(1) or []
+    ws = _ws_cached(sheet_name)
+    header, hmap = _sheet_header_cached(ws, sheet_name)
     if not header:
         raise RuntimeError(f"'{sheet_name}' 헤더(1행) 없음")
-    return ws, header, {n:i+1 for i,n in enumerate(header)}
+    return ws, header, hmap
 
 def _find_row_by_sabun(ws, hmap, sabun: str) -> int:
     c = hmap.get("사번")
@@ -2060,36 +2059,42 @@ def tab_competency(emp_df: pd.DataFrame):
 HIST_SHEET="부서이력"
 def ensure_dept_history_sheet():
     """
-    부서(근무지) 이동 이력 시트 보장 + 최소 헤더 정렬.
-    - 코드에서 사용하는 컬럼명(부서1/부서2/시작일/종료일/변경사유/승인자/등록시각)을 보장
-    - 기존에 다른 컬럼명이 있어도 '추가'만 하므로 호환됨
+    부서(근무지) 이동 이력 시트 보장 + 헤더 정렬.
+    gspread 호출은 캐시/재시도를 사용해 429를 완화합니다.
     """
-    wb = get_workbook()
+    # 프로젝트에 이미 선언돼 있던 상수를 그대로 사용하세요.
+    # HIST_SHEET = "부서이동이력"
+
+    # 1) 시트 객체(캐시)
     try:
         ws = _ws_cached(HIST_SHEET)
     except WorksheetNotFound:
+        wb = get_workbook()
         ws = _retry_call(wb.add_worksheet, title=HIST_SHEET, rows=5000, cols=30)
         _WS_CACHE[HIST_SHEET] = (time.time(), ws)
 
-    # 우리가 실제로 쓰는 컬럼들
-    required = [
-        "사번", "이름",
-        "부서1", "부서2",
-        "시작일", "종료일",
-        "변경사유", "승인자",
-        "등록시각", "비고",
+    # 2) 헤더 보정
+    default_headers = [
+        "기록시각", "사번", "이름",
+        "부서1(이전)", "부서2(이전)",
+        "부서1(변경)", "부서2(변경)",
+        "시작일", "사유", "승인자",
+        "기록자사번", "기록자이름", "비고",
     ]
-
-    header, _ = _sheet_header_cached(ws, HIST_SHEET)
+    header, hmap = _sheet_header_cached(ws, HIST_SHEET)
     if not header:
-        _retry_call(ws.update, "1:1", [required])
-        _HDR_CACHE[HIST_SHEET] = (time.time(), required, {n: i+1 for i, n in enumerate(required)})
+        _retry_call(ws.update, "1:1", [default_headers])
+        header = default_headers
+        hmap = {n: i + 1 for i, n in enumerate(header)}
+        _HDR_CACHE[HIST_SHEET] = (time.time(), header, hmap)
     else:
-        need = [h for h in required if h not in header]
+        need = [h for h in default_headers if h not in header]
         if need:
             new_header = header + need
             _retry_call(ws.update, "1:1", [new_header])
-            _HDR_CACHE[HIST_SHEET] = (time.time(), new_header, {n: i+1 for i, n in enumerate(new_header)})
+            header = new_header
+            hmap = {n: i + 1 for i, n in enumerate(header)}
+            _HDR_CACHE[HIST_SHEET] = (time.time(), header, hmap)
 
     return ws
 
