@@ -115,42 +115,50 @@ if _APP_PW:
 # -------------------------
 # 관리자 토큰 핸들러 (?admin=...)
 # -------------------------
-ADMIN_TOKEN = (st.secrets.get("ADMIN_TOKEN") or os.getenv("ADMIN_TOKEN") or "").strip()
+# A안: 시크릿/환경변수에 없으면 기본 "ABC1234"를 사용해 즉시 복구
+ADMIN_TOKEN = (st.secrets.get("ADMIN_TOKEN") or os.getenv("ADMIN_TOKEN") or "ABC1234").strip()
 
 def _is_admin() -> bool:
     """URL의 ?admin= 토큰이 ADMIN_TOKEN과 일치하면 세션에 관리자 플래그 저장."""
-    if not ADMIN_TOKEN:
-        return False
-
     # 이미 인증된 세션이면 바로 True
     if st.session_state.get("_admin_ok"):
         return True
 
-    # 쿼리파라미터에서 admin 값 읽기 (신/구 API 모두 대응)
+    # 쿼리파라미터에서 admin 값 읽기 (신/구 API 모두 대응 + URL 디코딩)
+    tok = None
     try:
-        if hasattr(st, "query_params"):  # 최신
-            qp = st.query_params
-            tok = qp.get("admin", None)
-        else:  # 구버전
+        if hasattr(st, "query_params"):  # 최신 API: 값이 주로 str
+            raw = st.query_params.get("admin", None)
+            if isinstance(raw, list):
+                raw = raw[0] if raw else None
+            tok = urllib.parse.unquote(raw) if raw else None
+        else:  # 구 API: 값이 list
             q = st.experimental_get_query_params()
-            tok = (q.get("admin", [None]) or [None])[0]
+            lst = q.get("admin", None)
+            raw = (lst[0] if isinstance(lst, list) and lst else lst)
+            tok = urllib.parse.unquote(raw) if raw else None
     except Exception:
         tok = None
 
+    # 토큰 일치 시 세션 플래그 세팅 + (가능하면) URL에서 admin 파라미터 제거
     if tok and str(tok).strip() == ADMIN_TOKEN:
         st.session_state["_admin_ok"] = True
-
-        # (선택) URL에서 admin 파라미터 지우기 — 최신 API에서만 가능
         try:
             if hasattr(st, "query_params"):
                 if "admin" in st.query_params:
                     del st.query_params["admin"]
+            else:
+                # 구 API에서도 가능한 범위 내에서 제거 시도
+                cur = st.experimental_get_query_params()
+                if "admin" in cur:
+                    cur.pop("admin", None)
+                    st.experimental_set_query_params(**cur)
         except Exception:
             pass
-
         return True
 
     return False
+
 
 # =========== DB 유틸 ===========
 def _load_database_url() -> str:
