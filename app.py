@@ -115,50 +115,42 @@ if _APP_PW:
 # -------------------------
 # 관리자 토큰 핸들러 (?admin=...)
 # -------------------------
-# A안: 시크릿/환경변수에 없으면 기본 "ABC1234"를 사용해 즉시 복구
-ADMIN_TOKEN = (st.secrets.get("ADMIN_TOKEN") or os.getenv("ADMIN_TOKEN") or "ABC1234").strip()
+ADMIN_TOKEN = (st.secrets.get("ADMIN_TOKEN") or os.getenv("ADMIN_TOKEN") or "").strip()
 
 def _is_admin() -> bool:
     """URL의 ?admin= 토큰이 ADMIN_TOKEN과 일치하면 세션에 관리자 플래그 저장."""
+    if not ADMIN_TOKEN:
+        return False
+
     # 이미 인증된 세션이면 바로 True
     if st.session_state.get("_admin_ok"):
         return True
 
-    # 쿼리파라미터에서 admin 값 읽기 (신/구 API 모두 대응 + URL 디코딩)
-    tok = None
+    # 쿼리파라미터에서 admin 값 읽기 (신/구 API 모두 대응)
     try:
-        if hasattr(st, "query_params"):  # 최신 API: 값이 주로 str
-            raw = st.query_params.get("admin", None)
-            if isinstance(raw, list):
-                raw = raw[0] if raw else None
-            tok = urllib.parse.unquote(raw) if raw else None
-        else:  # 구 API: 값이 list
+        if hasattr(st, "query_params"):  # 최신
+            qp = st.query_params
+            tok = qp.get("admin", None)
+        else:  # 구버전
             q = st.experimental_get_query_params()
-            lst = q.get("admin", None)
-            raw = (lst[0] if isinstance(lst, list) and lst else lst)
-            tok = urllib.parse.unquote(raw) if raw else None
+            tok = (q.get("admin", [None]) or [None])[0]
     except Exception:
         tok = None
 
-    # 토큰 일치 시 세션 플래그 세팅 + (가능하면) URL에서 admin 파라미터 제거
     if tok and str(tok).strip() == ADMIN_TOKEN:
         st.session_state["_admin_ok"] = True
+
+        # (선택) URL에서 admin 파라미터 지우기 — 최신 API에서만 가능
         try:
             if hasattr(st, "query_params"):
                 if "admin" in st.query_params:
                     del st.query_params["admin"]
-            else:
-                # 구 API에서도 가능한 범위 내에서 제거 시도
-                cur = st.experimental_get_query_params()
-                if "admin" in cur:
-                    cur.pop("admin", None)
-                    st.experimental_set_query_params(**cur)
         except Exception:
             pass
+
         return True
 
     return False
-
 
 # =========== DB 유틸 ===========
 def _load_database_url() -> str:
@@ -325,8 +317,7 @@ def _drive_download_pdf(file_id: str, api_key: str) -> bytes:
 def index_pdfs_from_drive(eng, folder_id: str, api_key: str, limit_files: int = 0):
     """Drive → DB 동기화:
        1) 파일 id(me) 기준으로 DB의 filename을 최신 Drive 경로로 일괄 갱신(재인덱싱 없음)
-       2) DB에 없던 신규 파일만 다운로드/인덱싱 (존재 판정은 me 기준)
-       3) 동일 filename인데 me가 다른 ‘예전 레코드’는 삭제 후 재인덱싱
+       2) DB에 없던 신규 파일만 다운로드/인덱싱
        반환: indexed(신규 파일 수), renamed(이름만 바뀐 파일 수), skipped, errors
     """
     ensure_reg_table(eng)
@@ -348,6 +339,7 @@ def index_pdfs_from_drive(eng, folder_id: str, api_key: str, limit_files: int = 
                     """),
                     {"rel": rel, "fid": fid}
                 )
+                # 같은 파일 id의 여러 페이지가 갱신돼도 '파일 1건'만 renamed로 카운트
                 rc = getattr(res, "rowcount", 0)
                 if isinstance(rc, int) and rc > 0:
                     renamed += 1
@@ -358,28 +350,16 @@ def index_pdfs_from_drive(eng, folder_id: str, api_key: str, limit_files: int = 
         # 2) 신규 파일만 인덱싱 (이미 존재하면 skip)
         for rel, fid in rel_to_id.items():
             try:
-                # ✅ 존재 판정은 '파일 ID(me)' 기준
-                row_by_me = con.execute(
-                    text("SELECT COUNT(*) FROM regulations WHERE me = :fid"),
-                    {"fid": fid}
+                # 이름 갱신 이후 현재 파일명이 DB에 존재하면 인덱싱된 것으로 간주
+                row = con.execute(
+                    text("SELECT COUNT(*) FROM regulations WHERE filename = :fn"),
+                    {"fn": rel}
                 ).scalar()
 
-                if row_by_me and int(row_by_me) > 0:
+                if row and row > 0:
                     skipped += 1
-                    done_files.append((rel, "skip(me-exists)"))
-                    # filename 최신화는 위에서 처리했으므로 continue
+                    done_files.append((rel, "skip"))
                     continue
-
-                # ⚠️ 같은 filename인데 me가 다른 예전 레코드 정리(이동/교체로 간주)
-                stale_cnt = con.execute(
-                    text("SELECT COUNT(*) FROM regulations WHERE filename = :fn AND (me IS NULL OR me <> :fid)"),
-                    {"fn": rel, "fid": fid}
-                ).scalar()
-                if stale_cnt and int(stale_cnt) > 0:
-                    con.execute(
-                        text("DELETE FROM regulations WHERE filename = :fn AND (me IS NULL OR me <> :fid)"),
-                        {"fn": rel, "fid": fid}
-                    )
 
                 # 새 파일 다운로드/인덱싱
                 reader = PdfReader(io.BytesIO(_drive_download_pdf(fid, api_key)))
@@ -414,7 +394,6 @@ def index_pdfs_from_drive(eng, folder_id: str, api_key: str, limit_files: int = 
                 done_files.append((rel, f"error: {type(e).__name__}"))
 
     return {"indexed": indexed, "renamed": renamed, "skipped": skipped, "errors": errors, "files": done_files}
-
 
 def make_snippet(text_: str, kw_list: List[str], width: int = 160) -> str:
     if not text_: return ""
@@ -488,44 +467,44 @@ EDU_FOLDER_ID = _extract_drive_id(st.secrets.get("EDU_FOLDER_ID") or os.getenv("
 # ------------------------------------------------------------
 # 상단: 데이터 전체 동기화 (Main+QnA + PDF 인덱스)
 # ------------------------------------------------------------
-# 모든 사용자에게 버튼 노출 (관리자 제한 해제)
-if st.button(
-    "데이터 전체 동기화",
-    key="btn_sync_all_pdf",
-    type="secondary",
-    help="Main+QnA 동기화, PDF 키가 있으면 인덱싱까지 수행합니다.",
-    kwargs=None
-):
-    try:
-        # 1) Main + QnA
-        r1 = _trigger_edge_func("sync_main"); cnt_main = int(r1.get("count", 0))
-        r2 = _trigger_edge_func("sync_qna");  cnt_qna  = int(r2.get("count", 0))
+# 관리자만 버튼 노출
+if _is_admin():
+    if st.button(
+        "데이터 전체 동기화",
+        key="btn_sync_all_pdf",
+        type="secondary",
+        help="Main+QnA 동기화, PDF 키가 있으면 인덱싱까지 수행합니다.",
+        kwargs=None
+    ):
+        try:
+            # 1) Main + QnA
+            r1 = _trigger_edge_func("sync_main"); cnt_main = int(r1.get("count", 0))
+            r2 = _trigger_edge_func("sync_qna");  cnt_qna  = int(r2.get("count", 0))
 
-        # 2) PDF (Drive 키/폴더 있을 때만)
-        cnt_pdf = skipped = errors = renamed = 0
-        pdf_note = ""
-        if DRIVE_API_KEY and DRIVE_FOLDER_ID:
-            res = index_pdfs_from_drive(eng, DRIVE_FOLDER_ID, DRIVE_API_KEY)
-            cnt_pdf  = int(res.get("indexed", 0))
-            renamed  = int(res.get("renamed", 0))
-            skipped  = int(res.get("skipped", 0))
-            errors   = int(res.get("errors", 0))
-            pdf_note = f" · PDF indexed {cnt_pdf:,}, renamed {renamed:,}, skipped {skipped:,}, errors {errors:,}"
+            # 2) PDF (Drive 키/폴더 있을 때만)
+            cnt_pdf = skipped = errors = renamed = 0
+            pdf_note = ""
+            if DRIVE_API_KEY and DRIVE_FOLDER_ID:
+                res = index_pdfs_from_drive(eng, DRIVE_FOLDER_ID, DRIVE_API_KEY)
+                cnt_pdf  = int(res.get("indexed", 0))
+                renamed  = int(res.get("renamed", 0))
+                skipped  = int(res.get("skipped", 0))
+                errors   = int(res.get("errors", 0))
+                pdf_note = f" · PDF indexed {cnt_pdf:,}, renamed {renamed:,}, skipped {skipped:,}, errors {errors:,}"
 
-        # 캐시/세션 정리 + 최근 동기화 기록
-        st.cache_data.clear()
-        for k in ("main_results","qna_results","pdf_results","pdf_sel_idx","pdf_kw_list"):
-            st.session_state.pop(k, None)
-        st.session_state["last_sync_ts"] = time.time()
-        st.session_state["last_sync_counts"] = {"main": cnt_main, "qna": cnt_qna, "pdf": cnt_pdf}
+            # 캐시/세션 정리 + 최근 동기화 기록
+            st.cache_data.clear()
+            for k in ("main_results","qna_results","pdf_results","pdf_sel_idx","pdf_kw_list"):
+                st.session_state.pop(k, None)
+            st.session_state["last_sync_ts"] = time.time()
+            st.session_state["last_sync_counts"] = {"main": cnt_main, "qna": cnt_qna, "pdf": cnt_pdf}
 
-        st.success(f"완료: Main {cnt_main:,} · QnA {cnt_qna:,}{pdf_note}")
-        st.rerun()
-    except Exception as e:
-        if e.__class__.__name__ in ("RerunData","RerunException"):
-            raise
-        st.error(f"동기화 실패: {e}")
-
+            st.success(f"완료: Main {cnt_main:,} · QnA {cnt_qna:,}{pdf_note}")
+            st.rerun()
+        except Exception as e:
+            if e.__class__.__name__ in ("RerunData","RerunException"):
+                raise
+            st.error(f"동기화 실패: {e}")
 
 def _fmt_ts(ts: float) -> str:
     try:
