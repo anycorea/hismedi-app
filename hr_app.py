@@ -2280,6 +2280,57 @@ def tab_admin_acl(emp_df: pd.DataFrame):
     st.markdown("### 권한 관리")
 
 # ===== AUTH_BLOCK: BEGIN (권한편집 v2) =====
+# 이 블록은 emp_df/read_auth_df 등의 의존 함수를 사용합니다.
+# emp_df가 준비되지 않았을 경우를 대비해 안전 로딩을 수행합니다.
+
+import pandas as pd
+import streamlit as st
+
+def _safe_series(df: pd.DataFrame, col: str) -> pd.Series:
+    """df[col]을 안전하게 가져와 문자열로 정규화합니다."""
+    if df is None or not isinstance(df, pd.DataFrame) or col not in df.columns:
+        return pd.Series([], dtype=object)
+    s = df[col]
+    try:
+        return s.astype(str)
+    except Exception:
+        return s.astype(object).astype(str)
+
+def _unique_sorted_nonempty(df: pd.DataFrame, col: str) -> list:
+    """해당 컬럼의 고유값을 정렬해서 반환 (빈값/NaN 제외)."""
+    s = _safe_series(df, col)
+    s = s.fillna("").map(lambda x: x.strip())
+    return sorted([x for x in s.unique().tolist() if x])
+
+# 0) emp_df 안전 로드
+try:
+    # 세션에서 먼저 찾아보고, 없으면 시트에서 읽기
+    emp_df = st.session_state.get("emp_df")
+    if emp_df is None:
+        emp_df = read_sheet_df(EMP_SHEET)  # ← 기존 프로젝트 함수 가정
+except Exception:
+    # 실패 시라도 빈 프레임으로 진행(화면은 뜨게)
+    emp_df = pd.DataFrame(columns=["사번","이름","부서1","부서2","직급","재직여부"])
+
+# 기본 컬럼 보정
+for c in ["사번","이름","부서1","부서2","직급","재직여부"]:
+    if c not in emp_df.columns:
+        emp_df[c] = ""
+emp_df["사번"] = emp_df["사번"].astype(str)
+if "재직여부" in emp_df.columns:
+    # True/False 또는 "TRUE"/"FALSE" 혼재 가능 → 문자열/불리언 혼용 대응은 필터에서 처리
+    pass
+else:
+    emp_df["재직여부"] = True
+
+# 0-1) 권한시트 읽기 실패 대비
+try:
+    df_auth = read_auth_df()
+    if df_auth is None or not isinstance(df_auth, pd.DataFrame):
+        raise ValueError("권한시트가 비정상입니다.")
+except Exception:
+    df_auth = pd.DataFrame(columns=["사번","이름","역할","범위유형","부서1","부서2","대상사번","활성","비고"])
+
 with st.expander("▶ 표 기반 권한 편집 (Master 전용)", expanded=True):
     me = st.session_state.get("user", {})
     am_master = is_admin(str(me.get("사번", "")))
@@ -2289,19 +2340,17 @@ with st.expander("▶ 표 기반 권한 편집 (Master 전용)", expanded=True):
     # 1) 필터
     base = emp_df[["사번", "이름", "부서1", "부서2", "직급", "재직여부"]].copy()
     base["사번"] = base["사번"].astype(str)
-    if "재직여부" not in base.columns:
-        base["재직여부"] = True
 
     cflt = st.columns([1, 1, 1, 2, 1])
     with cflt[0]:
-        opt_d1 = ["(전체)"] + sorted([x for x in base.get("부서1", []).dropna().unique() if x])
+        opt_d1 = ["(전체)"] + _unique_sorted_nonempty(base, "부서1")
         f_d1 = st.selectbox("부서1", opt_d1, index=0, key="aclp_d1")
     with cflt[1]:
         sub = base if f_d1 == "(전체)" else base[base["부서1"].astype(str) == f_d1]
-        opt_d2 = ["(전체)"] + sorted([x for x in sub.get("부서2", []).dropna().unique() if x])
+        opt_d2 = ["(전체)"] + _unique_sorted_nonempty(sub, "부서2")
         f_d2 = st.selectbox("부서2", opt_d2, index=0, key="aclp_d2")
     with cflt[2]:
-        opt_g = ["(전체)"] + sorted([x for x in base.get("직급", []).dropna().unique() if x])
+        opt_g = ["(전체)"] + _unique_sorted_nonempty(base, "직급")
         f_g = st.selectbox("직급", opt_g, index=0, key="aclp_grade")
     with cflt[3]:
         f_q = st.text_input("검색(사번/이름)", "", key="aclp_q")
@@ -2310,7 +2359,9 @@ with st.expander("▶ 표 기반 권한 편집 (Master 전용)", expanded=True):
 
     view = base.copy()
     if only_active and "재직여부" in view.columns:
-        view = view[view["재직여부"] == True]
+        # 불리언 True 또는 문자열 "TRUE" 모두 허용
+        mask_active = (view["재직여부"] == True) | (view["재직여부"].astype(str).str.upper() == "TRUE")
+        view = view[mask_active]
     if f_d1 != "(전체)":
         view = view[view["부서1"].astype(str) == f_d1]
     if f_d2 != "(전체)":
@@ -2323,14 +2374,12 @@ with st.expander("▶ 표 기반 권한 편집 (Master 전용)", expanded=True):
 
     st.caption(f"대상: **{len(view):,}명** — 체크 후 ‘변경 미리보기’ → ‘AUTH 저장’ 순서로 진행")
 
-    # 2) 현재 권한 플래그
-    df_auth = read_auth_df()
-
+    # 2) 현재 권한 플래그 (df_auth 안전 참조)
     def _has_master(s):
         sub = df_auth[
-            (df_auth["사번"].astype(str) == str(s)) &
-            (df_auth["역할"].str.lower() == "admin") &
-            (df_auth["활성"] == True)
+            (df_auth.get("사번", pd.Series([], dtype=object)).astype(str) == str(s)) &
+            (df_auth.get("역할", pd.Series([], dtype=object)).astype(str).str.lower() == "admin") &
+            (df_auth.get("활성", pd.Series([], dtype=object)) == True)
         ]
         return not sub.empty
 
@@ -2338,12 +2387,12 @@ with st.expander("▶ 표 기반 권한 편집 (Master 전용)", expanded=True):
         if not d1:
             return False
         sub = df_auth[
-            (df_auth["사번"].astype(str) == str(s)) &
-            (df_auth["역할"].str.lower() == "manager") &
-            (df_auth["범위유형"] == "부서") &
-            (df_auth["부서1"].astype(str) == str(d1)) &
-            (df_auth["부서2"].astype(str).fillna("") == "") &
-            (df_auth["활성"] == True)
+            (df_auth.get("사번", pd.Series([], dtype=object)).astype(str) == str(s)) &
+            (df_auth.get("역할", pd.Series([], dtype=object)).astype(str).str.lower() == "manager") &
+            (df_auth.get("범위유형", pd.Series([], dtype=object)) == "부서") &
+            (df_auth.get("부서1", pd.Series([], dtype=object)).astype(str) == str(d1)) &
+            (df_auth.get("부서2", pd.Series([], dtype=object)).astype(str).fillna("") == "") &
+            (df_auth.get("활성", pd.Series([], dtype=object)) == True)
         ]
         return not sub.empty
 
@@ -2351,12 +2400,12 @@ with st.expander("▶ 표 기반 권한 편집 (Master 전용)", expanded=True):
         if not d1 or not d2:
             return False
         sub = df_auth[
-            (df_auth["사번"].astype(str) == str(s)) &
-            (df_auth["역할"].str.lower() == "manager") &
-            (df_auth["범위유형"] == "부서") &
-            (df_auth["부서1"].astype(str) == str(d1)) &
-            (df_auth["부서2"].astype(str) == str(d2)) &
-            (df_auth["활성"] == True)
+            (df_auth.get("사번", pd.Series([], dtype=object)).astype(str) == str(s)) &
+            (df_auth.get("역할", pd.Series([], dtype=object)).astype(str).str.lower() == "manager") &
+            (df_auth.get("범위유형", pd.Series([], dtype=object)) == "부서") &
+            (df_auth.get("부서1", pd.Series([], dtype=object)).astype(str) == str(d1)) &
+            (df_auth.get("부서2", pd.Series([], dtype=object)).astype(str) == str(d2)) &
+            (df_auth.get("활성", pd.Series([], dtype=object)) == True)
         ]
         return not sub.empty
 
@@ -2364,12 +2413,12 @@ with st.expander("▶ 표 기반 권한 편집 (Master 전용)", expanded=True):
         if not d1:
             return False
         sub = df_auth[
-            (df_auth["사번"].astype(str) == str(s)) &
-            (df_auth["역할"].str.lower() == "evaluator") &
-            (df_auth["범위유형"] == "부서") &
-            (df_auth["부서1"].astype(str) == str(d1)) &
-            (df_auth["부서2"].astype(str).fillna("") == "") &
-            (df_auth["활성"] == True)
+            (df_auth.get("사번", pd.Series([], dtype=object)).astype(str) == str(s)) &
+            (df_auth.get("역할", pd.Series([], dtype=object)).astype(str).str.lower() == "evaluator") &
+            (df_auth.get("범위유형", pd.Series([], dtype=object)) == "부서") &
+            (df_auth.get("부서1", pd.Series([], dtype=object)).astype(str) == str(d1)) &
+            (df_auth.get("부서2", pd.Series([], dtype=object)).astype(str).fillna("") == "") &
+            (df_auth.get("활성", pd.Series([], dtype=object)) == True)
         ]
         return not sub.empty
 
@@ -2377,12 +2426,12 @@ with st.expander("▶ 표 기반 권한 편집 (Master 전용)", expanded=True):
         if not d1 or not d2:
             return False
         sub = df_auth[
-            (df_auth["사번"].astype(str) == str(s)) &
-            (df_auth["역할"].str.lower() == "evaluator") &
-            (df_auth["범위유형"] == "부서") &
-            (df_auth["부서1"].astype(str) == str(d1)) &
-            (df_auth["부서2"].astype(str) == str(d2)) &
-            (df_auth["활성"] == True)
+            (df_auth.get("사번", pd.Series([], dtype=object)).astype(str) == str(s)) &
+            (df_auth.get("역할", pd.Series([], dtype=object)).astype(str).str.lower() == "evaluator") &
+            (df_auth.get("범위유형", pd.Series([], dtype=object)) == "부서") &
+            (df_auth.get("부서1", pd.Series([], dtype=object)).astype(str) == str(d1)) &
+            (df_auth.get("부서2", pd.Series([], dtype=object)).astype(str) == str(d2)) &
+            (df_auth.get("활성", pd.Series([], dtype=object)) == True)
         ]
         return not sub.empty
 
@@ -2400,15 +2449,14 @@ with st.expander("▶ 표 기반 권한 편집 (Master 전용)", expanded=True):
         "평가(부서1+부서2)": grid.apply(lambda r: bool(_has_eval_team(r["사번"], r["부서1"], r["부서2"])), axis=1),
     })
 
-    # ❌ 행수 제한 슬라이더/상위 N 로직 전면 삭제
-    # 식별 컬럼(사번, 부서2, 이름) 앞단 노출 + 나머지 체크박스 열
+    # 행수 제한 슬라이더 제거 (전체 표시)
     display_cols = ["사번", "부서2", "이름", "Master", "부서1 전체", "부서1+부서2", "평가(부서1 전체)", "평가(부서1+부서2)"]
     flags_view = flags.reindex(columns=display_cols).copy()
 
     edited_flags = st.data_editor(
         flags_view,
         use_container_width=True,
-        height=min(680, 100 + 28 * (len(flags_view) + 1)),  # 표 높이 자동 보정(대략)
+        height=min(680, 100 + 28 * (len(flags_view) + 1)),
         hide_index=True,
         disabled=(not am_master),
         column_config={
@@ -2426,13 +2474,14 @@ with st.expander("▶ 표 기반 권한 편집 (Master 전용)", expanded=True):
     # 변경 계산
     def _calc_changes(orig_flags: pd.DataFrame, cur_flags: pd.DataFrame):
         changes = []
-        # 원본/현재를 사번 기준으로 맞추기
         orig = orig_flags.set_index("사번")
         cur = cur_flags.set_index("사번")
         for s in cur.index:
+            # 혹시 원본에 없을 수 있으니 방어
+            if s not in orig.index:
+                continue
             row_orig = orig.loc[s]
             row_cur = cur.loc[s]
-            # 표시용 참고 정보
             row_info = grid[grid["사번"] == s].iloc[0]
             d1 = str(row_info.get("부서1", ""))
             d2 = str(row_info.get("부서2", ""))
@@ -2462,7 +2511,7 @@ with st.expander("▶ 표 기반 권한 편집 (Master 전용)", expanded=True):
         st.caption("※ ‘권한 규칙 추가/목록/삭제’는 아래 섹션을 사용하세요.")
 
     if do_preview or do_apply:
-        changes = _calc_changes(flags_view, edited_flags)
+        changes = _calc_changes(flags, edited_flags)  # 원본=flags, 현재=edited_flags
 
         if not changes:
             st.info("변경 없음", icon="ℹ️")
@@ -2535,13 +2584,12 @@ with st.expander("▶ 표 기반 권한 편집 (Master 전용)", expanded=True):
     st.caption("범위유형: **부서** (개별 권한 UI는 사용 안 함)")
     cA, cB, cC = st.columns([1,1,1])
     with cA:
-        dept1 = st.selectbox("부서1", [""]+sorted([x for x in emp_df.get("부서1",[]).dropna().unique() if x]),
-                             index=0, key="acl_dept1")
+        dept1 = st.selectbox("부서1", [""]+_unique_sorted_nonempty(emp_df, "부서1"), index=0, key="acl_dept1")
     with cB:
         sub = emp_df.copy()
         if dept1:
             sub = sub[sub["부서1"].astype(str)==dept1]
-        opt_d2 = [""]+sorted([x for x in sub.get("부서2",[]).dropna().unique() if x])
+        opt_d2 = [""]+_unique_sorted_nonempty(sub, "부서2")
         dept2 = st.selectbox("부서2(선택)", opt_d2, index=0, key="acl_dept2")
     with cC:
         active = st.checkbox("활성", True, key="acl_active_dep")
@@ -2578,12 +2626,12 @@ with st.expander("▶ 표 기반 권한 편집 (Master 전용)", expanded=True):
 
     st.divider()
     st.markdown("#### 권한 규칙 목록")
-    df_auth_all = read_auth_df()
-    if df_auth_all.empty:
+    df_auth_all = read_auth_df() if callable(globals().get("read_auth_df", None)) else df_auth
+    if df_auth_all is None or df_auth_all.empty:
         st.caption("권한 규칙이 없습니다.")
     else:
-        view = df_auth_all.sort_values(["역할","사번","범위유형","부서1","부서2","대상사번"])
-        st.dataframe(view, use_container_width=True, height=380)
+        view_list = df_auth_all.sort_values(["역할","사번","범위유형","부서1","부서2","대상사번"])
+        st.dataframe(view_list, use_container_width=True, height=380)
 
     st.divider()
     st.markdown("#### 규칙 삭제 (행 번호)")
@@ -2598,6 +2646,7 @@ with st.expander("▶ 표 기반 권한 편집 (Master 전용)", expanded=True):
         except Exception as e:
             st.exception(e)
 # ===== AUTH_BLOCK: END (권한편집 v2) =====
+
 
 # ── Startup Sanity Checks & Safe Runner (BEGIN) ──────────────────────────────
 def startup_sanity_checks():
