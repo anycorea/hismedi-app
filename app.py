@@ -475,44 +475,44 @@ EDU_FOLDER_ID = _extract_drive_id(st.secrets.get("EDU_FOLDER_ID") or os.getenv("
 # ------------------------------------------------------------
 # 상단: 데이터 전체 동기화 (Main+QnA + PDF 인덱스)
 # ------------------------------------------------------------
-# 관리자만 버튼 노출
-if _is_admin():
-    if st.button(
-        "데이터 전체 동기화",
-        key="btn_sync_all_pdf",
-        type="secondary",
-        help="Main+QnA 동기화, PDF 키가 있으면 인덱싱까지 수행합니다.",
-        kwargs=None
-    ):
-        try:
-            # 1) Main + QnA
-            r1 = _trigger_edge_func("sync_main"); cnt_main = int(r1.get("count", 0))
-            r2 = _trigger_edge_func("sync_qna");  cnt_qna  = int(r2.get("count", 0))
+# 모든 사용자에게 버튼 노출 (관리자 제한 해제)
+if st.button(
+    "데이터 전체 동기화",
+    key="btn_sync_all_pdf",
+    type="secondary",
+    help="Main+QnA 동기화, PDF 키가 있으면 인덱싱까지 수행합니다.",
+    kwargs=None
+):
+    try:
+        # 1) Main + QnA
+        r1 = _trigger_edge_func("sync_main"); cnt_main = int(r1.get("count", 0))
+        r2 = _trigger_edge_func("sync_qna");  cnt_qna  = int(r2.get("count", 0))
 
-            # 2) PDF (Drive 키/폴더 있을 때만)
-            cnt_pdf = skipped = errors = renamed = 0
-            pdf_note = ""
-            if DRIVE_API_KEY and DRIVE_FOLDER_ID:
-                res = index_pdfs_from_drive(eng, DRIVE_FOLDER_ID, DRIVE_API_KEY)
-                cnt_pdf  = int(res.get("indexed", 0))
-                renamed  = int(res.get("renamed", 0))
-                skipped  = int(res.get("skipped", 0))
-                errors   = int(res.get("errors", 0))
-                pdf_note = f" · PDF indexed {cnt_pdf:,}, renamed {renamed:,}, skipped {skipped:,}, errors {errors:,}"
+        # 2) PDF (Drive 키/폴더 있을 때만)
+        cnt_pdf = skipped = errors = renamed = 0
+        pdf_note = ""
+        if DRIVE_API_KEY and DRIVE_FOLDER_ID:
+            res = index_pdfs_from_drive(eng, DRIVE_FOLDER_ID, DRIVE_API_KEY)
+            cnt_pdf  = int(res.get("indexed", 0))
+            renamed  = int(res.get("renamed", 0))
+            skipped  = int(res.get("skipped", 0))
+            errors   = int(res.get("errors", 0))
+            pdf_note = f" · PDF indexed {cnt_pdf:,}, renamed {renamed:,}, skipped {skipped:,}, errors {errors:,}"
 
-            # 캐시/세션 정리 + 최근 동기화 기록
-            st.cache_data.clear()
-            for k in ("main_results","qna_results","pdf_results","pdf_sel_idx","pdf_kw_list"):
-                st.session_state.pop(k, None)
-            st.session_state["last_sync_ts"] = time.time()
-            st.session_state["last_sync_counts"] = {"main": cnt_main, "qna": cnt_qna, "pdf": cnt_pdf}
+        # 캐시/세션 정리 + 최근 동기화 기록
+        st.cache_data.clear()
+        for k in ("main_results","qna_results","pdf_results","pdf_sel_idx","pdf_kw_list"):
+            st.session_state.pop(k, None)
+        st.session_state["last_sync_ts"] = time.time()
+        st.session_state["last_sync_counts"] = {"main": cnt_main, "qna": cnt_qna, "pdf": cnt_pdf}
 
-            st.success(f"완료: Main {cnt_main:,} · QnA {cnt_qna:,}{pdf_note}")
-            st.rerun()
-        except Exception as e:
-            if e.__class__.__name__ in ("RerunData","RerunException"):
-                raise
-            st.error(f"동기화 실패: {e}")
+        st.success(f"완료: Main {cnt_main:,} · QnA {cnt_qna:,}{pdf_note}")
+        st.rerun()
+    except Exception as e:
+        if e.__class__.__name__ in ("RerunData","RerunException"):
+            raise
+        st.error(f"동기화 실패: {e}")
+
 
 def _fmt_ts(ts: float) -> str:
     try:
