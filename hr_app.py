@@ -2279,232 +2279,244 @@ def tab_admin_acl(emp_df: pd.DataFrame):
 
     st.markdown("### 권한 관리")
 
-    with st.expander("▶ 표 기반 권한 편집 (Master 전용)", expanded=True):
-        me = st.session_state.get("user", {})
-        am_master = is_admin(str(me.get("사번", "")))
-        if not am_master:
-            st.error("Master만 저장할 수 있습니다. (표/저장 모두 비활성화)", icon="🛡️")
+# ===== AUTH_BLOCK: BEGIN (권한편집 v2) =====
+with st.expander("▶ 표 기반 권한 편집 (Master 전용)", expanded=True):
+    me = st.session_state.get("user", {})
+    am_master = is_admin(str(me.get("사번", "")))
+    if not am_master:
+        st.error("Master만 저장할 수 있습니다. (표/저장 모두 비활성화)", icon="🛡️")
 
-        # 1) 필터
-        base = emp_df[["사번", "이름", "부서1", "부서2", "직급", "재직여부"]].copy()
-        base["사번"] = base["사번"].astype(str)
-        if "재직여부" not in base.columns:
-            base["재직여부"] = True
+    # 1) 필터
+    base = emp_df[["사번", "이름", "부서1", "부서2", "직급", "재직여부"]].copy()
+    base["사번"] = base["사번"].astype(str)
+    if "재직여부" not in base.columns:
+        base["재직여부"] = True
 
-        cflt = st.columns([1, 1, 1, 2, 1])
-        with cflt[0]:
-            opt_d1 = ["(전체)"] + sorted([x for x in base.get("부서1", []).dropna().unique() if x])
-            f_d1 = st.selectbox("부서1", opt_d1, index=0, key="aclp_d1")
-        with cflt[1]:
-            sub = base if f_d1 == "(전체)" else base[base["부서1"].astype(str) == f_d1]
-            opt_d2 = ["(전체)"] + sorted([x for x in sub.get("부서2", []).dropna().unique() if x])
-            f_d2 = st.selectbox("부서2", opt_d2, index=0, key="aclp_d2")
-        with cflt[2]:
-            opt_g = ["(전체)"] + sorted([x for x in base.get("직급", []).dropna().unique() if x])
-            f_g = st.selectbox("직급", opt_g, index=0, key="aclp_grade")
-        with cflt[3]:
-            f_q = st.text_input("검색(사번/이름)", "", key="aclp_q")
-        with cflt[4]:
-            only_active = st.checkbox("재직만", True, key="aclp_active")
+    cflt = st.columns([1, 1, 1, 2, 1])
+    with cflt[0]:
+        opt_d1 = ["(전체)"] + sorted([x for x in base.get("부서1", []).dropna().unique() if x])
+        f_d1 = st.selectbox("부서1", opt_d1, index=0, key="aclp_d1")
+    with cflt[1]:
+        sub = base if f_d1 == "(전체)" else base[base["부서1"].astype(str) == f_d1]
+        opt_d2 = ["(전체)"] + sorted([x for x in sub.get("부서2", []).dropna().unique() if x])
+        f_d2 = st.selectbox("부서2", opt_d2, index=0, key="aclp_d2")
+    with cflt[2]:
+        opt_g = ["(전체)"] + sorted([x for x in base.get("직급", []).dropna().unique() if x])
+        f_g = st.selectbox("직급", opt_g, index=0, key="aclp_grade")
+    with cflt[3]:
+        f_q = st.text_input("검색(사번/이름)", "", key="aclp_q")
+    with cflt[4]:
+        only_active = st.checkbox("재직만", True, key="aclp_active")
 
-        view = base.copy()
-        if only_active and "재직여부" in view.columns:
-            view = view[view["재직여부"] == True]
-        if f_d1 != "(전체)":
-            view = view[view["부서1"].astype(str) == f_d1]
-        if f_d2 != "(전체)":
-            view = view[view["부서2"].astype(str) == f_d2]
-        if f_g != "(전체)":
-            view = view[view["직급"].astype(str) == f_g]
-        if f_q.strip():
-            k = f_q.strip().lower()
-            view = view[view.apply(lambda r: k in str(r["사번"]).lower() or k in str(r["이름"]).lower(), axis=1)]
+    view = base.copy()
+    if only_active and "재직여부" in view.columns:
+        view = view[view["재직여부"] == True]
+    if f_d1 != "(전체)":
+        view = view[view["부서1"].astype(str) == f_d1]
+    if f_d2 != "(전체)":
+        view = view[view["부서2"].astype(str) == f_d2]
+    if f_g != "(전체)":
+        view = view[view["직급"].astype(str) == f_g]
+    if f_q.strip():
+        k = f_q.strip().lower()
+        view = view[view.apply(lambda r: k in str(r["사번"]).lower() or k in str(r["이름"]).lower(), axis=1)]
 
-        st.caption(f"대상: **{len(view):,}명** — 체크 후 ‘변경 미리보기’ → ‘AUTH 저장’ 순서로 진행")
+    st.caption(f"대상: **{len(view):,}명** — 체크 후 ‘변경 미리보기’ → ‘AUTH 저장’ 순서로 진행")
 
-        # 2) 현재 권한 플래그
-        df_auth = read_auth_df()
+    # 2) 현재 권한 플래그
+    df_auth = read_auth_df()
 
-        def _has_master(s):
-            sub = df_auth[
-                (df_auth["사번"].astype(str) == str(s)) &
-                (df_auth["역할"].str.lower() == "admin") &
-                (df_auth["활성"] == True)
-            ]
-            return not sub.empty
+    def _has_master(s):
+        sub = df_auth[
+            (df_auth["사번"].astype(str) == str(s)) &
+            (df_auth["역할"].str.lower() == "admin") &
+            (df_auth["활성"] == True)
+        ]
+        return not sub.empty
 
-        def _has_mgr_dall(s, d1):
-            if not d1:
-                return False
-            sub = df_auth[
-                (df_auth["사번"].astype(str) == str(s)) &
-                (df_auth["역할"].str.lower() == "manager") &
-                (df_auth["범위유형"] == "부서") &
-                (df_auth["부서1"].astype(str) == str(d1)) &
-                (df_auth["부서2"].astype(str).fillna("") == "") &
-                (df_auth["활성"] == True)
-            ]
-            return not sub.empty
+    def _has_mgr_dall(s, d1):
+        if not d1:
+            return False
+        sub = df_auth[
+            (df_auth["사번"].astype(str) == str(s)) &
+            (df_auth["역할"].str.lower() == "manager") &
+            (df_auth["범위유형"] == "부서") &
+            (df_auth["부서1"].astype(str) == str(d1)) &
+            (df_auth["부서2"].astype(str).fillna("") == "") &
+            (df_auth["활성"] == True)
+        ]
+        return not sub.empty
 
-        def _has_mgr_team(s, d1, d2):
-            if not d1 or not d2:
-                return False
-            sub = df_auth[
-                (df_auth["사번"].astype(str) == str(s)) &
-                (df_auth["역할"].str.lower() == "manager") &
-                (df_auth["범위유형"] == "부서") &
-                (df_auth["부서1"].astype(str) == str(d1)) &
-                (df_auth["부서2"].astype(str) == str(d2)) &
-                (df_auth["활성"] == True)
-            ]
-            return not sub.empty
+    def _has_mgr_team(s, d1, d2):
+        if not d1 or not d2:
+            return False
+        sub = df_auth[
+            (df_auth["사번"].astype(str) == str(s)) &
+            (df_auth["역할"].str.lower() == "manager") &
+            (df_auth["범위유형"] == "부서") &
+            (df_auth["부서1"].astype(str) == str(d1)) &
+            (df_auth["부서2"].astype(str) == str(d2)) &
+            (df_auth["활성"] == True)
+        ]
+        return not sub.empty
 
-        def _has_eval_dall(s, d1):
-            if not d1:
-                return False
-            sub = df_auth[
-                (df_auth["사번"].astype(str) == str(s)) &
-                (df_auth["역할"].str.lower() == "evaluator") &
-                (df_auth["범위유형"] == "부서") &
-                (df_auth["부서1"].astype(str) == str(d1)) &
-                (df_auth["부서2"].astype(str).fillna("") == "") &
-                (df_auth["활성"] == True)
-            ]
-            return not sub.empty
+    def _has_eval_dall(s, d1):
+        if not d1:
+            return False
+        sub = df_auth[
+            (df_auth["사번"].astype(str) == str(s)) &
+            (df_auth["역할"].str.lower() == "evaluator") &
+            (df_auth["범위유형"] == "부서") &
+            (df_auth["부서1"].astype(str) == str(d1)) &
+            (df_auth["부서2"].astype(str).fillna("") == "") &
+            (df_auth["활성"] == True)
+        ]
+        return not sub.empty
 
-        def _has_eval_team(s, d1, d2):
-            if not d1 or not d2:
-                return False
-            sub = df_auth[
-                (df_auth["사번"].astype(str) == str(s)) &
-                (df_auth["역할"].str.lower() == "evaluator") &
-                (df_auth["범위유형"] == "부서") &
-                (df_auth["부서1"].astype(str) == str(d1)) &
-                (df_auth["부서2"].astype(str) == str(d2)) &
-                (df_auth["활성"] == True)
-            ]
-            return not sub.empty
+    def _has_eval_team(s, d1, d2):
+        if not d1 or not d2:
+            return False
+        sub = df_auth[
+            (df_auth["사번"].astype(str) == str(s)) &
+            (df_auth["역할"].str.lower() == "evaluator") &
+            (df_auth["범위유형"] == "부서") &
+            (df_auth["부서1"].astype(str) == str(d1)) &
+            (df_auth["부서2"].astype(str) == str(d2)) &
+            (df_auth["활성"] == True)
+        ]
+        return not sub.empty
 
-        grid = view.sort_values(["부서1", "부서2", "사번"]).reset_index(drop=True).copy()
+    grid = view.sort_values(["부서1", "부서2", "사번"]).reset_index(drop=True).copy()
 
-        # 편집 전용 플래그 프레임(최소 컬럼만, 전부 bool로 강제)
-        flags = pd.DataFrame({
-            "사번": grid["사번"].astype(str),
-            "Master": grid.apply(lambda r: bool(_has_master(r["사번"])), axis=1),
-            "부서1 전체": grid.apply(lambda r: bool(_has_mgr_dall(r["사번"], r["부서1"])), axis=1),
-            "부서1+부서2": grid.apply(lambda r: bool(_has_mgr_team(r["사번"], r["부서1"], r["부서2"])), axis=1),
-            "평가(부서1 전체)": grid.apply(lambda r: bool(_has_eval_dall(r["사번"], r["부서1"])), axis=1),
-            "평가(부서1+부서2)": grid.apply(lambda r: bool(_has_eval_team(r["사번"], r["부서1"], r["부서2"])), axis=1),
-        })
+    # 편집 플래그 + 식별 컬럼 포함 테이블 구성
+    flags = pd.DataFrame({
+        "사번": grid["사번"].astype(str),
+        "부서2": grid["부서2"].astype(str),
+        "이름": grid["이름"].astype(str),
+        "Master": grid.apply(lambda r: bool(_has_master(r["사번"])), axis=1),
+        "부서1 전체": grid.apply(lambda r: bool(_has_mgr_dall(r["사번"], r["부서1"])), axis=1),
+        "부서1+부서2": grid.apply(lambda r: bool(_has_mgr_team(r["사번"], r["부서1"], r["부서2"])), axis=1),
+        "평가(부서1 전체)": grid.apply(lambda r: bool(_has_eval_dall(r["사번"], r["부서1"])), axis=1),
+        "평가(부서1+부서2)": grid.apply(lambda r: bool(_has_eval_team(r["사번"], r["부서1"], r["부서2"])), axis=1),
+    })
 
-        # 행수 제한(대형 표 오류/성능 회피)
-        max_rows = st.slider("표시 행 수(상위 N)", min_value=50, max_value=1000,
-                             value=min(300, len(flags)), step=50)
+    # ❌ 행수 제한 슬라이더/상위 N 로직 전면 삭제
+    # 식별 컬럼(사번, 부서2, 이름) 앞단 노출 + 나머지 체크박스 열
+    display_cols = ["사번", "부서2", "이름", "Master", "부서1 전체", "부서1+부서2", "평가(부서1 전체)", "평가(부서1+부서2)"]
+    flags_view = flags.reindex(columns=display_cols).copy()
 
-        flags_view = flags.head(max_rows).copy()
+    edited_flags = st.data_editor(
+        flags_view,
+        use_container_width=True,
+        height=min(680, 100 + 28 * (len(flags_view) + 1)),  # 표 높이 자동 보정(대략)
+        hide_index=True,
+        disabled=(not am_master),
+        column_config={
+            "사번": st.column_config.TextColumn("사번", disabled=True),
+            "부서2": st.column_config.TextColumn("부서2", disabled=True),
+            "이름": st.column_config.TextColumn("이름", disabled=True),
+            "Master": st.column_config.CheckboxColumn("Master", help="전사 접근(최상위)"),
+            "부서1 전체": st.column_config.CheckboxColumn("Manager(부서1)", help="해당 부서1 전체"),
+            "부서1+부서2": st.column_config.CheckboxColumn("Manager(부서1+부서2)", help="해당 팀만"),
+            "평가(부서1 전체)": st.column_config.CheckboxColumn("평가(부서1 전체)"),
+            "평가(부서1+부서2)": st.column_config.CheckboxColumn("평가(부서1+부서2)"),
+        }
+    )
 
-        # ⚠️ key / num_rows / 복잡한 column_config 제거 → React #185 회피
-        edited_flags = st.data_editor(
-            flags_view.set_index("사번"),
-            use_container_width=True,
-            height=520,
-            hide_index=False,
-            disabled=(not am_master),
-        )
+    # 변경 계산
+    def _calc_changes(orig_flags: pd.DataFrame, cur_flags: pd.DataFrame):
+        changes = []
+        # 원본/현재를 사번 기준으로 맞추기
+        orig = orig_flags.set_index("사번")
+        cur = cur_flags.set_index("사번")
+        for s in cur.index:
+            row_orig = orig.loc[s]
+            row_cur = cur.loc[s]
+            # 표시용 참고 정보
+            row_info = grid[grid["사번"] == s].iloc[0]
+            d1 = str(row_info.get("부서1", ""))
+            d2 = str(row_info.get("부서2", ""))
+            name = str(row_info.get("이름", ""))
+            for col, label in [
+                ("Master", "admin"),
+                ("부서1 전체", "mgr_dept_all"),
+                ("부서1+부서2", "mgr_team"),
+                ("평가(부서1 전체)", "eval_dept_all"),
+                ("평가(부서1+부서2)", "eval_team"),
+            ]:
+                before = bool(row_orig[col])
+                after = bool(row_cur[col])
+                if before != after:
+                    action = "ADD" if after else "DEL"
+                    changes.append({"사번": s, "이름": name, "변경": f"{label}:{action}", "부서1": d1, "부서2": d2})
+        return changes
 
-        # 변경 계산
-        def _calc_changes(orig_flags, cur_flags):
-            changes = []
-            orig = orig_flags.set_index("사번")
-            cur = cur_flags.copy()
-            for s in cur.index:
-                row_orig = orig.loc[s]
-                row_cur = cur.loc[s]
-                # 표시용 참고 정보
-                row_info = grid[grid["사번"] == s].iloc[0]
-                d1 = str(row_info.get("부서1", ""))
-                d2 = str(row_info.get("부서2", ""))
-                name = str(row_info.get("이름", ""))
-                for col, label in [
-                    ("Master", "admin"),
-                    ("부서1 전체", "mgr_dept_all"),
-                    ("부서1+부서2", "mgr_team"),
-                    ("평가(부서1 전체)", "eval_dept_all"),
-                    ("평가(부서1+부서2)", "eval_team"),
-                ]:
-                    before = bool(row_orig[col])
-                    after = bool(row_cur[col])
-                    if before != after:
-                        action = "ADD" if after else "DEL"
-                        changes.append({"사번": s, "이름": name, "변경": f"{label}:{action}", "부서1": d1, "부서2": d2})
-            return changes
+    cbtn = st.columns([1, 1, 2, 2])
+    with cbtn[0]:
+        do_preview = st.button("변경 미리보기", type="primary", use_container_width=True, disabled=(not am_master))
+    with cbtn[1]:
+        do_apply   = st.button("AUTH 저장(일괄 적용)", type="primary", use_container_width=True, disabled=(not am_master))
+    with cbtn[2]:
+        st.caption("※ ‘AUTH 저장’은 현재 표에서 바뀐 항목만 반영합니다.")
+    with cbtn[3]:
+        st.caption("※ ‘권한 규칙 추가/목록/삭제’는 아래 섹션을 사용하세요.")
 
-        cbtn = st.columns([1, 1, 2, 2])
-        with cbtn[0]:
-            do_preview = st.button("변경 미리보기", type="primary", use_container_width=True, disabled=(not am_master))
-        with cbtn[1]:
-            do_apply   = st.button("AUTH 저장(일괄 적용)", type="primary", use_container_width=True, disabled=(not am_master))
-        with cbtn[2]:
-            st.caption("※ ‘AUTH 저장’은 현재 표(상위 N행)에서 바뀐 항목만 반영합니다.")
-        with cbtn[3]:
-            st.caption("※ ‘권한 규칙 추가/목록/삭제’는 아래 섹션을 사용하세요.")
+    if do_preview or do_apply:
+        changes = _calc_changes(flags_view, edited_flags)
 
-        if do_preview or do_apply:
-            changes = _calc_changes(flags_view, edited_flags)
+        if not changes:
+            st.info("변경 없음", icon="ℹ️")
+        else:
+            st.markdown("##### 변경 요약")
+            st.dataframe(pd.DataFrame(changes), use_container_width=True, height=min(260, 32 * (len(changes) + 1)))
 
-            if not changes:
-                st.info("변경 없음", icon="ℹ️")
-            else:
-                st.markdown("##### 변경 요약")
-                st.dataframe(pd.DataFrame(changes), use_container_width=True, height=260)
+        if do_apply and changes:
+            add_cnt = del_cnt = 0
+            seed_set = {a["사번"] for a in SEED_ADMINS}
+            try:
+                for ch in changes:
+                    sabun = str(ch["사번"]).strip()
+                    name  = str(ch["이름"]).strip()
+                    d1    = str(ch.get("부서1","")).strip()
+                    d2    = str(ch.get("부서2","")).strip()
+                    kind, action = ch["변경"].split(":")
 
-            if do_apply and changes:
-                add_cnt = del_cnt = 0
-                seed_set = {a["사번"] for a in SEED_ADMINS}
-                try:
-                    for ch in changes:
-                        sabun = str(ch["사번"]).strip()
-                        name  = str(ch["이름"]).strip()
-                        d1    = str(ch.get("부서1","")).strip()
-                        d2    = str(ch.get("부서2","")).strip()
-                        kind, action = ch["변경"].split(":")
+                    if kind == "admin":
+                        if action == "ADD":
+                            _auth_upsert_admin(sabun, name, True, "grid"); add_cnt += 1
+                        else:
+                            if sabun not in seed_set:
+                                _auth_remove_admin(sabun); del_cnt += 1
 
-                        if kind == "admin":
-                            if action == "ADD":
-                                _auth_upsert_admin(sabun, name, True, "grid"); add_cnt += 1
-                            else:
-                                if sabun not in seed_set:
-                                    _auth_remove_admin(sabun); del_cnt += 1
+                    elif kind == "mgr_dept_all" and d1:
+                        if action == "ADD":
+                            _auth_upsert_dept(sabun, name, d1, "", True, "grid"); add_cnt += 1
+                        else:
+                            _auth_remove_dept(sabun, d1, ""); del_cnt += 1
 
-                        elif kind == "mgr_dept_all" and d1:
-                            if action == "ADD":
-                                _auth_upsert_dept(sabun, name, d1, "", True, "grid"); add_cnt += 1
-                            else:
-                                _auth_remove_dept(sabun, d1, ""); del_cnt += 1
+                    elif kind == "mgr_team" and d1 and d2:
+                        if action == "ADD":
+                            _auth_upsert_dept(sabun, name, d1, d2, True, "grid"); add_cnt += 1
+                        else:
+                            _auth_remove_dept(sabun, d1, d2); del_cnt += 1
 
-                        elif kind == "mgr_team" and d1 and d2:
-                            if action == "ADD":
-                                _auth_upsert_dept(sabun, name, d1, d2, True, "grid"); add_cnt += 1
-                            else:
-                                _auth_remove_dept(sabun, d1, d2); del_cnt += 1
+                    elif kind == "eval_dept_all" and d1:
+                        if action == "ADD":
+                            _auth_upsert_eval(sabun, name, d1, "", True, "grid"); add_cnt += 1
+                        else:
+                            _auth_remove_eval(sabun, d1, ""); del_cnt += 1
 
-                        elif kind == "eval_dept_all" and d1:
-                            if action == "ADD":
-                                _auth_upsert_eval(sabun, name, d1, "", True, "grid"); add_cnt += 1
-                            else:
-                                _auth_remove_eval(sabun, d1, ""); del_cnt += 1
+                    elif kind == "eval_team" and d1 and d2:
+                        if action == "ADD":
+                            _auth_upsert_eval(sabun, name, d1, d2, True, "grid"); add_cnt += 1
+                        else:
+                            _auth_remove_eval(sabun, d1, d2); del_cnt += 1
 
-                        elif kind == "eval_team" and d1 and d2:
-                            if action == "ADD":
-                                _auth_upsert_eval(sabun, name, d1, d2, True, "grid"); add_cnt += 1
-                            else:
-                                _auth_remove_eval(sabun, d1, d2); del_cnt += 1
-
-                    st.cache_data.clear()
-                    st.success(f"AUTH 반영 완료: 추가/갱신 {add_cnt}건, 삭제 {del_cnt}건", icon="✅")
-                    st.rerun()
-                except Exception as e:
-                    st.exception(e)
+                st.cache_data.clear()
+                st.success(f"AUTH 반영 완료: 추가/갱신 {add_cnt}건, 삭제 {del_cnt}건", icon="✅")
+                st.rerun()
+            except Exception as e:
+                st.exception(e)
 
     st.divider()
 
@@ -2515,8 +2527,10 @@ def tab_admin_acl(emp_df: pd.DataFrame):
     df_pick = df_pick.sort_values(["사번"])
 
     c1, c2 = st.columns([2,2])
-    with c1: giver = st.selectbox("권한 주체(사번 - 이름)", ["(선택)"]+df_pick["표시"].tolist(), index=0, key="acl_giver")
-    with c2: role  = st.selectbox("역할", ["manager","evaluator","admin"], index=0, key="acl_role")
+    with c1:
+        giver = st.selectbox("권한 주체(사번 - 이름)", ["(선택)"]+df_pick["표시"].tolist(), index=0, key="acl_giver")
+    with c2:
+        role  = st.selectbox("역할", ["manager","evaluator","admin"], index=0, key="acl_role")
 
     st.caption("범위유형: **부서** (개별 권한 UI는 사용 안 함)")
     cA, cB, cC = st.columns([1,1,1])
@@ -2525,10 +2539,12 @@ def tab_admin_acl(emp_df: pd.DataFrame):
                              index=0, key="acl_dept1")
     with cB:
         sub = emp_df.copy()
-        if dept1: sub = sub[sub["부서1"].astype(str)==dept1]
+        if dept1:
+            sub = sub[sub["부서1"].astype(str)==dept1]
         opt_d2 = [""]+sorted([x for x in sub.get("부서2",[]).dropna().unique() if x])
         dept2 = st.selectbox("부서2(선택)", opt_d2, index=0, key="acl_dept2")
-    with cC: active = st.checkbox("활성", True, key="acl_active_dep")
+    with cC:
+        active = st.checkbox("활성", True, key="acl_active_dep")
 
     memo = st.text_input("비고(선택)", "", key="acl_memo")
 
@@ -2581,6 +2597,7 @@ def tab_admin_acl(emp_df: pd.DataFrame):
             st.rerun()
         except Exception as e:
             st.exception(e)
+# ===== AUTH_BLOCK: END (권한편집 v2) =====
 
 # ── Startup Sanity Checks & Safe Runner (BEGIN) ──────────────────────────────
 def startup_sanity_checks():
@@ -2628,6 +2645,7 @@ def safe_run(render_fn, *args, title: str = "", **kwargs):
         st.error(msg, icon="🛑")
         return None
 # ── Startup Sanity Checks & Safe Runner (END) ────────────────────────────────
+
 
 # ── 메인 ──────────────────────────────────────────────────────────────────────
 def main():
