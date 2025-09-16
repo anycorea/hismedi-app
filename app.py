@@ -325,7 +325,8 @@ def _drive_download_pdf(file_id: str, api_key: str) -> bytes:
 def index_pdfs_from_drive(eng, folder_id: str, api_key: str, limit_files: int = 0):
     """Drive → DB 동기화:
        1) 파일 id(me) 기준으로 DB의 filename을 최신 Drive 경로로 일괄 갱신(재인덱싱 없음)
-       2) DB에 없던 신규 파일만 다운로드/인덱싱
+       2) DB에 없던 신규 파일만 다운로드/인덱싱 (존재 판정은 me 기준)
+       3) 동일 filename인데 me가 다른 ‘예전 레코드’는 삭제 후 재인덱싱
        반환: indexed(신규 파일 수), renamed(이름만 바뀐 파일 수), skipped, errors
     """
     ensure_reg_table(eng)
@@ -347,7 +348,6 @@ def index_pdfs_from_drive(eng, folder_id: str, api_key: str, limit_files: int = 
                     """),
                     {"rel": rel, "fid": fid}
                 )
-                # 같은 파일 id의 여러 페이지가 갱신돼도 '파일 1건'만 renamed로 카운트
                 rc = getattr(res, "rowcount", 0)
                 if isinstance(rc, int) and rc > 0:
                     renamed += 1
@@ -355,67 +355,66 @@ def index_pdfs_from_drive(eng, folder_id: str, api_key: str, limit_files: int = 
                 # 이름 갱신 실패는 전체 동기화를 막지 않음
                 pass
 
-# 2) 신규 파일만 인덱싱 (이미 존재하면 skip)
-for rel, fid in rel_to_id.items():
-    try:
-        # ✅ 존재 판정은 '파일 ID(me)' 기준으로
-        row_by_me = con.execute(
-            text("SELECT COUNT(*) FROM regulations WHERE me = :fid"),
-            {"fid": fid}
-        ).scalar()
-
-        if row_by_me and int(row_by_me) > 0:
-            skipped += 1
-            done_files.append((rel, "skip(me-exists)"))
-            continue
-
-        # ⚠️ '같은 파일명(filename)인데 me가 다른' 예전 레코드가 있으면 이동/교체로 보고 정리
-        #    (필요 없으면 이 블록 주석 처리)
-        stale_cnt = con.execute(
-            text("SELECT COUNT(*) FROM regulations WHERE filename = :fn AND (me IS NULL OR me <> :fid)"),
-            {"fn": rel, "fid": fid}
-        ).scalar()
-        if stale_cnt and int(stale_cnt) > 0:
-            # 안전하게 기존 동일 filename 행들을 제거 후 새 ID로 재인덱싱
-            con.execute(
-                text("DELETE FROM regulations WHERE filename = :fn AND (me IS NULL OR me <> :fid)"),
-                {"fn": rel, "fid": fid}
-            )
-
-        # 새 파일 다운로드/인덱싱
-        reader = PdfReader(io.BytesIO(_drive_download_pdf(fid, api_key)))
-        rows = []
-        for pno, page in enumerate(reader.pages, start=1):
+        # 2) 신규 파일만 인덱싱 (이미 존재하면 skip)
+        for rel, fid in rel_to_id.items():
             try:
-                txt = page.extract_text() or ""
-            except Exception:
-                txt = ""
-            txt = _clean_text(txt)
-            if not txt:
-                continue
-            rows.append({
-                "filename": rel,
-                "page": pno,
-                "text": txt,
-                "file_mtime": 0,  # 필요 시 modifiedTime 반영 가능
-                "me": fid
-            })
-        if rows:
-            pd.DataFrame(rows).to_sql("regulations", con, if_exists="append", index=False)
-            indexed += 1
-            done_files.append((rel, f"indexed {len(rows)}p"))
-        else:
-            done_files.append((rel, "no-text"))
+                # ✅ 존재 판정은 '파일 ID(me)' 기준
+                row_by_me = con.execute(
+                    text("SELECT COUNT(*) FROM regulations WHERE me = :fid"),
+                    {"fid": fid}
+                ).scalar()
 
-        if limit_files and indexed >= limit_files:
-            break
+                if row_by_me and int(row_by_me) > 0:
+                    skipped += 1
+                    done_files.append((rel, "skip(me-exists)"))
+                    # filename 최신화는 위에서 처리했으므로 continue
+                    continue
 
-    except Exception as e:
-        errors += 1
-        done_files.append((rel, f"error: {type(e).__name__}"))
+                # ⚠️ 같은 filename인데 me가 다른 예전 레코드 정리(이동/교체로 간주)
+                stale_cnt = con.execute(
+                    text("SELECT COUNT(*) FROM regulations WHERE filename = :fn AND (me IS NULL OR me <> :fid)"),
+                    {"fn": rel, "fid": fid}
+                ).scalar()
+                if stale_cnt and int(stale_cnt) > 0:
+                    con.execute(
+                        text("DELETE FROM regulations WHERE filename = :fn AND (me IS NULL OR me <> :fid)"),
+                        {"fn": rel, "fid": fid}
+                    )
 
+                # 새 파일 다운로드/인덱싱
+                reader = PdfReader(io.BytesIO(_drive_download_pdf(fid, api_key)))
+                rows = []
+                for pno, page in enumerate(reader.pages, start=1):
+                    try:
+                        txt = page.extract_text() or ""
+                    except Exception:
+                        txt = ""
+                    txt = _clean_text(txt)
+                    if not txt:
+                        continue
+                    rows.append({
+                        "filename": rel,
+                        "page": pno,
+                        "text": txt,
+                        "file_mtime": 0,  # 필요 시 modifiedTime 반영 가능
+                        "me": fid
+                    })
+                if rows:
+                    pd.DataFrame(rows).to_sql("regulations", con, if_exists="append", index=False)
+                    indexed += 1
+                    done_files.append((rel, f"indexed {len(rows)}p"))
+                else:
+                    done_files.append((rel, "no-text"))
+
+                if limit_files and indexed >= limit_files:
+                    break
+
+            except Exception as e:
+                errors += 1
+                done_files.append((rel, f"error: {type(e).__name__}"))
 
     return {"indexed": indexed, "renamed": renamed, "skipped": skipped, "errors": errors, "files": done_files}
+
 
 def make_snippet(text_: str, kw_list: List[str], width: int = 160) -> str:
     if not text_: return ""
