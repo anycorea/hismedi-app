@@ -355,51 +355,65 @@ def index_pdfs_from_drive(eng, folder_id: str, api_key: str, limit_files: int = 
                 # 이름 갱신 실패는 전체 동기화를 막지 않음
                 pass
 
-        # 2) 신규 파일만 인덱싱 (이미 존재하면 skip)
-        for rel, fid in rel_to_id.items():
+# 2) 신규 파일만 인덱싱 (이미 존재하면 skip)
+for rel, fid in rel_to_id.items():
+    try:
+        # ✅ 존재 판정은 '파일 ID(me)' 기준으로
+        row_by_me = con.execute(
+            text("SELECT COUNT(*) FROM regulations WHERE me = :fid"),
+            {"fid": fid}
+        ).scalar()
+
+        if row_by_me and int(row_by_me) > 0:
+            skipped += 1
+            done_files.append((rel, "skip(me-exists)"))
+            continue
+
+        # ⚠️ '같은 파일명(filename)인데 me가 다른' 예전 레코드가 있으면 이동/교체로 보고 정리
+        #    (필요 없으면 이 블록 주석 처리)
+        stale_cnt = con.execute(
+            text("SELECT COUNT(*) FROM regulations WHERE filename = :fn AND (me IS NULL OR me <> :fid)"),
+            {"fn": rel, "fid": fid}
+        ).scalar()
+        if stale_cnt and int(stale_cnt) > 0:
+            # 안전하게 기존 동일 filename 행들을 제거 후 새 ID로 재인덱싱
+            con.execute(
+                text("DELETE FROM regulations WHERE filename = :fn AND (me IS NULL OR me <> :fid)"),
+                {"fn": rel, "fid": fid}
+            )
+
+        # 새 파일 다운로드/인덱싱
+        reader = PdfReader(io.BytesIO(_drive_download_pdf(fid, api_key)))
+        rows = []
+        for pno, page in enumerate(reader.pages, start=1):
             try:
-                # 이름 갱신 이후 현재 파일명이 DB에 존재하면 인덱싱된 것으로 간주
-                row = con.execute(
-                    text("SELECT COUNT(*) FROM regulations WHERE filename = :fn"),
-                    {"fn": rel}
-                ).scalar()
+                txt = page.extract_text() or ""
+            except Exception:
+                txt = ""
+            txt = _clean_text(txt)
+            if not txt:
+                continue
+            rows.append({
+                "filename": rel,
+                "page": pno,
+                "text": txt,
+                "file_mtime": 0,  # 필요 시 modifiedTime 반영 가능
+                "me": fid
+            })
+        if rows:
+            pd.DataFrame(rows).to_sql("regulations", con, if_exists="append", index=False)
+            indexed += 1
+            done_files.append((rel, f"indexed {len(rows)}p"))
+        else:
+            done_files.append((rel, "no-text"))
 
-                if row and row > 0:
-                    skipped += 1
-                    done_files.append((rel, "skip"))
-                    continue
+        if limit_files and indexed >= limit_files:
+            break
 
-                # 새 파일 다운로드/인덱싱
-                reader = PdfReader(io.BytesIO(_drive_download_pdf(fid, api_key)))
-                rows = []
-                for pno, page in enumerate(reader.pages, start=1):
-                    try:
-                        txt = page.extract_text() or ""
-                    except Exception:
-                        txt = ""
-                    txt = _clean_text(txt)
-                    if not txt:
-                        continue
-                    rows.append({
-                        "filename": rel,
-                        "page": pno,
-                        "text": txt,
-                        "file_mtime": 0,  # 필요 시 modifiedTime 반영 가능
-                        "me": fid
-                    })
-                if rows:
-                    pd.DataFrame(rows).to_sql("regulations", con, if_exists="append", index=False)
-                    indexed += 1
-                    done_files.append((rel, f"indexed {len(rows)}p"))
-                else:
-                    done_files.append((rel, "no-text"))
+    except Exception as e:
+        errors += 1
+        done_files.append((rel, f"error: {type(e).__name__}"))
 
-                if limit_files and indexed >= limit_files:
-                    break
-
-            except Exception as e:
-                errors += 1
-                done_files.append((rel, f"error: {type(e).__name__}"))
 
     return {"indexed": indexed, "renamed": renamed, "skipped": skipped, "errors": errors, "files": done_files}
 
