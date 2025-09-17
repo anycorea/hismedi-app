@@ -65,7 +65,7 @@ def _pin_hash(pin: str, sabun: str) -> str:
     return hashlib.sha256(plain.encode()).hexdigest()
 
 # ── Google API Retry Helper ───────────────────────────────────────────────────
-API_BACKOFF_SEC = [0.0, 0.6, 1.2, 2.4]
+API_BACKOFF_SEC = [0.0, 0.8, 1.6, 3.2, 6.4, 9.6]  # 더 길고 완만한 백오프 (429 대비)
 def _retry_call(fn, *args, **kwargs):
     last = None
     for backoff in API_BACKOFF_SEC:
@@ -73,7 +73,7 @@ def _retry_call(fn, *args, **kwargs):
             return fn(*args, **kwargs)
         except APIError as e:
             last = e
-            time.sleep(backoff + random.uniform(0, 0.15))
+            time.sleep(backoff + random.uniform(0, 0.25))
     if last: raise last
     return fn(*args, **kwargs)
 
@@ -339,42 +339,91 @@ SEED_ADMINS=[
     {"사번":"524007","이름":"행정원장","역할":"admin","범위유형":"","부서1":"","부서2":"","대상사번":"","활성":True,"비고":"seed"},
     {"사번":"524003","이름":"이영하","역할":"admin","범위유형":"","부서1":"행정부","부서2":"총무팀","대상사번":"","활성":True,"비고":"seed"},
 ]
-def ensure_auth_sheet():
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _auth_seed_once_cached() -> bool:
+    """
+    SEED_ADMINS 주입은 무겁기 때문에 1시간에 한 번만 시도합니다.
+    헤더는 ensure_auth_sheet()에서 즉시 보장합니다.
+    """
     wb = get_workbook()
     try:
         ws = wb.worksheet(AUTH_SHEET)
-        header = _retry_call(ws.row_values, 1) or []
-        need = [h for h in AUTH_HEADERS if h not in header]
-        if need:
-            _retry_call(ws.update, "1:1", [header + need])
-            header = _retry_call(ws.row_values, 1) or []
-        # 시드 주입
-        vals = _retry_call(ws.get_all_records, numericise_ignore=["all"])
-        cur_admins = {str(r.get("사번", "")).strip() for r in vals if str(r.get("역할", "")).strip() == "admin"}
-        add = [r for r in SEED_ADMINS if r["사번"] not in cur_admins]
-        if add:
-            rows = [[r.get(h, "") for h in header] for r in add]
-            _retry_call(ws.append_rows, rows, value_input_option="USER_ENTERED")
-        return ws
     except WorksheetNotFound:
-        ws = _retry_call(wb.add_worksheet, title=AUTH_SHEET, rows=1000, cols=20)
-        _retry_call(ws.update, "A1", [AUTH_HEADERS])
-        _retry_call(ws.append_rows, [[r.get(h, "") for h in AUTH_HEADERS] for r in SEED_ADMINS], value_input_option="USER_ENTERED")
+        ws = wb.add_worksheet(title=AUTH_SHEET, rows=1000, cols=20)
+        _retry_call(ws.update, "1:1", [AUTH_HEADERS])
+    header = _retry_call(ws.row_values, 1) or []
+    need = [h for h in AUTH_HEADERS if h not in header]
+    if need:
+        _retry_call(ws.update, "1:1", [header + need])
+        header = _retry_call(ws.row_values, 1) or []
+
+    # ↓ 이 부분이 상대적으로 무겁다: 전체 레코드 스캔
+    vals = _ws_get_all_records(ws)
+    cur_admins = {str(r.get("사번","")).strip() for r in vals if str(r.get("역할","")).strip()=="admin"}
+    add = [r for r in SEED_ADMINS if r["사번"] not in cur_admins]
+    if add:
+        rows = [[r.get(h, "") for h in header] for r in add]
+        _retry_call(ws.append_rows, rows, value_input_option="USER_ENTERED")
+    return True
+
+def ensure_auth_sheet():
+    """
+    권한시트의 '존재'와 '헤더'를 가볍게 보장합니다.
+    무거운 시드 주입은 _auth_seed_once_cached()에서 캐시로 제어합니다.
+    """
+    wb = get_workbook()
+    try:
+        ws = wb.worksheet(AUTH_SHEET)
+    except WorksheetNotFound:
+        ws = wb.add_worksheet(title=AUTH_SHEET, rows=1000, cols=20)
+        _retry_call(ws.update, "1:1", [AUTH_HEADERS])
+        # 최초 생성 시에만 시드도 함께
+        _auth_seed_once_cached()
         return ws
+
+    header = _retry_call(ws.row_values, 1) or []
+    need = [h for h in AUTH_HEADERS if h not in header]
+    if need:
+        _retry_call(ws.update, "1:1", [header + need])
+    # 시드는 캐시에 의해 1시간에 1회만
+    _auth_seed_once_cached()
+    return ws
+
+@st.cache_data(ttl=300, show_spinner=False)
+def ensure_auth_sheet_once() -> bool:
+    """
+    5분 캐시로 ensure_auth_sheet 호출 빈도를 낮춥니다.
+    실패 시 False 반환(예외 전파 없음) → 호출측에서 메시지 관리.
+    """
+    try:
+        ensure_auth_sheet()
+        return True
+    except Exception:
+        return False
 
 @st.cache_data(ttl=60, show_spinner=False)
 def read_auth_df() -> pd.DataFrame:
     try:
-        ensure_auth_sheet()
+        # 과거: ensure_auth_sheet() 직접 호출 → 빈번한 429
+        # 변경: 캐시된 보장 호출
+        _ = ensure_auth_sheet_once()
         ws = _ws_cached(AUTH_SHEET)
         df = pd.DataFrame(_ws_get_all_records(ws))
     except Exception as e:
         return _silent_df_exception(e, "권한 시트 읽기", AUTH_HEADERS)
 
-    if df.empty: return pd.DataFrame(columns=AUTH_HEADERS)
-    for c in ["사번","이름","역할","범위유형","부서1","부서2","대상사번","비고"]:
-        if c in df.columns: df[c] = df[c].astype(str)
-    if "활성" in df.columns: df["활성"] = df["활성"].map(_to_bool)
+    if df.empty:
+        return pd.DataFrame(columns=AUTH_HEADERS)
+
+    for c in ["사번","이름","역할","범위유형","부서1","부서2","대상사번","활성","비고"]:
+        if c not in df.columns:
+            df[c] = ""
+
+    # 타입/정리
+    df["사번"] = df["사번"].astype(str)
+    if "활성" in df.columns:
+        df["활성"] = df["활성"].map(_to_bool)
     return df
 
 # === 평가자(evaluator) 유틸 (단건 upsert/remove) =============================
@@ -2404,8 +2453,11 @@ def startup_sanity_checks():
     except Exception as e:
         problems.append(f"[직원시트] 로딩 실패: {e}")
 
+    # 권한시트 보장은 5분 캐시 사용(429 완화)
     try:
-        ensure_auth_sheet()
+        ok = ensure_auth_sheet_once()
+        if not ok:
+            problems.append("[권한시트] 보장 실패(캐시 호출 실패)")
     except Exception as e:
         problems.append(f"[권한시트] 보장 실패: {e}")
 
