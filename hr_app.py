@@ -1208,15 +1208,57 @@ def tab_job_desc(emp_df: pd.DataFrame):
         except Exception as e:
             st.exception(e)
 
+
 # ======================================================================
 # 📌 직무능력평가(Competency)
 # ======================================================================
 # ── 간편형만 유지 (JD 연동) · 상세 탭 제거 ────────────────────────────────────────
 # 화면 노출 권한: 관리자 또는 evaluator 권한(권한 범위가 1명 이상인 경우)에만 노출
+# Google Sheets API 429(Quota exceeded) 대비: 읽기/쓰기 재시도 래퍼 적용
 
+import time
 import pandas as pd
 import streamlit as st
 from datetime import datetime, timezone, timedelta
+from gspread.exceptions import APIError as _GS_APIError
+
+# ───────────────────────── Google Sheets 재시도 유틸 ─────────────────────────
+def _gs_retry(callable_fn, *, tries=5, base_delay=0.5, factor=2.0, retry_codes=(429, 500, 503), desc="sheets"):
+    """
+    Exponential backoff retry for Google Sheets calls.
+    - retries on 429/500/503 or message contains 'Quota exceeded'
+    - returns callable_fn() result or raises last error
+    """
+    delay = base_delay
+    for attempt in range(tries):
+        try:
+            return callable_fn()
+        except Exception as e:
+            status = None
+            if isinstance(e, _GS_APIError):
+                try:
+                    status = getattr(getattr(e, "response", None), "status_code", None)
+                except Exception:
+                    status = None
+            msg = str(e)
+            transient = (status in retry_codes) or ("Quota exceeded" in msg) or (" 429" in msg) or ("RESOURCE_EXHAUSTED" in msg)
+            if not transient or attempt == tries - 1:
+                raise
+            time.sleep(delay)
+            delay *= factor
+
+def _ws_get_all_records(ws):
+    return _gs_retry(lambda: ws.get_all_records(numericise_ignore=["all"]), desc="get_all_records")
+
+def _ws_get_all_values(ws):
+    return _gs_retry(lambda: ws.get_all_values(), desc="get_all_values")
+
+def _ws_append_row(ws, buf):
+    return _gs_retry(lambda: ws.append_row(buf, value_input_option="USER_ENTERED"), desc="append_row")
+
+def _ws_update_cell(ws, r, c, v):
+    return _gs_retry(lambda: ws.update_cell(r, c, v), desc="update_cell")
+
 
 # ───────────────────────── 간편(직무기술서 연동) 시트 헤더 ─────────────────────────
 COMP_SIMPLE_PREFIX = "직무능력_간편_응답_"
@@ -1234,23 +1276,25 @@ def _ensure_comp_simple_sheet(year:int):
     name = _simp_sheet_name(year)
     try:
         ws = wb.worksheet(name)
-    except WorksheetNotFound:
+    except Exception:
         ws = wb.add_worksheet(title=name, rows=1000, cols=50)
-        ws.update("1:1", [COMP_SIMPLE_HEADERS])
+        _gs_retry(lambda: ws.update("1:1", [COMP_SIMPLE_HEADERS]), desc="ensure header")
         return ws
     header = ws.row_values(1) or []
     need = [h for h in COMP_SIMPLE_HEADERS if h not in header]
     if need:
-        ws.update("1:1", [header + need])
+        _gs_retry(lambda: ws.update("1:1", [header + need]), desc="ensure header add")
     return ws
 
 def _jd_latest_for(sabun:str, year:int) -> dict:
     """대상자의 직무기술서(해당 연도, 최대 버전) 1건 반환 또는 {}."""
     try:
         df = read_jobdesc_df()
-        if df.empty: return {}
+        if df is None or len(df) == 0:
+            return {}
         q = df[(df["사번"].astype(str)==str(sabun)) & (df["연도"].astype(int)==int(year))]
-        if q.empty: return {}
+        if q.empty:
+            return {}
         # 버전 숫자화 후 최신 1건
         if "버전" in q.columns:
             try:
@@ -1293,7 +1337,7 @@ def upsert_comp_simple_response(
     now = kst_now_str()
 
     # upsert 키: 연도 + 평가대상사번 + 평가자사번
-    values = ws.get_all_values()
+    values = _ws_get_all_values(ws)
     cY   = hmap.get("연도")
     cTS  = hmap.get("평가대상사번")
     cES  = hmap.get("평가자사번")
@@ -1326,13 +1370,17 @@ def upsert_comp_simple_response(
         put("상태", "제출")
         put("제출시각", now)
         put("잠금", "")
-        ws.append_row(buf, value_input_option="USER_ENTERED")
-        st.cache_data.clear()
+        _ws_append_row(ws, buf)
+        # 🔎 타겟 캐시만 무효화 (전역 clear 방지)
+        try:
+            read_my_comp_simple_rows.clear()
+        except Exception:
+            pass
         return {"action":"insert"}
     else:
         def upd(k,v):
             c=hmap.get(k)
-            if c: ws.update_cell(row_idx, c, v)
+            if c: _ws_update_cell(ws, row_idx, c, v)
         upd("평가일자", eval_date)
         upd("주업무평가", main_grade)
         upd("기타업무평가", extra_grade)
@@ -1341,14 +1389,17 @@ def upsert_comp_simple_response(
         upd("종합의견", opinion)
         upd("상태", "제출")
         upd("제출시각", now)
-        st.cache_data.clear()
+        try:
+            read_my_comp_simple_rows.clear()
+        except Exception:
+            pass
         return {"action":"update"}
 
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=90, show_spinner=False)
 def read_my_comp_simple_rows(year:int, sabun:str)->pd.DataFrame:
     try:
         ws = get_workbook().worksheet(_simp_sheet_name(year))
-        df = pd.DataFrame(ws.get_all_records(numericise_ignore=["all"]))
+        df = pd.DataFrame(_ws_get_all_records(ws))
     except Exception:
         return pd.DataFrame(columns=COMP_SIMPLE_HEADERS)
     if df.empty: return df
@@ -1460,7 +1511,7 @@ def tab_competency(emp_df: pd.DataFrame):
     df_view["선택"] = (df_view["사번"].astype(str) == str(cur_sabun))
 
     edited = st.data_editor(
-        df_view["선택 사번 부서2 이름".split()],
+        df_view[["선택","사번","부서2","이름"]],
         use_container_width=True,
         height=340,
         key="cmpS_pick_editor",
