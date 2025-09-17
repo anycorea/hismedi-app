@@ -653,11 +653,10 @@ def render_status_line():
 
 
 # ======================================================================
-# 📌 직원(Employee) - 직원 탭 교체블럭
-# ======================================================================
-
-# ======================================================================
-# 📌 Quota-safe: 직원 탭 + 관리자 PIN/부서이동 (직원시트 인라인 반영, UI 즉시 반영, 재요청 최소화)
+# 📌 직원 탭 자동 새로고침 패치 (관리자 업데이트 후 탭 클릭 시 즉시 반영, 429 회피)
+#    - 버전키(emp_data_ver) 기반 캐시 무효화
+#    - 시트 쓰기 후 버전 증가 → 탭 렌더 시 자동 재조회
+#    - 여유롭게 st.session_state 메모리 패치(emp_patch)로 즉시 표시도 병행
 # ======================================================================
 
 REQ_EMP_COLS = [
@@ -699,6 +698,15 @@ def _sort_by_sabun(df):
         key = s.str.zfill(width)
     return df.assign(_k=key).sort_values("_k").drop(columns=["_k"]).reset_index(drop=True)
 
+def _bump_emp_ver():
+    st.session_state["emp_data_ver"] = int(st.session_state.get("emp_data_ver", 0)) + 1
+
+@st.cache_data(ttl=180, show_spinner=False)
+def read_emp_df_cached(version: int) -> pd.DataFrame:
+    # version은 캐시 키로만 사용됨
+    _ = version
+    return read_sheet_df(EMP_SHEET)
+
 def reissue_pin_inline(sabun: str, length: int = 6):
     ws, header, hmap = ensure_emp_sheet_staff_columns()
     if "PIN_hash" not in hmap or "PIN_No" not in hmap or "사번" not in hmap:
@@ -712,6 +720,7 @@ def reissue_pin_inline(sabun: str, length: int = 6):
     _update_cell(ws, row_idx, hmap["PIN_No"], pin)
     p = st.session_state.setdefault("emp_patch", {})
     p[str(sabun)] = {**p.get(str(sabun), {}), "PIN_No": pin, "PIN_hash": ph}
+    _bump_emp_ver()
     return {"PIN_No": pin, "PIN_hash": ph}
 
 def dept_transfer_inline(sabun: str, new_d1: str, new_d2: str, start_date):
@@ -738,6 +747,7 @@ def dept_transfer_inline(sabun: str, new_d1: str, new_d2: str, start_date):
         "이전부서2": cur_d2, "이전부서2_발령일": d,
         "현부서_발령일": d,
     }
+    _bump_emp_ver()
     return {"사번": sabun, "부서1": new_d1, "부서2": new_d2, "발령일": d}
 
 def tab_admin_pin(emp_df):
@@ -757,30 +767,38 @@ def tab_admin_pin(emp_df):
         with col[0]: do_save = st.button("PIN 저장/변경", type="primary", use_container_width=True, key="adm_pin_save")
         with col[1]: do_clear = st.button("PIN 비우기", use_container_width=True, key="adm_pin_clear")
         if do_save:
-            if not pin1 or not pin2: st.error("PIN을 두 번 모두 입력"); return
-            if pin1 != pin2: st.error("PIN 확인 불일치"); return
-            if not pin1.isdigit(): st.error("숫자만 입력"); return
-            if not _to_bool(row.get("재직여부", False)): st.error("퇴직자 불가"); return
-            if "PIN_hash" not in hmap or "PIN_No" not in hmap: st.error(f"'{EMP_SHEET}'에 PIN 컬럼 없음"); return
+            if not pin1 or not pin2:
+                st.error("PIN을 두 번 모두 입력하세요."); return
+            if pin1 != pin2:
+                st.error("PIN 확인이 일치하지 않습니다."); return
+            if not pin1.isdigit():
+                st.error("PIN은 숫자만 입력하세요."); return
+            if not _to_bool(row.get("재직여부", False)):
+                st.error("퇴직자는 변경할 수 없습니다."); return
+            if "PIN_hash" not in hmap or "PIN_No" not in hmap:
+                st.error(f"'{EMP_SHEET}' 시트에 PIN_hash/PIN_No가 없습니다."); return
             r = _find_row_by_sabun(ws, hmap, sabun)
             if r == 0:
-                st.error("사번 미발견")
-                return
-            _update_cell(ws, r, hmap["PIN_hash"], _pin_hash(pin1.strip(), str(sabun)))
+                st.error("시트에서 사번을 찾지 못했습니다."); return
+            hashed = _pin_hash(pin1.strip(), str(sabun))
+            _update_cell(ws, r, hmap["PIN_hash"], hashed)
             _update_cell(ws, r, hmap["PIN_No"], pin1.strip())
             p = st.session_state.setdefault("emp_patch", {})
-            p[str(sabun)] = {**p.get(str(sabun), {}), "PIN_No": pin1.strip(), "PIN_hash": _pin_hash(pin1.strip(), str(sabun))}
-            st.success("PIN 저장 완료 (UI 즉시 반영)", icon="✅")
+            p[str(sabun)] = {**p.get(str(sabun), {}), "PIN_No": pin1.strip(), "PIN_hash": hashed}
+            _bump_emp_ver()
+            st.success("PIN 저장 완료 (직원 탭에서 탭 클릭 시 즉시 반영)", icon="✅")
         if do_clear:
-            if "PIN_hash" not in hmap or "PIN_No" not in hmap: st.error(f"'{EMP_SHEET}'에 PIN 컬럼 없음"); return
+            if "PIN_hash" not in hmap or "PIN_No" not in hmap:
+                st.error(f"'{EMP_SHEET}' 시트에 PIN_hash/PIN_No가 없습니다."); return
             r = _find_row_by_sabun(ws, hmap, sabun)
             if r == 0:
-                st.error("사번 미발견")
-                return
-            _update_cell(ws, r, hmap["PIN_hash"], ""); _update_cell(ws, r, hmap["PIN_No"], "")
+                st.error("시트에서 사번을 찾지 못했습니다."); return
+            _update_cell(ws, r, hmap["PIN_hash"], "")
+            _update_cell(ws, r, hmap["PIN_No"], "")
             p = st.session_state.setdefault("emp_patch", {})
             p[str(sabun)] = {**p.get(str(sabun), {}), "PIN_No": "", "PIN_hash": ""}
-            st.success("PIN 초기화 완료 (UI 즉시 반영)", icon="✅")
+            _bump_emp_ver()
+            st.success("PIN 초기화 완료 (직원 탭에서 탭 클릭 시 즉시 반영)", icon="✅")
 
     st.divider()
     st.markdown("#### 전 직원 일괄 PIN 발급")
@@ -847,6 +865,7 @@ def tab_admin_pin(emp_df):
                 _retry_call(ws.batch_update, updates[i:i+CHUNK])
                 done = min(i + CHUNK, total); pbar.progress(done / total, text=f"{done}/{total} 반영 중…")
                 time.sleep(0.2)
+            _bump_emp_ver()
             st.success(f"일괄 발급 완료: 대상 {len(preview):,}명 / 셀 {total:,}개 반영", icon="✅")
         except Exception as e:
             st.exception(e)
@@ -870,10 +889,12 @@ def tab_admin_transfer(emp_df):
             st.error("부서1/부서2 중 하나는 입력 필요"); return
         try:
             rep = dept_transfer_inline(str(sabun), str(nd1).strip(), str(nd2).strip(), sdt)
+            _bump_emp_ver()
             st.success(f"{rep['부서1']} / {rep['부서2']} (발령일 {rep['발령일']}) 반영", icon="✅")
         except Exception as e:
             st.exception(e)
 
+# ── 직원 탭 ───────────────────────────────────────────────────────────────────
 def tab_staff(emp_df: pd.DataFrame):
     u = st.session_state.get("user", {})
     me = str(u.get("사번", ""))
@@ -882,7 +903,13 @@ def tab_staff(emp_df: pd.DataFrame):
         emp_df = emp_df[emp_df["사번"].astype(str).isin(allowed)].copy()
 
     st.subheader("직원")
-    df = emp_df.copy()
+
+    ver = int(st.session_state.get("emp_data_ver", 0))
+    try:
+        df = read_emp_df_cached(ver)
+    except Exception:
+        df = emp_df.copy()
+
     df = _apply_emp_patches(df)
 
     c = st.columns([1,1,1,1,1,1,2])
@@ -921,7 +948,6 @@ def tab_staff(emp_df: pd.DataFrame):
 
     st.write(f"결과: **{len(view):,}명**")
     st.dataframe(view[show_cols] if show_cols else view, use_container_width=True, height=560, hide_index=True)
-
 
 
 # ======================================================================
