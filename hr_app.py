@@ -653,10 +653,7 @@ def render_status_line():
 
 
 # ======================================================================
-# 📌 직원 탭 자동 새로고침 패치 (관리자 업데이트 후 탭 클릭 시 즉시 반영, 429 회피)
-#    - 버전키(emp_data_ver) 기반 캐시 무효화
-#    - 시트 쓰기 후 버전 증가 → 탭 렌더 시 자동 재조회
-#    - 여유롭게 st.session_state 메모리 패치(emp_patch)로 즉시 표시도 병행
+# 직원 탭/관리자 메뉴 패치 (즉시 반영 + PIN 기본 4자리)
 # ======================================================================
 
 REQ_EMP_COLS = [
@@ -703,11 +700,10 @@ def _bump_emp_ver():
 
 @st.cache_data(ttl=180, show_spinner=False)
 def read_emp_df_cached(version: int) -> pd.DataFrame:
-    # version은 캐시 키로만 사용됨
     _ = version
     return read_sheet_df(EMP_SHEET)
 
-def reissue_pin_inline(sabun: str, length: int = 6):
+def reissue_pin_inline(sabun: str, length: int = 4):
     ws, header, hmap = ensure_emp_sheet_staff_columns()
     if "PIN_hash" not in hmap or "PIN_No" not in hmap or "사번" not in hmap:
         raise RuntimeError("직원 시트에 PIN_hash/PIN_No/사번 컬럼이 필요합니다.")
@@ -786,7 +782,7 @@ def tab_admin_pin(emp_df):
             p = st.session_state.setdefault("emp_patch", {})
             p[str(sabun)] = {**p.get(str(sabun), {}), "PIN_No": pin1.strip(), "PIN_hash": hashed}
             _bump_emp_ver()
-            st.success("PIN 저장 완료 (직원 탭에서 탭 클릭 시 즉시 반영)", icon="✅")
+            st.success("PIN 저장 완료 (직원 탭 클릭 시 즉시 반영)", icon="✅")
         if do_clear:
             if "PIN_hash" not in hmap or "PIN_No" not in hmap:
                 st.error(f"'{EMP_SHEET}' 시트에 PIN_hash/PIN_No가 없습니다."); return
@@ -798,7 +794,7 @@ def tab_admin_pin(emp_df):
             p = st.session_state.setdefault("emp_patch", {})
             p[str(sabun)] = {**p.get(str(sabun), {}), "PIN_No": "", "PIN_hash": ""}
             _bump_emp_ver()
-            st.success("PIN 초기화 완료 (직원 탭에서 탭 클릭 시 즉시 반영)", icon="✅")
+            st.success("PIN 초기화 완료 (직원 탭 클릭 시 즉시 반영)", icon="✅")
 
     st.divider()
     st.markdown("#### 전 직원 일괄 PIN 발급")
@@ -806,7 +802,7 @@ def tab_admin_pin(emp_df):
     with col[0]: only_active = st.checkbox("재직자만", True, key="adm_pin_only_active")
     with col[1]: only_empty = st.checkbox("PIN 미설정자만", True, key="adm_pin_only_empty")
     with col[2]: overwrite_all = st.checkbox("기존 PIN 덮어쓰기", False, disabled=only_empty, key="adm_pin_overwrite")
-    with col[3]: pin_len = st.number_input("자릿수", min_value=4, max_value=8, value=6, step=1, key="adm_pin_len")
+    with col[3]: pin_len = st.number_input("자릿수", min_value=4, max_value=8, value=4, step=1, key="adm_pin_len")
     with col[4]: uniq = st.checkbox("서로 다른 PIN 보장", True, key="adm_pin_uniq")
     candidates = emp_df.copy()
     if only_active and "재직여부" in candidates.columns: candidates = candidates[candidates["재직여부"] == True]
@@ -894,7 +890,6 @@ def tab_admin_transfer(emp_df):
         except Exception as e:
             st.exception(e)
 
-# ── 직원 탭 ───────────────────────────────────────────────────────────────────
 def tab_staff(emp_df: pd.DataFrame):
     u = st.session_state.get("user", {})
     me = str(u.get("사번", ""))
@@ -905,10 +900,12 @@ def tab_staff(emp_df: pd.DataFrame):
     st.subheader("직원")
 
     ver = int(st.session_state.get("emp_data_ver", 0))
-    try:
+    last = int(st.session_state.get("emp_last_loaded_ver", -1))
+    if last != ver:
+        df = read_sheet_df(EMP_SHEET)
+        st.session_state["emp_last_loaded_ver"] = ver
+    else:
         df = read_emp_df_cached(ver)
-    except Exception:
-        df = emp_df.copy()
 
     df = _apply_emp_patches(df)
 
