@@ -391,16 +391,13 @@ def ensure_auth_sheet():
     return ws
 
 @st.cache_data(ttl=300, show_spinner=False)
-def ensure_auth_sheet_once() -> bool:
-    """
-    5분 캐시로 ensure_auth_sheet 호출 빈도를 낮춥니다.
-    실패 시 False 반환(예외 전파 없음) → 호출측에서 메시지 관리.
-    """
+def ensure_auth_sheet_once() -> tuple[bool, str]:
     try:
         ensure_auth_sheet()
-        return True
-    except Exception:
-        return False
+        return True, ""
+    except Exception as e:
+        # 원인 노출을 위해 문자열로 반환
+        return False, repr(e)
 
 @st.cache_data(ttl=60, show_spinner=False)
 def read_auth_df() -> pd.DataFrame:
@@ -2781,28 +2778,36 @@ def startup_sanity_checks():
     except Exception as e:
         problems.append(f"[직원시트] 로딩 실패: {e}")
 
-    # 권한시트 보장은 5분 캐시 사용(429 완화)
+    # 권한시트 보장은 5분 캐시 사용(429 완화) + 캐시 실패 시 1회 즉시 재시도
     try:
-        ok = ensure_auth_sheet_once()
+        ok, msg = ensure_auth_sheet_once()  # (bool, str)
         if not ok:
-            problems.append("[권한시트] 보장 실패(캐시 호출 실패)")
+            # 캐시 레이어에서 실패했으면 한 번은 직접 보장 재시도
+            try:
+                ensure_auth_sheet()
+                problems.append("[권한시트] 캐시 실패 → 즉시 재시도 성공")
+            except Exception as e:
+                problems.append(f"[권한시트] 보장 실패: {e} | 캐시 오류: {msg}")
     except Exception as e:
-        problems.append(f"[권한시트] 보장 실패: {e}")
+        problems.append(f"[권한시트] 보장 실패(상위): {e}")
 
     try:
         _ = read_settings_df()
     except Exception as e:
         problems.append(f"[설정시트] 로딩 실패: {e}")
+
     try:
         _ = read_jobdesc_df()
     except Exception as e:
         problems.append(f"[직무기술서] 로딩 실패: {e}")
+
     try:
         _ = read_eval_items_df(only_active=False)
     except Exception as e:
         problems.append(f"[평가항목] 로딩 실패: {e}")
 
     return problems
+
 
 def safe_run(render_fn, *args, title: str = "", **kwargs):
     """탭/섹션 하나를 안전하게 감싸서, 예외가 나도 전체 앱이 멈추지 않도록."""
