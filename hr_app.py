@@ -1658,7 +1658,9 @@ def tab_competency(emp_df: pd.DataFrame):
 # 📌 권한관리(Admin / ACL & Admin Tools)
 # ======================================================================
 # ── 부서이력/이동(필수 최소) ──────────────────────────────────────────────────
+
 HIST_SHEET="부서이력"
+
 def ensure_dept_history_sheet():
     """
     부서(근무지) 이동 이력 시트 보장 + 헤더 정렬.
@@ -1697,6 +1699,7 @@ def ensure_dept_history_sheet():
 
     return ws
 
+
 @st.cache_data(ttl=60, show_spinner=False)
 def read_dept_history_df()->pd.DataFrame:
     ensure_dept_history_sheet(); ws=get_workbook().worksheet(HIST_SHEET)
@@ -1706,6 +1709,7 @@ def read_dept_history_df()->pd.DataFrame:
         if c in df.columns: df[c]=df[c].astype(str)
     if "사번" in df.columns: df["사번"]=df["사번"].astype(str)
     return df
+
 
 def apply_department_change(
     emp_df: pd.DataFrame,
@@ -1782,6 +1786,7 @@ def apply_department_change(
         "new_dept2": new_dept2,
     }
 
+
 def sync_current_department_from_history(as_of_date:datetime.date=None)->int:
     ensure_dept_history_sheet()
     hist=read_dept_history_df(); emp=read_sheet_df(EMP_SHEET)
@@ -1808,9 +1813,13 @@ def sync_current_department_from_history(as_of_date:datetime.date=None)->int:
                 if "부서2" in hmap_emp: _update_cell(ws_emp,row_idx,hmap_emp["부서2"],d2)
                 changed+=1
     st.cache_data.clear(); return changed
+
+
 # ── 관리자: PIN / 부서이동 / 평가항목 / 권한 ─────────────────────────────────
+
 def _random_pin(length=6)->str:
     return "".join(pysecrets.choice("0123456789") for _ in range(length))
+
 
 def tab_admin_pin(emp_df: pd.DataFrame):
     st.markdown("### PIN 관리")
@@ -1922,6 +1931,7 @@ def tab_admin_pin(emp_df: pd.DataFrame):
         except Exception as e:
             st.exception(e)
 
+
 def tab_admin_transfer(emp_df: pd.DataFrame):
     st.markdown("### 부서(근무지) 이동")
     df=emp_df.copy(); df["표시"]=df.apply(lambda r:f"{str(r.get('사번',''))} - {str(r.get('이름',''))}",axis=1); df=df.sort_values(["사번"])
@@ -1965,6 +1975,7 @@ def tab_admin_transfer(emp_df: pd.DataFrame):
             st.success(f"직원 시트 현재부서 동기화 완료: {cnt}명 반영", icon="✅")
         except Exception as e:
             st.exception(e)
+
 
 def tab_admin_eval_items():
     import pandas as pd
@@ -2175,8 +2186,7 @@ def tab_admin_eval_items():
                                 ws.delete_rows(i); break
                         st.cache_data.clear()
                         st.success("삭제 완료"); st.rerun()
-                except Exception as e:
-                    st.exception(e)
+
 
 def tab_admin_jobdesc_defaults():
     st.markdown("### 직무기술서 기본값")
@@ -2210,22 +2220,23 @@ def tab_admin_jobdesc_defaults():
         st.caption("설정 데이터가 없습니다.")
     else:
         st.dataframe(df.sort_values("키"), use_container_width=True, height=240)
+
+
+# ── 권한관리(ACL): 심플 단일 표 편집 + 전체 반영 ─────────────────────────────
+
 def tab_admin_acl(emp_df: pd.DataFrame):
     """
     권한관리 — 단일 표에서 추가/수정/삭제 + 전체 반영 저장
-    - 검색/필터 UI 제거
-    - '권한 규칙 추가(부서만)' / '권한 규칙 목록' / '행 번호로 삭제' 제거
-    - 표에서 직접 행 추가/수정/삭제 후, [🗂️ 권한 전체 반영]으로 저장
-    - 사번은 셀렉트박스로 고르고, 이름/부서는 자동 보정
-    - 기존 스키마: AUTH_HEADERS = ["사번","이름","역할","범위유형","부서1","부서2","대상사번","활성","비고"]
-    의존: read_auth_df(), get_workbook(), _retry_call(), AUTH_SHEET, AUTH_HEADERS, is_admin()
+    - 사번 컬럼은 '사번 - 이름' 레이블로 선택
+    - 선택 시 자동으로 이름 컬럼 동기화
+    - 검색/필터 등 부가 UI 제거 (심플)
+    - 저장 시 전체 덮어쓰기
     """
     import pandas as pd
     import streamlit as st
 
     st.markdown("### 권한 관리")
 
-    # 로그인 사용자 / 저장 권한
     me = st.session_state.get("user", {})
     try:
         am_admin = is_admin(str(me.get("사번", "")))
@@ -2234,7 +2245,7 @@ def tab_admin_acl(emp_df: pd.DataFrame):
     if not am_admin:
         st.error("Master만 저장할 수 있습니다. (표/저장 모두 비활성화)", icon="🛡️")
 
-    # 직원 기본표 준비 (사번·이름·부서) → 사번 셀렉트 옵션 & 자동 보정
+    # 직원 기본표 → lookup & label map
     try:
         base = emp_df[["사번", "이름", "부서1", "부서2"]].copy()
     except Exception:
@@ -2243,18 +2254,30 @@ def tab_admin_acl(emp_df: pd.DataFrame):
         base["사번"] = base["사번"].astype(str).str.strip()
     emp_lookup = {}
     for _, r in base.iterrows():
-        emp_lookup[str(r.get("사번","")).strip()] = {
-            "이름":  str(r.get("이름","")).strip(),
-            "부서1": str(r.get("부서1","")).strip(),
-            "부서2": str(r.get("부서2","")).strip(),
+        s = str(r.get("사번",""))).strip()
+        emp_lookup[s] = {
+            "이름":  str(r.get("이름",""))).strip(),
+            "부서1": str(r.get("부서1",""))).strip(),
+            "부서2": str(r.get("부서2",""))).strip(),
         }
-    sabun_options = sorted([s for s in emp_lookup.keys() if s])
+    sabuns = sorted([s for s in emp_lookup.keys() if s])
 
-    # 권한 데이터 로드 + 타입 정규화
+    labels = []
+    label_by_sabun = {}
+    sabun_by_label = {}
+    for s in sabuns:
+        nm = emp_lookup[s]["이름"]
+        label = f"{s} - {nm}" if nm else s
+        labels.append(label)
+        label_by_sabun[s] = label
+        sabun_by_label[label] = s
+
+    # 권한 데이터 로드
     df_auth = read_auth_df()
     if df_auth.empty:
         df_auth = pd.DataFrame(columns=AUTH_HEADERS)
 
+    # 타입 정규화
     def _tostr(x): return "" if x is None else str(x)
     for c in ["사번","이름","역할","범위유형","부서1","부서2","대상사번","비고"]:
         if c in df_auth.columns:
@@ -2262,35 +2285,22 @@ def tab_admin_acl(emp_df: pd.DataFrame):
     if "활성" in df_auth.columns:
         df_auth["활성"] = df_auth["활성"].map(lambda x: str(x).strip().lower() in ("true","1","y","yes","t"))
 
-    # 초기 자동 보정(사번 기준 이름/부서 채움)
-    def _autofill(df: pd.DataFrame) -> pd.DataFrame:
-        df = df.copy()
-        if "사번" not in df.columns: return df
-        for i, row in df.iterrows():
-            sab = str(row.get("사번","")).strip()
-            if sab and sab in emp_lookup:
-                if not str(row.get("이름","")).strip():
-                    df.at[i, "이름"] = emp_lookup[sab]["이름"]
-                if not str(row.get("부서1","")).strip():
-                    df.at[i, "부서1"] = emp_lookup[sab]["부서1"]
-                if not str(row.get("부서2","")).strip():
-                    df.at[i, "부서2"] = emp_lookup[sab]["부서2"]
-        return df
+    # 표 표시 전에 '사번' 값을 레이블로 바꿔서 보여줌
+    df_disp = df_auth.copy()
+    if "사번" in df_disp.columns:
+        df_disp["사번"] = df_disp["사번"].map(lambda v: label_by_sabun.get(str(v).strip(), str(v).strip()))
 
-    df_auth = _autofill(df_auth)
-
-    # 편집 표 (단일 UI) — 추가/수정/삭제
     role_options = ["admin","manager","evaluator"]
     scope_options = ["","부서","개별"]  # ""=전체
 
-    if "삭제" not in df_auth.columns:
-        df_auth.insert(len(df_auth.columns), "삭제", False)
+    if "삭제" not in df_disp.columns:
+        df_disp.insert(len(df_disp.columns), "삭제", False)
 
     colcfg = {
         "사번": st.column_config.SelectboxColumn(
-            label="사번",
-            options=sabun_options,
-            help="권한을 부여할 직원의 사번을 선택하세요."
+            label="사번 - 이름",
+            options=labels,
+            help="사번을 선택하면 이름이 자동으로 입력됩니다."
         ),
         "이름": st.column_config.TextColumn(
             label="이름",
@@ -2318,7 +2328,7 @@ def tab_admin_acl(emp_df: pd.DataFrame):
     }
 
     edited = st.data_editor(
-        df_auth[[c for c in AUTH_HEADERS if c in df_auth.columns] + ["삭제"]],
+        df_disp[[c for c in AUTH_HEADERS if c in df_disp.columns] + ["삭제"]],
         key="acl_editor_simple",
         use_container_width=True,
         height=520,
@@ -2328,42 +2338,68 @@ def tab_admin_acl(emp_df: pd.DataFrame):
         column_config=colcfg,
     )
 
-    # 유효성 검사 + 자동 보정
+    # 에디터 결과를 정규화: 레이블 → 사번, 그리고 이름 자동 동기화
+    def _editor_to_canonical(df: pd.DataFrame) -> pd.DataFrame:
+        df = df.copy()
+        if "사번" in df.columns:
+            for i, val in df["사번"].items():
+                v = str(val).strip()
+                if not v:
+                    continue
+                sab = sabun_by_label.get(v)
+                if sab is None:
+                    # 혹시 '사번 - 이름' 텍스트가 직접 입력된 경우
+                    if " - " in v:
+                        sab = v.split(" - ", 1)[0].strip()
+                    else:
+                        sab = v
+                df.at[i, "사번"] = sab
+                # 이름 동기화
+                nm = emp_lookup.get(sab, {}).get("이름", "")
+                if nm:
+                    df.at[i, "이름"] = nm
+        return df
+
+    edited_canon = _editor_to_canonical(edited.drop(columns=["삭제"], errors="ignore"))
+
+    # 유효성 검사 + 추가 보정
     def _validate_and_fix(df: pd.DataFrame):
         df = df.copy().fillna("")
         errs = []
 
-        # 완전 공란 행 제거
+        # 완전 공란 제거
         df = df[df.astype(str).apply(lambda r: "".join(r.values).strip() != "", axis=1)]
 
         # 사번 검증 및 자동 보정
         if "사번" in df.columns:
             for i, row in df.iterrows():
-                sab = str(row.get("사번","")).strip()
+                sab = str(row.get("사번",""))).strip()
                 if not sab:
                     errs.append(f"{i+1}행: 사번이 비어 있습니다."); continue
                 if sab not in emp_lookup:
                     errs.append(f"{i+1}행: 사번 '{sab}' 은(는) 직원 목록에 없습니다."); continue
-                # 이름/부서 자동 보정
-                if str(row.get("이름","")).strip() != emp_lookup[sab]["이름"]:
-                    df.at[i, "이름"] = emp_lookup[sab]["이름"]
-                if not str(row.get("부서1","")).strip():
+                # 이름 자동 보정(재확인)
+                nm = emp_lookup[sab]["이름"]
+                if str(row.get("이름",""))).strip() != nm:
+                    df.at[i, "이름"] = nm
+                if not str(row.get("부서1",""))).strip():
                     df.at[i, "부서1"] = emp_lookup[sab]["부서1"]
-                if not str(row.get("부서2","")).strip():
+                if not str(row.get("부서2",""))).strip():
                     df.at[i, "부서2"] = emp_lookup[sab]["부서2"]
 
         # 역할/범위유형 옵션 체크
+        role_options = ["admin","manager","evaluator"]
+        scope_options = ["","부서","개별"]
         if "역할" in df.columns:
             bad = df[~df["역할"].isin(role_options) & (df["역할"].astype(str).str.strip()!="")]
             for i in bad.index.tolist():
                 errs.append(f"{i+1}행: 역할 값이 잘못되었습니다. ({df.loc[i,'역할']})")
-
         if "범위유형" in df.columns:
             bad = df[~df["범위유형"].isin(scope_options) & (df["범위유형"].astype(str).str.strip()!="")]
             for i in bad.index.tolist():
                 errs.append(f"{i+1}행: 범위유형 값이 잘못되었습니다. ({df.loc[i,'범위유형']})")
 
-        # 중복 규칙(사번+역할+범위유형+부서1+부서2+대상사번)
+        # 중복 규칙 검사
         keycols = [c for c in ["사번","역할","범위유형","부서1","부서2","대상사번"] if c in df.columns]
         if keycols:
             dup = df.assign(_key=df[keycols].astype(str).agg("|".join, axis=1)).duplicated("_key", keep=False)
@@ -2382,12 +2418,11 @@ def tab_admin_acl(emp_df: pd.DataFrame):
 
         return df, errs
 
-    fixed_df, errs = _validate_and_fix(edited.drop(columns=["삭제"], errors="ignore"))
+    fixed_df, errs = _validate_and_fix(edited_canon)
 
     if errs:
         st.warning("저장 전 확인이 필요합니다:\n- " + "\n- ".join(errs))
 
-    # 저장 버튼 (AUTH 저장 → 🗂️ 권한 전체 반영)
     colb = st.columns([1,2,4])
     with colb[0]:
         do_save = st.button("🗂️ 권한 전체 반영", type="primary", use_container_width=True, disabled=(not am_admin))
