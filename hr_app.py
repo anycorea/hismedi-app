@@ -656,34 +656,47 @@ def render_status_line():
 # ======================================================================
 # ── 직원 탭 ───────────────────────────────────────────────────────────────────
 def tab_staff(emp_df: pd.DataFrame):
-    u=st.session_state["user"]; me=str(u["사번"])
+    u = st.session_state.get("user", {})
+    me = str(u.get("사번", ""))
     if not is_admin(me):
-        allowed=get_allowed_sabuns(emp_df,me,include_self=True)
-        emp_df=emp_df[emp_df["사번"].astype(str).isin(allowed)].copy()
+        allowed = get_allowed_sabuns(emp_df, me, include_self=True)
+        emp_df = emp_df[emp_df["사번"].astype(str).isin(allowed)].copy()
 
     st.subheader("직원")
-    df=emp_df.copy()
-    c=st.columns([1,1,1,1,1,1,2])
-    with c[0]: dept1=st.selectbox("부서1",["(전체)"]+sorted([x for x in df.get("부서1",[]).dropna().unique() if x]),index=0,key="staff_dept1")
-    with c[1]: dept2=st.selectbox("부서2",["(전체)"]+sorted([x for x in df.get("부서2",[]).dropna().unique() if x]),index=0,key="staff_dept2")
-    with c[2]: grade=st.selectbox("직급",["(전체)"]+sorted([x for x in df.get("직급",[]).dropna().unique() if x]),index=0,key="staff_grade")
-    with c[3]: duty =st.selectbox("직무",["(전체)"]+sorted([x for x in df.get("직무",[]).dropna().unique() if x]),index=0,key="staff_duty")
-    with c[4]: group=st.selectbox("직군",["(전체)"]+sorted([x for x in df.get("직군",[]).dropna().unique() if x]),index=0,key="staff_group")
-    with c[5]: active=st.selectbox("재직여부",["(전체)","재직","퇴직"],index=0,key="staff_active")
-    with c[6]: q=st.text_input("검색(사번/이름/이메일)","",key="staff_q")
+    df = emp_df.copy()
 
-    view=df.copy()
-    if dept1!="(전체)" and "부서1" in view: view=view[view["부서1"]==dept1]
-    if dept2!="(전체)" and "부서2" in view: view=view[view["부서2"]==dept2]
-    if grade!="(전체)" and "직급" in view: view=view[view["직급"]==grade]
-    if duty !="(전체)" and "직무" in view: view=view[view["직무"]==duty]
-    if group!="(전체)" and "직군" in view: view=view[view["직군"]==group]
-    if active!="(전체)" and "재직여부" in view: view=view[view["재직여부"]==(active=="재직")]
+    c = st.columns([1,1,1,1,1,1,2])
+    with c[0]: dept1 = st.selectbox("부서1", ["(전체)"] + sorted([x for x in df.get("부서1", pd.Series(dtype=str)).dropna().unique() if x]), index=0, key="staff_dept1")
+    with c[1]: dept2 = st.selectbox("부서2", ["(전체)"] + sorted([x for x in df.get("부서2", pd.Series(dtype=str)).dropna().unique() if x]), index=0, key="staff_dept2")
+    with c[2]: grade = st.selectbox("직급",  ["(전체)"] + sorted([x for x in df.get("직급",  pd.Series(dtype=str)).dropna().unique() if x]), index=0, key="staff_grade")
+    with c[3]: duty  = st.selectbox("직무",  ["(전체)"] + sorted([x for x in df.get("직무",  pd.Series(dtype=str)).dropna().unique() if x]), index=0, key="staff_duty")
+    with c[4]: group = st.selectbox("직군",  ["(전체)"] + sorted([x for x in df.get("직군",  pd.Series(dtype=str)).dropna().unique() if x]), index=0, key="staff_group")
+    with c[5]: active= st.selectbox("재직여부", ["(전체)","재직","퇴직"], index=0, key="staff_active")
+    with c[6]: q     = st.text_input("검색(사번/이름/이메일)", "", key="staff_q")
+
+    view = df.copy()
+    if dept1 != "(전체)" and "부서1" in view: view = view[view["부서1"] == dept1]
+    if dept2 != "(전체)" and "부서2" in view: view = view[view["부서2"] == dept2]
+    if grade != "(전체)" and "직급"  in view: view = view[view["직급"]  == grade]
+    if duty  != "(전체)" and "직무"  in view: view = view[view["직무"]  == duty]
+    if group != "(전체)" and "직군"  in view: view = view[view["직군"]  == group]
+    if active!= "(전체)" and "재직여부" in view: view = view[view["재직여부"] == (active == "재직")]
     if q.strip():
-        k=q.strip().lower()
-        view=view[view.apply(lambda r: any(k in str(r[c]).lower() for c in ["사번","이메일","이름"] if c in r), axis=1)]
+        k = q.strip().lower()
+        view = view[view.apply(lambda r: any(k in str(r[c]).lower() for c in ["사번","이메일","이름"] if c in r), axis=1)]
+
+    if "사번" in view.columns:
+        s = view["사번"].astype(str).str.strip()
+        if s.str.match(r"^[0-9]+$").all():
+            key = pd.to_numeric(s, errors="coerce")
+        else:
+            width = int(max(s.str.len().max(), 1))
+            key = s.str.zfill(width)
+        view = view.assign(_k=key).sort_values("_k").drop(columns=["_k"]).reset_index(drop=True)
+
     st.write(f"결과: **{len(view):,}명**")
-    st.dataframe(view, use_container_width=True, height=560)
+    st.dataframe(view, use_container_width=True, height=560, hide_index=True)
+
 
 # ======================================================================
 # 📌 인사평가(Evaluation)
@@ -901,10 +914,10 @@ def tab_eval_input(emp_df: pd.DataFrame):
             view = view[view.apply(lambda r: k in str(r["사번"]).lower() or k in str(r["이름"]).lower(), axis=1)]
         view = view.sort_values(["부서1","부서2","사번"]).reset_index(drop=True)
         view["선택"] = (view["사번"] == st.session_state["eval2_target_sabun"])
-        edited_pick = st.data_editor(
+        edited_pick = st.data_editor(hide_index=True, 
             view[["선택","사번","이름","부서1","부서2","직급"]],
             use_container_width=True, height=360, key="eval2_pick_editor",
-            column_config={"선택": st.column_config.CheckboxColumn()}, num_rows="fixed",
+            column_config={"선택": st.column_config.CheckboxColumn(, num_rows="fixed")}, num_rows="fixed",
         )
         picked = edited_pick.loc[edited_pick["선택"] == True]
         if not picked.empty:
@@ -992,7 +1005,7 @@ def tab_eval_input(emp_df: pd.DataFrame):
         my = read_my_eval_rows(int(year), me_sabun)
         if my.empty: st.caption("제출된 평가가 없습니다.")
         else:
-            st.dataframe(my[["평가유형", "평가대상사번", "평가대상이름", "총점", "상태", "제출시각"]], use_container_width=True, height=260)
+            st.dataframe(my[["평가유형", "평가대상사번", "평가대상이름", "총점", "상태", "제출시각"]], use_container_width=True, height=260, hide_index=True)
     except Exception:
         st.caption("제출 현황을 불러오지 못했습니다.")
 
@@ -1648,11 +1661,10 @@ def tab_competency(emp_df: pd.DataFrame):
         else:
             st.dataframe(
                 my[["평가대상사번","평가대상이름","평가일자","주업무평가","기타업무평가","교육이수","자격유지","상태","제출시각"]],
-                use_container_width=True, height=260
+                use_container_width=True, height=260, hide_index=True
             )
     except Exception:
         st.caption("제출 현황을 불러오지 못했습니다.")
-
 
 
 # ======================================================================
