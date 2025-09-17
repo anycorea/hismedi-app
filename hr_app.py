@@ -2254,11 +2254,11 @@ def tab_admin_acl(emp_df: pd.DataFrame):
         base["사번"] = base["사번"].astype(str).str.strip()
     emp_lookup = {}
     for _, r in base.iterrows():
-        s = str(r.get("사번",""))).strip()
+        s = str(r.get("사번","")).strip()
         emp_lookup[s] = {
-            "이름":  str(r.get("이름",""))).strip(),
-            "부서1": str(r.get("부서1",""))).strip(),
-            "부서2": str(r.get("부서2",""))).strip(),
+            "이름":  str(r.get("이름","")).strip(),
+            "부서1": str(r.get("부서1","")).strip(),
+            "부서2": str(r.get("부서2","")).strip(),
         }
     sabuns = sorted([s for s in emp_lookup.keys() if s])
 
@@ -2373,18 +2373,18 @@ def tab_admin_acl(emp_df: pd.DataFrame):
         # 사번 검증 및 자동 보정
         if "사번" in df.columns:
             for i, row in df.iterrows():
-                sab = str(row.get("사번",""))).strip()
+                sab = str(row.get("사번","")).strip()
                 if not sab:
                     errs.append(f"{i+1}행: 사번이 비어 있습니다."); continue
                 if sab not in emp_lookup:
                     errs.append(f"{i+1}행: 사번 '{sab}' 은(는) 직원 목록에 없습니다."); continue
                 # 이름 자동 보정(재확인)
                 nm = emp_lookup[sab]["이름"]
-                if str(row.get("이름",""))).strip() != nm:
+                if str(row.get("이름","")).strip() != nm:
                     df.at[i, "이름"] = nm
-                if not str(row.get("부서1",""))).strip():
+                if not str(row.get("부서1","")).strip():
                     df.at[i, "부서1"] = emp_lookup[sab]["부서1"]
-                if not str(row.get("부서2",""))).strip():
+                if not str(row.get("부서2","")).strip():
                     df.at[i, "부서2"] = emp_lookup[sab]["부서2"]
 
         # 역할/범위유형 옵션 체크
