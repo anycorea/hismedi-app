@@ -897,17 +897,22 @@ def tab_staff(emp_df: pd.DataFrame):
         allowed = get_allowed_sabuns(emp_df, me, include_self=True)
         emp_df = emp_df[emp_df["사번"].astype(str).isin(allowed)].copy()
 
-    st.subheader("직원")
+    head = st.columns([6,1])
+    with head[0]:
+        st.subheader("직원")
+    with head[1]:
+        if st.button("🔄 새로고침", key="staff_refresh"):
+            try:
+                st.cache_data.clear()
+            except Exception:
+                pass
+            st.session_state.pop("emp_last_loaded_ver", None)
+            try:
+                st.rerun()
+            except Exception:
+                st.experimental_rerun()
 
-    ver = int(st.session_state.get("emp_data_ver", 0))
-    last = int(st.session_state.get("emp_last_loaded_ver", -1))
-    if last != ver:
-        df = read_sheet_df(EMP_SHEET)
-        st.session_state["emp_last_loaded_ver"] = ver
-    else:
-        df = read_emp_df_cached(ver)
-
-    df = _apply_emp_patches(df)
+    df = emp_df.copy()
 
     c = st.columns([1,1,1,1,1,1,2])
     with c[0]: dept1 = st.selectbox("부서1", ["(전체)"] + sorted([x for x in df.get("부서1", pd.Series(dtype=str)).dropna().unique() if x]), index=0, key="staff_dept1")
@@ -938,13 +943,9 @@ def tab_staff(emp_df: pd.DataFrame):
             key = s.str.zfill(width)
         view = view.assign(_k=key).sort_values("_k").drop(columns=["_k"]).reset_index(drop=True)
 
-    base_cols = ["사번","이름","부서1","부서2","직급","직무","직군","입사일","퇴사일","기타1","기타2","재직여부","PIN_hash","PIN_No","이전부서1","이전부서1_발령일","이전부서2","이전부서2_발령일","현부서_발령일"]
-    show_cols = [c for c in base_cols if c in view.columns]
-    if not is_admin(me):
-        show_cols = [c for c in show_cols if c not in ("PIN_hash","PIN_No")]
-
     st.write(f"결과: **{len(view):,}명**")
-    st.dataframe(view[show_cols] if show_cols else view, use_container_width=True, height=560, hide_index=True)
+    st.dataframe(view, use_container_width=True, height=560, hide_index=True)
+
 
 
 # ======================================================================
