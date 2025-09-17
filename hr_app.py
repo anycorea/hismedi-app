@@ -698,7 +698,6 @@ def tab_staff(emp_df: pd.DataFrame):
     st.write(f"결과: **{len(view):,}명**")
     st.dataframe(view, use_container_width=True, height=560, hide_index=True)
 
-
 # ======================================================================
 # 📌 인사평가(Evaluation)
 # ======================================================================
@@ -918,8 +917,8 @@ def tab_eval_input(emp_df: pd.DataFrame):
         edited_pick = st.data_editor(
             view[["선택","사번","이름","부서1","부서2","직급"]],
             use_container_width=True, height=360, key="eval2_pick_editor",
-            column_config={"선택": st.column_config.CheckboxColumn( )}, 
-        )
+            column_config={"선택": st.column_config.CheckboxColumn()}, 
+         hide_index=True, num_rows="fixed")
         picked = edited_pick.loc[edited_pick["선택"] == True]
         if not picked.empty:
             r = picked.iloc[-1]
@@ -1172,8 +1171,8 @@ def tab_job_desc(emp_df: pd.DataFrame):
         edited = st.data_editor(
             view[["선택","사번","이름","부서1","부서2","직급"]],
             use_container_width=True, height=360, key="jd2_pick_editor",
-            column_config={"선택": st.column_config.CheckboxColumn( )}, 
-        )
+            column_config={"선택": st.column_config.CheckboxColumn()}, 
+         hide_index=True, num_rows="fixed")
         picked = edited.loc[edited["선택"] == True]
         if not picked.empty:
             r = picked.iloc[-1]
@@ -1578,9 +1577,9 @@ def tab_competency(emp_df: pd.DataFrame):
         use_container_width=True,
         height=340,
         key="cmpS_pick_editor",
-        column_config={"선택": st.column_config.CheckboxColumn( hide_index=True)},
-        num_rows="fixed",
-    )
+        column_config={"선택": st.column_config.CheckboxColumn()},
+        
+     hide_index=True, num_rows="fixed")
     picked = edited.loc[edited["선택"] == True]
     if picked.empty:
         st.info("표에서 직원 1명을 체크하면 아래에 직무기술서 요약과 입력창이 열립니다.", icon="🧭")
