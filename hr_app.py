@@ -653,13 +653,78 @@ def render_status_line():
 
 
 # ======================================================================
-# 📌 직원(Employee)
+# 📌 직원(Employee) - 직원 탭 교체블럭
 # ======================================================================
+
+REQ_EMP_COLS = [
+    "사번","이름","부서1","부서2","직급","직무","직군","입사일","퇴사일","기타1","기타2","재직여부",
+    "PIN_hash","PIN_No","이전부서1","이전부서1_발령일","이전부서2","이전부서2_발령일","현부서_발령일"
+]
+
+def ensure_emp_sheet_staff_columns():
+    ws, header, hmap = _get_ws_and_headers(EMP_SHEET)
+    need = [c for c in REQ_EMP_COLS if c not in header]
+    if need:
+        _retry_call(ws.update, "1:1", [header + need])
+        st.cache_data.clear()
+        ws, header, hmap = _get_ws_and_headers(EMP_SHEET)
+    return ws, header, hmap
+
+def _sort_by_sabun(df):
+    if "사번" not in df.columns or df.empty:
+        return df
+    s = df["사번"].astype(str).str.strip()
+    if s.str.match(r"^[0-9]+$").all():
+        key = pd.to_numeric(s, errors="coerce")
+    else:
+        width = int(max(s.str.len().max(), 1))
+        key = s.str.zfill(width)
+    return df.assign(_k=key).sort_values("_k").drop(columns=["_k"]).reset_index(drop=True)
+
+def reissue_pin_inline(sabun: str, length: int = 6):
+    ws, header, hmap = ensure_emp_sheet_staff_columns()
+    if "PIN_hash" not in hmap or "PIN_No" not in hmap or "사번" not in hmap:
+        raise RuntimeError("직원 시트에 PIN_hash/PIN_No/사번 컬럼이 필요합니다.")
+    row_idx = _find_row_by_sabun(ws, hmap, str(sabun))
+    if row_idx == 0:
+        raise RuntimeError("사번을 찾지 못했습니다.")
+    pin = "".join(pysecrets.choice("0123456789") for _ in range(length))
+    ph = _pin_hash(pin, str(sabun))
+    _update_cell(ws, row_idx, hmap["PIN_hash"], ph)
+    _update_cell(ws, row_idx, hmap["PIN_No"], pin)
+    st.cache_data.clear()
+    return {"PIN_No": pin, "PIN_hash": ph}
+
+def dept_transfer_inline(sabun: str, new_d1: str, new_d2: str, start_date):
+    ws, header, hmap = ensure_emp_sheet_staff_columns()
+    row_idx = _find_row_by_sabun(ws, hmap, str(sabun))
+    if row_idx == 0:
+        raise RuntimeError("사번을 찾지 못했습니다.")
+    cur_d1 = "" if "부서1" not in hmap else (_retry_call(ws.cell, row_idx, hmap["부서1"]).value or "")
+    cur_d2 = "" if "부서2" not in hmap else (_retry_call(ws.cell, row_idx, hmap["부서2"]).value or "")
+    d = start_date.strftime("%Y-%m-%d")
+    if "이전부서1" in hmap: _update_cell(ws, row_idx, hmap["이전부서1"], cur_d1)
+    if "이전부서1_발령일" in hmap: _update_cell(ws, row_idx, hmap["이전부서1_발령일"], d)
+    if "이전부서2" in hmap: _update_cell(ws, row_idx, hmap["이전부서2"], cur_d2)
+    if "이전부서2_발령일" in hmap: _update_cell(ws, row_idx, hmap["이전부서2_발령일"], d)
+    if "현부서_발령일" in hmap: _update_cell(ws, row_idx, hmap["현부서_발령일"], d)
+    if "부서1" in hmap: _update_cell(ws, row_idx, hmap["부서1"], str(new_d1).strip())
+    if "부서2" in hmap: _update_cell(ws, row_idx, hmap["부서2"], str(new_d2).strip())
+    st.cache_data.clear()
+    return {"사번": sabun, "부서1": new_d1, "부서2": new_d2, "발령일": d}
+
 # ── 직원 탭 ───────────────────────────────────────────────────────────────────
 def tab_staff(emp_df: pd.DataFrame):
+    ws, header, hmap = ensure_emp_sheet_staff_columns()
+
     u = st.session_state.get("user", {})
     me = str(u.get("사번", ""))
-    if not is_admin(me):
+    am_admin = False
+    try:
+        am_admin = is_admin(me)
+    except Exception:
+        am_admin = False
+    if not am_admin:
         allowed = get_allowed_sabuns(emp_df, me, include_self=True)
         emp_df = emp_df[emp_df["사번"].astype(str).isin(allowed)].copy()
 
@@ -673,7 +738,7 @@ def tab_staff(emp_df: pd.DataFrame):
     with c[3]: duty  = st.selectbox("직무",  ["(전체)"] + sorted([x for x in df.get("직무",  pd.Series(dtype=str)).dropna().unique() if x]), index=0, key="staff_duty")
     with c[4]: group = st.selectbox("직군",  ["(전체)"] + sorted([x for x in df.get("직군",  pd.Series(dtype=str)).dropna().unique() if x]), index=0, key="staff_group")
     with c[5]: active= st.selectbox("재직여부", ["(전체)","재직","퇴직"], index=0, key="staff_active")
-    with c[6]: q     = st.text_input("검색(사번/이름/이메일)", "", key="staff_q")
+    with c[6]: q     = st.text_input("검색(사번/이름)", "", key="staff_q")
 
     view = df.copy()
     if dept1 != "(전체)" and "부서1" in view: view = view[view["부서1"] == dept1]
@@ -684,7 +749,7 @@ def tab_staff(emp_df: pd.DataFrame):
     if active!= "(전체)" and "재직여부" in view: view = view[view["재직여부"] == (active == "재직")]
     if q.strip():
         k = q.strip().lower()
-        view = view[view.apply(lambda r: any(k in str(r[c]).lower() for c in ["사번","이메일","이름"] if c in r), axis=1)]
+        view = view[view.apply(lambda r: any(k in str(r[c]).lower() for c in ["사번","이름"] if c in r), axis=1)]
 
     if "사번" in view.columns:
         s = view["사번"].astype(str).str.strip()
@@ -695,8 +760,47 @@ def tab_staff(emp_df: pd.DataFrame):
             key = s.str.zfill(width)
         view = view.assign(_k=key).sort_values("_k").drop(columns=["_k"]).reset_index(drop=True)
 
+    base_cols = ["사번","이름","부서1","부서2","직급","직무","직군","입사일","퇴사일","기타1","기타2","재직여부","PIN_hash","PIN_No","이전부서1","이전부서1_발령일","이전부서2","이전부서2_발령일","현부서_발령일"]
+    show_cols = [c for c in base_cols if c in view.columns]
+    if not am_admin:
+        show_cols = [c for c in show_cols if c not in ("PIN_hash","PIN_No")]
+
     st.write(f"결과: **{len(view):,}명**")
-    st.dataframe(view, use_container_width=True, height=560, hide_index=True)
+    st.dataframe(view[show_cols] if show_cols else view, use_container_width=True, height=560, hide_index=True)
+
+    opt = view.copy()
+    opt["표시"] = opt.apply(lambda r: f"{r.get('사번','')} - {r.get('이름','')}", axis=1)
+    pick = st.selectbox("대상자", ["(선택)"] + opt.get("표시", pd.Series(dtype=str)).tolist(), index=0, key="staff_pick")
+    if pick != "(선택)":
+        sabun = pick.split(" - ", 1)[0]
+        c2 = st.columns([1,1,2])
+        with c2[0]:
+            st.markdown("**PIN 재발급**")
+            length = st.number_input("자릿수", min_value=4, max_value=8, value=6, step=1, key="pin_len_staff")
+            if st.button("재발급", use_container_width=True, key="pin_reissue_staff"):
+                if not am_admin:
+                    st.error("Master 전용"); st.stop()
+                try:
+                    rep = reissue_pin_inline(sabun, int(length))
+                    st.success(f"PIN_No: {rep['PIN_No']}", icon="✅")
+                except Exception as e:
+                    st.exception(e)
+        with c2[1]:
+            st.markdown("**부서 이동**")
+            nd1 = st.text_input("새 부서1", "", key="staff_nd1")
+            nd2 = st.text_input("새 부서2", "", key="staff_nd2")
+            sdt = st.date_input("발령일", datetime.now(tz=tz_kst()).date(), key="staff_tr_date")
+            if st.button("이동 반영", use_container_width=True, key="staff_tr_apply"):
+                if not am_admin:
+                    st.error("Master 전용"); st.stop()
+                if not (str(nd1).strip() or str(nd2).strip()):
+                    st.error("부서1/부서2 중 하나는 입력 필요"); st.stop()
+                try:
+                    rep = dept_transfer_inline(sabun, str(nd1).strip(), str(nd2).strip(), sdt)
+                    st.success(f"{rep['부서1']} / {rep['부서2']} ({rep['발령일']}) 반영", icon="✅")
+                except Exception as e:
+                    st.exception(e)
+
 
 # ======================================================================
 # 📌 인사평가(Evaluation)
