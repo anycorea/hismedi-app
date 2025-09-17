@@ -762,7 +762,10 @@ def tab_admin_pin(emp_df):
             if not pin1.isdigit(): st.error("숫자만 입력"); return
             if not _to_bool(row.get("재직여부", False)): st.error("퇴직자 불가"); return
             if "PIN_hash" not in hmap or "PIN_No" not in hmap: st.error(f"'{EMP_SHEET}'에 PIN 컬럼 없음"); return
-            r = _find_row_by_sabun(ws, hmap, sabun); if r == 0: st.error("사번 미발견"); return
+            r = _find_row_by_sabun(ws, hmap, sabun)
+            if r == 0:
+                st.error("사번 미발견")
+                return
             _update_cell(ws, r, hmap["PIN_hash"], _pin_hash(pin1.strip(), str(sabun)))
             _update_cell(ws, r, hmap["PIN_No"], pin1.strip())
             p = st.session_state.setdefault("emp_patch", {})
@@ -770,7 +773,10 @@ def tab_admin_pin(emp_df):
             st.success("PIN 저장 완료 (UI 즉시 반영)", icon="✅")
         if do_clear:
             if "PIN_hash" not in hmap or "PIN_No" not in hmap: st.error(f"'{EMP_SHEET}'에 PIN 컬럼 없음"); return
-            r = _find_row_by_sabun(ws, hmap, sabun); if r == 0: st.error("사번 미발견"); return
+            r = _find_row_by_sabun(ws, hmap, sabun)
+            if r == 0:
+                st.error("사번 미발견")
+                return
             _update_cell(ws, r, hmap["PIN_hash"], ""); _update_cell(ws, r, hmap["PIN_No"], "")
             p = st.session_state.setdefault("emp_patch", {})
             p[str(sabun)] = {**p.get(str(sabun), {}), "PIN_No": "", "PIN_hash": ""}
@@ -915,6 +921,7 @@ def tab_staff(emp_df: pd.DataFrame):
 
     st.write(f"결과: **{len(view):,}명**")
     st.dataframe(view[show_cols] if show_cols else view, use_container_width=True, height=560, hide_index=True)
+
 
 
 # ======================================================================
