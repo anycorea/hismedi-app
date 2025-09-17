@@ -635,8 +635,6 @@ def tab_staff(emp_df: pd.DataFrame):
         view=view[view.apply(lambda r: any(k in str(r[c]).lower() for c in ["사번","이메일","이름"] if c in r), axis=1)]
     st.write(f"결과: **{len(view):,}명**")
     st.dataframe(view, use_container_width=True, height=560)
-    sheet_id = st.secrets["sheets"]["HR_SHEET_ID"]
-    st.caption(f"📄 원본: https://docs.google.com/spreadsheets/d/{sheet_id}/edit")
 
 # ======================================================================
 # 📌 인사평가(Evaluation)
@@ -2638,12 +2636,23 @@ def main():
             - 직원 탭: 전체 데이터(의사 포함), 권한에 따라 행 제한
             - 평가/직무기술서/직무능력평가/관리자: 동일 데이터 기반, 권한에 따라 접근
             - 상태표시: 상단에 'DB연결 … (KST)'
+            
+            ### 권한(Role) 설명
+            - **admin**: 시스템 최상위 관리자, 모든 메뉴 접근 가능
+            - **manager**: 지정된 부서 소속 직원 관리 가능 (부장/팀장은 자동 권한 부여)
+            - **evaluator**: 평가 권한 보유, 지정된 부서 직원 평가 가능
+            - **seed**: 초기 시스템에서 강제로 삽입된 보장 관리자 계정 (삭제 불가)
             """
         )
-        sheet_id = st.secrets.get("sheets", {}).get("HR_SHEET_ID")
-        if sheet_id:
-            url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit"
-            st.caption(f"📄 원본 스프레드시트: [{url}]({url})")
+
+            # 관리자 전용: DB열기
+        me = st.session_state.get("user", {})
+        my_empno = str(me.get("사번", ""))
+        if my_empno and is_admin(my_empno):
+            sheet_id = st.secrets.get("sheets", {}).get("HR_SHEET_ID")
+            if sheet_id:
+                url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit"
+                st.caption(f"📄 DB열기: [{url}]({url})")
 
     with tabs[-1]:
         safe_run(_render_help, title="도움말")
