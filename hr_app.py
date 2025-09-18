@@ -284,21 +284,34 @@ def _start_session(user_info: dict):
 
 def _ensure_state_owner():
     """
-    세션에 저장된 UI 상태의 소유자와 현재 로그인 사용자가 다르면
-    남아있던 UI 상태 키를 정리합니다.
+    현재 세션의 UI 상태 소유자(사번)와 st.session_state["user"]["사번"]이 다르면,
+    인증 핵심 키를 제외하고 UI 상태를 정리합니다.
+    ※ 외부 변수(user_info 등)는 절대 참조하지 않습니다.
     """
     try:
-        cur = str(st.session_state.get("user", {}).get("사번", "") or "")
+        # 세션에서만 읽어옵니다 (외부 변수 금지)
+        user_dict = st.session_state.get("user") or {}
+        cur = str(user_dict.get("사번", "") or "")
         owner = str(st.session_state.get("_state_owner_sabun", "") or "")
-        if owner and (owner != cur):
+
+        # 소유자 기록이 없으면(첫 설정) 현재 사용자로 세팅만 함
+        if not owner:
+            st.session_state["_state_owner_sabun"] = cur
+            return
+
+        # 소유자가 바뀌었으면 UI 상태(인증 핵심 제외)를 정리
+        if owner != cur:
+            KEEP = {"authed", "user", "auth_expires_at", "_state_owner_sabun"}
             for k in list(st.session_state.keys()):
-                if k not in ("authed", "user", "auth_expires_at", "_state_owner_sabun"):
+                if k not in KEEP:
                     try:
-                        del st.session_state[k]
+                        st.session_state.pop(k, None)
                     except Exception:
                         pass
             st.session_state["_state_owner_sabun"] = cur
+
     except Exception:
+        # 어떤 예외도 앱이 중단되지 않도록 방어
         pass
 
 
