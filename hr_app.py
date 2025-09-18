@@ -183,23 +183,6 @@ def _build_name_map(df: pd.DataFrame) -> dict:
     if df.empty: return {}
     return {str(r["사번"]): str(r.get("이름", "")) for _, r in df.iterrows()}
 
-
-# ---- Single-select helper -----------------------------------------------------
-def _enforce_single_pick(picked):
-    try:
-        import pandas as _pd
-        if picked is not None:
-            try:
-                n = len(picked)
-            except Exception:
-                n = 0
-            if n and n > 1:
-                st.warning("한 명만 선택됩니다. 마지막 체크된 1명으로 고정합니다.", icon="⚠️")
-                st.rerun()
-    except Exception:
-        pass
-
-
 # === Login Enter Key Binder (사번 Enter→PIN, PIN Enter→로그인) ==============
 import streamlit.components.v1 as components
 
@@ -1013,8 +996,7 @@ def tab_staff(emp_df: pd.DataFrame):
         view = view.assign(_k=key).sort_values("_k").drop(columns=["_k"]).reset_index(drop=True)
 
     st.write(f"결과: **{len(view):,}명**")
-        view = view.drop(columns=["PIN_hash"], errors="ignore")
-        st.dataframe(view, use_container_width=True, height=560, hide_index=True)
+    st.dataframe(view.drop(columns=["PIN_hash"], errors="ignore"), use_container_width=True, height=560, hide_index=True)
 
 
 
@@ -1240,12 +1222,10 @@ def tab_eval_input(emp_df: pd.DataFrame):
             column_config={"선택": st.column_config.CheckboxColumn()}, 
          hide_index=True, num_rows="fixed")
         picked = edited_pick.loc[edited_pick["선택"] == True]
-        picked = edited_pick.loc[edited_pick["선택"] == True]
-        _enforce_single_pick(picked)
-        picked = edited_pick.loc[edited_pick["선택"] == True]
-        picked = edited_pick.loc[edited_pick["선택"] == True]
-        _enforce_single_pick(picked)
-        _enforce_single_pick(picked)
+        if len(picked) > 1:
+            st.warning("한 명만 선택됩니다. 마지막 체크된 1명으로 고정합니다.", icon="⚠️")
+            st.rerun()
+
         if not picked.empty:
             r = picked.iloc[-1]
             st.session_state["eval2_target_sabun"] = str(r["사번"])
@@ -1500,8 +1480,10 @@ def tab_job_desc(emp_df: pd.DataFrame):
             column_config={"선택": st.column_config.CheckboxColumn()}, 
          hide_index=True, num_rows="fixed")
         picked = edited.loc[edited["선택"] == True]
-        picked = edited.loc[edited["선택"] == True]
-        _enforce_single_pick(picked)
+        if len(picked) > 1:
+            st.warning("한 명만 선택됩니다. 마지막 체크된 1명으로 고정합니다.", icon="⚠️")
+            st.rerun()
+
         if not picked.empty:
             r = picked.iloc[-1]
             st.session_state["jd2_target_sabun"] = str(r["사번"])
@@ -1867,7 +1849,11 @@ def tab_competency(emp_df: pd.DataFrame):
     if "부서2" not in df.columns:
         df["부서2"] = ""
 
-    df_view = df[["사번","이름","부서1","부서2","직급"]].copy().sort_values(["사번"]).reset_index(drop=True)
+    base = df.copy()
+    if "부서1" not in base.columns: base["부서1"] = ""
+    if "부서2" not in base.columns: base["부서2"] = ""
+    if "직급" not in base.columns: base["직급"] = ""
+    df_view = base[["사번","이름","부서1","부서2","직급"]].copy().sort_values(["사번"]).reset_index(drop=True)
 
     # ── 기본 선택: 로그인 사용자가 보이면 우선 선택, 아니면 1행 선택 ──
     sabun_series = df_view["사번"].astype(str)
@@ -1897,8 +1883,10 @@ def tab_competency(emp_df: pd.DataFrame):
     )
 
     picked = edited.loc[edited["선택"] == True]
-    picked = edited.loc[edited["선택"] == True]
-        _enforce_single_pick(picked)
+    if len(picked) > 1:
+        st.warning("한 명만 선택됩니다. 마지막 체크된 1명으로 고정합니다.", icon="⚠️")
+        st.rerun()
+
     if not picked.empty:
         last = picked.iloc[-1]
         st.session_state["cmpS_target_sabun"] = str(last["사번"])
