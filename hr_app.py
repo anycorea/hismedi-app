@@ -1519,11 +1519,19 @@ def tab_job_desc(emp_df: pd.DataFrame):
 
 
 # ======================================================================
-# 📌 직무능력평가(Competency)
+# 📌 직무능력평가(Competency) — 간편형 유지 + ACL 기반(직무개요 의존 제거) 교체본
 # ======================================================================
-# ── 간편형만 유지 (JD 연동) · 상세 탭 제거 ────────────────────────────────────────
-# 화면 노출 권한: 관리자 또는 evaluator 권한(권한 범위가 1명 이상인 경우)에만 노출
-# Google Sheets API 429(Quota exceeded) 대비: 읽기/쓰기 재시도 래퍼 적용
+# 이 파일은 사용자가 올린 "직무능력평가 권한관리.txt"의 블럭을 그대로 대체하기 위한 전체 교체본입니다.
+# 변경 요약:
+#   1) 접근 권한: 관리자(is_admin) 또는 매니저(is_manager) 또는 evaluator 범위가 1명 이상인 경우 탭 노출
+#   2) 보이기 조건에서 JD(직무개요) 필터를 제거 → 인사평가/직무기술서와 동일하게 ACL 기준으로 대상 표시
+#   3) 기존 "간편형" 평가 UI(등급 라디오/자격 유지/의견/교육이수 metric/저장 등) 그대로 유지
+#
+# 의존 함수/변수(동일 모듈 또는 프로젝트에 이미 존재해야 함):
+#   - get_workbook, tz_kst, kst_now_str, _emp_name_by_sabun
+#   - read_jobdesc_df, get_evaluable_targets, is_admin, is_manager
+#
+# Google Sheets API 대비 재시도 래퍼 포함(429 등)
 
 import time
 import pandas as pd
@@ -1721,9 +1729,14 @@ def read_my_comp_simple_rows(year:int, sabun:str)->pd.DataFrame:
 
 # ───────────────────────── 권한 게이트 ─────────────────────────
 def _has_competency_access(emp_df: pd.DataFrame, sabun: str) -> bool:
-    """관리자 또는 evaluator 범위가 1명 이상인 경우에만 True."""
+    """관리자 또는 매니저, 혹은 evaluator 범위가 1명 이상인 경우 True."""
     try:
         if is_admin(str(sabun)):
+            return True
+    except Exception:
+        pass
+    try:
+        if is_manager(emp_df, str(sabun)):
             return True
     except Exception:
         pass
@@ -1734,7 +1747,7 @@ def _has_competency_access(emp_df: pd.DataFrame, sabun: str) -> bool:
         return False
 
 
-# ───────────────────────── 메인 섹션(간편형만) ─────────────────────────
+# ───────────────────────── 메인 섹션(간편형 그대로, JD 필터 제거) ─────────────────────────
 def tab_competency(emp_df: pd.DataFrame):
     # 권한이 없으면 아무 것도 렌더링하지 않고 종료 (탭/헤더 등 표시 없음)
     user = st.session_state.get("user", {}) or {}
@@ -1744,17 +1757,20 @@ def tab_competency(emp_df: pd.DataFrame):
 
     st.subheader("직무능력평가")
 
-    this_year = datetime.now(tz=tz_kst()).year
+    # 연도 선택
+    try:
+        this_year = datetime.now(tz=tz_kst()).year
+    except Exception:
+        this_year = datetime.now().year
     colY = st.columns([1,3])
     with colY[0]:
         year = st.number_input("평가 연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="cmpS_year")
 
-    # 대상은 내 'evaluator 권한'으로 필터 (관리자는 전체 가능)
-    u = st.session_state["user"]
+    # 대상 풀 구성: 관리자/매니저는 전체, 그 외엔 evaluator 범위만
+    u = st.session_state.get("user", {})
     me_name = str(u.get("이름",""))
 
-    # --- 선택 영역: 표 기반(직무개요 등록 인원만) ---
-    st.markdown("#### 평가 대상 선택 (직무개요 등록 인원)")
+    st.markdown("#### 평가 대상 선택")
     try:
         evaluable = set(map(str, get_evaluable_targets(emp_df, me_sabun)))
     except Exception:
@@ -1764,49 +1780,11 @@ def tab_competency(emp_df: pd.DataFrame):
     df["사번"] = df["사번"].astype(str)
     if "재직여부" in df.columns:
         df = df[df["재직여부"] == True]
-    if evaluable and not is_admin(me_sabun):
-        df = df[df["사번"].isin(evaluable)]  # 관리자는 전체
+    if evaluable and not (is_admin(me_sabun) or is_manager(emp_df, me_sabun)):
+        df = df[df["사번"].isin(evaluable)]  # 관리자/매니저는 전체
 
     if df.empty:
-        # 권한이 있더라도 현재 연도에 대상이 없을 수 있음
         st.info("현재 평가 권한 범위 내 대상이 없습니다.", icon="ℹ️")
-        return
-
-    # 해당 연도의 JD 중 '직무개요'가 채워진 인원만
-    def _sabuns_with_jd_overview(target_year: int) -> set[str]:
-        try:
-            jdf = read_jobdesc_df()
-        except Exception:
-            return set()
-        if jdf is None or len(jdf) == 0:
-            return set()
-        jj = jdf.copy()
-        try:
-            jj["연도"] = jj["연도"].astype(int)
-        except Exception:
-            return set()
-        jj = jj[jj["연도"] == int(target_year)]
-        if jj.empty:
-            return set()
-        jj["직무개요"] = jj["직무개요"].astype(str).fillna("")
-        # 최신 버전 + 개요 비어있지 않은 행
-        if "버전" in jj.columns:
-            try:
-                jj["버전"] = pd.to_numeric(jj["버전"], errors="coerce").fillna(0)
-            except Exception:
-                pass
-            jj = jj.sort_values(["사번","버전"])
-        else:
-            jj = jj.reset_index(drop=True)
-        jj = jj[jj["직무개요"].str.strip() != ""]
-        jj = jj.drop_duplicates("사번", keep="last")
-        return set(jj["사번"].astype(str).tolist())
-
-    jd_ok = _sabuns_with_jd_overview(int(year))
-    df = df[df["사번"].isin(jd_ok)]
-
-    if df.empty:
-        st.info("해당 연도에 '직무개요'가 등록된 평가 대상이 없습니다.", icon="ℹ️")
         return
 
     if "부서2" not in df.columns:
@@ -1825,8 +1803,9 @@ def tab_competency(emp_df: pd.DataFrame):
         height=340,
         key="cmpS_pick_editor",
         column_config={"선택": st.column_config.CheckboxColumn()},
-        
-     hide_index=True, num_rows="fixed")
+        hide_index=True,
+        num_rows="fixed"
+    )
     picked = edited.loc[edited["선택"] == True]
     if picked.empty:
         st.info("표에서 직원 1명을 체크하면 아래에 직무기술서 요약과 입력창이 열립니다.", icon="🧭")
@@ -1838,7 +1817,7 @@ def tab_competency(emp_df: pd.DataFrame):
     st.session_state["cmpS_target_sabun"] = target_sabun
     st.session_state["cmpS_target_name"]  = target_name
 
-    # JD 요약 (직무개요 포함)
+    # JD 요약 (있으면 표시, 없어도 계속 진행)
     jd = _jd_latest_for(target_sabun, int(year))
     with st.expander("직무기술서 요약", expanded=True):
         st.write(f"**직무명:** {jd.get('직무명','') if jd else ''}")
@@ -1871,7 +1850,10 @@ def tab_competency(emp_df: pd.DataFrame):
     with colG[2]:
         qual = st.radio("직무 자격 유지 여부", ["직무 유지","직무 변경","직무비부여"], index=0, key="cmpS_qual")
     with colG[3]:
-        eval_date = st.date_input("평가일자", datetime.now(tz=tz_kst()).date(), key="cmpS_date").strftime("%Y-%m-%d")
+        try:
+            eval_date = st.date_input("평가일자", datetime.now(tz=tz_kst()).date(), key="cmpS_date").strftime("%Y-%m-%d")
+        except Exception:
+            eval_date = st.date_input("평가일자", datetime.now().date(), key="cmpS_date").strftime("%Y-%m-%d")
 
     edu_status = _edu_completion_from_jd(jd)
     st.metric("교육이수 (자동)", edu_status)
@@ -1900,6 +1882,7 @@ def tab_competency(emp_df: pd.DataFrame):
         except Exception as e:
             st.exception(e)
 
+    # 내 제출 현황
     st.markdown("#### 내 제출 현황")
     try:
         my = read_my_comp_simple_rows(int(year), me_sabun)
