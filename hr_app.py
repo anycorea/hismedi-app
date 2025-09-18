@@ -183,6 +183,23 @@ def _build_name_map(df: pd.DataFrame) -> dict:
     if df.empty: return {}
     return {str(r["사번"]): str(r.get("이름", "")) for _, r in df.iterrows()}
 
+
+# ---- Single-select helper -----------------------------------------------------
+def _enforce_single_pick(picked):
+    try:
+        import pandas as _pd
+        if picked is not None:
+            try:
+                n = len(picked)
+            except Exception:
+                n = 0
+            if n and n > 1:
+                st.warning("한 명만 선택됩니다. 마지막 체크된 1명으로 고정합니다.", icon="⚠️")
+                st.rerun()
+    except Exception:
+        pass
+
+
 # === Login Enter Key Binder (사번 Enter→PIN, PIN Enter→로그인) ==============
 import streamlit.components.v1 as components
 
@@ -885,8 +902,6 @@ def tab_admin_pin(emp_df):
             join_src = preview[["사번", "새_PIN"]].copy(); join_src["사번"] = join_src["사번"].astype(str)
             csv_df = full.merge(join_src, on="사번", how="left"); csv_df["새_PIN"] = csv_df["새_PIN"].fillna("")
             csv_df = csv_df.sort_values("사번")
-            st.download_button("CSV 전체 다운로드 (사번,이름,새_PIN)", data=csv_df.to_csv(index=False, encoding="utf-8-sig"), file_name=f"PIN_ALL_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv", mime="text/csv", use_container_width=True)
-            st.download_button("CSV 대상자만 다운로드 (사번,이름,새_PIN)", data=preview.to_csv(index=False, encoding="utf-8-sig"), file_name=f"PIN_TARGETS_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv", mime="text/csv", use_container_width=True)
     if do_issue and preview is not None:
         try:
             ws, header, hmap = ensure_emp_sheet_staff_columns()
@@ -998,7 +1013,8 @@ def tab_staff(emp_df: pd.DataFrame):
         view = view.assign(_k=key).sort_values("_k").drop(columns=["_k"]).reset_index(drop=True)
 
     st.write(f"결과: **{len(view):,}명**")
-    st.dataframe(view, use_container_width=True, height=560, hide_index=True)
+        view = view.drop(columns=["PIN_hash"], errors="ignore")
+        st.dataframe(view, use_container_width=True, height=560, hide_index=True)
 
 
 
@@ -1216,7 +1232,7 @@ def tab_eval_input(emp_df: pd.DataFrame):
         if f_q and f_q.strip():
             k = f_q.strip().lower()
             view = view[view.apply(lambda r: k in str(r["사번"]).lower() or k in str(r["이름"]).lower(), axis=1)]
-        view = view.sort_values(["부서1","부서2","사번"]).reset_index(drop=True)
+        view = view.sort_values(["사번"]).reset_index(drop=True)
         view["선택"] = (view["사번"] == st.session_state["eval2_target_sabun"])
         edited_pick = st.data_editor(
             view[["선택","사번","이름","부서1","부서2","직급"]],
@@ -1224,6 +1240,12 @@ def tab_eval_input(emp_df: pd.DataFrame):
             column_config={"선택": st.column_config.CheckboxColumn()}, 
          hide_index=True, num_rows="fixed")
         picked = edited_pick.loc[edited_pick["선택"] == True]
+        picked = edited_pick.loc[edited_pick["선택"] == True]
+        _enforce_single_pick(picked)
+        picked = edited_pick.loc[edited_pick["선택"] == True]
+        picked = edited_pick.loc[edited_pick["선택"] == True]
+        _enforce_single_pick(picked)
+        _enforce_single_pick(picked)
         if not picked.empty:
             r = picked.iloc[-1]
             st.session_state["eval2_target_sabun"] = str(r["사번"])
@@ -1470,7 +1492,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
         if f_q and f_q.strip():
             k = f_q.strip().lower()
             view = view[view.apply(lambda r: k in str(r["사번"]).lower() or k in str(r["이름"]).lower(), axis=1)]
-        view = view.sort_values(["부서1","부서2","사번"]).reset_index(drop=True)
+        view = view.sort_values(["사번"]).reset_index(drop=True)
         view["선택"] = (view["사번"] == st.session_state["jd2_target_sabun"])
         edited = st.data_editor(
             view[["선택","사번","이름","부서1","부서2","직급"]],
@@ -1478,6 +1500,8 @@ def tab_job_desc(emp_df: pd.DataFrame):
             column_config={"선택": st.column_config.CheckboxColumn()}, 
          hide_index=True, num_rows="fixed")
         picked = edited.loc[edited["선택"] == True]
+        picked = edited.loc[edited["선택"] == True]
+        _enforce_single_pick(picked)
         if not picked.empty:
             r = picked.iloc[-1]
             st.session_state["jd2_target_sabun"] = str(r["사번"])
@@ -1843,7 +1867,7 @@ def tab_competency(emp_df: pd.DataFrame):
     if "부서2" not in df.columns:
         df["부서2"] = ""
 
-    df_view = df[["사번","부서2","이름"]].copy().sort_values(["부서2","사번"]).reset_index(drop=True)
+    df_view = df[["사번","이름","부서1","부서2","직급"]].copy().sort_values(["사번"]).reset_index(drop=True)
 
     # ── 기본 선택: 로그인 사용자가 보이면 우선 선택, 아니면 1행 선택 ──
     sabun_series = df_view["사번"].astype(str)
@@ -1863,7 +1887,7 @@ def tab_competency(emp_df: pd.DataFrame):
 
     st.caption("※ 표에서 평가할 직원을 체크하세요. (여러 명 체크 시 마지막 선택 1명이 적용됩니다)")
     edited = st.data_editor(
-        df_view[["선택","사번","부서2","이름"]],
+        df_view[["선택","사번","이름","부서1","부서2","직급"]],
         use_container_width=True,
         height=340,
         key="cmpS_pick_editor",
@@ -1873,6 +1897,8 @@ def tab_competency(emp_df: pd.DataFrame):
     )
 
     picked = edited.loc[edited["선택"] == True]
+    picked = edited.loc[edited["선택"] == True]
+        _enforce_single_pick(picked)
     if not picked.empty:
         last = picked.iloc[-1]
         st.session_state["cmpS_target_sabun"] = str(last["사번"])
@@ -2230,7 +2256,7 @@ def tab_admin_pin(emp_df):
     with col[0]: only_active = st.checkbox("재직자만", True, key="adm_pin_only_active")
     with col[1]: only_empty = st.checkbox("PIN 미설정자만", True, key="adm_pin_only_empty")
     with col[2]: overwrite_all = st.checkbox("기존 PIN 덮어쓰기", False, disabled=only_empty, key="adm_pin_overwrite")
-    with col[3]: pin_len = st.number_input("자릿수", min_value=4, max_value=8, value=6, step=1, key="adm_pin_len")
+    with col[3]: pin_len = st.number_input("자릿수", min_value=4, max_value=8, value=4, step=1, key="adm_pin_len")
     with col[4]: uniq = st.checkbox("서로 다른 PIN 보장", True, key="adm_pin_uniq")
     candidates = emp_df.copy()
     if only_active and "재직여부" in candidates.columns: candidates = candidates[candidates["재직여부"] == True]
@@ -2259,8 +2285,6 @@ def tab_admin_pin(emp_df):
             join_src = preview[["사번", "새_PIN"]].copy(); join_src["사번"] = join_src["사번"].astype(str)
             csv_df = full.merge(join_src, on="사번", how="left"); csv_df["새_PIN"] = csv_df["새_PIN"].fillna("")
             csv_df = csv_df.sort_values("사번")
-            st.download_button("CSV 전체 다운로드 (사번,이름,새_PIN)", data=csv_df.to_csv(index=False, encoding="utf-8-sig"), file_name=f"PIN_ALL_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv", mime="text/csv", use_container_width=True)
-            st.download_button("CSV 대상자만 다운로드 (사번,이름,새_PIN)", data=preview.to_csv(index=False, encoding="utf-8-sig"), file_name=f"PIN_TARGETS_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv", mime="text/csv", use_container_width=True)
     if do_issue and preview is not None:
         try:
             ws, header, hmap = ensure_emp_sheet_staff_columns()
