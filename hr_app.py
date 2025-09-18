@@ -273,12 +273,69 @@ def _session_valid() -> bool:
     return bool(authed and exp and time.time() < exp)
 
 def _start_session(user_info: dict):
-    st.session_state["authed"]=True; st.session_state["user"]=user_info
-    st.session_state["auth_expires_at"]=time.time()+SESSION_TTL_MIN*60
+    """
+    새 로그인 시작 시 이전 사용자의 UI 상태가 남지 않도록
+    세션 상태를 전부 정리한 뒤 사용자 정보를 설정합니다.
+    """
+    # 1) 이전 사용자 흔적 제거 (UI 키 전체 정리)
+    try:
+        for k in list(st.session_state.keys()):
+            try:
+                del st.session_state[k]
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
+def _ensure_state_owner():
+    """
+    세션에 저장된 UI 상태의 소유자와 현재 로그인 사용자가 다르면
+    남아있던 UI 상태 키를 정리합니다.
+    """
+    try:
+        cur = str(st.session_state.get("user", {}).get("사번", "") or "")
+        owner = str(st.session_state.get("_state_owner_sabun", "") or "")
+        if owner and (owner != cur):
+            for k in list(st.session_state.keys()):
+                if k not in ("authed", "user", "auth_expires_at", "_state_owner_sabun"):
+                    try:
+                        del st.session_state[k]
+                    except Exception:
+                        pass
+            st.session_state["_state_owner_sabun"] = cur
+    except Exception:
+        pass
+
+
+    # 2) 새 사용자 정보 설정
+    st.session_state["authed"] = True
+    st.session_state["user"] = user_info
+    st.session_state["auth_expires_at"] = time.time() + SESSION_TTL_MIN * 60
+    st.session_state["_state_owner_sabun"] = str(user_info.get("사번", ""))
+
+    # 3) 데이터 캐시 정리
+    try:
+        st.cache_data.clear()
+    except Exception:
+        pass
 
 def logout():
-    for k in ("authed","user","auth_expires_at"): st.session_state.pop(k, None)
-    st.cache_data.clear(); st.rerun()
+    """
+    로그아웃 시 UI 상태가 남지 않도록 세션 상태를 완전히 초기화합니다.
+    """
+    try:
+        for k in list(st.session_state.keys()):
+            try:
+                del st.session_state[k]
+            except Exception:
+                pass
+        try:
+            st.cache_data.clear()
+        except Exception:
+            pass
+    finally:
+        st.rerun()
 
 def show_login_form(emp_df: pd.DataFrame):
     st.header("로그인")
@@ -328,8 +385,14 @@ def show_login_form(emp_df: pd.DataFrame):
 
 def require_login(emp_df: pd.DataFrame):
     if not _session_valid():
-        for k in ("authed","user","auth_expires_at"): st.session_state.pop(k, None)
-        show_login_form(emp_df); st.stop()
+        # 인증 정보 정리 후 로그인 폼으로 유도
+        for k in ("authed", "user", "auth_expires_at", "_state_owner_sabun"):
+            st.session_state.pop(k, None)
+        show_login_form(emp_df)
+        st.stop()
+    else:
+        # 동일 브라우저에서 사용자 교체 시 남아있는 UI 상태 정리
+        _ensure_state_owner()
 
 # ── ACL(권한) ─────────────────────────────────────────────────────────────────
 AUTH_SHEET="권한"
