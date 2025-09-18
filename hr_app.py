@@ -272,7 +272,6 @@ def _session_valid() -> bool:
     exp = st.session_state.get("auth_expires_at"); authed = st.session_state.get("authed", False)
     return bool(authed and exp and time.time() < exp)
 
-# ===== PATCH: _start_session (시작) =====
 def _start_session(user_info: dict):
     """
     새 로그인 시작 시 세션 전체를 지우지 않습니다.
@@ -282,7 +281,6 @@ def _start_session(user_info: dict):
     st.session_state["user"] = user_info
     st.session_state["auth_expires_at"] = time.time() + SESSION_TTL_MIN * 60
     st.session_state["_state_owner_sabun"] = str(user_info.get("사번", ""))
-# ===== PATCH: _start_session (끝) =====
 
 def _ensure_state_owner():
     """
