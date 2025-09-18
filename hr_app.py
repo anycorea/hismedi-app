@@ -2922,6 +2922,13 @@ def main():
 
     # 6) 탭 구성
     if u.get("관리자여부", False):
+
+# ===== 공통: 대상자 success 배너 유틸 =====
+def _target_success_banner():
+    u = st.session_state.get("user") or {}
+    name  = (u.get("이름") or u.get("성명") or u.get("name") or "").strip() or "-"
+    sabun = str(u.get("사번") or u.get("id") or "").strip() or "-"
+    st.success(f"대상자: {name} ({sabun})", icon="✅")
         tabs = st.tabs(["직원", "인사평가", "직무기술서", "직무능력평가", "관리자", "도움말"])
     else:
         tabs = st.tabs(["직원", "인사평가", "직무기술서", "직무능력평가", "도움말"])
@@ -2935,6 +2942,7 @@ def main():
     with tabs[2]:
         safe_run(tab_job_desc, emp_df_for_rest, title="직무기술서")
 
+    _target_success_banner()
     with tabs[3]:
         safe_run(tab_competency, emp_df_for_rest, title="직무능력평가")
 
