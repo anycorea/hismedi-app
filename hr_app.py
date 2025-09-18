@@ -2946,8 +2946,7 @@ def main():
         safe_run(tab_job_desc, emp_df_for_rest, title="직무기술서")
 
     with tabs[3]:
-
-    _target_success_banner()
+        _target_success_banner()
         safe_run(tab_competency, emp_df_for_rest, title="직무능력평가")
 
     if u.get("관리자여부", False):
