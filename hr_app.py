@@ -284,34 +284,21 @@ def _start_session(user_info: dict):
 
 def _ensure_state_owner():
     """
-    현재 세션의 UI 상태 소유자(사번)와 st.session_state["user"]["사번"]이 다르면,
-    인증 핵심 키를 제외하고 UI 상태를 정리합니다.
-    ※ 외부 변수(user_info 등)는 절대 참조하지 않습니다.
+    세션에 저장된 UI 상태의 소유자와 현재 로그인 사용자가 다르면
+    남아있던 UI 상태 키를 정리합니다.
     """
     try:
-        # 세션에서만 읽어옵니다 (외부 변수 금지)
-        user_dict = st.session_state.get("user") or {}
-        cur = str(user_dict.get("사번", "") or "")
+        cur = str(st.session_state.get("user", {}).get("사번", "") or "")
         owner = str(st.session_state.get("_state_owner_sabun", "") or "")
-
-        # 소유자 기록이 없으면(첫 설정) 현재 사용자로 세팅만 함
-        if not owner:
-            st.session_state["_state_owner_sabun"] = cur
-            return
-
-        # 소유자가 바뀌었으면 UI 상태(인증 핵심 제외)를 정리
-        if owner != cur:
-            KEEP = {"authed", "user", "auth_expires_at", "_state_owner_sabun"}
+        if owner and (owner != cur):
             for k in list(st.session_state.keys()):
-                if k not in KEEP:
+                if k not in ("authed", "user", "auth_expires_at", "_state_owner_sabun"):
                     try:
-                        st.session_state.pop(k, None)
+                        del st.session_state[k]
                     except Exception:
                         pass
             st.session_state["_state_owner_sabun"] = cur
-
     except Exception:
-        # 어떤 예외도 앱이 중단되지 않도록 방어
         pass
 
 
@@ -3080,3 +3067,76 @@ def main():
 # ── 엔트리포인트 ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     main()
+
+# =================== HR SESSION HOTFIX (BEGIN) ===================
+# 이 블록은 기존 정의를 "덮어쓰기" 합니다. 파일의 맨 아래여야 합니다.
+
+def _start_session(user_info: dict):
+    """
+    로그인 시작 시 인증 핵심 키만 설정합니다.
+    세션 전체 삭제는 하지 않습니다.
+    """
+    _ttl_min = int(globals().get("SESSION_TTL_MIN", 180))
+    st.session_state["authed"] = True
+    st.session_state["user"] = user_info or {}
+    st.session_state["auth_expires_at"] = time.time() + _ttl_min * 60
+    st.session_state["_state_owner_sabun"] = str(st.session_state["user"].get("사번", ""))
+
+def _ensure_state_owner():
+    """
+    현재 세션의 UI 상태 소유자(사번)와 st.session_state["user"]["사번"]이 다르면,
+    인증 핵심 키를 제외하고 UI 상태를 정리합니다.
+    ※ 외부 변수(user_info 등)는 절대 참조하지 않습니다.
+    """
+    try:
+        user_dict = st.session_state.get("user") or {}
+        cur = str(user_dict.get("사번", "") or "")
+        owner = str(st.session_state.get("_state_owner_sabun", "") or "")
+
+        if not owner:
+            st.session_state["_state_owner_sabun"] = cur
+            return
+
+        if owner != cur:
+            KEEP = {"authed", "user", "auth_expires_at", "_state_owner_sabun"}
+            for k in list(st.session_state.keys()):
+                if k not in KEEP:
+                    try:
+                        st.session_state.pop(k, None)
+                    except Exception:
+                        pass
+            st.session_state["_state_owner_sabun"] = cur
+    except Exception:
+        pass
+
+def require_login(emp_df: pd.DataFrame):
+    """
+    세션이 유효하지 않으면 로그인 폼을 보여주고 중단,
+    유효하면 사용자 전환에 따른 UI 잔여 상태를 정리합니다.
+    """
+    if not _session_valid():
+        for k in ("authed", "user", "auth_expires_at", "_state_owner_sabun"):
+            st.session_state.pop(k, None)
+        show_login_form(emp_df)
+        st.stop()
+    _ensure_state_owner()
+
+def logout():
+    """
+    로그아웃 시 세션/캐시 초기화 후 리런.
+    """
+    try:
+        for k in list(st.session_state.keys()):
+            try:
+                st.session_state.pop(k, None)
+            except Exception:
+                pass
+        try:
+            st.cache_data.clear()
+        except Exception:
+            pass
+    finally:
+        st.rerun()
+
+# =================== HR SESSION HOTFIX (END) =====================
+
