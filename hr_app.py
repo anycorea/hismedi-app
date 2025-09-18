@@ -1801,7 +1801,7 @@ def tab_competency(emp_df: pd.DataFrame):
 
     st.caption("※ 표에서 평가할 직원을 체크하세요. (여러 명 체크 시 마지막 선택 1명이 적용됩니다)")
     edited = st.data_editor(
-        df_view[["선택","사번","부서2","이름"]],
+        df_view[["선택","사번","이름","부서1","부서2","직급"]],
         use_container_width=True,
         height=340,
         key="cmpS_pick_editor",
