@@ -2900,7 +2900,7 @@ def main():
             else:
                 safe_run(tab_admin_acl,       emp_df_for_rest, title="관리자·권한")
 
-            # ===== BEGIN 관리자메뉴: 캐시 비우기 (429 완화/안전 재실행 포함) =====
+            # ===== BEGIN 관리자메뉴: 캐시 비우기 (429 완화/안전 재실행 포함, nested expander 제거) =====
             with st.expander("관리자메뉴 → 캐시 비우기", expanded=False):
                 st.caption("권장: 데이터 캐시만 비우고 '안전 재실행'을 사용하면 초기 부하(시트 점검)를 1회 건너뛰어 429를 줄입니다.")
 
@@ -2968,11 +2968,15 @@ def main():
                         st.toast("모든 캐시 삭제 후 재실행", icon="🧨")
                         st.rerun()
 
-                with st.expander("도움말/가이드", expanded=False):
-                    st.markdown("- **안전 재실행(권장)**: 데이터 캐시만 비우고, 다음 실행에서 초기 시트 점검을 1회 건너뜁니다.")
-                    st.markdown("- **즉시 재실행(위험)**: 리소스 캐시까지 지우면 시트/클라이언트가 전면 재초기화되어 429가 발생할 수 있습니다.")
-                    st.markdown("- 반복 429 시 잠시 후 재시도하거나, Streamlit Cloud에서 **Reboot** 후 접속하세요.")
-            # ===== END 관리자메뉴: 캐시 비우기 (429 완화/안전 재실행 포함) =====
+                # 안내(중첩 expander 금지 → 간단 섹션으로 표시)
+                st.markdown("""
+                **도움말/가이드**
+                - **안전 재실행(권장)**: 데이터 캐시만 비우고, 다음 실행에서 초기 시트 점검을 1회 건너뜁니다.
+                - **즉시 재실행(위험)**: 리소스 캐시까지 비우면 시트/클라이언트가 전면 재초기화되어 429가 발생할 수 있습니다.
+                - 반복 429 시 잠시 후 재시도하거나, Streamlit Cloud에서 **Reboot** 후 접속하세요.
+                """)
+            # ===== END 관리자메뉴: 캐시 비우기 (429 완화/안전 재실행 포함, nested expander 제거) =====
+
 
     def _render_help():
         st.markdown(
