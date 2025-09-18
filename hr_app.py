@@ -1216,18 +1216,32 @@ def tab_eval_input(emp_df: pd.DataFrame):
         if f_q and f_q.strip():
             k = f_q.strip().lower()
             view = view[view.apply(lambda r: k in str(r["사번"]).lower() or k in str(r["이름"]).lower(), axis=1)]
-        view = view.sort_values(["부서1","부서2","사번"]).reset_index(drop=True)
+        view = view.sort_values(["사번"]).reset_index(drop=True)
         view["선택"] = (view["사번"] == st.session_state["eval2_target_sabun"])
         edited_pick = st.data_editor(
             view[["선택","사번","이름","부서1","부서2","직급"]],
             use_container_width=True, height=360, key="eval2_pick_editor",
             column_config={"선택": st.column_config.CheckboxColumn()}, 
          hide_index=True, num_rows="fixed")
-        picked = edited_pick.loc[edited_pick["선택"] == True]
-        if not picked.empty:
-            r = picked.iloc[-1]
-            st.session_state["eval2_target_sabun"] = str(r["사번"])
-            st.session_state["eval2_target_name"]  = str(r["이름"])
+
+        # --- 단일 선택 강제: 이번 클릭이 on이면 나머지는 자동 off 처리되도록 세션 갱신 후 즉시 리런 ---
+_orig_sel = view["선택"].reset_index(drop=True)
+_new_sel  = edited_pick["선택"].reset_index(drop=True)
+_diff_idx = [i for i, v in enumerate((_orig_sel != _new_sel).tolist()) if v]
+_set = None
+if _diff_idx:
+    _idx = _diff_idx[-1]
+    if bool(_new_sel.iloc[_idx]):
+        _set = (str(edited_pick.iloc[_idx]["사번"]), str(edited_pick.iloc[_idx]["이름"]))
+    else:
+        _trues = [i for i, v in enumerate(_new_sel.tolist()) if bool(v)]
+        if _trues:
+            _idx = _trues[-1]
+            _set = (str(edited_pick.iloc[_idx]["사번"]), str(edited_pick.iloc[_idx]["이름"]))
+if _set:
+    st.session_state["eval2_target_sabun"] = _set[0]
+    st.session_state["eval2_target_name"]  = _set[1]
+    st.rerun()
         target_sabun = st.session_state["eval2_target_sabun"]
         target_name  = st.session_state["eval2_target_name"]
         st.success(f"대상자: {target_name} ({target_sabun})", icon="✅")
@@ -1470,18 +1484,32 @@ def tab_job_desc(emp_df: pd.DataFrame):
         if f_q and f_q.strip():
             k = f_q.strip().lower()
             view = view[view.apply(lambda r: k in str(r["사번"]).lower() or k in str(r["이름"]).lower(), axis=1)]
-        view = view.sort_values(["부서1","부서2","사번"]).reset_index(drop=True)
+        view = view.sort_values(["사번"]).reset_index(drop=True)
         view["선택"] = (view["사번"] == st.session_state["jd2_target_sabun"])
         edited = st.data_editor(
             view[["선택","사번","이름","부서1","부서2","직급"]],
             use_container_width=True, height=360, key="jd2_pick_editor",
             column_config={"선택": st.column_config.CheckboxColumn()}, 
          hide_index=True, num_rows="fixed")
-        picked = edited.loc[edited["선택"] == True]
-        if not picked.empty:
-            r = picked.iloc[-1]
-            st.session_state["jd2_target_sabun"] = str(r["사번"])
-            st.session_state["jd2_target_name"]  = str(r["이름"])
+
+        # --- 단일 선택 강제: 이번 클릭이 on이면 나머지는 자동 off 처리되도록 세션 갱신 후 즉시 리런 ---
+_orig_sel = view["선택"].reset_index(drop=True)
+_new_sel  = edited["선택"].reset_index(drop=True)
+_diff_idx = [i for i, v in enumerate((_orig_sel != _new_sel).tolist()) if v]
+_set = None
+if _diff_idx:
+    _idx = _diff_idx[-1]
+    if bool(_new_sel.iloc[_idx]):
+        _set = (str(edited.iloc[_idx]["사번"]), str(edited.iloc[_idx]["이름"]))
+    else:
+        _trues = [i for i, v in enumerate(_new_sel.tolist()) if bool(v)]
+        if _trues:
+            _idx = _trues[-1]
+            _set = (str(edited.iloc[_idx]["사번"]), str(edited.iloc[_idx]["이름"]))
+if _set:
+    st.session_state["jd2_target_sabun"] = _set[0]
+    st.session_state["jd2_target_name"]  = _set[1]
+    st.rerun()
         target_sabun = st.session_state["jd2_target_sabun"]
         target_name  = st.session_state["jd2_target_name"]
         st.success(f"대상자: {target_name} ({target_sabun})", icon="✅")
@@ -1843,7 +1871,7 @@ def tab_competency(emp_df: pd.DataFrame):
     if "부서2" not in df.columns:
         df["부서2"] = ""
 
-    df_view = df[["사번","부서2","이름"]].copy().sort_values(["부서2","사번"]).reset_index(drop=True)
+    df_view = df[["사번","부서2","이름"]].copy().sort_values(["사번"]).reset_index(drop=True)
 
     # ── 기본 선택: 로그인 사용자가 보이면 우선 선택, 아니면 1행 선택 ──
     sabun_series = df_view["사번"].astype(str)
@@ -1872,12 +1900,25 @@ def tab_competency(emp_df: pd.DataFrame):
         num_rows="fixed"
     )
 
-    picked = edited.loc[edited["선택"] == True]
-    if not picked.empty:
-        last = picked.iloc[-1]
-        st.session_state["cmpS_target_sabun"] = str(last["사번"])
-        st.session_state["cmpS_target_name"]  = str(last["이름"])
 
+    # --- 단일 선택 강제: 이번 클릭이 on이면 나머지는 자동 off 처리되도록 세션 갱신 후 즉시 리런 ---
+_orig_sel = df_view["선택"].reset_index(drop=True)
+_new_sel  = edited["선택"].reset_index(drop=True)
+_diff_idx = [i for i, v in enumerate((_orig_sel != _new_sel).tolist()) if v]
+_set = None
+if _diff_idx:
+    _idx = _diff_idx[-1]
+    if bool(_new_sel.iloc[_idx]):
+        _set = (str(edited.iloc[_idx]["사번"]), str(edited.iloc[_idx]["이름"]))
+    else:
+        _trues = [i for i, v in enumerate(_new_sel.tolist()) if bool(v)]
+        if _trues:
+            _idx = _trues[-1]
+            _set = (str(edited.iloc[_idx]["사번"]), str(edited.iloc[_idx]["이름"]))
+if _set:
+    st.session_state["cmpS_target_sabun"] = _set[0]
+    st.session_state["cmpS_target_name"]  = _set[1]
+    st.rerun()
     target_sabun = str(st.session_state.get("cmpS_target_sabun",""))
     target_name  = str(st.session_state.get("cmpS_target_name",""))
 
