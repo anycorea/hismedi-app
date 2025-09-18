@@ -1519,20 +1519,21 @@ def tab_job_desc(emp_df: pd.DataFrame):
 
 
 # ======================================================================
-# 📌 직무능력평가(Competency) — 간편형 유지 + "권한부여 직원만" 보기(ACL 엄격)
+# 📌 직무능력평가(Competency) — 간편형 + ACL(권한 부여 직원만) + 자동 선택/대상 표시
 # ======================================================================
 # 교체 대상: 기존 "직무능력평가 권한관리" 블럭 전체
-# 목적:
-#   - 인사평가/직무기술서와 동일하게 **권한이 부여된 직원만** 목록/평가 가능
-#   - 관리자/매니저도 예외 없이 ACL을 따름
-#   - JD(직무개요) 필요 조건 제거 (있으면 요약만 표시)
-#   - 기존 "간편형" UI(등급, 자격, 의견, 교육이수 metric, 저장/현황) 유지
+# 기능 요약:
+#   - 인사평가/직무기술서와 동일: "권한 부여된 직원만" 목록/평가 가능(관리자/매니저도 ACL 준수)
+#   - 로그인한 본인이 목록에 있으면 기본 선택(체크박스) 처리, 아니면 1행 자동 선택
+#   - 표 아래에 "✅ 대상자: 이름 (사번)" 표시
+#   - JD(직무개요) 값 유무와 무관 — 있으면 요약만 표시, 없어도 평가 가능
+#   - 간편형 입력 UI 유지(등급/자격/의견/교육이수/저장/내 제출 현황)
 #
-# 필요 유틸(이미 프로젝트에 존재한다고 가정):
+# 의존 함수(프로젝트에 존재해야 함):
 #   get_workbook, tz_kst, kst_now_str, _emp_name_by_sabun
-#   read_jobdesc_df, get_evaluable_targets, get_allowed_sabuns (있으면 사용)
+#   read_jobdesc_df, get_allowed_sabuns(emp_df, sabun)  # 없으면 get_evaluable_targets로 대체
 #
-# Google Sheets API는 재시도 래퍼로 429 대비
+# Google Sheets API 대비 재시도 래퍼 포함
 
 import time
 import pandas as pd
@@ -1621,6 +1622,7 @@ def _jd_latest_for(sabun:str, year:int) -> dict:
         return {}
 
 def _edu_completion_from_jd(jd_row:dict) -> str:
+    """직원공통필수교육이 비어있지 않으면 '완료', 아니면 '미완료'."""
     val = str(jd_row.get("직원공통필수교육","")).strip()
     return "완료" if val else "미완료"
 
@@ -1718,13 +1720,13 @@ def read_my_comp_simple_rows(year:int, sabun:str)->pd.DataFrame:
     return df.reset_index(drop=True)
 
 
-# ───────────────────────── 권한 게이트(ACL 엄격) ─────────────────────────
+# ───────────────────────── ACL(권한 부여 직원만) ─────────────────────────
 def _allowed_sabuns_for(emp_df: pd.DataFrame, sabun: str) -> set[str]:
     """
     인사평가/직무기술서와 동일한 ACL을 따른다.
-    - get_allowed_sabuns(emp_df, sabun)이 있으면 그것을 1순위로 사용
+    - get_allowed_sabuns(emp_df, sabun)이 있으면 그것을 사용
     - 없으면 evaluator 범위(get_evaluable_targets)로 대체
-    - 관리자/매니저라도 ACL을 그대로 따른다(전체 노출 금지)
+    - 관리자/매니저라도 ACL을 그대로 따른다(전체 노출 없음)
     """
     try:
         return set(map(str, get_allowed_sabuns(emp_df, str(sabun))))
@@ -1736,11 +1738,11 @@ def _allowed_sabuns_for(emp_df: pd.DataFrame, sabun: str) -> set[str]:
         return set()
 
 def _has_competency_access(emp_df: pd.DataFrame, sabun: str) -> bool:
-    """ACL에 따른 대상이 1명 이상이면 탭 노출. (관리자/매니저 예외 없음)"""
+    """ACL에 따른 대상이 1명 이상이면 탭 노출."""
     return len(_allowed_sabuns_for(emp_df, sabun)) > 0
 
 
-# ───────────────────────── 메인 섹션(간편형, ACL 엄격) ─────────────────────────
+# ───────────────────────── 메인 섹션(간편형 + 자동 선택/대상 표시) ─────────────────────────
 def tab_competency(emp_df: pd.DataFrame):
     user = st.session_state.get("user", {}) or {}
     me_sabun = str(user.get("사번", "") or "").strip()
@@ -1775,11 +1777,24 @@ def tab_competency(emp_df: pd.DataFrame):
         df["부서2"] = ""
 
     df_view = df[["사번","부서2","이름"]].copy().sort_values(["부서2","사번"]).reset_index(drop=True)
+
+    # ── 기본 선택: 로그인 사용자가 보이면 우선 선택, 아니면 1행 선택 ──
+    sabun_series = df_view["사번"].astype(str)
+    default_sabun = st.session_state.get("cmpS_target_sabun", "")
+    if (not default_sabun) or (str(default_sabun) not in set(sabun_series)):
+        if str(me_sabun) in set(sabun_series):
+            default_sabun = str(me_sabun)
+        else:
+            default_sabun = str(df_view.iloc[0]["사번"])
+        st.session_state["cmpS_target_sabun"] = default_sabun
+        try:
+            st.session_state["cmpS_target_name"] = str(df_view.loc[sabun_series==default_sabun, "이름"].iloc[0])
+        except Exception:
+            st.session_state["cmpS_target_name"] = ""
+
+    df_view["선택"] = (sabun_series == st.session_state.get("cmpS_target_sabun", ""))
+
     st.caption("※ 표에서 평가할 직원을 체크하세요. (여러 명 체크 시 마지막 선택 1명이 적용됩니다)")
-
-    cur_sabun = st.session_state.get("cmpS_target_sabun","")
-    df_view["선택"] = (df_view["사번"].astype(str) == str(cur_sabun))
-
     edited = st.data_editor(
         df_view[["선택","사번","부서2","이름"]],
         use_container_width=True,
@@ -1789,16 +1804,18 @@ def tab_competency(emp_df: pd.DataFrame):
         hide_index=True,
         num_rows="fixed"
     )
-    picked = edited.loc[edited["선택"] == True]
-    if picked.empty:
-        st.info("표에서 직원 1명을 체크하면 아래에 직무기술서 요약과 입력창이 열립니다.", icon="🧭")
-        return
 
-    r = picked.iloc[-1]
-    target_sabun = str(r["사번"])
-    target_name  = str(r["이름"])
-    st.session_state["cmpS_target_sabun"] = target_sabun
-    st.session_state["cmpS_target_name"]  = target_name
+    picked = edited.loc[edited["선택"] == True]
+    if not picked.empty:
+        last = picked.iloc[-1]
+        st.session_state["cmpS_target_sabun"] = str(last["사번"])
+        st.session_state["cmpS_target_name"]  = str(last["이름"])
+
+    target_sabun = str(st.session_state.get("cmpS_target_sabun",""))
+    target_name  = str(st.session_state.get("cmpS_target_name",""))
+
+    # ✅ 현재 대상자 표시
+    st.markdown(f"**✅ 대상자: {target_name} ({target_sabun})**")
 
     # JD 요약(있으면 표시, 없어도 진행)
     jd = _jd_latest_for(target_sabun, int(year))
