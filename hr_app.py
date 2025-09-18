@@ -272,21 +272,17 @@ def _session_valid() -> bool:
     exp = st.session_state.get("auth_expires_at"); authed = st.session_state.get("authed", False)
     return bool(authed and exp and time.time() < exp)
 
+# ===== PATCH: _start_session (시작) =====
 def _start_session(user_info: dict):
     """
-    새 로그인 시작 시 이전 사용자의 UI 상태가 남지 않도록
-    세션 상태를 전부 정리한 뒤 사용자 정보를 설정합니다.
+    새 로그인 시작 시 세션 전체를 지우지 않습니다.
+    핵심 인증 키만 설정하고, UI 잔존 상태 정리는 `_ensure_state_owner()`가 처리합니다.
     """
-    # 1) 이전 사용자 흔적 제거 (UI 키 전체 정리)
-    try:
-        for k in list(st.session_state.keys()):
-            try:
-                del st.session_state[k]
-            except Exception:
-                pass
-    except Exception:
-        pass
-
+    st.session_state["authed"] = True
+    st.session_state["user"] = user_info
+    st.session_state["auth_expires_at"] = time.time() + SESSION_TTL_MIN * 60
+    st.session_state["_state_owner_sabun"] = str(user_info.get("사번", ""))
+# ===== PATCH: _start_session (끝) =====
 
 def _ensure_state_owner():
     """
