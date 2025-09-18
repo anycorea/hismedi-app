@@ -1882,7 +1882,7 @@ def tab_competency(emp_df: pd.DataFrame):
     target_name  = str(st.session_state.get("cmpS_target_name",""))
 
     # ✅ 현재 대상자 표시
-    st.markdown(f"**✅ 대상자: {target_name} ({target_sabun})**")
+    st.success(f"대상자: {target_name} ({target_sabun})", icon="✅")
 
     # JD 요약(있으면 표시, 없어도 진행)
     jd = _jd_latest_for(target_sabun, int(year))
@@ -2946,7 +2946,6 @@ def main():
         safe_run(tab_job_desc, emp_df_for_rest, title="직무기술서")
 
     with tabs[3]:
-        _target_success_banner()
         safe_run(tab_competency, emp_df_for_rest, title="직무능력평가")
 
     if u.get("관리자여부", False):
