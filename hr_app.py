@@ -2888,6 +2888,61 @@ def main():
             else:
                 safe_run(tab_admin_acl,       emp_df_for_rest, title="관리자·권한")
 
+            # ===== BEGIN 관리자메뉴: 캐시 비우기 (admin 탭 내부에 붙여넣기) =====
+            with st.expander("관리자메뉴 → 캐시 비우기", expanded=False):
+                st.caption("st.cache_data / st.cache_resource 캐시를 비웁니다. 필요 시 앱을 재실행합니다.")
+
+                c1, c2, c3, c4 = st.columns([1, 1, 1, 2])
+                with c1:
+                    if st.button("데이터 캐시 비우기", key="admin_clear_cache_data"):
+                        try:
+                            st.cache_data.clear()
+                            st.success("✅ cache_data cleared")
+                            st.toast("cache_data cleared", icon="✅")
+                        except Exception as e:
+                            st.exception(e)
+
+                with c2:
+                    if st.button("리소스 캐시 비우기", key="admin_clear_cache_resource"):
+                        try:
+                            st.cache_resource.clear()
+                            st.success("✅ cache_resource cleared")
+                            st.toast("cache_resource cleared", icon="✅")
+                        except Exception as e:
+                            st.exception(e)
+
+                with c3:
+                    if st.button("모두 비우기", key="admin_clear_cache_all"):
+                        errs = []
+                        try:
+                            st.cache_data.clear()
+                        except Exception as e:
+                            errs.append(e)
+                        try:
+                            st.cache_resource.clear()
+                        except Exception as e:
+                            errs.append(e)
+                        if errs:
+                            for e in errs:
+                                st.error(f"{type(e).__name__}: {e}")
+                        else:
+                            st.success("✅ cache_data / cache_resource 둘 다 비웠습니다.")
+                            st.toast("모든 캐시를 비웠습니다.", icon="✅")
+
+                with c4:
+                    if st.button("비우고 재실행", key="admin_clear_and_rerun"):
+                        try:
+                            st.cache_data.clear()
+                        except Exception:
+                            pass
+                        try:
+                            st.cache_resource.clear()
+                        except Exception:
+                            pass
+                        st.toast("캐시를 비우고 앱을 재실행합니다.", icon="♻️")
+                        st.rerun()
+            # ===== END 관리자메뉴: 캐시 비우기 (admin 탭 내부에 붙여넣기) =====
+    
     def _render_help():
         st.markdown(
             """
