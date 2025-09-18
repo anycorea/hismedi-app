@@ -273,12 +273,63 @@ def _session_valid() -> bool:
     return bool(authed and exp and time.time() < exp)
 
 def _start_session(user_info: dict):
-    st.session_state["authed"]=True; st.session_state["user"]=user_info
-    st.session_state["auth_expires_at"]=time.time()+SESSION_TTL_MIN*60
+    """
+    새 로그인 시작 시 세션 전체를 지우지 않습니다.
+    핵심 인증 키만 설정하고, UI 잔존 상태 정리는 `_ensure_state_owner()`가 처리합니다.
+    """
+    st.session_state["authed"] = True
+    st.session_state["user"] = user_info
+    st.session_state["auth_expires_at"] = time.time() + SESSION_TTL_MIN * 60
+    st.session_state["_state_owner_sabun"] = str(user_info.get("사번", ""))
+
+def _ensure_state_owner():
+    """
+    세션에 저장된 UI 상태의 소유자와 현재 로그인 사용자가 다르면
+    남아있던 UI 상태 키를 정리합니다.
+    """
+    try:
+        cur = str(st.session_state.get("user", {}).get("사번", "") or "")
+        owner = str(st.session_state.get("_state_owner_sabun", "") or "")
+        if owner and (owner != cur):
+            for k in list(st.session_state.keys()):
+                if k not in ("authed", "user", "auth_expires_at", "_state_owner_sabun"):
+                    try:
+                        del st.session_state[k]
+                    except Exception:
+                        pass
+            st.session_state["_state_owner_sabun"] = cur
+    except Exception:
+        pass
+
+
+    # 2) 새 사용자 정보 설정
+    st.session_state["authed"] = True
+    st.session_state["user"] = user_info
+    st.session_state["auth_expires_at"] = time.time() + SESSION_TTL_MIN * 60
+    st.session_state["_state_owner_sabun"] = str(user_info.get("사번", ""))
+
+    # 3) 데이터 캐시 정리
+    try:
+        st.cache_data.clear()
+    except Exception:
+        pass
 
 def logout():
-    for k in ("authed","user","auth_expires_at"): st.session_state.pop(k, None)
-    st.cache_data.clear(); st.rerun()
+    """
+    로그아웃 시 UI 상태가 남지 않도록 세션 상태를 완전히 초기화합니다.
+    """
+    try:
+        for k in list(st.session_state.keys()):
+            try:
+                del st.session_state[k]
+            except Exception:
+                pass
+        try:
+            st.cache_data.clear()
+        except Exception:
+            pass
+    finally:
+        st.rerun()
 
 def show_login_form(emp_df: pd.DataFrame):
     st.header("로그인")
@@ -328,8 +379,14 @@ def show_login_form(emp_df: pd.DataFrame):
 
 def require_login(emp_df: pd.DataFrame):
     if not _session_valid():
-        for k in ("authed","user","auth_expires_at"): st.session_state.pop(k, None)
-        show_login_form(emp_df); st.stop()
+        # 인증 정보 정리 후 로그인 폼으로 유도
+        for k in ("authed", "user", "auth_expires_at", "_state_owner_sabun"):
+            st.session_state.pop(k, None)
+        show_login_form(emp_df)
+        st.stop()
+    else:
+        # 동일 브라우저에서 사용자 교체 시 남아있는 UI 상태 정리
+        _ensure_state_owner()
 
 # ── ACL(권한) ─────────────────────────────────────────────────────────────────
 AUTH_SHEET="권한"
@@ -1117,9 +1174,7 @@ def read_eval_saved_scores(year: int, eval_type: str, target_sabun: str, evaluat
 def tab_eval_input(emp_df: pd.DataFrame):
     st.subheader("평가")
     this_year = datetime.now(tz=tz_kst()).year
-    colY1, colY2 = st.columns([1,3])
-    with colY2:
-        year = st.number_input("평가 연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="eval2_year")
+    year = st.number_input("평가 연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="eval2_year")
     u = st.session_state["user"]; me_sabun = str(u["사번"]); me_name = str(u["이름"])
     am_admin_or_mgr = (is_admin(me_sabun) or is_manager(emp_df, me_sabun))
     allowed_sabuns = get_allowed_sabuns(emp_df, me_sabun, include_self=True)
@@ -1381,9 +1436,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
         }
 
     this_year = datetime.now(tz=tz_kst()).year
-    colY1, colY2 = st.columns([1,3])
-    with colY2:
-        year = st.number_input("평가 연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="jd2_year")
+    year = st.number_input("연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="jd2_year")
     u = st.session_state["user"]; me_sabun = str(u["사번"]); me_name = str(u["이름"])
     am_admin_or_mgr = (is_admin(me_sabun) or is_manager(emp_df, me_sabun))
     allowed_sabuns = get_allowed_sabuns(emp_df, me_sabun, include_self=True)
@@ -1544,6 +1597,16 @@ import pandas as pd
 import streamlit as st
 from datetime import datetime
 from gspread.exceptions import APIError as _GS_APIError
+
+
+# ===== 공통: 대상자 success 배너 유틸 =====
+def _target_success_banner():
+    u = st.session_state.get("user") or {}
+    name  = (u.get("이름") or u.get("성명") or u.get("name") or "").strip() or "-"
+    sabun = str(u.get("사번") or u.get("id") or "").strip() or "-"
+    st.success(f"대상자: {name} ({sabun})", icon="✅")
+
+
 
 # ───────────────────────── Google Sheets 재시도 유틸 ─────────────────────────
 def _gs_retry(callable_fn, *, tries=5, base_delay=0.5, factor=2.0, retry_codes=(429, 500, 503), desc="sheets"):
@@ -1777,11 +1840,10 @@ def tab_competency(emp_df: pd.DataFrame):
         st.info("현재 권한 범위 내 표시할 대상이 없습니다.", icon="ℹ️")
         return
 
-    for _c in ["부서1","부서2","직급","이름"]:
-        if _c not in df.columns:
-            df[_c] = ""
+    if "부서2" not in df.columns:
+        df["부서2"] = ""
 
-    df_view = df[["사번","이름","부서1","부서2","직급"]].copy().sort_values(["부서2","사번"]).reset_index(drop=True)
+    df_view = df[["사번","부서2","이름"]].copy().sort_values(["부서2","사번"]).reset_index(drop=True)
 
     # ── 기본 선택: 로그인 사용자가 보이면 우선 선택, 아니면 1행 선택 ──
     sabun_series = df_view["사번"].astype(str)
@@ -1801,7 +1863,7 @@ def tab_competency(emp_df: pd.DataFrame):
 
     st.caption("※ 표에서 평가할 직원을 체크하세요. (여러 명 체크 시 마지막 선택 1명이 적용됩니다)")
     edited = st.data_editor(
-        df_view[["선택","사번","이름","부서1","부서2","직급"]],
+        df_view[["선택","사번","부서2","이름"]],
         use_container_width=True,
         height=340,
         key="cmpS_pick_editor",
@@ -1820,7 +1882,7 @@ def tab_competency(emp_df: pd.DataFrame):
     target_name  = str(st.session_state.get("cmpS_target_name",""))
 
     # ✅ 현재 대상자 표시
-    st.markdown(f"**✅ 대상자: {target_name} ({target_sabun})**")
+    st.success(f"대상자: {target_name} ({target_sabun})", icon="✅")
 
     # JD 요약(있으면 표시, 없어도 진행)
     jd = _jd_latest_for(target_sabun, int(year))
@@ -3013,5 +3075,79 @@ def main():
 
 
 # ── 엔트리포인트 ─────────────────────────────────────────────────────────────
+
+
+# =================== HR SESSION HOTFIX (BEGIN) ===================
+# ⚠️ 이 블록은 기존 정의를 "덮어쓰기" 합니다. 이 줄 아래에 main() 호출이 와야 합니다.
+
+def _start_session(user_info: dict):
+    """
+    로그인 시작 시 인증 핵심 키만 설정합니다.
+    세션 전체 삭제는 하지 않습니다.
+    """
+    _ttl_min = int(globals().get("SESSION_TTL_MIN", 180))
+    st.session_state["authed"] = True
+    st.session_state["user"] = user_info or {}
+    st.session_state["auth_expires_at"] = time.time() + _ttl_min * 60
+    st.session_state["_state_owner_sabun"] = str(st.session_state["user"].get("사번", ""))
+
+def _ensure_state_owner():
+    """
+    현재 세션의 UI 상태 소유자(사번)와 st.session_state["user"]["사번"]이 다르면,
+    인증 핵심 키를 제외하고 UI 상태를 정리합니다.
+    ※ 외부 변수(user_info 등)는 절대 참조하지 않습니다.
+    """
+    try:
+        user_dict = st.session_state.get("user") or {}
+        cur = str(user_dict.get("사번", "") or "")
+        owner = str(st.session_state.get("_state_owner_sabun", "") or "")
+
+        if not owner:
+            st.session_state["_state_owner_sabun"] = cur
+            return
+
+        if owner != cur:
+            KEEP = {"authed", "user", "auth_expires_at", "_state_owner_sabun"}
+            for k in list(st.session_state.keys()):
+                if k not in KEEP:
+                    try:
+                        st.session_state.pop(k, None)
+                    except Exception:
+                        pass
+            st.session_state["_state_owner_sabun"] = cur
+    except Exception:
+        pass
+
+def require_login(emp_df: pd.DataFrame):
+    """
+    세션이 유효하지 않으면 로그인 폼을 보여주고 중단,
+    유효하면 사용자 전환에 따른 UI 잔여 상태를 정리합니다.
+    """
+    if not _session_valid():
+        for k in ("authed", "user", "auth_expires_at", "_state_owner_sabun"):
+            st.session_state.pop(k, None)
+        show_login_form(emp_df)
+        st.stop()
+    _ensure_state_owner()
+
+def logout():
+    """
+    로그아웃 시 세션/캐시 초기화 후 리런.
+    """
+    try:
+        for k in list(st.session_state.keys()):
+            try:
+                st.session_state.pop(k, None)
+            except Exception:
+                pass
+        try:
+            st.cache_data.clear()
+        except Exception:
+            pass
+    finally:
+        st.rerun()
+
+# =================== HR SESSION HOTFIX (END) =====================
+
 if __name__ == "__main__":
     main()
