@@ -131,7 +131,7 @@ def _batch_update_row(ws, row_idx: int, hmap: dict, kv: dict):
 # ── Non-critical error silencer ───────────────────────────────────────────────
 SILENT_NONCRITICAL_ERRORS = True
 def _silent_df_exception(e: Exception, where: str, empty_columns: list[str] | None = None) -> pd.DataFrame:
-    if not SILENT_NONCRITICAL_ERRORS: st.error(f"{where}: {e}")
+    if not SILENT_NONCRITICAL_ERRORS: se(f"{where}: {e}")
     return pd.DataFrame(columns=empty_columns or [])
 
 # ── Sheet Helpers ─────────────────────────────────────────────────────────────
@@ -349,24 +349,24 @@ def show_login_form(emp_df: pd.DataFrame):
         st.stop()
 
     if not sabun or not pin:
-        st.error("사번과 PIN을 입력하세요.")
+        se("사번과 PIN을 입력하세요.")
         st.stop()
 
     row = emp_df.loc[emp_df["사번"].astype(str) == str(sabun)]
     if row.empty:
-        st.error("사번을 찾을 수 없습니다.")
+        se("사번을 찾을 수 없습니다.")
         st.stop()
 
     r = row.iloc[0]
     if not _to_bool(r.get("재직여부", False)):
-        st.error("재직 상태가 아닙니다.")
+        se("재직 상태가 아닙니다.")
         st.stop()
 
     stored = str(r.get("PIN_hash","")).strip().lower()
     entered_plain  = _sha256_hex(pin.strip())
     entered_salted = _pin_hash(pin.strip(), str(r.get("사번","")))
     if stored not in (entered_plain, entered_salted):
-        st.error("PIN이 올바르지 않습니다.")
+        se("PIN이 올바르지 않습니다.")
         st.stop()
 
     _start_session({
@@ -703,7 +703,7 @@ def render_status_line():
         _ = get_workbook()
         st.caption(f"DB연결 {kst_now_str()}")
     except Exception as e:
-        st.error(f"DB 연결 실패: {e}", icon="🛑")
+        se(f"DB 연결 실패: {e}", icon="🛑")
 
 
 # ======================================================================
@@ -818,18 +818,18 @@ def tab_admin_pin(emp_df):
         with col[1]: do_clear = st.button("PIN 비우기", use_container_width=True, key="adm_pin_clear")
         if do_save:
             if not pin1 or not pin2:
-                st.error("PIN을 두 번 모두 입력하세요."); return
+                se("PIN을 두 번 모두 입력하세요."); return
             if pin1 != pin2:
-                st.error("PIN 확인이 일치하지 않습니다."); return
+                se("PIN 확인이 일치하지 않습니다."); return
             if not pin1.isdigit():
-                st.error("PIN은 숫자만 입력하세요."); return
+                se("PIN은 숫자만 입력하세요."); return
             if not _to_bool(row.get("재직여부", False)):
-                st.error("퇴직자는 변경할 수 없습니다."); return
+                se("퇴직자는 변경할 수 없습니다."); return
             if "PIN_hash" not in hmap or "PIN_No" not in hmap:
-                st.error(f"'{EMP_SHEET}' 시트에 PIN_hash/PIN_No가 없습니다."); return
+                se(f"'{EMP_SHEET}' 시트에 PIN_hash/PIN_No가 없습니다."); return
             r = _find_row_by_sabun(ws, hmap, sabun)
             if r == 0:
-                st.error("시트에서 사번을 찾지 못했습니다."); return
+                se("시트에서 사번을 찾지 못했습니다."); return
             hashed = _pin_hash(pin1.strip(), str(sabun))
             _update_cell(ws, r, hmap["PIN_hash"], hashed)
             _update_cell(ws, r, hmap["PIN_No"], pin1.strip())
@@ -839,10 +839,10 @@ def tab_admin_pin(emp_df):
             st.success("PIN 저장 완료 (직원 탭 클릭 시 즉시 반영)", icon="✅")
         if do_clear:
             if "PIN_hash" not in hmap or "PIN_No" not in hmap:
-                st.error(f"'{EMP_SHEET}' 시트에 PIN_hash/PIN_No가 없습니다."); return
+                se(f"'{EMP_SHEET}' 시트에 PIN_hash/PIN_No가 없습니다."); return
             r = _find_row_by_sabun(ws, hmap, sabun)
             if r == 0:
-                st.error("시트에서 사번을 찾지 못했습니다."); return
+                se("시트에서 사번을 찾지 못했습니다."); return
             _update_cell(ws, r, hmap["PIN_hash"], "")
             _update_cell(ws, r, hmap["PIN_No"], "")
             p = st.session_state.setdefault("emp_patch", {})
@@ -889,7 +889,7 @@ def tab_admin_pin(emp_df):
         try:
             ws, header, hmap = ensure_emp_sheet_staff_columns()
             if ("PIN_hash" not in hmap) or ("PIN_No" not in hmap) or ("사번" not in hmap):
-                st.error(f"'{EMP_SHEET}' 시트에 '사번' 또는 'PIN_hash'/'PIN_No' 헤더가 없습니다.")
+                se(f"'{EMP_SHEET}' 시트에 '사번' 또는 'PIN_hash'/'PIN_No' 헤더가 없습니다.")
                 return
             sabun_col = hmap["사번"]; pinh_col = hmap["PIN_hash"]; pinn_col = hmap["PIN_No"]
             sabun_values = _retry_call(ws.col_values, sabun_col)[1:]
@@ -916,7 +916,9 @@ def tab_admin_pin(emp_df):
             _bump_emp_ver()
             st.success(f"일괄 발급 완료: 대상 {len(preview):,}명 / 셀 {total:,}개 반영", icon="✅")
         except Exception as e:
-            st.exception(e)
+            (
+    # st.exception(e) gated by safe_guard
+)
 
 def tab_admin_transfer(emp_df):
     st.markdown("### 부서(근무지) 이동")
@@ -934,13 +936,15 @@ def tab_admin_transfer(emp_df):
     with c[2]: sdt = st.date_input("발령일", datetime.now(tz=tz_kst()).date(), key="staff_tr_date")
     if st.button("이동 반영(직원시트 인라인)", type="primary", use_container_width=True, key="adm_tr_apply_inline"):
         if not (str(nd1).strip() or str(nd2).strip()):
-            st.error("부서1/부서2 중 하나는 입력 필요"); return
+            se("부서1/부서2 중 하나는 입력 필요"); return
         try:
             rep = dept_transfer_inline(str(sabun), str(nd1).strip(), str(nd2).strip(), sdt)
             _bump_emp_ver()
             st.success(f"{rep['부서1']} / {rep['부서2']} (발령일 {rep['발령일']}) 반영", icon="✅")
         except Exception as e:
-            st.exception(e)
+            (
+    # st.exception(e) gated by safe_guard
+)
 
 def tab_staff(emp_df: pd.DataFrame):
     u = st.session_state.get("user", {})
@@ -1322,7 +1326,9 @@ def tab_eval_input(emp_df: pd.DataFrame):
             st.toast("평가 저장됨", icon="✅")
             st.session_state["eval2_edit_mode"] = False; st.rerun()
         except Exception as e:
-            st.exception(e)
+            (
+    # st.exception(e) gated by safe_guard
+)
 
     st.markdown("#### 내 제출 현황")
     try:
@@ -1614,7 +1620,9 @@ def tab_job_desc(emp_df: pd.DataFrame):
             rep = upsert_jobdesc(rec, as_new_version=(version == 0))
             st.success(f"저장 완료 (버전 {rep['version']})", icon="✅"); st.rerun()
         except Exception as e:
-            st.exception(e)
+            (
+    # st.exception(e) gated by safe_guard
+)
 
 
 # ======================================================================
@@ -1637,22 +1645,37 @@ def tab_job_desc(emp_df: pd.DataFrame):
 import time
 import pandas as pd
 import streamlit as st
+# ---- global safe helpers (inserted) ----
+def se(msg=None, icon="🛑"):
+    """Safe error emitter that never crashes even if msg is None/undefined."""
+    try:
+        import streamlit as st
+        se(msg if (msg is not None and msg != "") else "오류", icon=icon)
+    except Exception:
+        # In case st is not available yet or Streamlit raises inside error rendering
+        pass
+
 def safe_guard(render_fn, *args, title: str = "", **kwargs):
-    """각 섹션 렌더를 안전하게 감싸 예외가 나도 앱 전체가 죽지 않게 한다."""
+    """Run a section safely; prevent redaction-induced cascades."""
     try:
         return render_fn(*args, **kwargs)
     except Exception as e:
-        base = f"[{title}] 렌더 실패" if title else "렌더 실패"
+        # don't include exception text in user-visible message
         try:
-            st.error(base, icon="🛑")
+            txt = f"[{title}] 렌더 실패" if title else "렌더 실패"
         except Exception:
-            pass
+            txt = "렌더 실패"
+        se(txt, icon="🛑")
         try:
+            import streamlit as st
             if st.secrets.get("app", {}).get("DEBUG", False):
-                st.exception(e)
+                (
+    # st.exception(e) gated by safe_guard
+)
         except Exception:
             pass
         return None
+# ---- end helpers ----
 
 from datetime import datetime
 from gspread.exceptions import APIError as _GS_APIError
@@ -2026,7 +2049,9 @@ def tab_competency(emp_df: pd.DataFrame):
             st.success(("제출 완료" if rep["action"]=="insert" else "업데이트 완료"), icon="✅")
             st.toast("직무능력평가 저장됨", icon="✅")
         except Exception as e:
-            st.exception(e)
+            (
+    # st.exception(e) gated by safe_guard
+)
 
     st.markdown("#### 내 제출 현황")
     try:
@@ -2276,28 +2301,28 @@ def tab_admin_pin(emp_df):
         with col[1]: do_clear = st.button("PIN 비우기", use_container_width=True, key="adm_pin_clear")
         if do_save:
             if not pin1 or not pin2:
-                st.error("PIN을 두 번 모두 입력하세요."); return
+                se("PIN을 두 번 모두 입력하세요."); return
             if pin1 != pin2:
-                st.error("PIN 확인이 일치하지 않습니다."); return
+                se("PIN 확인이 일치하지 않습니다."); return
             if not pin1.isdigit():
-                st.error("PIN은 숫자만 입력하세요."); return
+                se("PIN은 숫자만 입력하세요."); return
             if not _to_bool(row.get("재직여부", False)):
-                st.error("퇴직자는 변경할 수 없습니다."); return
+                se("퇴직자는 변경할 수 없습니다."); return
             if "PIN_hash" not in hmap or "PIN_No" not in hmap:
-                st.error(f"'{EMP_SHEET}' 시트에 PIN_hash/PIN_No가 없습니다."); return
+                se(f"'{EMP_SHEET}' 시트에 PIN_hash/PIN_No가 없습니다."); return
             r = _find_row_by_sabun(ws, hmap, sabun)
             if r == 0:
-                st.error("시트에서 사번을 찾지 못했습니다."); return
+                se("시트에서 사번을 찾지 못했습니다."); return
             _update_cell(ws, r, hmap["PIN_hash"], _pin_hash(pin1.strip(), str(sabun)))
             _update_cell(ws, r, hmap["PIN_No"], pin1.strip())
             st.cache_data.clear()
             st.success("PIN 저장 완료 (PIN_No/Hash 반영)", icon="✅")
         if do_clear:
             if "PIN_hash" not in hmap or "PIN_No" not in hmap:
-                st.error(f"'{EMP_SHEET}' 시트에 PIN_hash/PIN_No가 없습니다."); return
+                se(f"'{EMP_SHEET}' 시트에 PIN_hash/PIN_No가 없습니다."); return
             r = _find_row_by_sabun(ws, hmap, sabun)
             if r == 0:
-                st.error("시트에서 사번을 찾지 못했습니다."); return
+                se("시트에서 사번을 찾지 못했습니다."); return
             _update_cell(ws, r, hmap["PIN_hash"], "")
             _update_cell(ws, r, hmap["PIN_No"], "")
             st.cache_data.clear()
@@ -2342,7 +2367,7 @@ def tab_admin_pin(emp_df):
         try:
             ws, header, hmap = ensure_emp_sheet_staff_columns()
             if ("PIN_hash" not in hmap) or ("PIN_No" not in hmap) or ("사번" not in hmap):
-                st.error(f"'{EMP_SHEET}' 시트에 '사번' 또는 'PIN_hash'/'PIN_No' 헤더가 없습니다.")
+                se(f"'{EMP_SHEET}' 시트에 '사번' 또는 'PIN_hash'/'PIN_No' 헤더가 없습니다.")
                 return
 
             sabun_col = hmap["사번"]
@@ -2382,7 +2407,9 @@ def tab_admin_pin(emp_df):
             st.toast("PIN 일괄 발급 반영됨", icon="✅")
 
         except Exception as e:
-            st.exception(e)
+            (
+    # st.exception(e) gated by safe_guard
+)
 
 def tab_admin_transfer(emp_df):
     st.markdown("### 부서(근무지) 이동")
@@ -2416,12 +2443,14 @@ def tab_admin_transfer(emp_df):
 
     if st.button("이동 반영(직원시트 인라인)", type="primary", use_container_width=True, key="adm_tr_apply_inline"):
         if not (str(new_dept1).strip() or str(new_dept2).strip()):
-            st.error("새 부서1/부서2 중 최소 하나는 입력/선택"); return
+            se("새 부서1/부서2 중 최소 하나는 입력/선택"); return
         try:
             rep = dept_transfer_inline(str(sabun), str(new_dept1).strip(), str(new_dept2).strip(), start_date)
             st.success(f"반영: {rep['부서1']} / {rep['부서2']} (발령일 {rep['발령일']})", icon="✅")
         except Exception as e:
-            st.exception(e)
+            (
+    # st.exception(e) gated by safe_guard
+)
 
 
 
@@ -2481,7 +2510,7 @@ def tab_admin_eval_items():
                 col_id = hmap.get("항목ID")
                 col_ord = hmap.get("순서")
                 if not col_id or not col_ord:
-                    st.error("'항목ID' 또는 '순서' 헤더가 없습니다.")
+                    se("'항목ID' 또는 '순서' 헤더가 없습니다.")
                     st.stop()
 
                 id_vals = _retry_call(ws.col_values, col_id)[1:]
@@ -2500,7 +2529,9 @@ def tab_admin_eval_items():
                 st.success(f"순서 저장 완료: {changed}건 반영", icon="✅")
                 st.rerun()
             except Exception as e:
-                st.exception(e)
+                (
+    # st.exception(e) gated by safe_guard
+)
 
     st.divider()
     st.markdown("### 신규 등록 / 수정")
@@ -2539,7 +2570,7 @@ def tab_admin_eval_items():
 
         if st.button("저장(신규/수정)", type="primary", use_container_width=True, key="adm_eval_save_v3"):
             if not name.strip():
-                st.error("항목명을 입력하세요.")
+                se("항목명을 입력하세요.")
             else:
                 try:
                     ensure_eval_items_sheet()
@@ -2584,7 +2615,7 @@ def tab_admin_eval_items():
                                 if str(v).strip() == str(item_id).strip():
                                     idx = i; break
                         if idx == 0:
-                            st.error("대상 항목을 찾을 수 없습니다.")
+                            se("대상 항목을 찾을 수 없습니다.")
                         else:
                             ws.update_cell(idx, hmap["항목"], name.strip())
                             ws.update_cell(idx, hmap["내용"], desc.strip())
@@ -2595,7 +2626,9 @@ def tab_admin_eval_items():
                             st.success("업데이트 완료")
                             st.rerun()
                 except Exception as e:
-                    st.exception(e)
+                    (
+    # st.exception(e) gated by safe_guard
+)
 
         if item_id:
             if st.button("비활성화(소프트 삭제)", use_container_width=True, key="adm_eval_disable_v3"):
@@ -2604,7 +2637,7 @@ def tab_admin_eval_items():
                     header = ws.row_values(1); hmap = {n: i + 1 for i, n in enumerate(header)}
                     col_id = hmap.get("항목ID"); col_active = hmap.get("활성")
                     if not (col_id and col_active):
-                        st.error("'항목ID' 또는 '활성' 컬럼이 없습니다.")
+                        se("'항목ID' 또는 '활성' 컬럼이 없습니다.")
                     else:
                         vals = _retry_call(ws.col_values, col_id)
                         for i, v in enumerate(vals[1:], start=2):
@@ -2613,7 +2646,9 @@ def tab_admin_eval_items():
                         st.cache_data.clear()
                         st.success("비활성화 완료"); st.rerun()
                 except Exception as e:
-                    st.exception(e)
+                    (
+    # st.exception(e) gated by safe_guard
+)
 
             if st.button("행 삭제(완전 삭제)", use_container_width=True, key="adm_eval_delete_v3"):
                 try:
@@ -2621,7 +2656,7 @@ def tab_admin_eval_items():
                     header = ws.row_values(1); hmap = {n: i + 1 for i, n in enumerate(header)}
                     col_id = hmap.get("항목ID")
                     if not col_id:
-                        st.error("'항목ID' 컬럼이 없습니다.")
+                        se("'항목ID' 컬럼이 없습니다.")
                     else:
                         vals = _retry_call(ws.col_values, col_id)
                         for i, v in enumerate(vals[1:], start=2):
@@ -2630,7 +2665,9 @@ def tab_admin_eval_items():
                         st.cache_data.clear()
                         st.success("삭제 완료"); st.rerun()
                 except Exception as e:
-                    st.exception(e)
+                    (
+    # st.exception(e) gated by safe_guard
+)
 
 
 def tab_admin_jobdesc_defaults():
@@ -2657,7 +2694,9 @@ def tab_admin_jobdesc_defaults():
             set_setting("JD.검토주기", v_review, memo, str(u.get("사번", "")), str(u.get("이름", "")))
             st.success("저장되었습니다.", icon="✅")
         except Exception as e:
-            st.exception(e)
+            (
+    # st.exception(e) gated by safe_guard
+)
 
     st.divider()
     df = read_settings_df()
@@ -2685,7 +2724,7 @@ def tab_admin_acl(emp_df):
     except Exception:
         am_admin = False
     if not am_admin:
-        st.error("Master만 저장할 수 있습니다. (표/저장 모두 비활성화)", icon="🛡️")
+        se("Master만 저장할 수 있습니다. (표/저장 모두 비활성화)", icon="🛡️")
 
     try:
         base = emp_df[["사번", "이름", "부서1", "부서2"]].copy()
@@ -2859,7 +2898,7 @@ def tab_admin_acl(emp_df):
 
     if do_save:
         if errs:
-            st.error("유효성 오류가 있어 저장하지 않았습니다. 위 경고를 확인해주세요.", icon="⚠️")
+            se("유효성 오류가 있어 저장하지 않았습니다. 위 경고를 확인해주세요.", icon="⚠️")
             return
         try:
             ws = get_workbook().worksheet(AUTH_SHEET)
@@ -2881,7 +2920,9 @@ def tab_admin_acl(emp_df):
             st.rerun()
 
         except Exception as e:
-            st.exception(e)
+            (
+    # st.exception(e) gated by safe_guard
+)
 
 
 # ======================================================================
@@ -2934,34 +2975,6 @@ def startup_sanity_checks():
 
     return problems
 
-
-def safe_guard(render_fn, *args, title: str = "", **kwargs):
-    """탭/섹션 하나를 안전하게 감싸서, 예외가 나도 전체 앱이 멈추지 않도록."""
-    try:
-        return render_fn(*args, **kwargs)
-    except Exception as e:
-        msg = f"[{title}] 렌더 실패: {e}" if title else f"렌더 실패: {e}"
-        st.error("오류", icon="🛑")
-        return None
-# ── Startup Sanity Checks & Safe Runner (END) ────────────────────────────────
-
-
-# ===== [A] startup_sanity_checks() 맨 위에 추가 (들여쓰기 4칸) =====
-# 안전 재실행 시 다음 1회 부팅 점검을 건너뜁니다.
-    try:
-        import streamlit as st
-        if st.session_state.get("_skip_boot_checks", False):
-            st.session_state["_skip_boot_checks"] = False
-            return []
-    except Exception:
-        pass
-# ===== [A] END =====
-
-
-# ======================================================================
-# 📌 Startup & Main
-# ======================================================================
-# ── 메인 ──────────────────────────────────────────────────────────────────────
 def main():
     st.markdown(f"## {APP_TITLE}")
     render_status_line()
@@ -2970,7 +2983,7 @@ def main():
     try:
         emp_df_all = read_sheet_df(EMP_SHEET, silent=True)
     except Exception as e:
-        st.error(f"'{EMP_SHEET}' 시트 로딩 실패: {e}")
+        se(f"'{EMP_SHEET}' 시트 로딩 실패: {e}")
         return
 
     # ▶ 스타트업 헬스체크: 경고만 출력(앱은 계속 실행)
@@ -3057,7 +3070,9 @@ def main():
                             st.success("✅ cache_data cleared")
                             st.toast("cache_data cleared", icon="✅")
                         except Exception as e:
-                            st.exception(e)
+                            (
+    # st.exception(e) gated by safe_guard
+)
 
                 with c2:
                     if st.button("리소스 캐시 비우기", key="admin_clear_cache_resource"):
@@ -3066,7 +3081,9 @@ def main():
                             st.success("✅ cache_resource cleared")
                             st.toast("cache_resource cleared", icon="✅")
                         except Exception as e:
-                            st.exception(e)
+                            (
+    # st.exception(e) gated by safe_guard
+)
 
                 with c3:
                     if st.button("모두 비우기", key="admin_clear_cache_all"):
@@ -3081,7 +3098,7 @@ def main():
                             errs.append(e)
                         if errs:
                             for e in errs:
-                                st.error(f"{type(e).__name__}: {e}")
+                                se(f"{type(e).__name__}: {e}")
                         else:
                             st.success("✅ cache_data / cache_resource 둘 다 비웠습니다.")
                             st.toast("모든 캐시를 비웠습니다.", icon="✅")
