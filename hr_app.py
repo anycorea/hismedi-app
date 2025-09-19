@@ -2919,17 +2919,32 @@ def startup_sanity_checks():
 
 
 def safe_run(render_fn, *args, title: str = "", **kwargs):
-    msg = None
+    """탭/섹션 하나를 안전하게 감싸서, 예외가 나도 전체 앱이 멈추지 않도록."""
     try:
         return render_fn(*args, **kwargs)
     except Exception as e:
         msg = f"[{title}] 렌더 실패: {e}" if title else f"렌더 실패: {e}"
-        try:
-            st.error(msg, icon="🛑")
-        except Exception:
-            pass
+        st.error(msg, icon="🛑")
         return None
+# ── Startup Sanity Checks & Safe Runner (END) ────────────────────────────────
 
+
+# ===== [A] startup_sanity_checks() 맨 위에 추가 (들여쓰기 4칸) =====
+# 안전 재실행 시 다음 1회 부팅 점검을 건너뜁니다.
+    try:
+        import streamlit as st
+        if st.session_state.get("_skip_boot_checks", False):
+            st.session_state["_skip_boot_checks"] = False
+            return []
+    except Exception:
+        pass
+# ===== [A] END =====
+
+
+# ======================================================================
+# 📌 Startup & Main
+# ======================================================================
+# ── 메인 ──────────────────────────────────────────────────────────────────────
 def main():
     st.markdown(f"## {APP_TITLE}")
     render_status_line()
@@ -3091,8 +3106,35 @@ def main():
 
 
     def _render_help():
-    st.subheader('도움말')
-    st.caption('도움말 콘텐츠는 준비 중입니다.')
+        st.subheader('도움말')
+        st.caption('도움말 콘텐츠는 준비 중입니다.')
+
+            ### 권한(Role) 설명
+            - **admin**: 시스템 최상위 관리자, 모든 메뉴 접근 가능
+            - **manager**: 지정된 부서 소속 직원 관리 가능 (부장/팀장은 자동 권한 부여)
+            - **evaluator**: 평가 권한 보유, 지정된 부서 직원 평가 가능
+            - **seed**: 초기 시스템에서 강제로 삽입된 보장 관리자 계정 (삭제 불가)
+            """
+        )
+
+            # 관리자 전용: DB열기
+        me = st.session_state.get("user", {})
+        my_empno = str(me.get("사번", ""))
+        if my_empno and is_admin(my_empno):
+            sheet_id = st.secrets.get("sheets", {}).get("HR_SHEET_ID")
+            if sheet_id:
+                url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit"
+                st.caption(f"📄 DB열기: [{url}]({url})")
+
+    with tabs[-1]:
+        safe_run(_render_help, title="도움말")
+
+
+# ── 엔트리포인트 ─────────────────────────────────────────────────────────────
+
+
+# =================== HR SESSION HOTFIX (BEGIN) ===================
+# ⚠️ 이 블록은 기존 정의를 "덮어쓰기" 합니다. 이 줄 아래에 main() 호출이 와야 합니다.
 
 def _start_session(user_info: dict):
     """
