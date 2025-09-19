@@ -1218,7 +1218,7 @@ def tab_eval_input(emp_df: pd.DataFrame):
         view["선택"] = (view["사번"].astype(str) == str(st.session_state.get("eval2_target_sabun","")))
         edited_pick = st.data_editor(
             view[["선택","사번","이름","부서1","부서2","직급"]],
-            use_container_width=True, height=360, key=f"eval2_pick_editor_{st.session_state.get(\'eval2_target_sabun\', \'\')}",
+            use_container_width=True, height=360, key=f"eval2_pick_editor_{st.session_state.get('eval2_target_sabun', '')}",
             column_config={"선택": st.column_config.CheckboxColumn()}, 
          hide_index=True, num_rows="fixed")
         picked = edited_pick.loc[edited_pick["선택"] == True]
@@ -1476,7 +1476,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
         view["선택"] = (view["사번"].astype(str) == str(st.session_state.get("jd2_target_sabun","")))
         edited = st.data_editor(
             view[["선택","사번","이름","부서1","부서2","직급"]],
-            use_container_width=True, height=360, key=f"jd2_pick_editor_{st.session_state.get(\'jd2_target_sabun\', \'\')}",
+            use_container_width=True, height=360, key=f"jd2_pick_editor_{st.session_state.get('jd2_target_sabun', '')}",
             column_config={"선택": st.column_config.CheckboxColumn()}, 
          hide_index=True, num_rows="fixed")
         picked = edited.loc[edited["선택"] == True]
@@ -1872,7 +1872,7 @@ def tab_competency(emp_df: pd.DataFrame):
         df_view[["선택","사번","이름","부서1","부서2","직급"]],
         use_container_width=True,
         height=340,
-        key=f"cmpS_pick_editor_{st.session_state.get(\'cmpS_target_sabun\', \'\')}",
+        key=f"cmpS_pick_editor_{st.session_state.get('cmpS_target_sabun', '')}",
         column_config={"선택": st.column_config.CheckboxColumn()},
         hide_index=True,
         num_rows="fixed"
