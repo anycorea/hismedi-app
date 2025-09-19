@@ -1201,8 +1201,7 @@ def tab_eval_input(emp_df: pd.DataFrame):
         # --- 단일 선택: selectbox로 대상자 선택 후 표는 읽기전용으로 표시 ---
         _sabuns = view["사번"].astype(str).tolist()
         _names  = view["이름"].astype(str).tolist() if "이름" in view.columns else [""] * len(_sabuns)
-        _d2 = view["부서2"].astype(str).tolist() if "부서2" in view.columns else [""] * len(_sabuns)
-        _opts = [f"{s} - {n} - {d2}" for s,n,d2 in zip(_sabuns,_names,_d2)]
+        _opts   = [f"{s} - {n}" for s, n in zip(_sabuns, _names)]
         _target = str(st.session_state.get("eval2_target_sabun", ""))
         try:
             _idx_default = _sabuns.index(_target) if _target in _sabuns else 0
@@ -1461,8 +1460,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
         # --- 단일 선택: selectbox로 대상자 선택 후 표는 읽기전용으로 표시 ---
         _sabuns = view["사번"].astype(str).tolist()
         _names  = view["이름"].astype(str).tolist() if "이름" in view.columns else [""] * len(_sabuns)
-        _d2 = view["부서2"].astype(str).tolist() if "부서2" in view.columns else [""] * len(_sabuns)
-        _opts = [f"{s} - {n} - {d2}" for s,n,d2 in zip(_sabuns,_names,_d2)]
+        _opts   = [f"{s} - {n}" for s, n in zip(_sabuns, _names)]
         _target = str(st.session_state.get("jd2_target_sabun", ""))
         try:
             _idx_default = _sabuns.index(_target) if _target in _sabuns else 0
@@ -1874,7 +1872,8 @@ def tab_competency(emp_df: pd.DataFrame):
     # 셀렉트 + 표 (체크를 우선 반영)
     sabuns = df["사번"].astype(str).tolist()
     names = df["이름"].astype(str).tolist()
-    opts = [f"{s} - {n}" for s, n in zip(sabuns, names)]
+    d2s = df["부서2"].astype(str).tolist() if "부서2" in df.columns else [""] * len(sabuns)
+    opts = [f"{s} - {n} - {d2}" for s, n, d2 in zip(sabuns, names, d2s)]
 
     sel_idx = sabuns.index(default_sabun) if default_sabun in sabuns else 0
     sel_label = st.selectbox("대상자 선택", opts, index=sel_idx, key="cmpS_pick_select")
