@@ -54,19 +54,19 @@ st.markdown(
 )
 
 
-# === 공통 대상자 동기화 유틸 =============================
+# === 대상자 동기화 유틸 (공통) ===============================
 def _get_name_by_sabun(emp_df, sabun: str) -> str:
     s = str(sabun)
     try:
         m = st.session_state.get("name_by_sabun")
-        if isinstance(m, dict) and s in m: 
+        if isinstance(m, dict) and s in m:
             return m[s]
     except Exception:
         pass
     try:
         row = emp_df.loc[emp_df["사번"].astype(str) == s]
         if not row.empty:
-            return str(row.iloc[0].get("이름", ""))
+            return str(row.iloc[0].get("이름",""))
     except Exception:
         pass
     return ""
@@ -76,10 +76,8 @@ def _sync_target_all_tabs(sabun: str, emp_df):
     if not s:
         return
     nm = _get_name_by_sabun(emp_df, s)
-    # 공통
     st.session_state["target_sabun"] = s
     st.session_state["target_name"]  = nm
-    # 탭별
     st.session_state["eval2_target_sabun"] = s
     st.session_state["eval2_target_name"]  = nm
     st.session_state["jd2_target_sabun"]   = s
@@ -88,11 +86,10 @@ def _sync_target_all_tabs(sabun: str, emp_df):
     st.session_state["cmpS_target_name"]   = nm
 
 def _pull_any_target_into_all(emp_df):
-    # 우선순위: eval2 -> jd2 -> cmpS -> target_sabun
-    s = (str(st.session_state.get("eval2_target_sabun") or "") 
+    s = (str(st.session_state.get("target_sabun") or "") 
+         or str(st.session_state.get("eval2_target_sabun") or "")
          or str(st.session_state.get("jd2_target_sabun") or "")
-         or str(st.session_state.get("cmpS_target_sabun") or "")
-         or str(st.session_state.get("target_sabun") or "")).strip()
+         or str(st.session_state.get("cmpS_target_sabun") or "")).strip()
     if s:
         _sync_target_all_tabs(s, emp_df)
 
@@ -417,7 +414,6 @@ def show_login_form(emp_df: pd.DataFrame):
         "이름": str(r.get("이름","")),
         "관리자여부": False,
     })
-    # 로그인 직후 세 탭 대상자를 로그인 사용자로 초기화
     try:
         _sync_target_all_tabs(str(r.get("사번","")), emp_df)
     except Exception:
@@ -991,6 +987,10 @@ def tab_admin_transfer(emp_df):
             st.exception(e)
 
 def tab_staff(emp_df: pd.DataFrame):
+    try:
+        _pull_any_target_into_all(emp_df)
+    except Exception:
+        pass
     u = st.session_state.get("user", {})
     me = str(u.get("사번", ""))
     if not is_admin(me):
@@ -1008,9 +1008,9 @@ def tab_staff(emp_df: pd.DataFrame):
                 pass
             st.session_state.pop("emp_last_loaded_ver", None)
             try:
-                # st.rerun()  # removed to keep tab focus
+                st.rerun()
             except Exception:
-                # st.experimental_rerun()  # removed to keep tab focus
+                st.experimental_rerun()
 
     df = emp_df.copy()
 
@@ -1294,7 +1294,7 @@ def tab_eval_input(emp_df: pd.DataFrame):
     with col_mode[0]:
         if st.button(("수정모드로 전환" if not st.session_state["eval2_edit_mode"] else "보기모드로 전환"),
                      use_container_width=True, key="eval2_toggle"):
-            st.session_state["eval2_edit_mode"] = not st.session_state["eval2_edit_mode"]; # st.rerun()  # removed to keep tab focus
+            st.session_state["eval2_edit_mode"] = not st.session_state["eval2_edit_mode"]; st.rerun()
     with col_mode[1]: st.caption(f"현재: **{'수정모드' if st.session_state['eval2_edit_mode'] else '보기모드'}**")
     edit_mode = bool(st.session_state["eval2_edit_mode"])
 
@@ -1355,7 +1355,7 @@ def tab_eval_input(emp_df: pd.DataFrame):
             rep = upsert_eval_response(emp_df, int(year), eval_type, str(target_sabun), str(me_sabun), scores, "제출")
             st.success(("제출 완료" if rep["action"] == "insert" else "업데이트 완료") + f" (총점 {rep['total']}점)", icon="✅")
             st.toast("평가 저장됨", icon="✅")
-            st.session_state["eval2_edit_mode"] = False; # st.rerun()  # removed to keep tab focus
+            st.session_state["eval2_edit_mode"] = False; st.rerun()
         except Exception as e:
             st.exception(e)
 
@@ -1885,7 +1885,7 @@ def tab_competency(emp_df: pd.DataFrame):
             st.session_state["cmpS_target_name"] = _emp_name_by_sabun(emp_df, str(_glob_pick))
         except Exception:
             pass
-        # st.rerun()  # removed to keep tab focus
+        st.rerun()
     """직무능력평가: 인사평가/직무기술서와 동일한 권한(ACL)으로 직원 목록을 필터링하고, JD 유무와 무관하게 평가 가능."""
     user = st.session_state.get("user", {}) or {}
     me_sabun = str(user.get("사번", "") or "").strip()
@@ -1952,7 +1952,7 @@ def tab_competency(emp_df: pd.DataFrame):
                 st.session_state["cmpS_target_name"] = _emp_name_by_sabun(emp_df, str(_sabun))
             except Exception:
                 pass
-            # st.rerun()  # removed to keep tab focus
+            st.rerun()
 
     sel_label = st.selectbox("대상자 선택", opts, index=sel_idx, key="cmpS_pick_select", on_change=_cmpS_on_pick_change)
     sel_sabun = sel_label.split(" - ", 1)[0] if isinstance(sel_label, str) else sabuns[sel_idx]
@@ -2039,7 +2039,7 @@ def tab_competency(emp_df: pd.DataFrame):
         for k in ["cmpS_main", "cmpS_extra", "cmpS_qual", "cmpS_opinion"]:
             if k in st.session_state:
                 del st.session_state[k]
-        # st.rerun()  # removed to keep tab focus
+        st.rerun()
 
     if do_save:
         try:
