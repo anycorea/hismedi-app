@@ -9,25 +9,6 @@ from datetime import datetime, timedelta
 from typing import Any
 import pandas as pd, streamlit as st
 
-
-# === 공용 선택자 표시 유틸 =======================================
-def _display_target_row(row: pd.Series) -> str:
-    get = lambda k: str(row.get(k, "") or "")
-    return f"{get('사번')} - {get('이름')} - {get('부서1')} - {get('부서2')} - {get('직급')}"
-
-def build_target_selector(emp_df: pd.DataFrame, key: str, label: str = "대상자 선택") -> pd.Series | None:
-    if emp_df is None or emp_df.empty:
-        st.warning("직원 데이터가 없습니다.")
-        return None
-    df = emp_df.copy()
-    for c in ["사번","이름","부서1","부서2","직급"]:
-        if c not in df.columns: df[c] = ""
-    df["_disp"] = df.apply(_display_target_row, axis=1)
-    choice = st.selectbox(label, df["_disp"].tolist(), index=0 if len(df)>0 else None, key=key)
-    if choice is None: return None
-    return df.loc[df["_disp"] == choice].iloc[0]
-
-
 # KST
 try:
     from zoneinfo import ZoneInfo
@@ -1220,11 +1201,8 @@ def tab_eval_input(emp_df: pd.DataFrame):
         # --- 단일 선택: selectbox로 대상자 선택 후 표는 읽기전용으로 표시 ---
         _sabuns = view["사번"].astype(str).tolist()
         _names  = view["이름"].astype(str).tolist() if "이름" in view.columns else [""] * len(_sabuns)
-        _d1   = view["부서1"].astype(str).tolist() if "부서1" in view.columns else [""] * len(_sabuns)
-        _d2   = view["부서2"].astype(str).tolist() if "부서2" in view.columns else [""] * len(_sabuns)
-        _grade= view["직급"].astype(str).tolist()  if "직급"  in view.columns else [""] * len(_sabuns)
-
-        _opts = [f"{s} - {n} - {d1} - {d2} - {g}" for s,n,d1,d2,g in zip(_sabuns,_names,_d1,_d2,_grade)]
+        _d2 = view["부서2"].astype(str).tolist() if "부서2" in view.columns else [""] * len(_sabuns)
+        _opts = [f"{s} - {n} - {d2}" for s,n,d2 in zip(_sabuns,_names,_d2)]
         _target = str(st.session_state.get("eval2_target_sabun", ""))
         try:
             _idx_default = _sabuns.index(_target) if _target in _sabuns else 0
@@ -1483,11 +1461,8 @@ def tab_job_desc(emp_df: pd.DataFrame):
         # --- 단일 선택: selectbox로 대상자 선택 후 표는 읽기전용으로 표시 ---
         _sabuns = view["사번"].astype(str).tolist()
         _names  = view["이름"].astype(str).tolist() if "이름" in view.columns else [""] * len(_sabuns)
-        _d1   = view["부서1"].astype(str).tolist() if "부서1" in view.columns else [""] * len(_sabuns)
-        _d2   = view["부서2"].astype(str).tolist() if "부서2" in view.columns else [""] * len(_sabuns)
-        _grade= view["직급"].astype(str).tolist()  if "직급"  in view.columns else [""] * len(_sabuns)
-
-        _opts = [f"{s} - {n} - {d1} - {d2} - {g}" for s,n,d1,d2,g in zip(_sabuns,_names,_d1,_d2,_grade)]
+        _d2 = view["부서2"].astype(str).tolist() if "부서2" in view.columns else [""] * len(_sabuns)
+        _opts = [f"{s} - {n} - {d2}" for s,n,d2 in zip(_sabuns,_names,_d2)]
         _target = str(st.session_state.get("jd2_target_sabun", ""))
         try:
             _idx_default = _sabuns.index(_target) if _target in _sabuns else 0
