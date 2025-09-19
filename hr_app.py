@@ -1237,7 +1237,7 @@ def tab_eval_input(emp_df: pd.DataFrame):
         st.data_editor(
             view[["선택","사번","이름","부서1","부서2","직급"]],
             use_container_width=True, height=360, key="eval2_pick_editor",
-            column_config={"선택": st.column_config.CheckboxColumn(, disabled=True)}, 
+            column_config={"선택": st.column_config.CheckboxColumn()}, 
          hide_index=True, num_rows="fixed")
         picked = edited_pick.loc[edited_pick["선택"] == True]
         if not picked.empty:
@@ -1513,7 +1513,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
         st.data_editor(
             view[["선택","사번","이름","부서1","부서2","직급"]],
             use_container_width=True, height=360, key="jd2_pick_editor",
-            column_config={"선택": st.column_config.CheckboxColumn(, disabled=True)}, 
+            column_config={"선택": st.column_config.CheckboxColumn()}, 
          hide_index=True, num_rows="fixed")
         picked = edited.loc[edited["선택"] == True]
         if not picked.empty:
@@ -1927,7 +1927,7 @@ def tab_competency(emp_df: pd.DataFrame):
         use_container_width=True,
         height=340,
         key="cmpS_pick_editor",
-        column_config={"선택": st.column_config.CheckboxColumn(, disabled=True)},
+        column_config={"선택": st.column_config.CheckboxColumn()},
         hide_index=True,
         num_rows="fixed"
     )
@@ -2450,7 +2450,7 @@ def tab_admin_eval_items():
             column_config={
                 "항목ID": st.column_config.TextColumn(disabled=True),
                 "항목": st.column_config.TextColumn(disabled=True),
-                "활성": st.column_config.CheckboxColumn(disabled=True),
+                "활성": st.column_config.CheckboxColumn(),
                 "순서": st.column_config.NumberColumn(step=1, min_value=0),
             },
         )
