@@ -1208,28 +1208,7 @@ def tab_eval_input(emp_df: pd.DataFrame):
             _idx_default = _sabuns.index(_target) if _target in _sabuns else 0
         except Exception:
             _idx_default = 0
-
-        # --- 대상자 선택 (統一構造, 안전처리) ---
-        sabuns = view["사번"].astype(str).tolist() if "사번" in view.columns else []
-        names  = view["이름"].astype(str).tolist() if "이름" in view.columns else [""] * len(sabuns)
-        d2s    = view["부서2"].astype(str).tolist() if "부서2" in view.columns else [""] * len(sabuns)
-        opts   = [f"{s} - {n} - {d2}" for s, n, d2 in zip(sabuns, names, d2s)]
-
-        if opts:
-            default_sabun = st.session_state.get("eval2_target_sabun", "")
-            idx_default   = sabuns.index(default_sabun) if default_sabun in sabuns else 0
-            sel = st.selectbox("대상자 선택", opts, index=idx_default, key="eval2_pick_select")
-
-            sel_parts = str(sel).split(" - ") if isinstance(sel, str) else []
-            sel_sabun = (sel_parts[0].strip() if len(sel_parts) >= 1 else "")
-            sel_name  = (sel_parts[1].strip() if len(sel_parts) >= 2 else "")
-
-            st.session_state["eval2_target_sabun"] = sel_sabun
-            st.session_state["eval2_target_name"]  = sel_name
-
-            st.success(f"대상자: {sel_name} ({sel_sabun})", icon="✅")
-        else:
-            st.warning("선택할 대상자가 없습니다.")
+        _sel = st.selectbox("대상자 선택", _opts, index=_idx_default, key="eval2_pick_editor_select")
         _sel_sabun = _sel.split(" - ", 1)[0] if isinstance(_sel, str) and " - " in _sel else (_sel if isinstance(_sel, str) else _sabuns[_idx_default] if len(_sabuns)>0 else "")
         st.session_state["eval2_target_sabun"] = str(_sel_sabun)
         try:
@@ -1899,24 +1878,21 @@ def tab_competency(emp_df: pd.DataFrame):
     opts = [f"{s} - {n} - {d2}" for s, n, d2 in zip(sabuns, names, d2s)]
     sel_idx = sabuns.index(default_sabun) if default_sabun in sabuns else 0
 
-    # --- 대상자 선택 (統一構造, 안전처리) ---
+    # --- 대상자 선택 (드롭다운 우선) ---
     sabuns = df["사번"].astype(str).tolist() if "사번" in df.columns else []
     names  = df["이름"].astype(str).tolist() if "이름" in df.columns else [""] * len(sabuns)
     d2s    = df["부서2"].astype(str).tolist() if "부서2" in df.columns else [""] * len(sabuns)
     opts   = [f"{s} - {n} - {d2}" for s, n, d2 in zip(sabuns, names, d2s)]
-
     if opts:
         default_sabun = st.session_state.get("cmpS_target_sabun", "")
         idx_default   = sabuns.index(default_sabun) if default_sabun in sabuns else 0
         sel = st.selectbox("대상자 선택", opts, index=idx_default, key="cmpS_pick_select")
-
         sel_parts = str(sel).split(" - ") if isinstance(sel, str) else []
         sel_sabun = (sel_parts[0].strip() if len(sel_parts) >= 1 else "")
         sel_name  = (sel_parts[1].strip() if len(sel_parts) >= 2 else "")
-
+        # 드롭다운 선택을 항상 세션에 반영
         st.session_state["cmpS_target_sabun"] = sel_sabun
         st.session_state["cmpS_target_name"]  = sel_name
-
         st.success(f"대상자: {sel_name} ({sel_sabun})", icon="✅")
     else:
         st.warning("선택할 대상자가 없습니다.")
