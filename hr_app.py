@@ -1878,18 +1878,6 @@ def tab_competency(emp_df: pd.DataFrame):
     opts = [f"{s} - {n} - {d2}" for s, n, d2 in zip(sabuns, names, d2s)]
     sel_idx = sabuns.index(default_sabun) if default_sabun in sabuns else 0
     sel_label = st.selectbox("대상자 선택", opts, index=sel_idx, key="cmpS_pick_select")
-
-# ── 선택 즉시 대상자 세션/표시 갱신 (자동 반영) ─────────────────────────────
-try:
-    _cmp_label = sel_label
-    _cmp_parts = str(_cmp_label).split(" - ")
-    _cmp_sabun = (_cmp_parts[0].strip() if len(_cmp_parts) >= 1 else "")
-    _cmp_name  = (_cmp_parts[1].strip() if len(_cmp_parts) >= 2 else _cmp_label)
-    st.session_state["cmpS_target_sabun"] = _cmp_sabun
-    st.session_state["cmpS_target_name"]  = _cmp_name
-    st.success(f"대상자: {_cmp_name} ({_cmp_sabun})", icon="✅")
-except Exception:
-    pass
     sel_sabun = sel_label.split(" - ", 1)[0] if isinstance(sel_label, str) else sabuns[sel_idx]
 
     view = df[["사번", "이름", "부서1", "부서2", "직급"]].copy()
