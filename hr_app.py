@@ -1639,6 +1639,27 @@ def tab_job_desc(emp_df: pd.DataFrame):
 import time
 import pandas as pd
 import streamlit as st
+
+def safe_guard(render_fn, *args, title: str = "", **kwargs):
+    """Run a section safely and avoid redaction-induced cascades."""
+    try:
+        return render_fn(*args, **kwargs)
+    except Exception as e:
+        try:
+            base = f"[{title}] 렌더 실패" if title else "렌더 실패"
+        except Exception:
+            base = "렌더 실패"
+        try:
+            st.error(base, icon="🛑")
+        except Exception:
+            pass
+        try:
+            if st.secrets.get("app", {}).get("DEBUG", False):
+                st.exception(e)  # 개발 모드에서만 상세 스택
+        except Exception:
+            pass
+        return None
+
 from datetime import datetime
 from gspread.exceptions import APIError as _GS_APIError
 
@@ -2888,34 +2909,6 @@ def startup_sanity_checks():
 
     return problems
 
-
-def safe_run(render_fn, *args, title: str = "", **kwargs):
-    """탭/섹션 하나를 안전하게 감싸서, 예외가 나도 전체 앱이 멈추지 않도록."""
-    try:
-        return render_fn(*args, **kwargs)
-    except Exception as e:
-        msg = f"[{title}] 렌더 실패: {e}" if title else f"렌더 실패: {e}"
-        st.error(msg, icon="🛑")
-        return None
-# ── Startup Sanity Checks & Safe Runner (END) ────────────────────────────────
-
-
-# ===== [A] startup_sanity_checks() 맨 위에 추가 (들여쓰기 4칸) =====
-# 안전 재실행 시 다음 1회 부팅 점검을 건너뜁니다.
-    try:
-        import streamlit as st
-        if st.session_state.get("_skip_boot_checks", False):
-            st.session_state["_skip_boot_checks"] = False
-            return []
-    except Exception:
-        pass
-# ===== [A] END =====
-
-
-# ======================================================================
-# 📌 Startup & Main
-# ======================================================================
-# ── 메인 ──────────────────────────────────────────────────────────────────────
 def main():
     st.markdown(f"## {APP_TITLE}")
     render_status_line()
@@ -2968,16 +2961,16 @@ def main():
         tabs = st.tabs(["직원", "인사평가", "직무기술서", "직무능력평가", "도움말"])
 
     with tabs[0]:
-        safe_run(tab_staff, emp_df_for_staff, title="직원")
+        safe_guard(tab_staff, emp_df_for_staff, title="직원")
 
     with tabs[1]:
-        safe_run(tab_eval_input, emp_df_for_rest, title="평가")
+        safe_guard(tab_eval_input, emp_df_for_rest, title="평가")
 
     with tabs[2]:
-        safe_run(tab_job_desc, emp_df_for_rest, title="직무기술서")
+        safe_guard(tab_job_desc, emp_df_for_rest, title="직무기술서")
 
     with tabs[3]:
-        safe_run(tab_competency, emp_df_for_rest, title="직무능력평가")
+        safe_guard(tab_competency, emp_df_for_rest, title="직무능력평가")
 
     if u.get("관리자여부", False):
         with tabs[4]:
@@ -2990,13 +2983,13 @@ def main():
             )
             st.divider()
             if admin_page == "PIN 관리":
-                safe_run(tab_admin_pin,       emp_df_for_rest, title="관리자·PIN")
+                safe_guard(tab_admin_pin,       emp_df_for_rest, title="관리자·PIN")
             elif admin_page == "부서(근무지) 이동":
-                safe_run(tab_admin_transfer,  emp_df_for_rest, title="관리자·부서이동")
+                safe_guard(tab_admin_transfer,  emp_df_for_rest, title="관리자·부서이동")
             elif admin_page == "평가 항목 관리":
-                safe_run(tab_admin_eval_items,                  title="관리자·평가항목")
+                safe_guard(tab_admin_eval_items,                  title="관리자·평가항목")
             else:
-                safe_run(tab_admin_acl,       emp_df_for_rest, title="관리자·권한")
+                safe_guard(tab_admin_acl,       emp_df_for_rest, title="관리자·권한")
 
             # ===== BEGIN 관리자메뉴: 캐시 비우기 (429 완화/안전 재실행 포함, nested expander 제거) =====
             with st.expander("관리자메뉴 → 캐시 비우기", expanded=False):
@@ -3102,7 +3095,7 @@ def main():
                 st.caption(f"📄 DB열기: [{url}]({url})")
 
     with tabs[-1]:
-        safe_run(_render_help, title="도움말")
+        safe_guard(_render_help, title="도움말")
 
 
 # ── 엔트리포인트 ─────────────────────────────────────────────────────────────
