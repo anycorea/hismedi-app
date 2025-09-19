@@ -334,12 +334,37 @@ def logout():
 def show_login_form(emp_df: pd.DataFrame):
     st.header("로그인")
 
-    with st.form("login_form", clear_on_submit=False):
-        sabun = st.text_input("사번", placeholder="예) 123456", key="login_sabun")
-        pin   = st.text_input("PIN (숫자)", type="password", key="login_pin")
-        submitted = st.form_submit_button("로그인", use_container_width=True, type="primary")
+    sabun = st.text_input("사번", placeholder="예) 123456", key="login_sabun")
+    pin   = st.text_input("PIN (숫자)", type="password", key="login_pin")
 
-    if not submitted:
+    col = st.columns([1, 3])
+    with col[0]:
+        do_login = st.button("로그인", use_container_width=True, type="primary", key="login_btn")
+
+    # ⬇️ 엔터키 동작(사번→PIN, PIN→로그인) 주입
+    _inject_login_keybinder()
+
+    # ── 서버 검증/세션 시작 ───────────────────────────────────────────
+    # Enter를 '사번'에서 눌러 로그인 트리거가 걸렸는데 PIN이 비어있다면, 오류를 띄우지 말고 PIN으로 포커스만 이동
+    if do_login and not pin:
+        components.html(
+            """
+            <script>
+              (function(){
+                const doc = window.parent.document;
+                const labels = Array.from(doc.querySelectorAll('label'));
+                const lab = labels.find(l => (l.innerText||'').trim().startsWith('PIN'));
+                if(lab){
+                  const root = lab.closest('div[data-testid="stTextInput"]') || lab.parentElement;
+                  const inp = root ? root.querySelector('input') : null;
+                  if(inp){ try{ inp.focus(); inp.select(); }catch(e){} }
+                }
+              })();
+            </script>
+            """, height=0, width=0
+        )
+        st.stop()
+    if not do_login:
         st.stop()
 
     if not sabun or not pin:
@@ -368,6 +393,7 @@ def show_login_form(emp_df: pd.DataFrame):
         "이름": str(r.get("이름","")),
         "관리자여부": False,
     })
+    st.success(f"{str(r.get('이름',''))}님 환영합니다!")
     st.rerun()
 
 def require_login(emp_df: pd.DataFrame):
