@@ -1820,6 +1820,16 @@ def _has_competency_access(emp_df: pd.DataFrame, sabun: str) -> bool:
 
 # ───────────────────────── 메인 섹션(간편형 + 자동 선택/대상 표시) ─────────────────────────
 def tab_competency(emp_df: pd.DataFrame):
+
+    # 🔄 sync from other tabs (인사평가/직무기술서)
+    _glob_pick = st.session_state.get("eval2_target_sabun") or st.session_state.get("jd2_target_sabun")
+    if _glob_pick and st.session_state.get("cmpS_target_sabun") != str(_glob_pick):
+        st.session_state["cmpS_target_sabun"] = str(_glob_pick)
+        try:
+            st.session_state["cmpS_target_name"] = _emp_name_by_sabun(emp_df, str(_glob_pick))
+        except Exception:
+            pass
+        st.rerun()
     """직무능력평가: 인사평가/직무기술서와 동일한 권한(ACL)으로 직원 목록을 필터링하고, JD 유무와 무관하게 평가 가능."""
     user = st.session_state.get("user", {}) or {}
     me_sabun = str(user.get("사번", "") or "").strip()
@@ -1877,7 +1887,18 @@ def tab_competency(emp_df: pd.DataFrame):
     d2s = df["부서2"].astype(str).tolist() if "부서2" in df.columns else [""] * len(sabuns)
     opts = [f"{s} - {n} - {d2}" for s, n, d2 in zip(sabuns, names, d2s)]
     sel_idx = sabuns.index(default_sabun) if default_sabun in sabuns else 0
-    sel_label = st.selectbox("대상자 선택", opts, index=sel_idx, key="cmpS_pick_select")
+    def _cmpS_on_pick_change():
+        _label = st.session_state.get("cmpS_pick_select", "")
+        _sabun = _label.split(" - ", 1)[0] if isinstance(_label, str) else ""
+        if _sabun:
+            st.session_state["cmpS_target_sabun"] = str(_sabun)
+            try:
+                st.session_state["cmpS_target_name"] = _emp_name_by_sabun(emp_df, str(_sabun))
+            except Exception:
+                pass
+            st.rerun()
+
+    sel_label = st.selectbox("대상자 선택", opts, index=sel_idx, key="cmpS_pick_select", on_change=_cmpS_on_pick_change)
     sel_sabun = sel_label.split(" - ", 1)[0] if isinstance(sel_label, str) else sabuns[sel_idx]
 
     view = df[["사번", "이름", "부서1", "부서2", "직급"]].copy()
