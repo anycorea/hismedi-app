@@ -885,6 +885,8 @@ def tab_admin_pin(emp_df):
             join_src = preview[["사번", "새_PIN"]].copy(); join_src["사번"] = join_src["사번"].astype(str)
             csv_df = full.merge(join_src, on="사번", how="left"); csv_df["새_PIN"] = csv_df["새_PIN"].fillna("")
             csv_df = csv_df.sort_values("사번")
+            st.download_button("CSV 전체 다운로드 (사번,이름,새_PIN)", data=csv_df.to_csv(index=False, encoding="utf-8-sig"), file_name=f"PIN_ALL_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv", mime="text/csv", use_container_width=True)
+            st.download_button("CSV 대상자만 다운로드 (사번,이름,새_PIN)", data=preview.to_csv(index=False, encoding="utf-8-sig"), file_name=f"PIN_TARGETS_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv", mime="text/csv", use_container_width=True)
     if do_issue and preview is not None:
         try:
             ws, header, hmap = ensure_emp_sheet_staff_columns()
@@ -996,7 +998,7 @@ def tab_staff(emp_df: pd.DataFrame):
         view = view.assign(_k=key).sort_values("_k").drop(columns=["_k"]).reset_index(drop=True)
 
     st.write(f"결과: **{len(view):,}명**")
-    st.dataframe(view.drop(columns=["PIN_hash"], errors="ignore"), use_container_width=True, height=560, hide_index=True)
+    st.dataframe(view, use_container_width=True, height=560, hide_index=True)
 
 
 
@@ -1214,40 +1216,18 @@ def tab_eval_input(emp_df: pd.DataFrame):
         if f_q and f_q.strip():
             k = f_q.strip().lower()
             view = view[view.apply(lambda r: k in str(r["사번"]).lower() or k in str(r["이름"]).lower(), axis=1)]
-        view = view.sort_values(["사번"]).reset_index(drop=True)
-        view["선택"] = (view["사번"].astype(str) == str(st.session_state.get("eval2_target_sabun","")))
-        # --- 단일 선택: selectbox로 대상자 선택 후 표는 읽기전용으로 표시 ---
-        _sabuns = view["사번"].astype(str).tolist()
-        _names  = view["이름"].astype(str).tolist() if "이름" in view.columns else [""] * len(_sabuns)
-        _opts   = [f"{s} - {n}" for s, n in zip(_sabuns, _names)]
-        _target = str(st.session_state.get("eval2_target_sabun", ""))
-        try:
-            _idx_default = _sabuns.index(_target) if _target in _sabuns else 0
-        except Exception:
-            _idx_default = 0
-        _sel = st.selectbox("대상자 선택", _opts, index=_idx_default, key="eval2_pick_editor_select")
-        _sel_sabun = _sel.split(" - ", 1)[0] if isinstance(_sel, str) and " - " in _sel else (_sel if isinstance(_sel, str) else _sabuns[_idx_default] if len(_sabuns)>0 else "")
-        st.session_state["eval2_target_sabun"] = str(_sel_sabun)
-        try:
-            st.session_state["eval2_target_name"] = str(_names[_sabuns.index(_sel_sabun)]) if _sel_sabun in _sabuns else ""
-        except Exception:
-            st.session_state["eval2_target_name"] = ""
-        view["선택"] = (view["사번"].astype(str) == str(st.session_state.get("eval2_target_sabun", "")))
-        edited_pick = view[["선택","사번","이름","부서1","부서2","직급"]] if all(c in view.columns for c in ["이름","부서1","부서2","직급"]) else view
-        st.data_editor(
+        view = view.sort_values(["부서1","부서2","사번"]).reset_index(drop=True)
+        view["선택"] = (view["사번"] == st.session_state["eval2_target_sabun"])
+        edited_pick = st.data_editor(
             view[["선택","사번","이름","부서1","부서2","직급"]],
             use_container_width=True, height=360, key="eval2_pick_editor",
             column_config={"선택": st.column_config.CheckboxColumn()}, 
          hide_index=True, num_rows="fixed")
         picked = edited_pick.loc[edited_pick["선택"] == True]
         if not picked.empty:
-            _r = picked.iloc[-1]
-            st.session_state["eval2_target_sabun"] = str(_r["사번"])
-            try:
-                st.session_state["eval2_target_name"]  = str(_r["이름"])
-            except Exception:
-                st.session_state["eval2_target_name"]  = ""
-            st.session_state["eval2_target_name"]  = str(_r["이름"])
+            r = picked.iloc[-1]
+            st.session_state["eval2_target_sabun"] = str(r["사번"])
+            st.session_state["eval2_target_name"]  = str(r["이름"])
         target_sabun = st.session_state["eval2_target_sabun"]
         target_name  = st.session_state["eval2_target_name"]
         st.success(f"대상자: {target_name} ({target_sabun})", icon="✅")
@@ -1490,40 +1470,18 @@ def tab_job_desc(emp_df: pd.DataFrame):
         if f_q and f_q.strip():
             k = f_q.strip().lower()
             view = view[view.apply(lambda r: k in str(r["사번"]).lower() or k in str(r["이름"]).lower(), axis=1)]
-        view = view.sort_values(["사번"]).reset_index(drop=True)
-        view["선택"] = (view["사번"].astype(str) == str(st.session_state.get("jd2_target_sabun","")))
-        # --- 단일 선택: selectbox로 대상자 선택 후 표는 읽기전용으로 표시 ---
-        _sabuns = view["사번"].astype(str).tolist()
-        _names  = view["이름"].astype(str).tolist() if "이름" in view.columns else [""] * len(_sabuns)
-        _opts   = [f"{s} - {n}" for s, n in zip(_sabuns, _names)]
-        _target = str(st.session_state.get("jd2_target_sabun", ""))
-        try:
-            _idx_default = _sabuns.index(_target) if _target in _sabuns else 0
-        except Exception:
-            _idx_default = 0
-        _sel = st.selectbox("대상자 선택", _opts, index=_idx_default, key="jd2_pick_editor_select")
-        _sel_sabun = _sel.split(" - ", 1)[0] if isinstance(_sel, str) and " - " in _sel else (_sel if isinstance(_sel, str) else _sabuns[_idx_default] if len(_sabuns)>0 else "")
-        st.session_state["jd2_target_sabun"] = str(_sel_sabun)
-        try:
-            st.session_state["jd2_target_name"] = str(_names[_sabuns.index(_sel_sabun)]) if _sel_sabun in _sabuns else ""
-        except Exception:
-            st.session_state["jd2_target_name"] = ""
-        view["선택"] = (view["사번"].astype(str) == str(st.session_state.get("jd2_target_sabun", "")))
-        edited = view[["선택","사번","이름","부서1","부서2","직급"]] if all(c in view.columns for c in ["이름","부서1","부서2","직급"]) else view
-        st.data_editor(
+        view = view.sort_values(["부서1","부서2","사번"]).reset_index(drop=True)
+        view["선택"] = (view["사번"] == st.session_state["jd2_target_sabun"])
+        edited = st.data_editor(
             view[["선택","사번","이름","부서1","부서2","직급"]],
             use_container_width=True, height=360, key="jd2_pick_editor",
             column_config={"선택": st.column_config.CheckboxColumn()}, 
          hide_index=True, num_rows="fixed")
         picked = edited.loc[edited["선택"] == True]
         if not picked.empty:
-            _r = picked.iloc[-1]
-            st.session_state["jd2_target_sabun"] = str(_r["사번"])
-            try:
-                st.session_state["jd2_target_name"]  = str(_r["이름"])
-            except Exception:
-                st.session_state["jd2_target_name"]  = ""
-            st.session_state["jd2_target_name"]  = str(_r["이름"])
+            r = picked.iloc[-1]
+            st.session_state["jd2_target_sabun"] = str(r["사번"])
+            st.session_state["jd2_target_name"]  = str(r["이름"])
         target_sabun = st.session_state["jd2_target_sabun"]
         target_name  = st.session_state["jd2_target_name"]
         st.success(f"대상자: {target_name} ({target_sabun})", icon="✅")
@@ -1637,29 +1595,6 @@ def tab_job_desc(emp_df: pd.DataFrame):
 import time
 import pandas as pd
 import streamlit as st
-
-# --- patched wrapper: safe_run2 ---
-def safe_run2(render_fn, *args, title: str = "", **kwargs):
-    """각 탭/섹션 렌더를 안전하게 감싸 예외가 나도 앱 전체가 죽지 않게 한다."""
-    try:
-        return render_fn(*args, **kwargs)
-    except Exception as e:
-        # ❗ 에러 문자열/예외 본문을 사용자 메시지에 넣지 말 것 (Cloud redaction 충돌 방지)
-        base = f"[{title}] 렌더 실패" if title else "렌더 실패"
-        try:
-            st.error(base, icon="🛑")
-        except Exception:
-            # st 준비 전 등 예외 상황은 무시
-            pass
-
-        # 개발환경에서만 상세 트레이스 확인 (st.secrets["app"]["DEBUG"]=True 일 때)
-        try:
-            if st.secrets.get("app", {}).get("DEBUG", False):
-                st.exception(e)
-        except Exception:
-            pass
-        return None
-
 from datetime import datetime
 from gspread.exceptions import APIError as _GS_APIError
 
@@ -1908,7 +1843,7 @@ def tab_competency(emp_df: pd.DataFrame):
     if "부서2" not in df.columns:
         df["부서2"] = ""
 
-    df_view = df[["사번","부서2","이름"]].copy().sort_values(["사번"]).reset_index(drop=True)
+    df_view = df[["사번","부서2","이름"]].copy().sort_values(["부서2","사번"]).reset_index(drop=True)
 
     # ── 기본 선택: 로그인 사용자가 보이면 우선 선택, 아니면 1행 선택 ──
     sabun_series = df_view["사번"].astype(str)
@@ -1924,29 +1859,11 @@ def tab_competency(emp_df: pd.DataFrame):
         except Exception:
             st.session_state["cmpS_target_name"] = ""
 
-    df_view["선택"] = (df_view["사번"].astype(str) == str(st.session_state.get("cmpS_target_sabun","")))
+    df_view["선택"] = (sabun_series == st.session_state.get("cmpS_target_sabun", ""))
 
     st.caption("※ 표에서 평가할 직원을 체크하세요. (여러 명 체크 시 마지막 선택 1명이 적용됩니다)")
-    # --- 단일 선택: selectbox로 대상자 선택 후 표는 읽기전용으로 표시 ---
-    _sabuns = df_view["사번"].astype(str).tolist()
-    _names  = df_view["이름"].astype(str).tolist() if "이름" in df_view.columns else [""] * len(_sabuns)
-    _opts   = [f"{s} - {n}" for s, n in zip(_sabuns, _names)]
-    _target = str(st.session_state.get("cmpS_target_sabun", ""))
-    try:
-        _idx_default = _sabuns.index(_target) if _target in _sabuns else 0
-    except Exception:
-        _idx_default = 0
-    _sel = st.selectbox("대상자 선택", _opts, index=_idx_default, key="cmpS_pick_editor_select")
-    _sel_sabun = _sel.split(" - ", 1)[0] if isinstance(_sel, str) and " - " in _sel else (_sel if isinstance(_sel, str) else _sabuns[_idx_default] if len(_sabuns)>0 else "")
-    st.session_state["cmpS_target_sabun"] = str(_sel_sabun)
-    try:
-        st.session_state["cmpS_target_name"] = str(_names[_sabuns.index(_sel_sabun)]) if _sel_sabun in _sabuns else ""
-    except Exception:
-        st.session_state["cmpS_target_name"] = ""
-    df_view["선택"] = (df_view["사번"].astype(str) == str(st.session_state.get("cmpS_target_sabun", "")))
-    edited = df_view[["선택","사번","이름","부서1","부서2","직급"]] if all(c in df_view.columns for c in ["이름","부서1","부서2","직급"]) else df_view
-    st.data_editor(
-        df_view[["선택","사번","이름","부서1","부서2","직급"]],
+    edited = st.data_editor(
+        df_view[["선택","사번","부서2","이름"]],
         use_container_width=True,
         height=340,
         key="cmpS_pick_editor",
@@ -1957,12 +1874,10 @@ def tab_competency(emp_df: pd.DataFrame):
 
     picked = edited.loc[edited["선택"] == True]
     if not picked.empty:
-        _r = picked.iloc[-1]
-        st.session_state["cmpS_target_sabun"] = str(_r["사번"])
-        try:
-            st.session_state["cmpS_target_name"]  = str(_r["이름"])
-        except Exception:
-            st.session_state["cmpS_target_name"]  = ""
+        last = picked.iloc[-1]
+        st.session_state["cmpS_target_sabun"] = str(last["사번"])
+        st.session_state["cmpS_target_name"]  = str(last["이름"])
+
     target_sabun = str(st.session_state.get("cmpS_target_sabun",""))
     target_name  = str(st.session_state.get("cmpS_target_name",""))
 
@@ -2344,6 +2259,8 @@ def tab_admin_pin(emp_df):
             join_src = preview[["사번", "새_PIN"]].copy(); join_src["사번"] = join_src["사번"].astype(str)
             csv_df = full.merge(join_src, on="사번", how="left"); csv_df["새_PIN"] = csv_df["새_PIN"].fillna("")
             csv_df = csv_df.sort_values("사번")
+            st.download_button("CSV 전체 다운로드 (사번,이름,새_PIN)", data=csv_df.to_csv(index=False, encoding="utf-8-sig"), file_name=f"PIN_ALL_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv", mime="text/csv", use_container_width=True)
+            st.download_button("CSV 대상자만 다운로드 (사번,이름,새_PIN)", data=preview.to_csv(index=False, encoding="utf-8-sig"), file_name=f"PIN_TARGETS_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv", mime="text/csv", use_container_width=True)
     if do_issue and preview is not None:
         try:
             ws, header, hmap = ensure_emp_sheet_staff_columns()
@@ -2473,7 +2390,7 @@ def tab_admin_eval_items():
             column_config={
                 "항목ID": st.column_config.TextColumn(disabled=True),
                 "항목": st.column_config.TextColumn(disabled=True),
-                "활성": st.column_config.CheckboxColumn(),
+                "활성": st.column_config.CheckboxColumn(disabled=True),
                 "순서": st.column_config.NumberColumn(step=1, min_value=0),
             },
         )
@@ -2941,7 +2858,7 @@ def startup_sanity_checks():
     return problems
 
 
-def safe_run2(render_fn, *args, title: str = "", **kwargs):
+def safe_run(render_fn, *args, title: str = "", **kwargs):
     """탭/섹션 하나를 안전하게 감싸서, 예외가 나도 전체 앱이 멈추지 않도록."""
     try:
         return render_fn(*args, **kwargs)
@@ -3020,16 +2937,16 @@ def main():
         tabs = st.tabs(["직원", "인사평가", "직무기술서", "직무능력평가", "도움말"])
 
     with tabs[0]:
-        safe_run2(tab_staff, emp_df_for_staff, title="직원")
+        safe_run(tab_staff, emp_df_for_staff, title="직원")
 
     with tabs[1]:
-        safe_run2(tab_eval_input, emp_df_for_rest, title="평가")
+        safe_run(tab_eval_input, emp_df_for_rest, title="평가")
 
     with tabs[2]:
-        safe_run2(tab_job_desc, emp_df_for_rest, title="직무기술서")
+        safe_run(tab_job_desc, emp_df_for_rest, title="직무기술서")
 
     with tabs[3]:
-        safe_run2(tab_competency, emp_df_for_rest, title="직무능력평가")
+        safe_run(tab_competency, emp_df_for_rest, title="직무능력평가")
 
     if u.get("관리자여부", False):
         with tabs[4]:
@@ -3042,13 +2959,13 @@ def main():
             )
             st.divider()
             if admin_page == "PIN 관리":
-                safe_run2(tab_admin_pin,       emp_df_for_rest, title="관리자·PIN")
+                safe_run(tab_admin_pin,       emp_df_for_rest, title="관리자·PIN")
             elif admin_page == "부서(근무지) 이동":
-                safe_run2(tab_admin_transfer,  emp_df_for_rest, title="관리자·부서이동")
+                safe_run(tab_admin_transfer,  emp_df_for_rest, title="관리자·부서이동")
             elif admin_page == "평가 항목 관리":
-                safe_run2(tab_admin_eval_items,                  title="관리자·평가항목")
+                safe_run(tab_admin_eval_items,                  title="관리자·평가항목")
             else:
-                safe_run2(tab_admin_acl,       emp_df_for_rest, title="관리자·권한")
+                safe_run(tab_admin_acl,       emp_df_for_rest, title="관리자·권한")
 
             # ===== BEGIN 관리자메뉴: 캐시 비우기 (429 완화/안전 재실행 포함, nested expander 제거) =====
             with st.expander("관리자메뉴 → 캐시 비우기", expanded=False):
@@ -3154,7 +3071,7 @@ def main():
                 st.caption(f"📄 DB열기: [{url}]({url})")
 
     with tabs[-1]:
-        safe_run2(_render_help, title="도움말")
+        safe_run(_render_help, title="도움말")
 
 
 # ── 엔트리포인트 ─────────────────────────────────────────────────────────────
