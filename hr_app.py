@@ -2700,7 +2700,7 @@ def tab_admin_acl(emp_df):
     except Exception:
         am_admin = False
     if not am_admin:
-        se("오류")", icon="🛡️")
+        se("오류")
 
     try:
         base = emp_df[["사번", "이름", "부서1", "부서2"]].copy()
