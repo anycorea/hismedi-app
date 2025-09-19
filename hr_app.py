@@ -1877,25 +1877,7 @@ def tab_competency(emp_df: pd.DataFrame):
     d2s = df["부서2"].astype(str).tolist() if "부서2" in df.columns else [""] * len(sabuns)
     opts = [f"{s} - {n} - {d2}" for s, n, d2 in zip(sabuns, names, d2s)]
     sel_idx = sabuns.index(default_sabun) if default_sabun in sabuns else 0
-
-    # --- 대상자 선택 (드롭다운 우선) ---
-    sabuns = df["사번"].astype(str).tolist() if "사번" in df.columns else []
-    names  = df["이름"].astype(str).tolist() if "이름" in df.columns else [""] * len(sabuns)
-    d2s    = df["부서2"].astype(str).tolist() if "부서2" in df.columns else [""] * len(sabuns)
-    opts   = [f"{s} - {n} - {d2}" for s, n, d2 in zip(sabuns, names, d2s)]
-    if opts:
-        default_sabun = st.session_state.get("cmpS_target_sabun", "")
-        idx_default   = sabuns.index(default_sabun) if default_sabun in sabuns else 0
-        sel = st.selectbox("대상자 선택", opts, index=idx_default, key="cmpS_pick_select")
-        sel_parts = str(sel).split(" - ") if isinstance(sel, str) else []
-        sel_sabun = (sel_parts[0].strip() if len(sel_parts) >= 1 else "")
-        sel_name  = (sel_parts[1].strip() if len(sel_parts) >= 2 else "")
-        # 드롭다운 선택을 항상 세션에 반영
-        st.session_state["cmpS_target_sabun"] = sel_sabun
-        st.session_state["cmpS_target_name"]  = sel_name
-        st.success(f"대상자: {sel_name} ({sel_sabun})", icon="✅")
-    else:
-        st.warning("선택할 대상자가 없습니다.")
+    sel_label = st.selectbox("대상자 선택", opts, index=sel_idx, key="cmpS_pick_select")
     sel_sabun = sel_label.split(" - ", 1)[0] if isinstance(sel_label, str) else sabuns[sel_idx]
 
     view = df[["사번", "이름", "부서1", "부서2", "직급"]].copy()
