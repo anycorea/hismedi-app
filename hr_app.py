@@ -1877,20 +1877,7 @@ def tab_competency(emp_df: pd.DataFrame):
     d2s = df["부서2"].astype(str).tolist() if "부서2" in df.columns else [""] * len(sabuns)
     opts = [f"{s} - {n} - {d2}" for s, n, d2 in zip(sabuns, names, d2s)]
     sel_idx = sabuns.index(default_sabun) if default_sabun in sabuns else 0
-    # --- 대상자 선택(셀렉트) : 사번 - 이름 - 부서2 ----------------------------
-    _sabuns = df["사번"].astype(str).tolist() if "사번" in df.columns else []
-    _names  = df["이름"].astype(str).tolist() if "이름" in df.columns else [""] * len(_sabuns)
-    _d2s    = df["부서2"].astype(str).tolist() if "부서2" in df.columns else [""] * len(_sabuns)
-    _opts   = [f"{s} - {n} - {d2}" for s, n, d2 in zip(_sabuns, _names, _d2s)]
-    _idx    = 0 if len(_opts) > 0 else None
-    _label  = st.selectbox("대상자 선택", _opts, index=_idx, key="cmpS_pick_select")
-    _parts  = (str(_label).split(" - ") if isinstance(_label, str) else [])
-    _sabun  = (_parts[0].strip() if len(_parts) >= 1 else "")
-    _name   = (_parts[1].strip() if len(_parts) >= 2 else "")
-    st.session_state["cmpS_target_sabun"] = _sabun
-    st.session_state["cmpS_target_name"]  = _name
-    st.success(f"대상자: {_name} ({_sabun})", icon="✅")
-
+    sel_label = st.selectbox("대상자 선택", opts, index=sel_idx, key="cmpS_pick_select")
     sel_sabun = sel_label.split(" - ", 1)[0] if isinstance(sel_label, str) else sabuns[sel_idx]
 
     view = df[["사번", "이름", "부서1", "부서2", "직급"]].copy()
