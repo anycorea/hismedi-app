@@ -1215,12 +1215,7 @@ def tab_eval_input(emp_df: pd.DataFrame):
             k = f_q.strip().lower()
             view = view[view.apply(lambda r: k in str(r["사번"]).lower() or k in str(r["이름"]).lower(), axis=1)]
         view = view.sort_values(["사번"]).reset_index(drop=True)
-        _target = str(st.session_state.get("eval2_target_sabun", ""))
-        if _target == "" and not view.empty:
-            st.session_state["eval2_target_sabun"] = str(view.iloc[0]["사번"])
-            _target = st.session_state["eval2_target_sabun"]
-        view["선택"] = (view["사번"].astype(str) == str(_target))
-
+        view["선택"] = (view["사번"].astype(str) == str(st.session_state.get("eval2_target_sabun","")))
         edited_pick = st.data_editor(
             view[["선택","사번","이름","부서1","부서2","직급"]],
             use_container_width=True, height=360, key="eval2_pick_editor",
@@ -1478,12 +1473,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
             k = f_q.strip().lower()
             view = view[view.apply(lambda r: k in str(r["사번"]).lower() or k in str(r["이름"]).lower(), axis=1)]
         view = view.sort_values(["사번"]).reset_index(drop=True)
-        _target = str(st.session_state.get("jd2_target_sabun", ""))
-        if _target == "" and not view.empty:
-            st.session_state["jd2_target_sabun"] = str(view.iloc[0]["사번"])
-            _target = st.session_state["jd2_target_sabun"]
-        view["선택"] = (view["사번"].astype(str) == str(_target))
-
+        view["선택"] = (view["사번"].astype(str) == str(st.session_state.get("jd2_target_sabun","")))
         edited = st.data_editor(
             view[["선택","사번","이름","부서1","부서2","직급"]],
             use_container_width=True, height=360, key="jd2_pick_editor",
@@ -1875,12 +1865,7 @@ def tab_competency(emp_df: pd.DataFrame):
         except Exception:
             st.session_state["cmpS_target_name"] = ""
 
-    _target = str(st.session_state.get("cmpS_target_sabun", ""))
-    if _target == "" and not df_view.empty:
-        st.session_state["cmpS_target_sabun"] = str(df_view.iloc[0]["사번"])
-        _target = st.session_state["cmpS_target_sabun"]
-    df_view["선택"] = (df_view["사번"].astype(str) == str(_target))
-
+    df_view["선택"] = (df_view["사번"].astype(str) == str(st.session_state.get("cmpS_target_sabun","")))
 
     st.caption("※ 표에서 평가할 직원을 체크하세요. (여러 명 체크 시 마지막 선택 1명이 적용됩니다)")
     edited = st.data_editor(
