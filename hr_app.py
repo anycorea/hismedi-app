@@ -1951,6 +1951,47 @@ def tab_competency(emp_df: pd.DataFrame):
     except Exception:
         st.session_state["cmpS_target_name"] = ""
 
+    # 표에서 선택 체크 유지/반영
+try:
+    view["선택"] = (view["사번"].astype(str) == str(st.session_state.get("cmpS_target_sabun","")))
+    edited = st.data_editor(
+        view[["선택","사번","이름","부서1","부서2","직급"]],
+        use_container_width=True, height=340,
+        key="cmpS_pick_editor",
+        column_config={"선택": st.column_config.CheckboxColumn()},
+        hide_index=True, num_rows="fixed"
+    )
+    picked = edited.loc[edited["선택"] == True]
+    if not picked.empty:
+        _r = picked.iloc[-1]
+        st.session_state["cmpS_target_sabun"] = str(_r["사번"])
+        try:
+            st.session_state["cmpS_target_name"] = str(_r.get("이름",""))
+        except Exception:
+            st.session_state["cmpS_target_name"] = ""
+except Exception:
+    pass
+
+target_sabun = str(st.session_state.get("cmpS_target_sabun",""))
+target_name  = str(st.session_state.get("cmpS_target_name",""))
+st.success(f"대상자: {target_name} ({target_sabun})", icon="✅")
+
+# JD 요약(있으면 표시, 없어도 진행)
+try:
+    jd = _jd_latest_for(target_sabun, int(year))
+except Exception:
+    jd = None
+with st.expander("직무기술서 요약", expanded=True):
+    if jd:
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.markdown("**직무개요**"); st.write((jd.get("직무개요","") or "").strip() or "—")
+        with c2:
+            st.markdown("**주업무**"); st.write((jd.get("주업무","") or "").strip() or "—")
+        with c3:
+            st.markdown("**기타업무**"); st.write((jd.get("기타업무","") or "").strip() or "—")
+    else:
+        st.caption("직무기술서가 없습니다.")
     st.markdown("#### 평가 입력")
     grade_options = [("A","탁월(A)"), ("B","우수(B)"), ("C","보통(C)"), ("D","부족(D)"), ("E","저조(E)")]
     grade_labels  = [lbl for _, lbl in grade_options]
