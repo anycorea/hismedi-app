@@ -1170,7 +1170,10 @@ def read_eval_saved_scores(year: int, eval_type: str, target_sabun: str, evaluat
         return {}, {}
 
 def tab_eval_input(emp_df: pd.DataFrame):
-    _simple_single_select(emp_df, 'eval2', '인사평가')
+
+    # 통일 UI: 평가
+    _unified_people_tab(emp_df, "eval2", "인사평가")
+
 
 def ensure_jobdesc_sheet():
     wb=get_workbook()
@@ -1249,7 +1252,10 @@ def upsert_jobdesc(rec:dict, as_new_version:bool=False)->dict:
         return {"action":"update","version":ver}
 
 def tab_job_desc(emp_df: pd.DataFrame):
-    _simple_single_select(emp_df, 'jd2', '직무기술서')
+
+    # 통일 UI: 직무기술서
+    _unified_people_tab(emp_df, "jd2", "직무기술서")
+
 
 def _target_success_banner():
     u = st.session_state.get("user") or {}
@@ -1462,7 +1468,10 @@ def _has_competency_access(emp_df: pd.DataFrame, sabun: str) -> bool:
 
 # ───────────────────────── 메인 섹션(간편형 + 자동 선택/대상 표시) ─────────────────────────
 def tab_competency(emp_df: pd.DataFrame):
-    _simple_single_select(emp_df, 'cmpS', '직무능력평가')
+
+    # 통일 UI: 직무능력평가
+    _unified_people_tab(emp_df, "cmpS", "직무능력평가")
+
 
 def ensure_dept_history_sheet():
     """
@@ -1882,7 +1891,7 @@ def tab_admin_eval_items():
             column_config={
                 "항목ID": st.column_config.TextColumn(disabled=True),
                 "항목": st.column_config.TextColumn(disabled=True),
-                "활성": st.column_config.CheckboxColumn(),
+                "활성": st.column_config.CheckboxColumn(disabled=True),
                 "순서": st.column_config.NumberColumn(step=1, min_value=0),
             },
         )
@@ -2302,6 +2311,47 @@ def tab_admin_acl(emp_df):
 # ======================================================================
 # 📌 Startup Checks
 # ======================================================================
+
+def _unified_people_tab(emp_df: pd.DataFrame, state_prefix: str, title_text: str):
+    st.subheader(title_text)
+    df = emp_df.copy()
+    # Ensure required columns exist
+    for col in ["사번","이름","부서1","부서2","직급"]:
+        if col not in df.columns:
+            df[col] = ""
+    # Build view
+    view = df[["사번","이름","부서1","부서2","직급"]].copy()
+    # Sort by 사번
+    try:
+        view["사번"] = view["사번"].astype(str)
+    except Exception:
+        view["사번"] = view["사번"].astype(str)
+    view = view.sort_values(["사번"]).reset_index(drop=True)
+    # Single select by selectbox
+    sabuns = view["사번"].astype(str).tolist()
+    names  = view["이름"].astype(str).tolist()
+    opts   = [f"{s} - {n}" for s,n in zip(sabuns, names)]
+    tgt_s  = str(st.session_state.get(f"{state_prefix}_target_sabun", ""))
+    idx    = sabuns.index(tgt_s) if tgt_s in sabuns else 0 if sabuns else 0
+    sel    = st.selectbox("대상자 선택", opts if opts else ["-"], index=idx if opts else 0, key=f"{state_prefix}_pick_select")
+    if isinstance(sel, str) and " - " in sel:
+        sel_sabun = sel.split(" - ", 1)[0]
+    else:
+        sel_sabun = sabuns[idx] if sabuns else ""
+    st.session_state[f"{state_prefix}_target_sabun"] = str(sel_sabun)
+    try:
+        st.session_state[f"{state_prefix}_target_name"]  = str(view.loc[view["사번"]==sel_sabun, "이름"].iloc[0]) if sel_sabun in sabuns else ""
+    except Exception:
+        st.session_state[f"{state_prefix}_target_name"]  = ""
+    # Mark selection
+    view["선택"] = (view["사번"].astype(str) == str(st.session_state.get(f"{state_prefix}_target_sabun","")))
+    # Display read-only table with unified columns
+    _show = view[["선택","사번","이름","부서1","부서2","직급"]]
+    st.dataframe(_show, use_container_width=True, height=360)
+    # Return selected row (or None)
+    if sel_sabun in sabuns:
+        return view.loc[view["사번"]==sel_sabun].iloc[0].to_dict()
+    return None
 # ── Startup Sanity Checks & Safe Runner (BEGIN) ──────────────────────────────
 def startup_sanity_checks():
     problems = []
@@ -2351,13 +2401,12 @@ def startup_sanity_checks():
 
 
 def safe_run(render_fn, *args, title: str = "", **kwargs):
-    msg = None
     """탭/섹션 하나를 안전하게 감싸서, 예외가 나도 전체 앱이 멈추지 않도록."""
     try:
         return render_fn(*args, **kwargs)
     except Exception as e:
         msg = f"[{title}] 렌더 실패: {e}" if title else f"렌더 실패: {e}"
-        st.error(msg, icon="🛑") if msg is not None else None
+        st.error(msg, icon="🛑")
         return None
 # ── Startup Sanity Checks & Safe Runner (END) ────────────────────────────────
 
@@ -2378,34 +2427,6 @@ def safe_run(render_fn, *args, title: str = "", **kwargs):
 # 📌 Startup & Main
 # ======================================================================
 # ── 메인 ──────────────────────────────────────────────────────────────────────
-
-def _simple_single_select(emp_df: pd.DataFrame, state_prefix: str, title_text: str):
-    st.subheader(title_text)
-    df = emp_df.copy()
-    # Ensure required columns
-    for col in ["사번","이름","부서1","부서2","직급"]:
-        if col not in df.columns:
-            df[col] = ""
-    # Sort by 사번
-    df["사번"] = df["사번"].astype(str)
-    df = df.sort_values(["사번"]).reset_index(drop=True)
-    # Build options
-    sabuns = df["사번"].astype(str).tolist()
-    names  = df["이름"].astype(str).tolist()
-    opts   = [f"{s} - {n}" for s, n in zip(sabuns, names)] if sabuns else ["-"]
-    # Default index
-    tgt = str(st.session_state.get(f"{state_prefix}_target_sabun", ""))
-    idx = sabuns.index(tgt) if tgt in sabuns else 0
-    sel = st.selectbox("대상자 선택", opts, index=idx, key=f"{state_prefix}_select")
-    sel_sabun = sel.split(" - ", 1)[0] if isinstance(sel, str) and " - " in sel else (sabuns[idx] if sabuns else "")
-    st.session_state[f"{state_prefix}_target_sabun"] = str(sel_sabun)
-    try:
-        st.session_state[f"{state_prefix}_target_name"] = str(df.loc[df["사번"]==sel_sabun, "이름"].iloc[0]) if sel_sabun in sabuns else ""
-    except Exception:
-        st.session_state[f"{state_prefix}_target_name"] = ""
-    # No table shown (requested)
-    return
-
 def main():
     st.markdown(f"## {APP_TITLE}")
     render_status_line()
@@ -2567,7 +2588,8 @@ def main():
 
 
     def _render_help():
-        pass
+    st.subheader("도움말")
+    st.caption("도움말 콘텐츠는 준비 중입니다.")
 
 def _start_session(user_info: dict):
     """
