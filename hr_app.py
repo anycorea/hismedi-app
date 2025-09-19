@@ -1234,13 +1234,7 @@ def tab_eval_input(emp_df: pd.DataFrame):
             st.session_state["eval2_target_name"] = ""
         view["선택"] = (view["사번"].astype(str) == str(st.session_state.get("eval2_target_sabun", "")))
         edited_pick = view[["선택","사번","이름","부서1","부서2","직급"]] if all(c in view.columns for c in ["이름","부서1","부서2","직급"]) else view
-        st.data_editor(
-            view[["선택","사번","이름","부서1","부서2","직급"]],
-            use_container_width=True, height=360, key="eval2_pick_editor",
-            column_config={"선택": st.column_config.CheckboxColumn()}, 
-         hide_index=True, num_rows="fixed")
-        picked = edited_pick.loc[edited_pick["선택"] == True]
-        if not picked.empty:
+
             _r = picked.iloc[-1]
             st.session_state["eval2_target_sabun"] = str(_r["사번"])
             try:
@@ -1509,14 +1503,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
         except Exception:
             st.session_state["jd2_target_name"] = ""
         view["선택"] = (view["사번"].astype(str) == str(st.session_state.get("jd2_target_sabun", "")))
-        edited = view[["선택","사번","이름","부서1","부서2","직급"]] if all(c in view.columns for c in ["이름","부서1","부서2","직급"]) else view
-        st.data_editor(
-            view[["선택","사번","이름","부서1","부서2","직급"]],
-            use_container_width=True, height=360, key="jd2_pick_editor",
-            column_config={"선택": st.column_config.CheckboxColumn()}, 
-         hide_index=True, num_rows="fixed")
-        picked = edited.loc[edited["선택"] == True]
-        if not picked.empty:
+
             _r = picked.iloc[-1]
             st.session_state["jd2_target_sabun"] = str(_r["사번"])
             try:
@@ -1921,27 +1908,14 @@ def tab_competency(emp_df: pd.DataFrame):
     except Exception:
         st.session_state["cmpS_target_name"] = ""
     df_view["선택"] = (df_view["사번"].astype(str) == str(st.session_state.get("cmpS_target_sabun", "")))
-    edited = df_view[["선택","사번","이름","부서1","부서2","직급"]] if all(c in df_view.columns for c in ["이름","부서1","부서2","직급"]) else df_view
-    st.data_editor(
-        df_view[["선택","사번","이름","부서1","부서2","직급"]],
-        use_container_width=True,
-        height=340,
-        key="cmpS_pick_editor",
-        column_config={"선택": st.column_config.CheckboxColumn()},
-        hide_index=True,
-        num_rows="fixed"
-    )
 
-    picked = edited.loc[edited["선택"] == True]
-    if not picked.empty:
+
         _r = picked.iloc[-1]
         st.session_state["cmpS_target_sabun"] = str(_r["사번"])
         try:
             st.session_state["cmpS_target_name"]  = str(_r["이름"])
         except Exception:
             st.session_state["cmpS_target_name"]  = ""
-        # 안정화 목적: 선택 UI 이후 나머지 로직은 임시 중단
-    return
 
     target_sabun = str(st.session_state.get("cmpS_target_sabun",""))
     target_name  = str(st.session_state.get("cmpS_target_name",""))
@@ -2193,7 +2167,7 @@ def sync_current_department_from_history(as_of_date=None):
 
 # ── 관리자: PIN / 부서이동 / 평가항목 / 권한 ─────────────────────────────────
 
-def _random_pin(length=6):
+def _random_pin(length=4):
     return "".join(pysecrets.choice("0123456789") for _ in range(length))
 
 
@@ -2922,12 +2896,13 @@ def startup_sanity_checks():
 
 
 def safe_run(render_fn, *args, title: str = "", **kwargs):
+    msg = None
     """탭/섹션 하나를 안전하게 감싸서, 예외가 나도 전체 앱이 멈추지 않도록."""
     try:
         return render_fn(*args, **kwargs)
     except Exception as e:
         msg = f"[{title}] 렌더 실패: {e}" if title else f"렌더 실패: {e}"
-        st.error(msg, icon="🛑")
+        st.error(msg, icon="🛑") if msg is not None else None
         return None
 # ── Startup Sanity Checks & Safe Runner (END) ────────────────────────────────
 
