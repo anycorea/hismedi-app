@@ -1,3 +1,26 @@
+
+def _emp_name_by_sabun(emp_df, sabun: str) -> str:
+    try:
+        sabun = str(sabun)
+        row = emp_df.loc[emp_df['사번'].astype(str) == sabun]
+        if not row.empty:
+            return str(row.iloc[0]['이름'])
+    except Exception:
+        pass
+    return ""
+
+def _sync_target_all(sabun: str, emp_df):
+    sabun = str(sabun)
+    name = _emp_name_by_sabun(emp_df, sabun)
+    st.session_state["target_sabun"] = sabun
+    st.session_state["target_name"]  = name
+    st.session_state["eval2_target_sabun"] = sabun
+    st.session_state["eval2_target_name"]  = name
+    st.session_state["jd2_target_sabun"]   = sabun
+    st.session_state["jd2_target_name"]    = name
+    st.session_state["cmpS_target_sabun"]  = sabun
+    st.session_state["cmpS_target_name"]   = name
+
 # -*- coding: utf-8 -*-
 """
 HISMEDI - 인사/HR (Google Sheets 연동)
@@ -1604,46 +1627,6 @@ def tab_job_desc(emp_df: pd.DataFrame):
 import time
 import pandas as pd
 import streamlit as st
-
-
-# === Shared selection sync helpers ===
-from typing import Optional
-
-def _emp_name_by_sabun(emp_df, sabun: str) -> str:
-    try:
-        df = emp_df
-        if df is None:
-            return ""
-        _s = str(sabun)
-        row = df.loc[df.get('사번').astype(str) == _s] if '사번' in df.columns else None
-        if row is not None and not row.empty:
-            return str(row.iloc[0].get('이름', ''))
-    except Exception:
-        pass
-    return ""
-
-
-def _sync_target_all(sabun: Optional[str], emp_df):
-    if not sabun:
-        return
-    sabun = str(sabun)
-    try:
-        name = _emp_name_by_sabun(emp_df, sabun)
-    except Exception:
-        name = ""
-    # canonical keys
-    st.session_state["target_sabun"] = sabun
-    st.session_state["target_name"] = name
-    # per-tab keys
-    for a,b in [
-        ("eval2_target_sabun","eval2_target_name"),
-        ("jd2_target_sabun","jd2_target_name"),
-        ("cmpS_target_sabun","cmpS_target_name"),
-    ]:
-        st.session_state[a] = sabun
-        st.session_state[b] = name
-
-
 from datetime import datetime
 from gspread.exceptions import APIError as _GS_APIError
 
@@ -2991,7 +2974,7 @@ def main():
     if u.get("관리자여부", False):
         tabs = st.tabs(["직원", "인사평가", "직무기술서", "직무능력평가", "관리자", "도움말"])
     else:
-        tabs = st.tabs(["직원", "인사평가", "직무기술서", "직무능력평가", "도움말"], key="main_tabs")
+        tabs = st.tabs(["직원", "인사평가", "직무기술서", "직무능력평가", "도움말"])
 
     with tabs[0]:
         safe_run(tab_staff, emp_df_for_staff, title="직원")
