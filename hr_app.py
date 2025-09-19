@@ -3106,16 +3106,7 @@ def main():
 
 
     def _render_help():
-    st.subheader('도움말')
-    st.markdown(
-        '''
-        ### 권한(Role) 설명
-        - **admin**: 시스템 최상위 관리자, 모든 메뉴 접근 가능
-        - **manager**: 지정된 부서 소속 직원 관리 가능 (부장/팀장은 자동 권한 부여)
-        - **evaluator**: 평가 권한 보유, 지정된 부서 직원 평가 가능
-        - **seed**: 초기 시스템에서 강제로 삽입된 보장 관리자 계정 (삭제 불가)
-        '''
-    )
+        pass
 
 def _start_session(user_info: dict):
     """
