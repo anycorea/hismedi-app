@@ -53,46 +53,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-
-# === 대상자 동기화 유틸 (공통) ===============================
-def _get_name_by_sabun(emp_df, sabun: str) -> str:
-    s = str(sabun)
-    try:
-        m = st.session_state.get("name_by_sabun")
-        if isinstance(m, dict) and s in m:
-            return m[s]
-    except Exception:
-        pass
-    try:
-        row = emp_df.loc[emp_df["사번"].astype(str) == s]
-        if not row.empty:
-            return str(row.iloc[0].get("이름",""))
-    except Exception:
-        pass
-    return ""
-
-def _sync_target_all_tabs(sabun: str, emp_df):
-    s = str(sabun or "").strip()
-    if not s:
-        return
-    nm = _get_name_by_sabun(emp_df, s)
-    st.session_state["target_sabun"] = s
-    st.session_state["target_name"]  = nm
-    st.session_state["eval2_target_sabun"] = s
-    st.session_state["eval2_target_name"]  = nm
-    st.session_state["jd2_target_sabun"]   = s
-    st.session_state["jd2_target_name"]    = nm
-    st.session_state["cmpS_target_sabun"]  = s
-    st.session_state["cmpS_target_name"]   = nm
-
-def _pull_any_target_into_all(emp_df):
-    s = (str(st.session_state.get("target_sabun") or "") 
-         or str(st.session_state.get("eval2_target_sabun") or "")
-         or str(st.session_state.get("jd2_target_sabun") or "")
-         or str(st.session_state.get("cmpS_target_sabun") or "")).strip()
-    if s:
-        _sync_target_all_tabs(s, emp_df)
-
 # ── Utils ─────────────────────────────────────────────────────────────────────
 def kst_now_str(): return datetime.now(tz=tz_kst()).strftime("%Y-%m-%d %H:%M:%S (%Z)")
 def _sha256_hex(s: str) -> str: return hashlib.sha256(str(s).encode()).hexdigest()
@@ -414,10 +374,6 @@ def show_login_form(emp_df: pd.DataFrame):
         "이름": str(r.get("이름","")),
         "관리자여부": False,
     })
-    try:
-        _sync_target_all_tabs(str(r.get("사번","")), emp_df)
-    except Exception:
-        pass
     st.success(f"{str(r.get('이름',''))}님 환영합니다!")
     st.rerun()
 
@@ -987,10 +943,6 @@ def tab_admin_transfer(emp_df):
             st.exception(e)
 
 def tab_staff(emp_df: pd.DataFrame):
-    try:
-        _pull_any_target_into_all(emp_df)
-    except Exception:
-        pass
     u = st.session_state.get("user", {})
     me = str(u.get("사번", ""))
     if not is_admin(me):
@@ -1218,10 +1170,6 @@ def read_eval_saved_scores(year: int, eval_type: str, target_sabun: str, evaluat
         return {}, {}
 
 def tab_eval_input(emp_df: pd.DataFrame):
-    try:
-        _pull_any_target_into_all(emp_df)
-    except Exception:
-        pass
     st.subheader("인사평가")
     this_year = datetime.now(tz=tz_kst()).year
     year = st.number_input("연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="eval2_year")
@@ -1873,10 +1821,6 @@ def _has_competency_access(emp_df: pd.DataFrame, sabun: str) -> bool:
 # ───────────────────────── 메인 섹션(간편형 + 자동 선택/대상 표시) ─────────────────────────
 def tab_competency(emp_df: pd.DataFrame):
 
-    try:
-        _pull_any_target_into_all(emp_df)
-    except Exception:
-        pass
     # 🔄 sync from other tabs (인사평가/직무기술서)
     _glob_pick = st.session_state.get("eval2_target_sabun") or st.session_state.get("jd2_target_sabun")
     if _glob_pick and st.session_state.get("cmpS_target_sabun") != str(_glob_pick):
