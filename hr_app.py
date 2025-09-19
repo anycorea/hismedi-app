@@ -1216,10 +1216,28 @@ def tab_eval_input(emp_df: pd.DataFrame):
             view = view[view.apply(lambda r: k in str(r["사번"]).lower() or k in str(r["이름"]).lower(), axis=1)]
         view = view.sort_values(["사번"]).reset_index(drop=True)
         view["선택"] = (view["사번"].astype(str) == str(st.session_state.get("eval2_target_sabun","")))
-        edited_pick = st.data_editor(
+        # --- 단일 선택: selectbox로 대상자 선택 후 표는 읽기전용으로 표시 ---
+        _sabuns = view["사번"].astype(str).tolist()
+        _names  = view["이름"].astype(str).tolist() if "이름" in view.columns else [""] * len(_sabuns)
+        _opts   = [f"{s} - {n}" for s, n in zip(_sabuns, _names)]
+        _target = str(st.session_state.get("eval2_target_sabun", ""))
+        try:
+            _idx_default = _sabuns.index(_target) if _target in _sabuns else 0
+        except Exception:
+            _idx_default = 0
+        _sel = st.selectbox("대상자 선택", _opts, index=_idx_default, key="eval2_pick_editor_select")
+        _sel_sabun = _sel.split(" - ", 1)[0] if isinstance(_sel, str) and " - " in _sel else (_sel if isinstance(_sel, str) else _sabuns[_idx_default] if len(_sabuns)>0 else "")
+        st.session_state["eval2_target_sabun"] = str(_sel_sabun)
+        try:
+            st.session_state["eval2_target_name"] = str(_names[_sabuns.index(_sel_sabun)]) if _sel_sabun in _sabuns else ""
+        except Exception:
+            st.session_state["eval2_target_name"] = ""
+        view["선택"] = (view["사번"].astype(str) == str(st.session_state.get("eval2_target_sabun", "")))
+        edited_pick = view[["선택","사번","이름","부서1","부서2","직급"]] if all(c in view.columns for c in ["이름","부서1","부서2","직급"]) else view
+        st.data_editor(
             view[["선택","사번","이름","부서1","부서2","직급"]],
-            use_container_width=True, height=360, key=f"eval2_pick_editor_{st.session_state.get('eval2_target_sabun', '')}",
-            column_config={"선택": st.column_config.CheckboxColumn()}, 
+            use_container_width=True, height=360, key="eval2_pick_editor",
+            column_config={"선택": st.column_config.CheckboxColumn(, disabled=True)}, 
          hide_index=True, num_rows="fixed")
         picked = edited_pick.loc[edited_pick["선택"] == True]
         if not picked.empty:
@@ -1474,10 +1492,28 @@ def tab_job_desc(emp_df: pd.DataFrame):
             view = view[view.apply(lambda r: k in str(r["사번"]).lower() or k in str(r["이름"]).lower(), axis=1)]
         view = view.sort_values(["사번"]).reset_index(drop=True)
         view["선택"] = (view["사번"].astype(str) == str(st.session_state.get("jd2_target_sabun","")))
-        edited = st.data_editor(
+        # --- 단일 선택: selectbox로 대상자 선택 후 표는 읽기전용으로 표시 ---
+        _sabuns = view["사번"].astype(str).tolist()
+        _names  = view["이름"].astype(str).tolist() if "이름" in view.columns else [""] * len(_sabuns)
+        _opts   = [f"{s} - {n}" for s, n in zip(_sabuns, _names)]
+        _target = str(st.session_state.get("jd2_target_sabun", ""))
+        try:
+            _idx_default = _sabuns.index(_target) if _target in _sabuns else 0
+        except Exception:
+            _idx_default = 0
+        _sel = st.selectbox("대상자 선택", _opts, index=_idx_default, key="jd2_pick_editor_select")
+        _sel_sabun = _sel.split(" - ", 1)[0] if isinstance(_sel, str) and " - " in _sel else (_sel if isinstance(_sel, str) else _sabuns[_idx_default] if len(_sabuns)>0 else "")
+        st.session_state["jd2_target_sabun"] = str(_sel_sabun)
+        try:
+            st.session_state["jd2_target_name"] = str(_names[_sabuns.index(_sel_sabun)]) if _sel_sabun in _sabuns else ""
+        except Exception:
+            st.session_state["jd2_target_name"] = ""
+        view["선택"] = (view["사번"].astype(str) == str(st.session_state.get("jd2_target_sabun", "")))
+        edited = view[["선택","사번","이름","부서1","부서2","직급"]] if all(c in view.columns for c in ["이름","부서1","부서2","직급"]) else view
+        st.data_editor(
             view[["선택","사번","이름","부서1","부서2","직급"]],
-            use_container_width=True, height=360, key=f"jd2_pick_editor_{st.session_state.get('jd2_target_sabun', '')}",
-            column_config={"선택": st.column_config.CheckboxColumn()}, 
+            use_container_width=True, height=360, key="jd2_pick_editor",
+            column_config={"선택": st.column_config.CheckboxColumn(, disabled=True)}, 
          hide_index=True, num_rows="fixed")
         picked = edited.loc[edited["선택"] == True]
         if not picked.empty:
@@ -1868,12 +1904,30 @@ def tab_competency(emp_df: pd.DataFrame):
     df_view["선택"] = (df_view["사번"].astype(str) == str(st.session_state.get("cmpS_target_sabun","")))
 
     st.caption("※ 표에서 평가할 직원을 체크하세요. (여러 명 체크 시 마지막 선택 1명이 적용됩니다)")
-    edited = st.data_editor(
+    # --- 단일 선택: selectbox로 대상자 선택 후 표는 읽기전용으로 표시 ---
+    _sabuns = df_view["사번"].astype(str).tolist()
+    _names  = df_view["이름"].astype(str).tolist() if "이름" in df_view.columns else [""] * len(_sabuns)
+    _opts   = [f"{s} - {n}" for s, n in zip(_sabuns, _names)]
+    _target = str(st.session_state.get("cmpS_target_sabun", ""))
+    try:
+        _idx_default = _sabuns.index(_target) if _target in _sabuns else 0
+    except Exception:
+        _idx_default = 0
+    _sel = st.selectbox("대상자 선택", _opts, index=_idx_default, key="cmpS_pick_editor_select")
+    _sel_sabun = _sel.split(" - ", 1)[0] if isinstance(_sel, str) and " - " in _sel else (_sel if isinstance(_sel, str) else _sabuns[_idx_default] if len(_sabuns)>0 else "")
+    st.session_state["cmpS_target_sabun"] = str(_sel_sabun)
+    try:
+        st.session_state["cmpS_target_name"] = str(_names[_sabuns.index(_sel_sabun)]) if _sel_sabun in _sabuns else ""
+    except Exception:
+        st.session_state["cmpS_target_name"] = ""
+    df_view["선택"] = (df_view["사번"].astype(str) == str(st.session_state.get("cmpS_target_sabun", "")))
+    edited = df_view[["선택","사번","이름","부서1","부서2","직급"]] if all(c in df_view.columns for c in ["이름","부서1","부서2","직급"]) else df_view
+    st.data_editor(
         df_view[["선택","사번","이름","부서1","부서2","직급"]],
         use_container_width=True,
         height=340,
-        key=f"cmpS_pick_editor_{st.session_state.get('cmpS_target_sabun', '')}",
-        column_config={"선택": st.column_config.CheckboxColumn()},
+        key="cmpS_pick_editor",
+        column_config={"선택": st.column_config.CheckboxColumn(, disabled=True)},
         hide_index=True,
         num_rows="fixed"
     )
