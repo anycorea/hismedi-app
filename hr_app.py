@@ -1638,20 +1638,22 @@ import time
 import pandas as pd
 import streamlit as st
 def safe_guard(render_fn, *args, title: str = "", **kwargs):
+    """Run a section safely and avoid redaction-induced cascades."""
     try:
         return render_fn(*args, **kwargs)
     except Exception as e:
+        # ⚠️ 절대 예외 본문을 메시지에 넣지 마세요.
         try:
             base = f"[{title}] 렌더 실패" if title else "렌더 실패"
         except Exception:
             base = "렌더 실패"
         try:
-            st.error(base, icon="🛑")  # avoid leaking e into user-visible UI
+            st.error(base, icon="🛑")
         except Exception:
             pass
         try:
             if st.secrets.get("app", {}).get("DEBUG", False):
-                st.exception(e)  # DEBUG only
+                st.exception(e)  # 개발 모드에서만 상세 스택
         except Exception:
             pass
         return None
@@ -1749,18 +1751,10 @@ def _jd_latest_for(sabun:str, year:int) -> dict:
     except Exception:
         return {}
 
-def _edu_completion_from_jd(jd_row: dict | None) -> str:
-    """직원공통필수교육이 비어있지 않으면 '완료', 아니면 '미완료'.
-    None이나 키 없음 등 모든 경우를 안전하게 처리한다.
-    """
-    try:
-        if not jd_row or not isinstance(jd_row, dict):
-            return "미완료"
-        val = str(jd_row.get("직원공통필수교육", "") or "").strip()
-        return "완료" if val else "미완료"
-    except Exception:
-        return "미완료"
-
+def _edu_completion_from_jd(jd_row:dict) -> str:
+    """직원공통필수교육이 비어있지 않으면 '완료', 아니면 '미완료'."""
+    val = str(jd_row.get("직원공통필수교육","")).strip()
+    return "완료" if val else "미완료"
 
 
 def upsert_comp_simple_response(
@@ -2011,7 +2005,7 @@ def tab_competency(emp_df: pd.DataFrame):
         except Exception:
             eval_date = st.date_input("평가일자", datetime.now().date(), key="cmpS_date").strftime("%Y-%m-%d")
 
-    edu_status = _edu_completion_from_jd(jd if jd else {})
+    edu_status = _edu_completion_from_jd(jd)
     st.metric("교육이수 (자동)", edu_status)
 
     opinion = st.text_area("종합평가 의견", value="", height=150, key="cmpS_opinion")
@@ -2944,34 +2938,6 @@ def startup_sanity_checks():
 
     return problems
 
-
-def safe_guard(render_fn, *args, title: str = "", **kwargs):
-    """탭/섹션 하나를 안전하게 감싸서, 예외가 나도 전체 앱이 멈추지 않도록."""
-    try:
-        return render_fn(*args, **kwargs)
-    except Exception as e:
-        msg = f"[{title}] 렌더 실패: {e}" if title else f"렌더 실패: {e}"
-        st.error(msg, icon="🛑")
-        return None
-# ── Startup Sanity Checks & Safe Runner (END) ────────────────────────────────
-
-
-# ===== [A] startup_sanity_checks() 맨 위에 추가 (들여쓰기 4칸) =====
-# 안전 재실행 시 다음 1회 부팅 점검을 건너뜁니다.
-    try:
-        import streamlit as st
-        if st.session_state.get("_skip_boot_checks", False):
-            st.session_state["_skip_boot_checks"] = False
-            return []
-    except Exception:
-        pass
-# ===== [A] END =====
-
-
-# ======================================================================
-# 📌 Startup & Main
-# ======================================================================
-# ── 메인 ──────────────────────────────────────────────────────────────────────
 def main():
     st.markdown(f"## {APP_TITLE}")
     render_status_line()
