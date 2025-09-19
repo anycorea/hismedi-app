@@ -329,7 +329,7 @@ def logout():
         except Exception:
             pass
     finally:
-        st.rerun()
+
 
 def show_login_form(emp_df: pd.DataFrame):
     st.header("로그인")
@@ -375,7 +375,7 @@ def show_login_form(emp_df: pd.DataFrame):
         "관리자여부": False,
     })
     st.success(f"{str(r.get('이름',''))}님 환영합니다!")
-    st.rerun()
+
 
 def require_login(emp_df: pd.DataFrame):
     if not _session_valid():
@@ -960,9 +960,9 @@ def tab_staff(emp_df: pd.DataFrame):
                 pass
             st.session_state.pop("emp_last_loaded_ver", None)
             try:
-                st.rerun()
+
             except Exception:
-                st.experimental_rerun()
+
 
     df = emp_df.copy()
 
@@ -1221,11 +1221,28 @@ def tab_eval_input(emp_df: pd.DataFrame):
             use_container_width=True, height=360, key="eval2_pick_editor",
             column_config={"선택": st.column_config.CheckboxColumn()}, 
          hide_index=True, num_rows="fixed")
+        # 단일 선택 강제 (무한 재렌더 방지: st.rerun 사용하지 않음)
+        orig_selected = view["선택"].astype(bool) if "선택" in view.columns else None
+        new_selected = edited_pick["선택"].astype(bool) if "선택" in edited_pick.columns else None
         picked = edited_pick.loc[edited_pick["선택"] == True]
-        if len(picked) > 1:
-            st.warning("한 명만 선택됩니다. 마지막 체크된 1명으로 고정합니다.", icon="⚠️")
-            st.rerun()
-
+        if orig_selected is not None and new_selected is not None and not new_selected.equals(orig_selected):
+            diff_mask = (new_selected ^ orig_selected)
+            if diff_mask.any():
+                _idx = list(edited_pick.index[diff_mask])[-1]
+                _row = edited_pick.loc[_idx]
+            elif picked.shape[0] > 0:
+                _row = picked.iloc[-1]
+            else:
+                _row = None
+            if _row is not None:
+                st.session_state["eval2_target_sabun"] = str(_row["사번"])
+                st.session_state["eval2_target_name"]  = str(_row.get("이름",""))
+        # 선택 결과 반영
+        picked = edited_pick.loc[edited_pick["선택"] == True]
+        if not picked.empty:
+            r = picked.iloc[-1]
+            st.session_state["eval2_target_sabun"] = str(r["사번"])
+            st.session_state["eval2_target_name"]  = str(r.get("이름",""))
         if not picked.empty:
             r = picked.iloc[-1]
             st.session_state["eval2_target_sabun"] = str(r["사번"])
@@ -1241,7 +1258,7 @@ def tab_eval_input(emp_df: pd.DataFrame):
     with col_mode[0]:
         if st.button(("수정모드로 전환" if not st.session_state["eval2_edit_mode"] else "보기모드로 전환"),
                      use_container_width=True, key="eval2_toggle"):
-            st.session_state["eval2_edit_mode"] = not st.session_state["eval2_edit_mode"]; st.rerun()
+            st.session_state["eval2_edit_mode"] = not st.session_state["eval2_edit_mode"];
     with col_mode[1]: st.caption(f"현재: **{'수정모드' if st.session_state['eval2_edit_mode'] else '보기모드'}**")
     edit_mode = bool(st.session_state["eval2_edit_mode"])
 
@@ -1302,7 +1319,7 @@ def tab_eval_input(emp_df: pd.DataFrame):
             rep = upsert_eval_response(emp_df, int(year), eval_type, str(target_sabun), str(me_sabun), scores, "제출")
             st.success(("제출 완료" if rep["action"] == "insert" else "업데이트 완료") + f" (총점 {rep['total']}점)", icon="✅")
             st.toast("평가 저장됨", icon="✅")
-            st.session_state["eval2_edit_mode"] = False; st.rerun()
+            st.session_state["eval2_edit_mode"] = False;
         except Exception as e:
             st.exception(e)
 
@@ -1479,11 +1496,28 @@ def tab_job_desc(emp_df: pd.DataFrame):
             use_container_width=True, height=360, key="jd2_pick_editor",
             column_config={"선택": st.column_config.CheckboxColumn()}, 
          hide_index=True, num_rows="fixed")
+        # 단일 선택 강제 (무한 재렌더 방지: st.rerun 사용하지 않음)
+        orig_selected = view["선택"].astype(bool) if "선택" in view.columns else None
+        new_selected = edited["선택"].astype(bool) if "선택" in edited.columns else None
         picked = edited.loc[edited["선택"] == True]
-        if len(picked) > 1:
-            st.warning("한 명만 선택됩니다. 마지막 체크된 1명으로 고정합니다.", icon="⚠️")
-            st.rerun()
-
+        if orig_selected is not None and new_selected is not None and not new_selected.equals(orig_selected):
+            diff_mask = (new_selected ^ orig_selected)
+            if diff_mask.any():
+                _idx = list(edited.index[diff_mask])[-1]
+                _row = edited.loc[_idx]
+            elif picked.shape[0] > 0:
+                _row = picked.iloc[-1]
+            else:
+                _row = None
+            if _row is not None:
+                st.session_state["jd2_target_sabun"] = str(_row["사번"])
+                st.session_state["jd2_target_name"]  = str(_row.get("이름",""))
+        # 선택 결과 반영
+        picked = edited.loc[edited["선택"] == True]
+        if not picked.empty:
+            r = picked.iloc[-1]
+            st.session_state["jd2_target_sabun"] = str(r["사번"])
+            st.session_state["jd2_target_name"]  = str(r.get("이름",""))
         if not picked.empty:
             r = picked.iloc[-1]
             st.session_state["jd2_target_sabun"] = str(r["사번"])
@@ -1496,7 +1530,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
     with col_mode[0]:
         if st.button(("수정모드로 전환" if not st.session_state["jd2_edit_mode"] else "보기모드로 전환"),
                      use_container_width=True, key="jd2_toggle"):
-            st.session_state["jd2_edit_mode"] = not st.session_state["jd2_edit_mode"]; st.rerun()
+            st.session_state["jd2_edit_mode"] = not st.session_state["jd2_edit_mode"];
     with col_mode[1]: st.caption(f"현재: **{'수정모드' if st.session_state['jd2_edit_mode'] else '보기모드'}**")
     edit_mode = bool(st.session_state["jd2_edit_mode"])
 
@@ -1576,7 +1610,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
         }
         try:
             rep = upsert_jobdesc(rec, as_new_version=(version == 0))
-            st.success(f"저장 완료 (버전 {rep['version']})", icon="✅"); st.rerun()
+            st.success(f"저장 완료 (버전 {rep['version']})", icon="✅");
         except Exception as e:
             st.exception(e)
 
@@ -1849,11 +1883,7 @@ def tab_competency(emp_df: pd.DataFrame):
     if "부서2" not in df.columns:
         df["부서2"] = ""
 
-    base = df.copy()
-    if "부서1" not in base.columns: base["부서1"] = ""
-    if "부서2" not in base.columns: base["부서2"] = ""
-    if "직급" not in base.columns: base["직급"] = ""
-    df_view = base[["사번","이름","부서1","부서2","직급"]].copy().sort_values(["사번"]).reset_index(drop=True)
+    df_view = df[["사번","부서2","이름"]].copy().sort_values(["사번"]).reset_index(drop=True)
 
     # ── 기본 선택: 로그인 사용자가 보이면 우선 선택, 아니면 1행 선택 ──
     sabun_series = df_view["사번"].astype(str)
@@ -1882,11 +1912,28 @@ def tab_competency(emp_df: pd.DataFrame):
         num_rows="fixed"
     )
 
+    # 단일 선택 강제 (무한 재렌더 방지: st.rerun 사용하지 않음)
+    orig_selected = df_view["선택"].astype(bool) if "선택" in df_view.columns else None
+    new_selected = edited["선택"].astype(bool) if "선택" in edited.columns else None
     picked = edited.loc[edited["선택"] == True]
-    if len(picked) > 1:
-        st.warning("한 명만 선택됩니다. 마지막 체크된 1명으로 고정합니다.", icon="⚠️")
-        st.rerun()
-
+    if orig_selected is not None and new_selected is not None and not new_selected.equals(orig_selected):
+        diff_mask = (new_selected ^ orig_selected)
+        if diff_mask.any():
+            _idx = list(edited.index[diff_mask])[-1]
+            _row = edited.loc[_idx]
+        elif picked.shape[0] > 0:
+            _row = picked.iloc[-1]
+        else:
+            _row = None
+        if _row is not None:
+            st.session_state["cmpS_target_sabun"] = str(_row["사번"])
+            st.session_state["cmpS_target_name"]  = str(_row.get("이름",""))
+    # 선택 결과 반영
+    picked = edited.loc[edited["선택"] == True]
+    if not picked.empty:
+        r = picked.iloc[-1]
+        st.session_state["cmpS_target_sabun"] = str(r["사번"])
+        st.session_state["cmpS_target_name"]  = str(r.get("이름",""))
     if not picked.empty:
         last = picked.iloc[-1]
         st.session_state["cmpS_target_sabun"] = str(last["사번"])
@@ -1950,7 +1997,7 @@ def tab_competency(emp_df: pd.DataFrame):
     if do_reset:
         for k in ["cmpS_main","cmpS_extra","cmpS_qual","cmpS_opinion"]:
             if k in st.session_state: del st.session_state[k]
-        st.rerun()
+
 
     if do_save:
         try:
@@ -2244,7 +2291,7 @@ def tab_admin_pin(emp_df):
     with col[0]: only_active = st.checkbox("재직자만", True, key="adm_pin_only_active")
     with col[1]: only_empty = st.checkbox("PIN 미설정자만", True, key="adm_pin_only_empty")
     with col[2]: overwrite_all = st.checkbox("기존 PIN 덮어쓰기", False, disabled=only_empty, key="adm_pin_overwrite")
-    with col[3]: pin_len = st.number_input("자릿수", min_value=4, max_value=8, value=4, step=1, key="adm_pin_len")
+    with col[3]: pin_len = st.number_input("자릿수", min_value=4, max_value=8, value=6, step=1, key="adm_pin_len")
     with col[4]: uniq = st.checkbox("서로 다른 PIN 보장", True, key="adm_pin_uniq")
     candidates = emp_df.copy()
     if only_active and "재직여부" in candidates.columns: candidates = candidates[candidates["재직여부"] == True]
@@ -2433,7 +2480,7 @@ def tab_admin_eval_items():
 
                 st.cache_data.clear()
                 st.success(f"순서 저장 완료: {changed}건 반영", icon="✅")
-                st.rerun()
+
             except Exception as e:
                 st.exception(e)
 
@@ -2508,7 +2555,7 @@ def tab_admin_eval_items():
                         _retry_call(ws.append_row, rowbuf, value_input_option="USER_ENTERED")
                         st.cache_data.clear()
                         st.success(f"저장 완료 (항목ID: {new_id})")
-                        st.rerun()
+
 
                     else:
                         col_id = hmap.get("항목ID")
@@ -2528,7 +2575,7 @@ def tab_admin_eval_items():
                             if "비고" in hmap: ws.update_cell(idx, hmap["비고"], memo.strip())
                             st.cache_data.clear()
                             st.success("업데이트 완료")
-                            st.rerun()
+
                 except Exception as e:
                     st.exception(e)
 
@@ -2546,7 +2593,7 @@ def tab_admin_eval_items():
                             if str(v).strip() == str(item_id).strip():
                                 ws.update_cell(i, col_active, False); break
                         st.cache_data.clear()
-                        st.success("비활성화 완료"); st.rerun()
+                        st.success("비활성화 완료");
                 except Exception as e:
                     st.exception(e)
 
@@ -2563,7 +2610,7 @@ def tab_admin_eval_items():
                             if str(v).strip() == str(item_id).strip():
                                 ws.delete_rows(i); break
                         st.cache_data.clear()
-                        st.success("삭제 완료"); st.rerun()
+                        st.success("삭제 완료");
                 except Exception as e:
                     st.exception(e)
 
@@ -2813,7 +2860,7 @@ def tab_admin_acl(emp_df):
 
             st.cache_data.clear()
             st.success("권한이 전체 반영되었습니다.", icon="✅")
-            st.rerun()
+
 
         except Exception as e:
             st.exception(e)
@@ -3032,7 +3079,7 @@ def main():
                         # 다음 실행에서 startup_sanity_checks를 건너뛰게 플래그 설정
                         st.session_state["_skip_boot_checks"] = True
                         st.toast("데이터 캐시 삭제 및 안전 재실행", icon="♻️")
-                        st.rerun()
+
 
                 with r2:
                     if st.button("모두 비우고 즉시 재실행(429 위험)", key="admin_danger_rerun"):
@@ -3045,7 +3092,7 @@ def main():
                         except Exception:
                             pass
                         st.toast("모든 캐시 삭제 후 재실행", icon="🧨")
-                        st.rerun()
+
 
                 # 안내(중첩 expander 금지 → 간단 섹션으로 표시)
                 st.markdown("""
@@ -3157,7 +3204,7 @@ def logout():
         except Exception:
             pass
     finally:
-        st.rerun()
+
 
 # =================== HR SESSION HOTFIX (END) =====================
 
