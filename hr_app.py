@@ -345,25 +345,6 @@ def show_login_form(emp_df: pd.DataFrame):
     _inject_login_keybinder()
 
     # ── 서버 검증/세션 시작 ───────────────────────────────────────────
-    # Enter를 '사번'에서 눌러 로그인 트리거가 걸렸는데 PIN이 비어있다면, 오류를 띄우지 말고 PIN으로 포커스만 이동
-    if do_login and not pin:
-        components.html(
-            """
-            <script>
-              (function(){
-                const doc = window.parent.document;
-                const labels = Array.from(doc.querySelectorAll('label'));
-                const lab = labels.find(l => (l.innerText||'').trim().startsWith('PIN'));
-                if(lab){
-                  const root = lab.closest('div[data-testid="stTextInput"]') || lab.parentElement;
-                  const inp = root ? root.querySelector('input') : null;
-                  if(inp){ try{ inp.focus(); inp.select(); }catch(e){} }
-                }
-              })();
-            </script>
-            """, height=0, width=0
-        )
-        st.stop()
     if not do_login:
         st.stop()
 
@@ -1906,19 +1887,13 @@ def tab_competency(emp_df: pd.DataFrame):
     d2s = df["부서2"].astype(str).tolist() if "부서2" in df.columns else [""] * len(sabuns)
     opts = [f"{s} - {n} - {d2}" for s, n, d2 in zip(sabuns, names, d2s)]
     sel_idx = sabuns.index(default_sabun) if default_sabun in sabuns else 0
-    def _cmpS_on_pick_change():
-        _label = st.session_state.get("cmpS_pick_select", "")
-        _sabun = _label.split(" - ", 1)[0] if isinstance(_label, str) else ""
-        if _sabun:
-            st.session_state["cmpS_target_sabun"] = str(_sabun)
-            try:
-                st.session_state["cmpS_target_name"] = _emp_name_by_sabun(emp_df, str(_sabun))
-            except Exception:
-                pass
-            st.rerun()
-
-    sel_label = st.selectbox("대상자 선택", opts, index=sel_idx, key="cmpS_pick_select", on_change=_cmpS_on_pick_change)
+    sel_label = st.selectbox("대상자 선택", opts, index=sel_idx, key="cmpS_pick_select")
     sel_sabun = sel_label.split(" - ", 1)[0] if isinstance(sel_label, str) else sabuns[sel_idx]
+    st.session_state["cmpS_target_sabun"] = str(sel_sabun)
+    try:
+        st.session_state["cmpS_target_name"] = _emp_name_by_sabun(emp_df, str(sel_sabun))
+    except Exception:
+        pass
 
     view = df[["사번", "이름", "부서1", "부서2", "직급"]].copy()
     view["선택"] = (view["사번"].astype(str) == str(st.session_state.get("cmpS_target_sabun", sel_sabun)))
