@@ -1170,7 +1170,7 @@ def read_eval_saved_scores(year: int, eval_type: str, target_sabun: str, evaluat
         return {}, {}
 
 def tab_eval_input(emp_df: pd.DataFrame):
-    st.subheader("평가")
+    st.subheader("인사평가")
     this_year = datetime.now(tz=tz_kst()).year
     year = st.number_input("평가 연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="eval2_year")
     u = st.session_state["user"]; me_sabun = str(u["사번"]); me_name = str(u["이름"])
@@ -1192,28 +1192,10 @@ def tab_eval_input(emp_df: pd.DataFrame):
         base = emp_df.copy(); base["사번"] = base["사번"].astype(str)
         base = base[base["사번"].isin({str(s) for s in allowed_sabuns})]
         if "재직여부" in base.columns: base = base[base["재직여부"] == True]
-        cflt = st.columns([1,1,1,2,1])
-        with cflt[0]:
-            opt_d1 = ["(전체)"] + sorted([x for x in base.get("부서1", []).dropna().unique() if x])
-            f_d1 = st.selectbox("부서1", opt_d1, index=0, key="eval2_f_d1")
-        with cflt[1]:
-            sub = base if f_d1 == "(전체)" else base[base["부서1"].astype(str) == f_d1]
-            opt_d2 = ["(전체)"] + sorted([x for x in sub.get("부서2", []).dropna().unique() if x])
-            f_d2 = st.selectbox("부서2", opt_d2, index=0, key="eval2_f_d2")
-        with cflt[2]:
-            opt_g = ["(전체)"] + sorted([x for x in base.get("직급", []).dropna().unique() if x])
-            f_g = st.selectbox("직급", opt_g, index=0, key="eval2_f_grade")
-        with cflt[3]: f_q = st.text_input("검색(사번/이름)", "", key="eval2_f_q")
-        with cflt[4]: only_active = st.checkbox("재직만", True, key="eval2_f_active")
-
+                # 대상자 선택 UI (간소화: 필터 제거, 재직만 체크박스 제거)
         view = base[["사번","이름","부서1","부서2","직급","재직여부"]].copy()
-        if only_active and "재직여부" in view.columns: view = view[view["재직여부"] == True]
-        if f_d1 != "(전체)": view = view[view["부서1"].astype(str) == f_d1]
-        if f_d2 != "(전체)": view = view[view["부서2"].astype(str) == f_d2]
-        if f_g  != "(전체)": view = view[view["직급"].astype(str) == f_g]
-        if f_q and f_q.strip():
-            k = f_q.strip().lower()
-            view = view[view.apply(lambda r: k in str(r["사번"]).lower() or k in str(r["이름"]).lower(), axis=1)]
+        if "재직여부" in view.columns:
+            view = view[view["재직여부"] == True]
         view = view.sort_values(["사번"]).reset_index(drop=True)
         view["선택"] = (view["사번"].astype(str) == str(st.session_state.get("eval2_target_sabun","")))
         # --- 단일 선택: selectbox로 대상자 선택 후 표는 읽기전용으로 표시 ---
@@ -1471,25 +1453,8 @@ def tab_job_desc(emp_df: pd.DataFrame):
         base = emp_df.copy(); base["사번"] = base["사번"].astype(str)
         base = base[base["사번"].isin({str(s) for s in allowed_sabuns})]
         if "재직여부" in base.columns: base = base[base["재직여부"] == True]
-        cflt = st.columns([1,1,1,2])
-        with cflt[0]:
-            opt_d1 = ["(전체)"] + sorted([x for x in base.get("부서1", []).dropna().unique() if x])
-            f_d1 = st.selectbox("부서1", opt_d1, index=0, key="jd2_f_d1")
-        with cflt[1]:
-            sub = base if f_d1 == "(전체)" else base[base["부서1"].astype(str) == f_d1]
-            opt_d2 = ["(전체)"] + sorted([x for x in sub.get("부서2", []).dropna().unique() if x])
-            f_d2 = st.selectbox("부서2", opt_d2, index=0, key="jd2_f_d2")
-        with cflt[2]:
-            opt_g = ["(전체)"] + sorted([x for x in base.get("직급", []).dropna().unique() if x])
-            f_g = st.selectbox("직급", opt_g, index=0, key="jd2_f_grade")
-        with cflt[3]: f_q = st.text_input("검색(사번/이름)", key="jd2_f_q")
+                # 대상자 선택 UI (간소화: 부서/직급/검색 필터 제거)
         view = base[["사번","이름","부서1","부서2","직급"]].copy()
-        if f_d1 != "(전체)": view = view[view["부서1"].astype(str) == f_d1]
-        if f_d2 != "(전체)": view = view[view["부서2"].astype(str) == f_d2]
-        if f_g  != "(전체)": view = view[view["직급"].astype(str) == f_g]
-        if f_q and f_q.strip():
-            k = f_q.strip().lower()
-            view = view[view.apply(lambda r: k in str(r["사번"]).lower() or k in str(r["이름"]).lower(), axis=1)]
         view = view.sort_values(["사번"]).reset_index(drop=True)
         view["선택"] = (view["사번"].astype(str) == str(st.session_state.get("jd2_target_sabun","")))
         # --- 단일 선택: selectbox로 대상자 선택 후 표는 읽기전용으로 표시 ---
@@ -2986,7 +2951,7 @@ def main():
         safe_run(tab_staff, emp_df_for_staff, title="직원")
 
     with tabs[1]:
-        safe_run(tab_eval_input, emp_df_for_rest, title="평가")
+        safe_run(tab_eval_input, emp_df_for_rest, title="인사평가")
 
     with tabs[2]:
         safe_run(tab_job_desc, emp_df_for_rest, title="직무기술서")
