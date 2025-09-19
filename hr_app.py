@@ -1901,8 +1901,6 @@ def tab_competency(emp_df: pd.DataFrame):
             st.session_state["cmpS_target_name"]  = str(_r["이름"])
         except Exception:
             st.session_state["cmpS_target_name"]  = ""
-        st.session_state["cmpS_target_name"]  = str(last["이름"])
-
     target_sabun = str(st.session_state.get("cmpS_target_sabun",""))
     target_name  = str(st.session_state.get("cmpS_target_name",""))
 
