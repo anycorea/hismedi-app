@@ -1216,9 +1216,11 @@ def tab_eval_input(emp_df: pd.DataFrame):
             view = view[view.apply(lambda r: k in str(r["사번"]).lower() or k in str(r["이름"]).lower(), axis=1)]
         view = view.sort_values(["사번"]).reset_index(drop=True)
         view["선택"] = (view["사번"].astype(str) == str(st.session_state.get("eval2_target_sabun","")))
-        edited_pick = st.data_editor(
+        pick_key_edited_pick = f"eval2_pick_editor_{str(st.session_state.get("eval2_target_sabun",""))}"
+        edited_pick = pick_key_cmpS = f"cmpS_pick_editor_{str(st.session_state.get("cmpS_target_sabun",""))}"
+ st.data_editor(
             view[["선택","사번","이름","부서1","부서2","직급"]],
-            use_container_width=True, height=360, key="eval2_pick_editor",
+            use_container_width=True, height=360, key=pick_key_edited_pick,
             column_config={"선택": st.column_config.CheckboxColumn()}, 
          hide_index=True, num_rows="fixed")
         picked = edited_pick.loc[edited_pick["선택"] == True]
@@ -1474,9 +1476,10 @@ def tab_job_desc(emp_df: pd.DataFrame):
             view = view[view.apply(lambda r: k in str(r["사번"]).lower() or k in str(r["이름"]).lower(), axis=1)]
         view = view.sort_values(["사번"]).reset_index(drop=True)
         view["선택"] = (view["사번"].astype(str) == str(st.session_state.get("jd2_target_sabun","")))
+        pick_key_edited = f"jd2_pick_editor_{str(st.session_state.get("jd2_target_sabun",""))}"
         edited = st.data_editor(
             view[["선택","사번","이름","부서1","부서2","직급"]],
-            use_container_width=True, height=360, key="jd2_pick_editor",
+            use_container_width=True, height=360, key=pick_key_edited,
             column_config={"선택": st.column_config.CheckboxColumn()}, 
          hide_index=True, num_rows="fixed")
         picked = edited.loc[edited["선택"] == True]
@@ -1849,7 +1852,11 @@ def tab_competency(emp_df: pd.DataFrame):
     if "부서2" not in df.columns:
         df["부서2"] = ""
 
-    df_view = df[["사번","부서2","이름"]].copy().sort_values(["사번"]).reset_index(drop=True)
+    base = df.copy()
+    if "부서1" not in base.columns: base["부서1"] = ""
+    if "부서2" not in base.columns: base["부서2"] = ""
+    if "직급"  not in base.columns: base["직급"]  = ""
+    df_view = base[["사번","이름","부서1","부서2","직급"]].copy().sort_values(["사번"]).reset_index(drop=True)
 
     # ── 기본 선택: 로그인 사용자가 보이면 우선 선택, 아니면 1행 선택 ──
     sabun_series = df_view["사번"].astype(str)
@@ -1872,7 +1879,7 @@ def tab_competency(emp_df: pd.DataFrame):
         df_view[["선택","사번","이름","부서1","부서2","직급"]],
         use_container_width=True,
         height=340,
-        key="cmpS_pick_editor",
+        key=pick_key_cmpS,
         column_config={"선택": st.column_config.CheckboxColumn()},
         hide_index=True,
         num_rows="fixed"
