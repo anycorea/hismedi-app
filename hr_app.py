@@ -131,7 +131,7 @@ def _batch_update_row(ws, row_idx: int, hmap: dict, kv: dict):
 # ── Non-critical error silencer ───────────────────────────────────────────────
 SILENT_NONCRITICAL_ERRORS = True
 def _silent_df_exception(e: Exception, where: str, empty_columns: list[str] | None = None) -> pd.DataFrame:
-    if not SILENT_NONCRITICAL_ERRORS: se(f"{where}: {e}")
+    if not SILENT_NONCRITICAL_ERRORS: st.error(f"{where}: {e}")
     return pd.DataFrame(columns=empty_columns or [])
 
 # ── Sheet Helpers ─────────────────────────────────────────────────────────────
@@ -349,24 +349,24 @@ def show_login_form(emp_df: pd.DataFrame):
         st.stop()
 
     if not sabun or not pin:
-        se("사번과 PIN을 입력하세요.")
+        st.error("사번과 PIN을 입력하세요.")
         st.stop()
 
     row = emp_df.loc[emp_df["사번"].astype(str) == str(sabun)]
     if row.empty:
-        se("사번을 찾을 수 없습니다.")
+        st.error("사번을 찾을 수 없습니다.")
         st.stop()
 
     r = row.iloc[0]
     if not _to_bool(r.get("재직여부", False)):
-        se("재직 상태가 아닙니다.")
+        st.error("재직 상태가 아닙니다.")
         st.stop()
 
     stored = str(r.get("PIN_hash","")).strip().lower()
     entered_plain  = _sha256_hex(pin.strip())
     entered_salted = _pin_hash(pin.strip(), str(r.get("사번","")))
     if stored not in (entered_plain, entered_salted):
-        se("PIN이 올바르지 않습니다.")
+        st.error("PIN이 올바르지 않습니다.")
         st.stop()
 
     _start_session({
@@ -703,7 +703,7 @@ def render_status_line():
         _ = get_workbook()
         st.caption(f"DB연결 {kst_now_str()}")
     except Exception as e:
-        se(f"DB 연결 실패: {e}", icon="🛑")
+        st.error(f"DB 연결 실패: {e}", icon="🛑")
 
 
 # ======================================================================
@@ -818,18 +818,18 @@ def tab_admin_pin(emp_df):
         with col[1]: do_clear = st.button("PIN 비우기", use_container_width=True, key="adm_pin_clear")
         if do_save:
             if not pin1 or not pin2:
-                se("PIN을 두 번 모두 입력하세요."); return
+                st.error("PIN을 두 번 모두 입력하세요."); return
             if pin1 != pin2:
-                se("PIN 확인이 일치하지 않습니다."); return
+                st.error("PIN 확인이 일치하지 않습니다."); return
             if not pin1.isdigit():
-                se("PIN은 숫자만 입력하세요."); return
+                st.error("PIN은 숫자만 입력하세요."); return
             if not _to_bool(row.get("재직여부", False)):
-                se("퇴직자는 변경할 수 없습니다."); return
+                st.error("퇴직자는 변경할 수 없습니다."); return
             if "PIN_hash" not in hmap or "PIN_No" not in hmap:
-                se(f"'{EMP_SHEET}' 시트에 PIN_hash/PIN_No가 없습니다."); return
+                st.error(f"'{EMP_SHEET}' 시트에 PIN_hash/PIN_No가 없습니다."); return
             r = _find_row_by_sabun(ws, hmap, sabun)
             if r == 0:
-                se("시트에서 사번을 찾지 못했습니다."); return
+                st.error("시트에서 사번을 찾지 못했습니다."); return
             hashed = _pin_hash(pin1.strip(), str(sabun))
             _update_cell(ws, r, hmap["PIN_hash"], hashed)
             _update_cell(ws, r, hmap["PIN_No"], pin1.strip())
@@ -839,10 +839,10 @@ def tab_admin_pin(emp_df):
             st.success("PIN 저장 완료 (직원 탭 클릭 시 즉시 반영)", icon="✅")
         if do_clear:
             if "PIN_hash" not in hmap or "PIN_No" not in hmap:
-                se(f"'{EMP_SHEET}' 시트에 PIN_hash/PIN_No가 없습니다."); return
+                st.error(f"'{EMP_SHEET}' 시트에 PIN_hash/PIN_No가 없습니다."); return
             r = _find_row_by_sabun(ws, hmap, sabun)
             if r == 0:
-                se("시트에서 사번을 찾지 못했습니다."); return
+                st.error("시트에서 사번을 찾지 못했습니다."); return
             _update_cell(ws, r, hmap["PIN_hash"], "")
             _update_cell(ws, r, hmap["PIN_No"], "")
             p = st.session_state.setdefault("emp_patch", {})
@@ -885,11 +885,13 @@ def tab_admin_pin(emp_df):
             join_src = preview[["사번", "새_PIN"]].copy(); join_src["사번"] = join_src["사번"].astype(str)
             csv_df = full.merge(join_src, on="사번", how="left"); csv_df["새_PIN"] = csv_df["새_PIN"].fillna("")
             csv_df = csv_df.sort_values("사번")
+            st.download_button("CSV 전체 다운로드 (사번,이름,새_PIN)", data=csv_df.to_csv(index=False, encoding="utf-8-sig"), file_name=f"PIN_ALL_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv", mime="text/csv", use_container_width=True)
+            st.download_button("CSV 대상자만 다운로드 (사번,이름,새_PIN)", data=preview.to_csv(index=False, encoding="utf-8-sig"), file_name=f"PIN_TARGETS_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv", mime="text/csv", use_container_width=True)
     if do_issue and preview is not None:
         try:
             ws, header, hmap = ensure_emp_sheet_staff_columns()
             if ("PIN_hash" not in hmap) or ("PIN_No" not in hmap) or ("사번" not in hmap):
-                se(f"'{EMP_SHEET}' 시트에 '사번' 또는 'PIN_hash'/'PIN_No' 헤더가 없습니다.")
+                st.error(f"'{EMP_SHEET}' 시트에 '사번' 또는 'PIN_hash'/'PIN_No' 헤더가 없습니다.")
                 return
             sabun_col = hmap["사번"]; pinh_col = hmap["PIN_hash"]; pinn_col = hmap["PIN_No"]
             sabun_values = _retry_call(ws.col_values, sabun_col)[1:]
@@ -916,9 +918,7 @@ def tab_admin_pin(emp_df):
             _bump_emp_ver()
             st.success(f"일괄 발급 완료: 대상 {len(preview):,}명 / 셀 {total:,}개 반영", icon="✅")
         except Exception as e:
-            (
-    # st.exception(e) gated by safe_guard
-)
+            st.exception(e)
 
 def tab_admin_transfer(emp_df):
     st.markdown("### 부서(근무지) 이동")
@@ -936,15 +936,13 @@ def tab_admin_transfer(emp_df):
     with c[2]: sdt = st.date_input("발령일", datetime.now(tz=tz_kst()).date(), key="staff_tr_date")
     if st.button("이동 반영(직원시트 인라인)", type="primary", use_container_width=True, key="adm_tr_apply_inline"):
         if not (str(nd1).strip() or str(nd2).strip()):
-            se("부서1/부서2 중 하나는 입력 필요"); return
+            st.error("부서1/부서2 중 하나는 입력 필요"); return
         try:
             rep = dept_transfer_inline(str(sabun), str(nd1).strip(), str(nd2).strip(), sdt)
             _bump_emp_ver()
             st.success(f"{rep['부서1']} / {rep['부서2']} (발령일 {rep['발령일']}) 반영", icon="✅")
         except Exception as e:
-            (
-    # st.exception(e) gated by safe_guard
-)
+            st.exception(e)
 
 def tab_staff(emp_df: pd.DataFrame):
     u = st.session_state.get("user", {})
@@ -1000,7 +998,7 @@ def tab_staff(emp_df: pd.DataFrame):
         view = view.assign(_k=key).sort_values("_k").drop(columns=["_k"]).reset_index(drop=True)
 
     st.write(f"결과: **{len(view):,}명**")
-    st.dataframe(view.drop(columns=["PIN_hash"], errors="ignore"), use_container_width=True, height=560, hide_index=True)
+    st.dataframe(view, use_container_width=True, height=560, hide_index=True)
 
 
 
@@ -1218,40 +1216,18 @@ def tab_eval_input(emp_df: pd.DataFrame):
         if f_q and f_q.strip():
             k = f_q.strip().lower()
             view = view[view.apply(lambda r: k in str(r["사번"]).lower() or k in str(r["이름"]).lower(), axis=1)]
-        view = view.sort_values(["사번"]).reset_index(drop=True)
-        view["선택"] = (view["사번"].astype(str) == str(st.session_state.get("eval2_target_sabun","")))
-        # --- 단일 선택: selectbox로 대상자 선택 후 표는 읽기전용으로 표시 ---
-        _sabuns = view["사번"].astype(str).tolist()
-        _names  = view["이름"].astype(str).tolist() if "이름" in view.columns else [""] * len(_sabuns)
-        _opts   = [f"{s} - {n}" for s, n in zip(_sabuns, _names)]
-        _target = str(st.session_state.get("eval2_target_sabun", ""))
-        try:
-            _idx_default = _sabuns.index(_target) if _target in _sabuns else 0
-        except Exception:
-            _idx_default = 0
-        _sel = st.selectbox("대상자 선택", _opts, index=_idx_default, key="eval2_pick_editor_select")
-        _sel_sabun = _sel.split(" - ", 1)[0] if isinstance(_sel, str) and " - " in _sel else (_sel if isinstance(_sel, str) else _sabuns[_idx_default] if len(_sabuns)>0 else "")
-        st.session_state["eval2_target_sabun"] = str(_sel_sabun)
-        try:
-            st.session_state["eval2_target_name"] = str(_names[_sabuns.index(_sel_sabun)]) if _sel_sabun in _sabuns else ""
-        except Exception:
-            st.session_state["eval2_target_name"] = ""
-        view["선택"] = (view["사번"].astype(str) == str(st.session_state.get("eval2_target_sabun", "")))
-        edited_pick = view[["선택","사번","이름","부서1","부서2","직급"]] if all(c in view.columns for c in ["이름","부서1","부서2","직급"]) else view
-        st.data_editor(
+        view = view.sort_values(["부서1","부서2","사번"]).reset_index(drop=True)
+        view["선택"] = (view["사번"] == st.session_state["eval2_target_sabun"])
+        edited_pick = st.data_editor(
             view[["선택","사번","이름","부서1","부서2","직급"]],
             use_container_width=True, height=360, key="eval2_pick_editor",
             column_config={"선택": st.column_config.CheckboxColumn()}, 
          hide_index=True, num_rows="fixed")
         picked = edited_pick.loc[edited_pick["선택"] == True]
         if not picked.empty:
-            _r = picked.iloc[-1]
-            st.session_state["eval2_target_sabun"] = str(_r["사번"])
-            try:
-                st.session_state["eval2_target_name"]  = str(_r["이름"])
-            except Exception:
-                st.session_state["eval2_target_name"]  = ""
-            st.session_state["eval2_target_name"]  = str(_r["이름"])
+            r = picked.iloc[-1]
+            st.session_state["eval2_target_sabun"] = str(r["사번"])
+            st.session_state["eval2_target_name"]  = str(r["이름"])
         target_sabun = st.session_state["eval2_target_sabun"]
         target_name  = st.session_state["eval2_target_name"]
         st.success(f"대상자: {target_name} ({target_sabun})", icon="✅")
@@ -1326,9 +1302,7 @@ def tab_eval_input(emp_df: pd.DataFrame):
             st.toast("평가 저장됨", icon="✅")
             st.session_state["eval2_edit_mode"] = False; st.rerun()
         except Exception as e:
-            (
-    # st.exception(e) gated by safe_guard
-)
+            st.exception(e)
 
     st.markdown("#### 내 제출 현황")
     try:
@@ -1496,40 +1470,18 @@ def tab_job_desc(emp_df: pd.DataFrame):
         if f_q and f_q.strip():
             k = f_q.strip().lower()
             view = view[view.apply(lambda r: k in str(r["사번"]).lower() or k in str(r["이름"]).lower(), axis=1)]
-        view = view.sort_values(["사번"]).reset_index(drop=True)
-        view["선택"] = (view["사번"].astype(str) == str(st.session_state.get("jd2_target_sabun","")))
-        # --- 단일 선택: selectbox로 대상자 선택 후 표는 읽기전용으로 표시 ---
-        _sabuns = view["사번"].astype(str).tolist()
-        _names  = view["이름"].astype(str).tolist() if "이름" in view.columns else [""] * len(_sabuns)
-        _opts   = [f"{s} - {n}" for s, n in zip(_sabuns, _names)]
-        _target = str(st.session_state.get("jd2_target_sabun", ""))
-        try:
-            _idx_default = _sabuns.index(_target) if _target in _sabuns else 0
-        except Exception:
-            _idx_default = 0
-        _sel = st.selectbox("대상자 선택", _opts, index=_idx_default, key="jd2_pick_editor_select")
-        _sel_sabun = _sel.split(" - ", 1)[0] if isinstance(_sel, str) and " - " in _sel else (_sel if isinstance(_sel, str) else _sabuns[_idx_default] if len(_sabuns)>0 else "")
-        st.session_state["jd2_target_sabun"] = str(_sel_sabun)
-        try:
-            st.session_state["jd2_target_name"] = str(_names[_sabuns.index(_sel_sabun)]) if _sel_sabun in _sabuns else ""
-        except Exception:
-            st.session_state["jd2_target_name"] = ""
-        view["선택"] = (view["사번"].astype(str) == str(st.session_state.get("jd2_target_sabun", "")))
-        edited = view[["선택","사번","이름","부서1","부서2","직급"]] if all(c in view.columns for c in ["이름","부서1","부서2","직급"]) else view
-        st.data_editor(
+        view = view.sort_values(["부서1","부서2","사번"]).reset_index(drop=True)
+        view["선택"] = (view["사번"] == st.session_state["jd2_target_sabun"])
+        edited = st.data_editor(
             view[["선택","사번","이름","부서1","부서2","직급"]],
             use_container_width=True, height=360, key="jd2_pick_editor",
             column_config={"선택": st.column_config.CheckboxColumn()}, 
          hide_index=True, num_rows="fixed")
         picked = edited.loc[edited["선택"] == True]
         if not picked.empty:
-            _r = picked.iloc[-1]
-            st.session_state["jd2_target_sabun"] = str(_r["사번"])
-            try:
-                st.session_state["jd2_target_name"]  = str(_r["이름"])
-            except Exception:
-                st.session_state["jd2_target_name"]  = ""
-            st.session_state["jd2_target_name"]  = str(_r["이름"])
+            r = picked.iloc[-1]
+            st.session_state["jd2_target_sabun"] = str(r["사번"])
+            st.session_state["jd2_target_name"]  = str(r["이름"])
         target_sabun = st.session_state["jd2_target_sabun"]
         target_name  = st.session_state["jd2_target_name"]
         st.success(f"대상자: {target_name} ({target_sabun})", icon="✅")
@@ -1620,9 +1572,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
             rep = upsert_jobdesc(rec, as_new_version=(version == 0))
             st.success(f"저장 완료 (버전 {rep['version']})", icon="✅"); st.rerun()
         except Exception as e:
-            (
-    # st.exception(e) gated by safe_guard
-)
+            st.exception(e)
 
 
 # ======================================================================
@@ -1645,38 +1595,6 @@ def tab_job_desc(emp_df: pd.DataFrame):
 import time
 import pandas as pd
 import streamlit as st
-# ---- global safe helpers (inserted) ----
-def se(msg=None, icon="🛑"):
-    """Safe error emitter that never crashes even if msg is None/undefined."""
-    try:
-        import streamlit as st
-        se(msg if (msg is not None and msg != "") else "오류", icon=icon)
-    except Exception:
-        # In case st is not available yet or Streamlit raises inside error rendering
-        pass
-
-def safe_guard(render_fn, *args, title: str = "", **kwargs):
-    """Run a section safely; prevent redaction-induced cascades."""
-    try:
-        return render_fn(*args, **kwargs)
-    except Exception as e:
-        # don't include exception text in user-visible message
-        try:
-            txt = f"[{title}] 렌더 실패" if title else "렌더 실패"
-        except Exception:
-            txt = "렌더 실패"
-        se(txt, icon="🛑")
-        try:
-            import streamlit as st
-            if st.secrets.get("app", {}).get("DEBUG", False):
-                (
-    # st.exception(e) gated by safe_guard
-)
-        except Exception:
-            pass
-        return None
-# ---- end helpers ----
-
 from datetime import datetime
 from gspread.exceptions import APIError as _GS_APIError
 
@@ -1925,7 +1843,7 @@ def tab_competency(emp_df: pd.DataFrame):
     if "부서2" not in df.columns:
         df["부서2"] = ""
 
-    df_view = df[["사번","부서2","이름"]].copy().sort_values(["사번"]).reset_index(drop=True)
+    df_view = df[["사번","부서2","이름"]].copy().sort_values(["부서2","사번"]).reset_index(drop=True)
 
     # ── 기본 선택: 로그인 사용자가 보이면 우선 선택, 아니면 1행 선택 ──
     sabun_series = df_view["사번"].astype(str)
@@ -1941,29 +1859,11 @@ def tab_competency(emp_df: pd.DataFrame):
         except Exception:
             st.session_state["cmpS_target_name"] = ""
 
-    df_view["선택"] = (df_view["사번"].astype(str) == str(st.session_state.get("cmpS_target_sabun","")))
+    df_view["선택"] = (sabun_series == st.session_state.get("cmpS_target_sabun", ""))
 
     st.caption("※ 표에서 평가할 직원을 체크하세요. (여러 명 체크 시 마지막 선택 1명이 적용됩니다)")
-    # --- 단일 선택: selectbox로 대상자 선택 후 표는 읽기전용으로 표시 ---
-    _sabuns = df_view["사번"].astype(str).tolist()
-    _names  = df_view["이름"].astype(str).tolist() if "이름" in df_view.columns else [""] * len(_sabuns)
-    _opts   = [f"{s} - {n}" for s, n in zip(_sabuns, _names)]
-    _target = str(st.session_state.get("cmpS_target_sabun", ""))
-    try:
-        _idx_default = _sabuns.index(_target) if _target in _sabuns else 0
-    except Exception:
-        _idx_default = 0
-    _sel = st.selectbox("대상자 선택", _opts, index=_idx_default, key="cmpS_pick_editor_select")
-    _sel_sabun = _sel.split(" - ", 1)[0] if isinstance(_sel, str) and " - " in _sel else (_sel if isinstance(_sel, str) else _sabuns[_idx_default] if len(_sabuns)>0 else "")
-    st.session_state["cmpS_target_sabun"] = str(_sel_sabun)
-    try:
-        st.session_state["cmpS_target_name"] = str(_names[_sabuns.index(_sel_sabun)]) if _sel_sabun in _sabuns else ""
-    except Exception:
-        st.session_state["cmpS_target_name"] = ""
-    df_view["선택"] = (df_view["사번"].astype(str) == str(st.session_state.get("cmpS_target_sabun", "")))
-    edited = df_view[["선택","사번","이름","부서1","부서2","직급"]] if all(c in df_view.columns for c in ["이름","부서1","부서2","직급"]) else df_view
-    st.data_editor(
-        df_view[["선택","사번","이름","부서1","부서2","직급"]],
+    edited = st.data_editor(
+        df_view[["선택","사번","부서2","이름"]],
         use_container_width=True,
         height=340,
         key="cmpS_pick_editor",
@@ -1974,12 +1874,10 @@ def tab_competency(emp_df: pd.DataFrame):
 
     picked = edited.loc[edited["선택"] == True]
     if not picked.empty:
-        _r = picked.iloc[-1]
-        st.session_state["cmpS_target_sabun"] = str(_r["사번"])
-        try:
-            st.session_state["cmpS_target_name"]  = str(_r["이름"])
-        except Exception:
-            st.session_state["cmpS_target_name"]  = ""
+        last = picked.iloc[-1]
+        st.session_state["cmpS_target_sabun"] = str(last["사번"])
+        st.session_state["cmpS_target_name"]  = str(last["이름"])
+
     target_sabun = str(st.session_state.get("cmpS_target_sabun",""))
     target_name  = str(st.session_state.get("cmpS_target_name",""))
 
@@ -2049,9 +1947,7 @@ def tab_competency(emp_df: pd.DataFrame):
             st.success(("제출 완료" if rep["action"]=="insert" else "업데이트 완료"), icon="✅")
             st.toast("직무능력평가 저장됨", icon="✅")
         except Exception as e:
-            (
-    # st.exception(e) gated by safe_guard
-)
+            st.exception(e)
 
     st.markdown("#### 내 제출 현황")
     try:
@@ -2301,28 +2197,28 @@ def tab_admin_pin(emp_df):
         with col[1]: do_clear = st.button("PIN 비우기", use_container_width=True, key="adm_pin_clear")
         if do_save:
             if not pin1 or not pin2:
-                se("PIN을 두 번 모두 입력하세요."); return
+                st.error("PIN을 두 번 모두 입력하세요."); return
             if pin1 != pin2:
-                se("PIN 확인이 일치하지 않습니다."); return
+                st.error("PIN 확인이 일치하지 않습니다."); return
             if not pin1.isdigit():
-                se("PIN은 숫자만 입력하세요."); return
+                st.error("PIN은 숫자만 입력하세요."); return
             if not _to_bool(row.get("재직여부", False)):
-                se("퇴직자는 변경할 수 없습니다."); return
+                st.error("퇴직자는 변경할 수 없습니다."); return
             if "PIN_hash" not in hmap or "PIN_No" not in hmap:
-                se(f"'{EMP_SHEET}' 시트에 PIN_hash/PIN_No가 없습니다."); return
+                st.error(f"'{EMP_SHEET}' 시트에 PIN_hash/PIN_No가 없습니다."); return
             r = _find_row_by_sabun(ws, hmap, sabun)
             if r == 0:
-                se("시트에서 사번을 찾지 못했습니다."); return
+                st.error("시트에서 사번을 찾지 못했습니다."); return
             _update_cell(ws, r, hmap["PIN_hash"], _pin_hash(pin1.strip(), str(sabun)))
             _update_cell(ws, r, hmap["PIN_No"], pin1.strip())
             st.cache_data.clear()
             st.success("PIN 저장 완료 (PIN_No/Hash 반영)", icon="✅")
         if do_clear:
             if "PIN_hash" not in hmap or "PIN_No" not in hmap:
-                se(f"'{EMP_SHEET}' 시트에 PIN_hash/PIN_No가 없습니다."); return
+                st.error(f"'{EMP_SHEET}' 시트에 PIN_hash/PIN_No가 없습니다."); return
             r = _find_row_by_sabun(ws, hmap, sabun)
             if r == 0:
-                se("시트에서 사번을 찾지 못했습니다."); return
+                st.error("시트에서 사번을 찾지 못했습니다."); return
             _update_cell(ws, r, hmap["PIN_hash"], "")
             _update_cell(ws, r, hmap["PIN_No"], "")
             st.cache_data.clear()
@@ -2363,11 +2259,13 @@ def tab_admin_pin(emp_df):
             join_src = preview[["사번", "새_PIN"]].copy(); join_src["사번"] = join_src["사번"].astype(str)
             csv_df = full.merge(join_src, on="사번", how="left"); csv_df["새_PIN"] = csv_df["새_PIN"].fillna("")
             csv_df = csv_df.sort_values("사번")
+            st.download_button("CSV 전체 다운로드 (사번,이름,새_PIN)", data=csv_df.to_csv(index=False, encoding="utf-8-sig"), file_name=f"PIN_ALL_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv", mime="text/csv", use_container_width=True)
+            st.download_button("CSV 대상자만 다운로드 (사번,이름,새_PIN)", data=preview.to_csv(index=False, encoding="utf-8-sig"), file_name=f"PIN_TARGETS_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv", mime="text/csv", use_container_width=True)
     if do_issue and preview is not None:
         try:
             ws, header, hmap = ensure_emp_sheet_staff_columns()
             if ("PIN_hash" not in hmap) or ("PIN_No" not in hmap) or ("사번" not in hmap):
-                se(f"'{EMP_SHEET}' 시트에 '사번' 또는 'PIN_hash'/'PIN_No' 헤더가 없습니다.")
+                st.error(f"'{EMP_SHEET}' 시트에 '사번' 또는 'PIN_hash'/'PIN_No' 헤더가 없습니다.")
                 return
 
             sabun_col = hmap["사번"]
@@ -2407,9 +2305,7 @@ def tab_admin_pin(emp_df):
             st.toast("PIN 일괄 발급 반영됨", icon="✅")
 
         except Exception as e:
-            (
-    # st.exception(e) gated by safe_guard
-)
+            st.exception(e)
 
 def tab_admin_transfer(emp_df):
     st.markdown("### 부서(근무지) 이동")
@@ -2443,14 +2339,12 @@ def tab_admin_transfer(emp_df):
 
     if st.button("이동 반영(직원시트 인라인)", type="primary", use_container_width=True, key="adm_tr_apply_inline"):
         if not (str(new_dept1).strip() or str(new_dept2).strip()):
-            se("새 부서1/부서2 중 최소 하나는 입력/선택"); return
+            st.error("새 부서1/부서2 중 최소 하나는 입력/선택"); return
         try:
             rep = dept_transfer_inline(str(sabun), str(new_dept1).strip(), str(new_dept2).strip(), start_date)
             st.success(f"반영: {rep['부서1']} / {rep['부서2']} (발령일 {rep['발령일']})", icon="✅")
         except Exception as e:
-            (
-    # st.exception(e) gated by safe_guard
-)
+            st.exception(e)
 
 
 
@@ -2496,7 +2390,7 @@ def tab_admin_eval_items():
             column_config={
                 "항목ID": st.column_config.TextColumn(disabled=True),
                 "항목": st.column_config.TextColumn(disabled=True),
-                "활성": st.column_config.CheckboxColumn(),
+                "활성": st.column_config.CheckboxColumn(disabled=True),
                 "순서": st.column_config.NumberColumn(step=1, min_value=0),
             },
         )
@@ -2510,7 +2404,7 @@ def tab_admin_eval_items():
                 col_id = hmap.get("항목ID")
                 col_ord = hmap.get("순서")
                 if not col_id or not col_ord:
-                    se("'항목ID' 또는 '순서' 헤더가 없습니다.")
+                    st.error("'항목ID' 또는 '순서' 헤더가 없습니다.")
                     st.stop()
 
                 id_vals = _retry_call(ws.col_values, col_id)[1:]
@@ -2529,9 +2423,7 @@ def tab_admin_eval_items():
                 st.success(f"순서 저장 완료: {changed}건 반영", icon="✅")
                 st.rerun()
             except Exception as e:
-                (
-    # st.exception(e) gated by safe_guard
-)
+                st.exception(e)
 
     st.divider()
     st.markdown("### 신규 등록 / 수정")
@@ -2570,7 +2462,7 @@ def tab_admin_eval_items():
 
         if st.button("저장(신규/수정)", type="primary", use_container_width=True, key="adm_eval_save_v3"):
             if not name.strip():
-                se("항목명을 입력하세요.")
+                st.error("항목명을 입력하세요.")
             else:
                 try:
                     ensure_eval_items_sheet()
@@ -2615,7 +2507,7 @@ def tab_admin_eval_items():
                                 if str(v).strip() == str(item_id).strip():
                                     idx = i; break
                         if idx == 0:
-                            se("대상 항목을 찾을 수 없습니다.")
+                            st.error("대상 항목을 찾을 수 없습니다.")
                         else:
                             ws.update_cell(idx, hmap["항목"], name.strip())
                             ws.update_cell(idx, hmap["내용"], desc.strip())
@@ -2626,9 +2518,7 @@ def tab_admin_eval_items():
                             st.success("업데이트 완료")
                             st.rerun()
                 except Exception as e:
-                    (
-    # st.exception(e) gated by safe_guard
-)
+                    st.exception(e)
 
         if item_id:
             if st.button("비활성화(소프트 삭제)", use_container_width=True, key="adm_eval_disable_v3"):
@@ -2637,7 +2527,7 @@ def tab_admin_eval_items():
                     header = ws.row_values(1); hmap = {n: i + 1 for i, n in enumerate(header)}
                     col_id = hmap.get("항목ID"); col_active = hmap.get("활성")
                     if not (col_id and col_active):
-                        se("'항목ID' 또는 '활성' 컬럼이 없습니다.")
+                        st.error("'항목ID' 또는 '활성' 컬럼이 없습니다.")
                     else:
                         vals = _retry_call(ws.col_values, col_id)
                         for i, v in enumerate(vals[1:], start=2):
@@ -2646,9 +2536,7 @@ def tab_admin_eval_items():
                         st.cache_data.clear()
                         st.success("비활성화 완료"); st.rerun()
                 except Exception as e:
-                    (
-    # st.exception(e) gated by safe_guard
-)
+                    st.exception(e)
 
             if st.button("행 삭제(완전 삭제)", use_container_width=True, key="adm_eval_delete_v3"):
                 try:
@@ -2656,7 +2544,7 @@ def tab_admin_eval_items():
                     header = ws.row_values(1); hmap = {n: i + 1 for i, n in enumerate(header)}
                     col_id = hmap.get("항목ID")
                     if not col_id:
-                        se("'항목ID' 컬럼이 없습니다.")
+                        st.error("'항목ID' 컬럼이 없습니다.")
                     else:
                         vals = _retry_call(ws.col_values, col_id)
                         for i, v in enumerate(vals[1:], start=2):
@@ -2665,9 +2553,7 @@ def tab_admin_eval_items():
                         st.cache_data.clear()
                         st.success("삭제 완료"); st.rerun()
                 except Exception as e:
-                    (
-    # st.exception(e) gated by safe_guard
-)
+                    st.exception(e)
 
 
 def tab_admin_jobdesc_defaults():
@@ -2694,9 +2580,7 @@ def tab_admin_jobdesc_defaults():
             set_setting("JD.검토주기", v_review, memo, str(u.get("사번", "")), str(u.get("이름", "")))
             st.success("저장되었습니다.", icon="✅")
         except Exception as e:
-            (
-    # st.exception(e) gated by safe_guard
-)
+            st.exception(e)
 
     st.divider()
     df = read_settings_df()
@@ -2724,7 +2608,7 @@ def tab_admin_acl(emp_df):
     except Exception:
         am_admin = False
     if not am_admin:
-        se("Master만 저장할 수 있습니다. (표/저장 모두 비활성화)", icon="🛡️")
+        st.error("Master만 저장할 수 있습니다. (표/저장 모두 비활성화)", icon="🛡️")
 
     try:
         base = emp_df[["사번", "이름", "부서1", "부서2"]].copy()
@@ -2898,7 +2782,7 @@ def tab_admin_acl(emp_df):
 
     if do_save:
         if errs:
-            se("유효성 오류가 있어 저장하지 않았습니다. 위 경고를 확인해주세요.", icon="⚠️")
+            st.error("유효성 오류가 있어 저장하지 않았습니다. 위 경고를 확인해주세요.", icon="⚠️")
             return
         try:
             ws = get_workbook().worksheet(AUTH_SHEET)
@@ -2920,9 +2804,7 @@ def tab_admin_acl(emp_df):
             st.rerun()
 
         except Exception as e:
-            (
-    # st.exception(e) gated by safe_guard
-)
+            st.exception(e)
 
 
 # ======================================================================
@@ -2975,6 +2857,34 @@ def startup_sanity_checks():
 
     return problems
 
+
+def safe_run(render_fn, *args, title: str = "", **kwargs):
+    """탭/섹션 하나를 안전하게 감싸서, 예외가 나도 전체 앱이 멈추지 않도록."""
+    try:
+        return render_fn(*args, **kwargs)
+    except Exception as e:
+        msg = f"[{title}] 렌더 실패: {e}" if title else f"렌더 실패: {e}"
+        st.error(msg, icon="🛑")
+        return None
+# ── Startup Sanity Checks & Safe Runner (END) ────────────────────────────────
+
+
+# ===== [A] startup_sanity_checks() 맨 위에 추가 (들여쓰기 4칸) =====
+# 안전 재실행 시 다음 1회 부팅 점검을 건너뜁니다.
+    try:
+        import streamlit as st
+        if st.session_state.get("_skip_boot_checks", False):
+            st.session_state["_skip_boot_checks"] = False
+            return []
+    except Exception:
+        pass
+# ===== [A] END =====
+
+
+# ======================================================================
+# 📌 Startup & Main
+# ======================================================================
+# ── 메인 ──────────────────────────────────────────────────────────────────────
 def main():
     st.markdown(f"## {APP_TITLE}")
     render_status_line()
@@ -2983,7 +2893,7 @@ def main():
     try:
         emp_df_all = read_sheet_df(EMP_SHEET, silent=True)
     except Exception as e:
-        se(f"'{EMP_SHEET}' 시트 로딩 실패: {e}")
+        st.error(f"'{EMP_SHEET}' 시트 로딩 실패: {e}")
         return
 
     # ▶ 스타트업 헬스체크: 경고만 출력(앱은 계속 실행)
@@ -3027,16 +2937,16 @@ def main():
         tabs = st.tabs(["직원", "인사평가", "직무기술서", "직무능력평가", "도움말"])
 
     with tabs[0]:
-        safe_guard(tab_staff, emp_df_for_staff, title="직원")
+        safe_run(tab_staff, emp_df_for_staff, title="직원")
 
     with tabs[1]:
-        safe_guard(tab_eval_input, emp_df_for_rest, title="평가")
+        safe_run(tab_eval_input, emp_df_for_rest, title="평가")
 
     with tabs[2]:
-        safe_guard(tab_job_desc, emp_df_for_rest, title="직무기술서")
+        safe_run(tab_job_desc, emp_df_for_rest, title="직무기술서")
 
     with tabs[3]:
-        safe_guard(tab_competency, emp_df_for_rest, title="직무능력평가")
+        safe_run(tab_competency, emp_df_for_rest, title="직무능력평가")
 
     if u.get("관리자여부", False):
         with tabs[4]:
@@ -3049,13 +2959,13 @@ def main():
             )
             st.divider()
             if admin_page == "PIN 관리":
-                safe_guard(tab_admin_pin,       emp_df_for_rest, title="관리자·PIN")
+                safe_run(tab_admin_pin,       emp_df_for_rest, title="관리자·PIN")
             elif admin_page == "부서(근무지) 이동":
-                safe_guard(tab_admin_transfer,  emp_df_for_rest, title="관리자·부서이동")
+                safe_run(tab_admin_transfer,  emp_df_for_rest, title="관리자·부서이동")
             elif admin_page == "평가 항목 관리":
-                safe_guard(tab_admin_eval_items,                  title="관리자·평가항목")
+                safe_run(tab_admin_eval_items,                  title="관리자·평가항목")
             else:
-                safe_guard(tab_admin_acl,       emp_df_for_rest, title="관리자·권한")
+                safe_run(tab_admin_acl,       emp_df_for_rest, title="관리자·권한")
 
             # ===== BEGIN 관리자메뉴: 캐시 비우기 (429 완화/안전 재실행 포함, nested expander 제거) =====
             with st.expander("관리자메뉴 → 캐시 비우기", expanded=False):
@@ -3070,9 +2980,7 @@ def main():
                             st.success("✅ cache_data cleared")
                             st.toast("cache_data cleared", icon="✅")
                         except Exception as e:
-                            (
-    # st.exception(e) gated by safe_guard
-)
+                            st.exception(e)
 
                 with c2:
                     if st.button("리소스 캐시 비우기", key="admin_clear_cache_resource"):
@@ -3081,9 +2989,7 @@ def main():
                             st.success("✅ cache_resource cleared")
                             st.toast("cache_resource cleared", icon="✅")
                         except Exception as e:
-                            (
-    # st.exception(e) gated by safe_guard
-)
+                            st.exception(e)
 
                 with c3:
                     if st.button("모두 비우기", key="admin_clear_cache_all"):
@@ -3098,7 +3004,7 @@ def main():
                             errs.append(e)
                         if errs:
                             for e in errs:
-                                se(f"{type(e).__name__}: {e}")
+                                st.error(f"{type(e).__name__}: {e}")
                         else:
                             st.success("✅ cache_data / cache_resource 둘 다 비웠습니다.")
                             st.toast("모든 캐시를 비웠습니다.", icon="✅")
@@ -3165,7 +3071,7 @@ def main():
                 st.caption(f"📄 DB열기: [{url}]({url})")
 
     with tabs[-1]:
-        safe_guard(_render_help, title="도움말")
+        safe_run(_render_help, title="도움말")
 
 
 # ── 엔트리포인트 ─────────────────────────────────────────────────────────────
