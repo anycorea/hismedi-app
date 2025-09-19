@@ -289,7 +289,7 @@ def _ensure_state_owner():
     """
     try:
         cur = str(st.session_state.get("user", {}).get("사번", "") or "")
-        owner = str(st.session_state.get("_state_owner_sabun", "") or "")
+        owner = str(st.session_state.get('_state_owner_sabun','') or "")
         if owner and (owner != cur):
             for k in list(st.session_state.keys()):
                 if k not in ("authed", "user", "auth_expires_at", "_state_owner_sabun"):
@@ -1215,9 +1215,9 @@ def tab_eval_input(emp_df: pd.DataFrame):
             k = f_q.strip().lower()
             view = view[view.apply(lambda r: k in str(r["사번"]).lower() or k in str(r["이름"]).lower(), axis=1)]
         view = view.sort_values(["사번"]).reset_index(drop=True)
-        view["선택"] = (view["사번"].astype(str) == str(st.session_state.get("eval2_target_sabun","")))
-        pick_key_edited_pick = f"eval2_pick_editor_{str(st.session_state.get("eval2_target_sabun",""))}"
-        edited_pick = pick_key_cmpS = f"cmpS_pick_editor_{str(st.session_state.get("cmpS_target_sabun",""))}"
+        view["선택"] = (view["사번"].astype(str) == str(st.session_state.get('eval2_target_sabun','')))
+        pick_key_edited_pick = f"eval2_pick_editor_{str(st.session_state.get('eval2_target_sabun',''))}"
+        edited_pick = pick_key_cmpS = f"cmpS_pick_editor_{str(st.session_state.get('cmpS_target_sabun',''))}"
  st.data_editor(
             view[["선택","사번","이름","부서1","부서2","직급"]],
             use_container_width=True, height=360, key=pick_key_edited_pick,
@@ -1475,8 +1475,8 @@ def tab_job_desc(emp_df: pd.DataFrame):
             k = f_q.strip().lower()
             view = view[view.apply(lambda r: k in str(r["사번"]).lower() or k in str(r["이름"]).lower(), axis=1)]
         view = view.sort_values(["사번"]).reset_index(drop=True)
-        view["선택"] = (view["사번"].astype(str) == str(st.session_state.get("jd2_target_sabun","")))
-        pick_key_edited = f"jd2_pick_editor_{str(st.session_state.get("jd2_target_sabun",""))}"
+        view["선택"] = (view["사번"].astype(str) == str(st.session_state.get('jd2_target_sabun','')))
+        pick_key_edited = f"jd2_pick_editor_{str(st.session_state.get('jd2_target_sabun',''))}"
         edited = st.data_editor(
             view[["선택","사번","이름","부서1","부서2","직급"]],
             use_container_width=True, height=360, key=pick_key_edited,
@@ -1860,7 +1860,7 @@ def tab_competency(emp_df: pd.DataFrame):
 
     # ── 기본 선택: 로그인 사용자가 보이면 우선 선택, 아니면 1행 선택 ──
     sabun_series = df_view["사번"].astype(str)
-    default_sabun = st.session_state.get("cmpS_target_sabun", "")
+    default_sabun = st.session_state.get('cmpS_target_sabun','')
     if (not default_sabun) or (str(default_sabun) not in set(sabun_series)):
         if str(me_sabun) in set(sabun_series):
             default_sabun = str(me_sabun)
@@ -1872,7 +1872,7 @@ def tab_competency(emp_df: pd.DataFrame):
         except Exception:
             st.session_state["cmpS_target_name"] = ""
 
-    df_view["선택"] = (df_view["사번"].astype(str) == str(st.session_state.get("cmpS_target_sabun","")))
+    df_view["선택"] = (df_view["사번"].astype(str) == str(st.session_state.get('cmpS_target_sabun','')))
 
     st.caption("※ 표에서 평가할 직원을 체크하세요. (여러 명 체크 시 마지막 선택 1명이 적용됩니다)")
     edited = st.data_editor(
@@ -1893,8 +1893,8 @@ def tab_competency(emp_df: pd.DataFrame):
             st.session_state["cmpS_target_name"]  = str(_r["이름"])
         except Exception:
             st.session_state["cmpS_target_name"]  = ""
-    target_sabun = str(st.session_state.get("cmpS_target_sabun",""))
-    target_name  = str(st.session_state.get("cmpS_target_name",""))
+    target_sabun = str(st.session_state.get('cmpS_target_sabun',''))
+    target_name  = str(st.session_state.get('cmpS_target_name',''))
 
     # ✅ 현재 대상자 표시
     st.success(f"대상자: {target_name} ({target_sabun})", icon="✅")
@@ -3113,7 +3113,7 @@ def _ensure_state_owner():
     try:
         user_dict = st.session_state.get("user") or {}
         cur = str(user_dict.get("사번", "") or "")
-        owner = str(st.session_state.get("_state_owner_sabun", "") or "")
+        owner = str(st.session_state.get('_state_owner_sabun','') or "")
 
         if not owner:
             st.session_state["_state_owner_sabun"] = cur
