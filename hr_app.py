@@ -1604,6 +1604,46 @@ def tab_job_desc(emp_df: pd.DataFrame):
 import time
 import pandas as pd
 import streamlit as st
+
+
+# === Shared selection sync helpers ===
+from typing import Optional
+
+def _emp_name_by_sabun(emp_df, sabun: str) -> str:
+    try:
+        df = emp_df
+        if df is None:
+            return ""
+        _s = str(sabun)
+        row = df.loc[df.get('사번').astype(str) == _s] if '사번' in df.columns else None
+        if row is not None and not row.empty:
+            return str(row.iloc[0].get('이름', ''))
+    except Exception:
+        pass
+    return ""
+
+
+def _sync_target_all(sabun: Optional[str], emp_df):
+    if not sabun:
+        return
+    sabun = str(sabun)
+    try:
+        name = _emp_name_by_sabun(emp_df, sabun)
+    except Exception:
+        name = ""
+    # canonical keys
+    st.session_state["target_sabun"] = sabun
+    st.session_state["target_name"] = name
+    # per-tab keys
+    for a,b in [
+        ("eval2_target_sabun","eval2_target_name"),
+        ("jd2_target_sabun","jd2_target_name"),
+        ("cmpS_target_sabun","cmpS_target_name"),
+    ]:
+        st.session_state[a] = sabun
+        st.session_state[b] = name
+
+
 from datetime import datetime
 from gspread.exceptions import APIError as _GS_APIError
 
@@ -1820,16 +1860,6 @@ def _has_competency_access(emp_df: pd.DataFrame, sabun: str) -> bool:
 
 # ───────────────────────── 메인 섹션(간편형 + 자동 선택/대상 표시) ─────────────────────────
 def tab_competency(emp_df: pd.DataFrame):
-
-    # 🔄 sync from other tabs (인사평가/직무기술서)
-    _glob_pick = st.session_state.get("eval2_target_sabun") or st.session_state.get("jd2_target_sabun")
-    if _glob_pick and st.session_state.get("cmpS_target_sabun") != str(_glob_pick):
-        st.session_state["cmpS_target_sabun"] = str(_glob_pick)
-        try:
-            st.session_state["cmpS_target_name"] = _emp_name_by_sabun(emp_df, str(_glob_pick))
-        except Exception:
-            pass
-        st.rerun()
     """직무능력평가: 인사평가/직무기술서와 동일한 권한(ACL)으로 직원 목록을 필터링하고, JD 유무와 무관하게 평가 가능."""
     user = st.session_state.get("user", {}) or {}
     me_sabun = str(user.get("사번", "") or "").strip()
@@ -1887,18 +1917,7 @@ def tab_competency(emp_df: pd.DataFrame):
     d2s = df["부서2"].astype(str).tolist() if "부서2" in df.columns else [""] * len(sabuns)
     opts = [f"{s} - {n} - {d2}" for s, n, d2 in zip(sabuns, names, d2s)]
     sel_idx = sabuns.index(default_sabun) if default_sabun in sabuns else 0
-    def _cmpS_on_pick_change():
-        _label = st.session_state.get("cmpS_pick_select", "")
-        _sabun = _label.split(" - ", 1)[0] if isinstance(_label, str) else ""
-        if _sabun:
-            st.session_state["cmpS_target_sabun"] = str(_sabun)
-            try:
-                st.session_state["cmpS_target_name"] = _emp_name_by_sabun(emp_df, str(_sabun))
-            except Exception:
-                pass
-            st.rerun()
-
-    sel_label = st.selectbox("대상자 선택", opts, index=sel_idx, key="cmpS_pick_select", on_change=_cmpS_on_pick_change)
+    sel_label = st.selectbox("대상자 선택", opts, index=sel_idx, key="cmpS_pick_select")
     sel_sabun = sel_label.split(" - ", 1)[0] if isinstance(sel_label, str) else sabuns[sel_idx]
 
     view = df[["사번", "이름", "부서1", "부서2", "직급"]].copy()
@@ -2970,9 +2989,9 @@ def main():
 
     # 6) 탭 구성
     if u.get("관리자여부", False):
-        tabs = st.tabs(["직원", "인사평가", "직무기술서", "직무능력평가", "관리자", "도움말"])
+        tabs = st.tabs(["직원", "인사평가", "직무기술서", "직무능력평가", "관리자", "도움말"], key="main_tabs")
     else:
-        tabs = st.tabs(["직원", "인사평가", "직무기술서", "직무능력평가", "도움말"])
+        tabs = st.tabs(["직원", "인사평가", "직무기술서", "직무능력평가", "도움말"], key="main_tabs")
 
     with tabs[0]:
         safe_run(tab_staff, emp_df_for_staff, title="직원")
