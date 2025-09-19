@@ -375,7 +375,7 @@ def show_login_form(emp_df: pd.DataFrame):
         "관리자여부": False,
     })
     st.success(f"{str(r.get('이름',''))}님 환영합니다!")
-    st.rerun()
+    # (removed) rerun
 
 def require_login(emp_df: pd.DataFrame):
     if not _session_valid():
@@ -960,9 +960,9 @@ def tab_staff(emp_df: pd.DataFrame):
                 pass
             st.session_state.pop("emp_last_loaded_ver", None)
             try:
-                st.rerun()
+                # (removed) rerun
             except Exception:
-                st.experimental_rerun()
+                # (removed) rerun
 
     df = emp_df.copy()
 
@@ -1242,7 +1242,7 @@ def tab_eval_input(emp_df: pd.DataFrame):
     with col_mode[0]:
         if st.button(("수정모드로 전환" if not st.session_state["eval2_edit_mode"] else "보기모드로 전환"),
                      use_container_width=True, key="eval2_toggle"):
-            st.session_state["eval2_edit_mode"] = not st.session_state["eval2_edit_mode"]; st.rerun()
+            st.session_state["eval2_edit_mode"] = not st.session_state["eval2_edit_mode"]; # (removed) rerun
     with col_mode[1]: st.caption(f"현재: **{'수정모드' if st.session_state['eval2_edit_mode'] else '보기모드'}**")
     edit_mode = bool(st.session_state["eval2_edit_mode"])
 
@@ -1303,7 +1303,7 @@ def tab_eval_input(emp_df: pd.DataFrame):
             rep = upsert_eval_response(emp_df, int(year), eval_type, str(target_sabun), str(me_sabun), scores, "제출")
             st.success(("제출 완료" if rep["action"] == "insert" else "업데이트 완료") + f" (총점 {rep['total']}점)", icon="✅")
             st.toast("평가 저장됨", icon="✅")
-            st.session_state["eval2_edit_mode"] = False; st.rerun()
+            st.session_state["eval2_edit_mode"] = False; # (removed) rerun
         except Exception as e:
             st.exception(e)
 
@@ -1499,7 +1499,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
     with col_mode[0]:
         if st.button(("수정모드로 전환" if not st.session_state["jd2_edit_mode"] else "보기모드로 전환"),
                      use_container_width=True, key="jd2_toggle"):
-            st.session_state["jd2_edit_mode"] = not st.session_state["jd2_edit_mode"]; st.rerun()
+            st.session_state["jd2_edit_mode"] = not st.session_state["jd2_edit_mode"]; # (removed) rerun
     with col_mode[1]: st.caption(f"현재: **{'수정모드' if st.session_state['jd2_edit_mode'] else '보기모드'}**")
     edit_mode = bool(st.session_state["jd2_edit_mode"])
 
@@ -1579,7 +1579,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
         }
         try:
             rep = upsert_jobdesc(rec, as_new_version=(version == 0))
-            st.success(f"저장 완료 (버전 {rep['version']})", icon="✅"); st.rerun()
+            st.success(f"저장 완료 (버전 {rep['version']})", icon="✅"); # (removed) rerun
         except Exception as e:
             st.exception(e)
 
@@ -1829,7 +1829,7 @@ def tab_competency(emp_df: pd.DataFrame):
             st.session_state["cmpS_target_name"] = _emp_name_by_sabun(emp_df, str(_glob_pick))
         except Exception:
             pass
-        st.rerun()
+        # (removed) rerun
     """직무능력평가: 인사평가/직무기술서와 동일한 권한(ACL)으로 직원 목록을 필터링하고, JD 유무와 무관하게 평가 가능."""
     user = st.session_state.get("user", {}) or {}
     me_sabun = str(user.get("사번", "") or "").strip()
@@ -1896,7 +1896,7 @@ def tab_competency(emp_df: pd.DataFrame):
                 st.session_state["cmpS_target_name"] = _emp_name_by_sabun(emp_df, str(_sabun))
             except Exception:
                 pass
-            st.rerun()
+            # (removed) rerun
 
     sel_label = st.selectbox("대상자 선택", opts, index=sel_idx, key="cmpS_pick_select", on_change=_cmpS_on_pick_change)
     sel_sabun = sel_label.split(" - ", 1)[0] if isinstance(sel_label, str) else sabuns[sel_idx]
@@ -1983,7 +1983,7 @@ def tab_competency(emp_df: pd.DataFrame):
         for k in ["cmpS_main", "cmpS_extra", "cmpS_qual", "cmpS_opinion"]:
             if k in st.session_state:
                 del st.session_state[k]
-        st.rerun()
+        # (removed) rerun
 
     if do_save:
         try:
@@ -2459,7 +2459,7 @@ def tab_admin_eval_items():
 
                 st.cache_data.clear()
                 st.success(f"순서 저장 완료: {changed}건 반영", icon="✅")
-                st.rerun()
+                # (removed) rerun
             except Exception as e:
                 st.exception(e)
 
@@ -2534,7 +2534,7 @@ def tab_admin_eval_items():
                         _retry_call(ws.append_row, rowbuf, value_input_option="USER_ENTERED")
                         st.cache_data.clear()
                         st.success(f"저장 완료 (항목ID: {new_id})")
-                        st.rerun()
+                        # (removed) rerun
 
                     else:
                         col_id = hmap.get("항목ID")
@@ -2554,7 +2554,7 @@ def tab_admin_eval_items():
                             if "비고" in hmap: ws.update_cell(idx, hmap["비고"], memo.strip())
                             st.cache_data.clear()
                             st.success("업데이트 완료")
-                            st.rerun()
+                            # (removed) rerun
                 except Exception as e:
                     st.exception(e)
 
@@ -2572,7 +2572,7 @@ def tab_admin_eval_items():
                             if str(v).strip() == str(item_id).strip():
                                 ws.update_cell(i, col_active, False); break
                         st.cache_data.clear()
-                        st.success("비활성화 완료"); st.rerun()
+                        st.success("비활성화 완료"); # (removed) rerun
                 except Exception as e:
                     st.exception(e)
 
@@ -2589,7 +2589,7 @@ def tab_admin_eval_items():
                             if str(v).strip() == str(item_id).strip():
                                 ws.delete_rows(i); break
                         st.cache_data.clear()
-                        st.success("삭제 완료"); st.rerun()
+                        st.success("삭제 완료"); # (removed) rerun
                 except Exception as e:
                     st.exception(e)
 
@@ -2839,7 +2839,7 @@ def tab_admin_acl(emp_df):
 
             st.cache_data.clear()
             st.success("권한이 전체 반영되었습니다.", icon="✅")
-            st.rerun()
+            # (removed) rerun
 
         except Exception as e:
             st.exception(e)
@@ -3058,7 +3058,7 @@ def main():
                         # 다음 실행에서 startup_sanity_checks를 건너뛰게 플래그 설정
                         st.session_state["_skip_boot_checks"] = True
                         st.toast("데이터 캐시 삭제 및 안전 재실행", icon="♻️")
-                        st.rerun()
+                        # (removed) rerun
 
                 with r2:
                     if st.button("모두 비우고 즉시 재실행(429 위험)", key="admin_danger_rerun"):
@@ -3071,7 +3071,7 @@ def main():
                         except Exception:
                             pass
                         st.toast("모든 캐시 삭제 후 재실행", icon="🧨")
-                        st.rerun()
+                        # (removed) rerun
 
                 # 안내(중첩 expander 금지 → 간단 섹션으로 표시)
                 st.markdown("""
@@ -3183,7 +3183,7 @@ def logout():
         except Exception:
             pass
     finally:
-        st.rerun()
+        # (removed) rerun
 
 # =================== HR SESSION HOTFIX (END) =====================
 
