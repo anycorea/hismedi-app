@@ -334,7 +334,7 @@ def logout():
 def show_login_form(emp_df: pd.DataFrame):
     st.header("로그인")
 
-    with st.form("login_form", clear_on_submit=False, enter_to_submit=True):
+    with st.form("login_form", clear_on_submit=False):
         sabun = st.text_input("사번", placeholder="예) 123456", key="login_sabun")
         pin   = st.text_input("PIN (숫자)", type="password", key="login_pin")
         submitted = st.form_submit_button("로그인", use_container_width=True, type="primary")
