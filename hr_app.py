@@ -1224,7 +1224,7 @@ def tab_eval_input(emp_df: pd.DataFrame):
         _d2   = view["부서2"].astype(str).tolist() if "부서2" in view.columns else [""] * len(_sabuns)
         _grade= view["직급"].astype(str).tolist()  if "직급"  in view.columns else [""] * len(_sabuns)
 
-        _opts   = [f"{s} - {n}" for s, n in zip(_sabuns, _names)]
+        _opts = [f"{s} - {n} - {d1} - {d2} - {g}" for s,n,d1,d2,g in zip(_sabuns,_names,_d1,_d2,_grade)]
         _target = str(st.session_state.get("eval2_target_sabun", ""))
         try:
             _idx_default = _sabuns.index(_target) if _target in _sabuns else 0
@@ -1487,7 +1487,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
         _d2   = view["부서2"].astype(str).tolist() if "부서2" in view.columns else [""] * len(_sabuns)
         _grade= view["직급"].astype(str).tolist()  if "직급"  in view.columns else [""] * len(_sabuns)
 
-        _opts   = [f"{s} - {n}" for s, n in zip(_sabuns, _names)]
+        _opts = [f"{s} - {n} - {d1} - {d2} - {g}" for s,n,d1,d2,g in zip(_sabuns,_names,_d1,_d2,_grade)]
         _target = str(st.session_state.get("jd2_target_sabun", ""))
         try:
             _idx_default = _sabuns.index(_target) if _target in _sabuns else 0
