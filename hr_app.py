@@ -1172,7 +1172,7 @@ def read_eval_saved_scores(year: int, eval_type: str, target_sabun: str, evaluat
 def tab_eval_input(emp_df: pd.DataFrame):
     st.subheader("인사평가")
     this_year = datetime.now(tz=tz_kst()).year
-    year = st.number_input("평가 연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="eval2_year")
+    year = st.number_input("연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="eval2_year")
     u = st.session_state["user"]; me_sabun = str(u["사번"]); me_name = str(u["이름"])
     am_admin_or_mgr = (is_admin(me_sabun) or is_manager(emp_df, me_sabun))
     allowed_sabuns = get_allowed_sabuns(emp_df, me_sabun, include_self=True)
@@ -1833,7 +1833,7 @@ def tab_competency(emp_df: pd.DataFrame):
         this_year = datetime.now().year
     colY = st.columns([1, 3])
     with colY[0]:
-        year = st.number_input("평가 연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="cmpS_year")
+        year = st.number_input("연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="cmpS_year")
     with colY[1]:
         st.caption("※ JD 유무와 관계없이 평가 가능합니다. (목록은 권한 기준으로 제한)")
 
