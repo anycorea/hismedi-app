@@ -2588,10 +2588,8 @@ def main():
 
 
     def _render_help():
-
     st.subheader("도움말")
     st.caption("도움말 콘텐츠는 준비 중입니다.")
-    
 
 def _start_session(user_info: dict):
     """
