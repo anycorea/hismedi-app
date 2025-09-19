@@ -1831,8 +1831,10 @@ def tab_competency(emp_df: pd.DataFrame):
         this_year = datetime.now(tz=tz_kst()).year
     except Exception:
         this_year = datetime.now().year
-
-       year = st.number_input("연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="cmpS_year")
+    colY = st.columns([1, 3])
+    with colY[0]:
+        year = st.number_input("연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="cmpS_year")
+    with colY[1]:
 
     # ── 권한 내 대상 목록 (인사평가/직무기술서와 동일) ───────────────────────────
     df = emp_df.copy()
