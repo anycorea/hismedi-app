@@ -1940,6 +1940,9 @@ def tab_competency(emp_df: pd.DataFrame):
             st.session_state["cmpS_target_name"]  = str(_r["이름"])
         except Exception:
             st.session_state["cmpS_target_name"]  = ""
+        # 안정화 목적: 선택 UI 이후 나머지 로직은 임시 중단
+    return
+
     target_sabun = str(st.session_state.get("cmpS_target_sabun",""))
     target_name  = str(st.session_state.get("cmpS_target_name",""))
 
