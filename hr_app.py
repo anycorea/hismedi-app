@@ -1640,14 +1640,19 @@ import streamlit as st
 
 # --- patched wrapper: safe_run2 ---
 def safe_run2(render_fn, *args, title: str = "", **kwargs):
+    """각 탭/섹션 렌더를 안전하게 감싸 예외가 나도 앱 전체가 죽지 않게 한다."""
     try:
         return render_fn(*args, **kwargs)
     except Exception as e:
+        # ❗ 에러 문자열/예외 본문을 사용자 메시지에 넣지 말 것 (Cloud redaction 충돌 방지)
         base = f"[{title}] 렌더 실패" if title else "렌더 실패"
         try:
             st.error(base, icon="🛑")
         except Exception:
+            # st 준비 전 등 예외 상황은 무시
             pass
+
+        # 개발환경에서만 상세 트레이스 확인 (st.secrets["app"]["DEBUG"]=True 일 때)
         try:
             if st.secrets.get("app", {}).get("DEBUG", False):
                 st.exception(e)
