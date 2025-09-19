@@ -1822,7 +1822,7 @@ def _has_competency_access(emp_df: pd.DataFrame, sabun: str) -> bool:
 def tab_competency(emp_df: pd.DataFrame):
 
     # 🔄 sync from other tabs (인사평가/직무기술서)
-    _glob_pick = st.session_state.get("jd2_target_sabun")  # 인사평가→직무능력평가 동기화 제거
+    _glob_pick = st.session_state.get("eval2_target_sabun") or st.session_state.get("jd2_target_sabun")
     if _glob_pick and st.session_state.get("cmpS_target_sabun") != str(_glob_pick):
         st.session_state["cmpS_target_sabun"] = str(_glob_pick)
         try:
@@ -1887,19 +1887,13 @@ def tab_competency(emp_df: pd.DataFrame):
     d2s = df["부서2"].astype(str).tolist() if "부서2" in df.columns else [""] * len(sabuns)
     opts = [f"{s} - {n} - {d2}" for s, n, d2 in zip(sabuns, names, d2s)]
     sel_idx = sabuns.index(default_sabun) if default_sabun in sabuns else 0
-    def _cmpS_on_pick_change():
-        _label = st.session_state.get("cmpS_pick_select", "")
-        _sabun = _label.split(" - ", 1)[0] if isinstance(_label, str) else ""
-        if _sabun:
-            st.session_state["cmpS_target_sabun"] = str(_sabun)
-            try:
-                st.session_state["cmpS_target_name"] = _emp_name_by_sabun(emp_df, str(_sabun))
-            except Exception:
-                pass
-            st.rerun()
-
-    sel_label = st.selectbox("대상자 선택", opts, index=sel_idx, key="cmpS_pick_select", on_change=_cmpS_on_pick_change)
+    sel_label = st.selectbox("대상자 선택", opts, index=sel_idx, key="cmpS_pick_select")
     sel_sabun = sel_label.split(" - ", 1)[0] if isinstance(sel_label, str) else sabuns[sel_idx]
+    st.session_state["cmpS_target_sabun"] = str(sel_sabun)
+    try:
+        st.session_state["cmpS_target_name"] = _emp_name_by_sabun(emp_df, str(sel_sabun))
+    except Exception:
+        pass
 
     view = df[["사번", "이름", "부서1", "부서2", "직급"]].copy()
     view["선택"] = (view["사번"].astype(str) == str(st.session_state.get("cmpS_target_sabun", sel_sabun)))
