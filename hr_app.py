@@ -1637,6 +1637,24 @@ def tab_job_desc(emp_df: pd.DataFrame):
 import time
 import pandas as pd
 import streamlit as st
+
+# --- patched wrapper: safe_run2 ---
+def safe_run2(render_fn, *args, title: str = "", **kwargs):
+    try:
+        return render_fn(*args, **kwargs)
+    except Exception as e:
+        base = f"[{title}] 렌더 실패" if title else "렌더 실패"
+        try:
+            st.error(base, icon="🛑")
+        except Exception:
+            pass
+        try:
+            if st.secrets.get("app", {}).get("DEBUG", False):
+                st.exception(e)
+        except Exception:
+            pass
+        return None
+
 from datetime import datetime
 from gspread.exceptions import APIError as _GS_APIError
 
@@ -2918,30 +2936,227 @@ def startup_sanity_checks():
     return problems
 
 
-def safe_run(render_fn, *args, title: str = "", **kwargs):
+def safe_run2(render_fn, *args, title: str = "", **kwargs):
     """탭/섹션 하나를 안전하게 감싸서, 예외가 나도 전체 앱이 멈추지 않도록."""
     try:
         return render_fn(*args, **kwargs)
     except Exception as e:
-        # Cloud redaction 충돌 방지: 예외 본문을 사용자 메시지에 넣지 않음
-        try:
-            base = f"[{title}] 렌더 실패" if title else "렌더 실패"
-        except Exception:
-            base = "렌더 실패"
-        try:
-            st.error(base, icon="🛑")
-        except Exception:
-            # st가 아직 준비 전이거나 또 다른 문제가 있을 때도 그냥 무시
-            pass
-        # 개발환경에서는 상세 스택을 보고 싶을 수 있으므로 선택적으로 노출
-        try:
-            if st.secrets.get("app", {}).get("DEBUG", False):
-                st.exception(e)
-        except Exception:
-            pass
+        msg = f"[{title}] 렌더 실패: {e}" if title else f"렌더 실패: {e}"
+        st.error(msg, icon="🛑")
         return None
+# ── Startup Sanity Checks & Safe Runner (END) ────────────────────────────────
 
 
+# ===== [A] startup_sanity_checks() 맨 위에 추가 (들여쓰기 4칸) =====
+# 안전 재실행 시 다음 1회 부팅 점검을 건너뜁니다.
+    try:
+        import streamlit as st
+        if st.session_state.get("_skip_boot_checks", False):
+            st.session_state["_skip_boot_checks"] = False
+            return []
+    except Exception:
+        pass
+# ===== [A] END =====
+
+
+# ======================================================================
+# 📌 Startup & Main
+# ======================================================================
+# ── 메인 ──────────────────────────────────────────────────────────────────────
+def main():
+    st.markdown(f"## {APP_TITLE}")
+    render_status_line()
+
+    # 1) 직원 시트 로딩 + 세션 캐시/네임맵 구성
+    try:
+        emp_df_all = read_sheet_df(EMP_SHEET, silent=True)
+    except Exception as e:
+        st.error(f"'{EMP_SHEET}' 시트 로딩 실패: {e}")
+        return
+
+    # ▶ 스타트업 헬스체크: 경고만 출력(앱은 계속 실행)
+    for warn in startup_sanity_checks():
+        st.warning(warn, icon="⚠️")
+
+    st.session_state["emp_df_cache"] = emp_df_all.copy()
+    st.session_state["name_by_sabun"] = _build_name_map(emp_df_all)
+
+    # 2) 로그인 요구
+    require_login(emp_df_all)
+
+    # 3) 로그인 직후: 관리자 플래그 최신화
+    try:
+        st.session_state["user"]["관리자여부"] = is_admin(st.session_state["user"]["사번"])
+    except Exception:
+        st.session_state["user"]["관리자여부"] = (
+            st.session_state["user"]["사번"] in {a["사번"] for a in SEED_ADMINS}
+        )
+        st.warning("권한 시트 조회 오류로 관리자 여부를 시드 기준으로 판정했습니다.", icon="⚠️")
+
+    # 4) 데이터 뷰 분기 (의료진 포함, 필터 없음)
+    emp_df_for_staff = emp_df_all
+    emp_df_for_rest  = emp_df_all
+
+    # 5) 사이드바 사용자/로그아웃
+    u = st.session_state["user"]
+    with st.sidebar:
+        st.write(f"👤 **{u['이름']}** ({u['사번']})")
+        role_badge = "관리자" if u.get("관리자여부", False) else (
+            "매니저" if is_manager(emp_df_all, u["사번"]) else "직원"
+        )
+        st.caption(f"권한: {role_badge}")
+        if st.button("로그아웃", use_container_width=True):
+            logout()
+
+    # 6) 탭 구성
+    if u.get("관리자여부", False):
+        tabs = st.tabs(["직원", "인사평가", "직무기술서", "직무능력평가", "관리자", "도움말"])
+    else:
+        tabs = st.tabs(["직원", "인사평가", "직무기술서", "직무능력평가", "도움말"])
+
+    with tabs[0]:
+        safe_run2(tab_staff, emp_df_for_staff, title="직원")
+
+    with tabs[1]:
+        safe_run2(tab_eval_input, emp_df_for_rest, title="평가")
+
+    with tabs[2]:
+        safe_run2(tab_job_desc, emp_df_for_rest, title="직무기술서")
+
+    with tabs[3]:
+        safe_run2(tab_competency, emp_df_for_rest, title="직무능력평가")
+
+    if u.get("관리자여부", False):
+        with tabs[4]:
+            st.subheader("관리자 메뉴")
+            admin_page = st.radio(
+                "기능 선택",
+                ["PIN 관리", "부서(근무지) 이동", "평가 항목 관리", "권한 관리"],
+                horizontal=True,
+                key="admin_page_selector",
+            )
+            st.divider()
+            if admin_page == "PIN 관리":
+                safe_run2(tab_admin_pin,       emp_df_for_rest, title="관리자·PIN")
+            elif admin_page == "부서(근무지) 이동":
+                safe_run2(tab_admin_transfer,  emp_df_for_rest, title="관리자·부서이동")
+            elif admin_page == "평가 항목 관리":
+                safe_run2(tab_admin_eval_items,                  title="관리자·평가항목")
+            else:
+                safe_run2(tab_admin_acl,       emp_df_for_rest, title="관리자·권한")
+
+            # ===== BEGIN 관리자메뉴: 캐시 비우기 (429 완화/안전 재실행 포함, nested expander 제거) =====
+            with st.expander("관리자메뉴 → 캐시 비우기", expanded=False):
+                st.caption("권장: 데이터 캐시만 비우고 '안전 재실행'을 사용하면 초기 부하(시트 점검)를 1회 건너뛰어 429를 줄입니다.")
+
+                # 1) 개별/전체 캐시 비우기
+                c1, c2, c3, c4 = st.columns([1, 1, 1, 2])
+                with c1:
+                    if st.button("데이터 캐시 비우기", key="admin_clear_cache_data"):
+                        try:
+                            st.cache_data.clear()
+                            st.success("✅ cache_data cleared")
+                            st.toast("cache_data cleared", icon="✅")
+                        except Exception as e:
+                            st.exception(e)
+
+                with c2:
+                    if st.button("리소스 캐시 비우기", key="admin_clear_cache_resource"):
+                        try:
+                            st.cache_resource.clear()
+                            st.success("✅ cache_resource cleared")
+                            st.toast("cache_resource cleared", icon="✅")
+                        except Exception as e:
+                            st.exception(e)
+
+                with c3:
+                    if st.button("모두 비우기", key="admin_clear_cache_all"):
+                        errs = []
+                        try:
+                            st.cache_data.clear()
+                        except Exception as e:
+                            errs.append(e)
+                        try:
+                            st.cache_resource.clear()
+                        except Exception as e:
+                            errs.append(e)
+                        if errs:
+                            for e in errs:
+                                st.error(f"{type(e).__name__}: {e}")
+                        else:
+                            st.success("✅ cache_data / cache_resource 둘 다 비웠습니다.")
+                            st.toast("모든 캐시를 비웠습니다.", icon="✅")
+
+                # 2) 재실행 옵션
+                r1, r2 = st.columns([1, 1])
+                with r1:
+                    if st.button("데이터 캐시 비우고 안전 재실행(권장)", key="admin_safe_rerun"):
+                        try:
+                            st.cache_data.clear()
+                        except Exception:
+                            pass
+                        # 다음 실행에서 startup_sanity_checks를 건너뛰게 플래그 설정
+                        st.session_state["_skip_boot_checks"] = True
+                        st.toast("데이터 캐시 삭제 및 안전 재실행", icon="♻️")
+                        st.rerun()
+
+                with r2:
+                    if st.button("모두 비우고 즉시 재실행(429 위험)", key="admin_danger_rerun"):
+                        try:
+                            st.cache_data.clear()
+                        except Exception:
+                            pass
+                        try:
+                            st.cache_resource.clear()
+                        except Exception:
+                            pass
+                        st.toast("모든 캐시 삭제 후 재실행", icon="🧨")
+                        st.rerun()
+
+                # 안내(중첩 expander 금지 → 간단 섹션으로 표시)
+                st.markdown("""
+                **도움말/가이드**
+                - **안전 재실행(권장)**: 데이터 캐시만 비우고, 다음 실행에서 초기 시트 점검을 1회 건너뜁니다.
+                - **즉시 재실행(위험)**: 리소스 캐시까지 비우면 시트/클라이언트가 전면 재초기화되어 429가 발생할 수 있습니다.
+                - 반복 429 시 잠시 후 재시도하거나, Streamlit Cloud에서 **Reboot** 후 접속하세요.
+                """)
+            # ===== END 관리자메뉴: 캐시 비우기 (429 완화/안전 재실행 포함, nested expander 제거) =====
+
+
+    def _render_help():
+        st.markdown(
+            """
+            ### 사용 안내
+            - 직원 탭: 전체 데이터(의사 포함), 권한에 따라 행 제한
+            - 평가/직무기술서/직무능력평가/관리자: 동일 데이터 기반, 권한에 따라 접근
+            - 상태표시: 상단에 'DB연결 … (KST)'
+
+            ### 권한(Role) 설명
+            - **admin**: 시스템 최상위 관리자, 모든 메뉴 접근 가능
+            - **manager**: 지정된 부서 소속 직원 관리 가능 (부장/팀장은 자동 권한 부여)
+            - **evaluator**: 평가 권한 보유, 지정된 부서 직원 평가 가능
+            - **seed**: 초기 시스템에서 강제로 삽입된 보장 관리자 계정 (삭제 불가)
+            """
+        )
+
+            # 관리자 전용: DB열기
+        me = st.session_state.get("user", {})
+        my_empno = str(me.get("사번", ""))
+        if my_empno and is_admin(my_empno):
+            sheet_id = st.secrets.get("sheets", {}).get("HR_SHEET_ID")
+            if sheet_id:
+                url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit"
+                st.caption(f"📄 DB열기: [{url}]({url})")
+
+    with tabs[-1]:
+        safe_run2(_render_help, title="도움말")
+
+
+# ── 엔트리포인트 ─────────────────────────────────────────────────────────────
+
+
+# =================== HR SESSION HOTFIX (BEGIN) ===================
+# ⚠️ 이 블록은 기존 정의를 "덮어쓰기" 합니다. 이 줄 아래에 main() 호출이 와야 합니다.
 
 def _start_session(user_info: dict):
     """
