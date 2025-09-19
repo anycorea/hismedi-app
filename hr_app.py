@@ -1887,49 +1887,53 @@ def tab_competency(emp_df: pd.DataFrame):
     if "부서2" not in df.columns:
         df["부서2"] = ""
 
-    # ── 필터 (부서1/부서2/직급/검색) ──
-if "부서2" not in df.columns:
-    df["부서2"] = ""
-base = df.copy()
-base["사번"] = base["사번"].astype(str)
-cflt = st.columns([1,1,1,2])
-with cflt[0]:
-    opt_d1 = ["(전체)"] + sorted([x for x in base.get("부서1", []).dropna().unique() if x])
-    f_d1 = st.selectbox("부서1", opt_d1, index=0, key="cmpS_f_d1")
-with cflt[1]:
-    opt_d2 = ["(전체)"] + sorted([x for x in base.get("부서2", []).dropna().unique() if x])
-    f_d2 = st.selectbox("부서2", opt_d2, index=0, key="cmpS_f_d2")
-with cflt[2]:
-    opt_g = ["(전체)"] + sorted([x for x in base.get("직급", []).dropna().unique() if x])
-    f_g = st.selectbox("직급", opt_g, index=0, key="cmpS_f_grade")
-with cflt[3]:
-    f_q = st.text_input("검색(사번/이름)", "", key="cmpS_f_q")
+        # ── 필터 (부서1/부서2/직급/검색) ──
+    if "부서2" not in df.columns:
+        df["부서2"] = ""
+    base = df.copy()
+    base["사번"] = base["사번"].astype(str)
+    cflt = st.columns([1,1,1,2])
+    with cflt[0]:
+        opt_d1 = ["(전체)"] + sorted([x for x in base.get("부서1", []).dropna().unique() if x])
+        f_d1 = st.selectbox("부서1", opt_d1, index=0, key="cmpS_f_d1")
+    with cflt[1]:
+        opt_d2 = ["(전체)"] + sorted([x for x in base.get("부서2", []).dropna().unique() if x])
+        f_d2 = st.selectbox("부서2", opt_d2, index=0, key="cmpS_f_d2")
+    with cflt[2]:
+        opt_g = ["(전체)"] + sorted([x for x in base.get("직급", []).dropna().unique() if x])
+        f_g = st.selectbox("직급", opt_g, index=0, key="cmpS_f_grade")
+    with cflt[3]:
+        f_q = st.text_input("검색(사번/이름)", "", key="cmpS_f_q")
 
-view = base[["사번","이름","부서1","부서2","직급"]].copy()
-if f_d1 != "(전체)": view = view[view["부서1"].astype(str) == f_d1]
-if f_d2 != "(전체)": view = view[view["부서2"].astype(str) == f_d2]
-if f_g  != "(전체)": view = view[view["직급"].astype(str) == f_g]
-if f_q and f_q.strip():
-    k = f_q.strip().lower()
-    view = view[view.apply(lambda r: k in str(r["사번"]).lower() or k in str(r["이름"]).lower(), axis=1)]
-view = view.sort_values(["사번"]).reset_index(drop=True)
+    view = base[["사번","이름","부서1","부서2","직급"]].copy()
+    if f_d1 != "(전체)":
+        view = view[view["부서1"].astype(str) == f_d1]
+    if f_d2 != "(전체)":
+        view = view[view["부서2"].astype(str) == f_d2]
+    if f_g  != "(전체)":
+        view = view[view["직급"].astype(str) == f_g]
+    if f_q and f_q.strip():
+        k = f_q.strip().lower()
+        view = view[view.apply(lambda r: k in str(r["사번"]).lower() or k in str(r["이름"]).lower(), axis=1)]
+    view = view.sort_values(["사번"]).reset_index(drop=True)
 
-# 대상자 선택 (selectbox)
-_sabuns = view["사번"].astype(str).tolist()
-_names  = view["이름"].astype(str).tolist() if "이름" in view.columns else [""] * len(_sabuns)
-_opts   = [f"{s} - {n}" for s, n in zip(_sabuns, _names)]
-_target = str(st.session_state.get("cmpS_target_sabun", ""))
-try:
-    _idx_default = _sabuns.index(_target) if _target in _sabuns else 0
-except Exception:
-    _idx_default = 0
-_sel = st.selectbox("대상자 선택", _opts, index=_idx_default, key="cmpS_pick_editor_select")
-_sel_sabun = _sel.split(" - ", 1)[0] if isinstance(_sel, str) else (_sabuns[_idx_default] if len(_sabuns)>0 else "")
-st.session_state["cmpS_target_sabun"] = str(_sel_sabun)
-try:
-    st.session_state["cmpS_target_name"] = str(_names[_sabuns.index(_sel_sabun)]) if _sel_sabun in _sabuns else ""
-except Exception:
-    st.session_state["cmpS_target_name"] = ""
+    # 대상자 선택 (selectbox)
+    _sabuns = view["사번"].astype(str).tolist()
+    _names  = view["이름"].astype(str).tolist() if "이름" in view.columns else [""] * len(_sabuns)
+    _opts   = [f"{s} - {n}" for s, n in zip(_sabuns, _names)]
+    _target = str(st.session_state.get("cmpS_target_sabun", ""))
+    try:
+        _idx_default = _sabuns.index(_target) if _target in _sabuns else 0
+    except Exception:
+        _idx_default = 0
+    _sel = st.selectbox("대상자 선택", _opts, index=_idx_default, key="cmpS_pick_editor_select")
+    _sel_sabun = _sel.split(" - ", 1)[0] if isinstance(_sel, str) else (_sabuns[_idx_default] if len(_sabuns)>0 else "")
+    st.session_state["cmpS_target_sabun"] = str(_sel_sabun)
+    try:
+        st.session_state["cmpS_target_name"] = str(_names[_sabuns.index(_sel_sabun)]) if _sel_sabun in _sabuns else ""
+    except Exception:
+        st.session_state["cmpS_target_name"] = ""
+
     st.markdown("#### 평가 입력")
     grade_options = [("A","탁월(A)"), ("B","우수(B)"), ("C","보통(C)"), ("D","부족(D)"), ("E","저조(E)")]
     grade_labels  = [lbl for _, lbl in grade_options]
