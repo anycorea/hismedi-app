@@ -1887,10 +1887,7 @@ def tab_competency(emp_df: pd.DataFrame):
         this_year = datetime.now(tz=tz_kst()).year
     except Exception:
         this_year = datetime.now().year
-    colY = st.columns([1,3])
-    with colY[0]:
-        year = st.number_input("평가 연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="cmpS_year")
-
+    year = st.number_input("평가 연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="cmpS_year")
     st.markdown("#### 평가 대상 선택")
     allowed = _allowed_sabuns_for(emp_df, me_sabun)
 
@@ -1904,24 +1901,23 @@ def tab_competency(emp_df: pd.DataFrame):
     if df.empty:
         st.info("현재 권한 범위 내 표시할 대상이 없습니다.", icon="ℹ️")
         return
-
+# ── 필터 (부서1/부서2/직급/검색) ──
     if "부서2" not in df.columns:
         df["부서2"] = ""
-
-        # ── 필터 (부서1/부서2/직급/검색) ──
-    if "부서2" not in df.columns:
-        df["부서2"] = ""
+    for c in ["이름","부서1","부서2","직급"]:
+        if c not in df.columns:
+            df[c] = ""
     base = df.copy()
     base["사번"] = base["사번"].astype(str)
     cflt = st.columns([1,1,1,2])
     with cflt[0]:
-        opt_d1 = ["(전체)"] + sorted([x for x in base.get("부서1", []).dropna().unique() if x])
+        opt_d1 = ["(전체)"] + sorted([x for x in df["부서1"].dropna().astype(str).unique() if x])
         f_d1 = st.selectbox("부서1", opt_d1, index=0, key="cmpS_f_d1")
     with cflt[1]:
-        opt_d2 = ["(전체)"] + sorted([x for x in base.get("부서2", []).dropna().unique() if x])
+        opt_d2 = ["(전체)"] + sorted([x for x in df["부서2"].dropna().astype(str).unique() if x])
         f_d2 = st.selectbox("부서2", opt_d2, index=0, key="cmpS_f_d2")
     with cflt[2]:
-        opt_g = ["(전체)"] + sorted([x for x in base.get("직급", []).dropna().unique() if x])
+        opt_g = ["(전체)"] + sorted([x for x in df["직급"].dropna().astype(str).unique() if x])
         f_g = st.selectbox("직급", opt_g, index=0, key="cmpS_f_grade")
     with cflt[3]:
         f_q = st.text_input("검색(사번/이름)", "", key="cmpS_f_q")
