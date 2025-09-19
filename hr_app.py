@@ -1234,7 +1234,13 @@ def tab_eval_input(emp_df: pd.DataFrame):
             st.session_state["eval2_target_name"] = ""
         view["선택"] = (view["사번"].astype(str) == str(st.session_state.get("eval2_target_sabun", "")))
         edited_pick = view[["선택","사번","이름","부서1","부서2","직급"]] if all(c in view.columns for c in ["이름","부서1","부서2","직급"]) else view
-
+        st.data_editor(
+            view[["선택","사번","이름","부서1","부서2","직급"]],
+            use_container_width=True, height=360, key="eval2_pick_editor",
+            column_config={"선택": st.column_config.CheckboxColumn()}, 
+         hide_index=True, num_rows="fixed")
+        picked = edited_pick.loc[edited_pick["선택"] == True]
+        if not picked.empty:
             _r = picked.iloc[-1]
             st.session_state["eval2_target_sabun"] = str(_r["사번"])
             try:
@@ -1503,7 +1509,14 @@ def tab_job_desc(emp_df: pd.DataFrame):
         except Exception:
             st.session_state["jd2_target_name"] = ""
         view["선택"] = (view["사번"].astype(str) == str(st.session_state.get("jd2_target_sabun", "")))
-
+        edited = view[["선택","사번","이름","부서1","부서2","직급"]] if all(c in view.columns for c in ["이름","부서1","부서2","직급"]) else view
+        st.data_editor(
+            view[["선택","사번","이름","부서1","부서2","직급"]],
+            use_container_width=True, height=360, key="jd2_pick_editor",
+            column_config={"선택": st.column_config.CheckboxColumn()}, 
+         hide_index=True, num_rows="fixed")
+        picked = edited.loc[edited["선택"] == True]
+        if not picked.empty:
             _r = picked.iloc[-1]
             st.session_state["jd2_target_sabun"] = str(_r["사번"])
             try:
@@ -1908,15 +1921,25 @@ def tab_competency(emp_df: pd.DataFrame):
     except Exception:
         st.session_state["cmpS_target_name"] = ""
     df_view["선택"] = (df_view["사번"].astype(str) == str(st.session_state.get("cmpS_target_sabun", "")))
+    edited = df_view[["선택","사번","이름","부서1","부서2","직급"]] if all(c in df_view.columns for c in ["이름","부서1","부서2","직급"]) else df_view
+    st.data_editor(
+        df_view[["선택","사번","이름","부서1","부서2","직급"]],
+        use_container_width=True,
+        height=340,
+        key="cmpS_pick_editor",
+        column_config={"선택": st.column_config.CheckboxColumn()},
+        hide_index=True,
+        num_rows="fixed"
+    )
 
-
+    picked = edited.loc[edited["선택"] == True]
+    if not picked.empty:
         _r = picked.iloc[-1]
         st.session_state["cmpS_target_sabun"] = str(_r["사번"])
         try:
             st.session_state["cmpS_target_name"]  = str(_r["이름"])
         except Exception:
             st.session_state["cmpS_target_name"]  = ""
-
     target_sabun = str(st.session_state.get("cmpS_target_sabun",""))
     target_name  = str(st.session_state.get("cmpS_target_name",""))
 
@@ -2167,7 +2190,7 @@ def sync_current_department_from_history(as_of_date=None):
 
 # ── 관리자: PIN / 부서이동 / 평가항목 / 권한 ─────────────────────────────────
 
-def _random_pin(length=4):
+def _random_pin(length=6):
     return "".join(pysecrets.choice("0123456789") for _ in range(length))
 
 
@@ -2897,32 +2920,16 @@ def startup_sanity_checks():
 
 def safe_run(render_fn, *args, title: str = "", **kwargs):
     msg = None
-    """탭/섹션 하나를 안전하게 감싸서, 예외가 나도 전체 앱이 멈추지 않도록."""
     try:
         return render_fn(*args, **kwargs)
     except Exception as e:
         msg = f"[{title}] 렌더 실패: {e}" if title else f"렌더 실패: {e}"
-        st.error(msg, icon="🛑") if msg is not None else None
+        try:
+            st.error(msg, icon="🛑")
+        except Exception:
+            pass
         return None
-# ── Startup Sanity Checks & Safe Runner (END) ────────────────────────────────
 
-
-# ===== [A] startup_sanity_checks() 맨 위에 추가 (들여쓰기 4칸) =====
-# 안전 재실행 시 다음 1회 부팅 점검을 건너뜁니다.
-    try:
-        import streamlit as st
-        if st.session_state.get("_skip_boot_checks", False):
-            st.session_state["_skip_boot_checks"] = False
-            return []
-    except Exception:
-        pass
-# ===== [A] END =====
-
-
-# ======================================================================
-# 📌 Startup & Main
-# ======================================================================
-# ── 메인 ──────────────────────────────────────────────────────────────────────
 def main():
     st.markdown(f"## {APP_TITLE}")
     render_status_line()
@@ -3084,39 +3091,8 @@ def main():
 
 
     def _render_help():
-        st.markdown(
-            """
-            ### 사용 안내
-            - 직원 탭: 전체 데이터(의사 포함), 권한에 따라 행 제한
-            - 평가/직무기술서/직무능력평가/관리자: 동일 데이터 기반, 권한에 따라 접근
-            - 상태표시: 상단에 'DB연결 … (KST)'
-
-            ### 권한(Role) 설명
-            - **admin**: 시스템 최상위 관리자, 모든 메뉴 접근 가능
-            - **manager**: 지정된 부서 소속 직원 관리 가능 (부장/팀장은 자동 권한 부여)
-            - **evaluator**: 평가 권한 보유, 지정된 부서 직원 평가 가능
-            - **seed**: 초기 시스템에서 강제로 삽입된 보장 관리자 계정 (삭제 불가)
-            """
-        )
-
-            # 관리자 전용: DB열기
-        me = st.session_state.get("user", {})
-        my_empno = str(me.get("사번", ""))
-        if my_empno and is_admin(my_empno):
-            sheet_id = st.secrets.get("sheets", {}).get("HR_SHEET_ID")
-            if sheet_id:
-                url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit"
-                st.caption(f"📄 DB열기: [{url}]({url})")
-
-    with tabs[-1]:
-        safe_run(_render_help, title="도움말")
-
-
-# ── 엔트리포인트 ─────────────────────────────────────────────────────────────
-
-
-# =================== HR SESSION HOTFIX (BEGIN) ===================
-# ⚠️ 이 블록은 기존 정의를 "덮어쓰기" 합니다. 이 줄 아래에 main() 호출이 와야 합니다.
+    st.subheader('도움말')
+    st.caption('도움말 콘텐츠는 준비 중입니다.')
 
 def _start_session(user_info: dict):
     """
