@@ -1229,7 +1229,7 @@ def tab_eval_input(emp_df: pd.DataFrame):
                 st.session_state["eval2_target_name"]  = str(_r["이름"])
             except Exception:
                 st.session_state["eval2_target_name"]  = ""
-            st.session_state["eval2_target_name"]  = str(r["이름"])
+            st.session_state["eval2_target_name"]  = str(_r["이름"])
         target_sabun = st.session_state["eval2_target_sabun"]
         target_name  = st.session_state["eval2_target_name"]
         st.success(f"대상자: {target_name} ({target_sabun})", icon="✅")
@@ -1487,7 +1487,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
                 st.session_state["jd2_target_name"]  = str(_r["이름"])
             except Exception:
                 st.session_state["jd2_target_name"]  = ""
-            st.session_state["jd2_target_name"]  = str(r["이름"])
+            st.session_state["jd2_target_name"]  = str(_r["이름"])
         target_sabun = st.session_state["jd2_target_sabun"]
         target_name  = st.session_state["jd2_target_name"]
         st.success(f"대상자: {target_name} ({target_sabun})", icon="✅")
