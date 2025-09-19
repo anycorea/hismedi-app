@@ -2919,12 +2919,13 @@ def startup_sanity_checks():
 
 
 def safe_run(render_fn, *args, title: str = "", **kwargs):
+    msg = None
     """탭/섹션 하나를 안전하게 감싸서, 예외가 나도 전체 앱이 멈추지 않도록."""
     try:
         return render_fn(*args, **kwargs)
     except Exception as e:
         msg = f"[{title}] 렌더 실패: {e}" if title else f"렌더 실패: {e}"
-        st.error(msg, icon="🛑")
+        st.error(msg, icon="🛑") if msg is not None else None
         return None
 # ── Startup Sanity Checks & Safe Runner (END) ────────────────────────────────
 
@@ -3106,8 +3107,12 @@ def main():
 
 
     def _render_help():
-        st.subheader('도움말')
-        st.caption('도움말 콘텐츠는 준비 중입니다.')
+        st.markdown(
+            """
+            ### 사용 안내
+            - 직원 탭: 전체 데이터(의사 포함), 권한에 따라 행 제한
+            - 평가/직무기술서/직무능력평가/관리자: 동일 데이터 기반, 권한에 따라 접근
+            - 상태표시: 상단에 'DB연결 … (KST)'
 
             ### 권한(Role) 설명
             - **admin**: 시스템 최상위 관리자, 모든 메뉴 접근 가능
