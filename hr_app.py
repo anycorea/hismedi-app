@@ -1170,10 +1170,181 @@ def read_eval_saved_scores(year: int, eval_type: str, target_sabun: str, evaluat
         return {}, {}
 
 def tab_eval_input(emp_df: pd.DataFrame):
+    st.subheader("평가")
+    this_year = datetime.now(tz=tz_kst()).year
+    year = st.number_input("평가 연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="eval2_year")
+    u = st.session_state["user"]; me_sabun = str(u["사번"]); me_name = str(u["이름"])
+    am_admin_or_mgr = (is_admin(me_sabun) or is_manager(emp_df, me_sabun))
+    allowed_sabuns = get_allowed_sabuns(emp_df, me_sabun, include_self=True)
+    items = read_eval_items_df(only_active=True)
+    if items.empty: st.warning("활성화된 평가 항목이 없습니다.", icon="⚠️"); return
+    items_sorted = items.sort_values(["순서", "항목"]).reset_index(drop=True)
+    item_ids = [str(x) for x in items_sorted["항목ID"].tolist()]
+    st.session_state.setdefault("eval2_target_sabun", me_sabun)
+    st.session_state.setdefault("eval2_target_name",  me_name)
+    st.session_state.setdefault("eval2_edit_mode",    False)
 
-    # 통일 UI: 평가
-    _unified_people_tab(emp_df, "eval2", "인사평가")
+    if not am_admin_or_mgr:
+        target_sabun = me_sabun; target_name  = me_name
+        st.info(f"대상자: {target_name} ({target_sabun})", icon="👤")
+        eval_type = "자기"; st.caption("평가유형: **자기**")
+    else:
+        base = emp_df.copy(); base["사번"] = base["사번"].astype(str)
+        base = base[base["사번"].isin({str(s) for s in allowed_sabuns})]
+        if "재직여부" in base.columns: base = base[base["재직여부"] == True]
+        cflt = st.columns([1,1,1,2,1])
+        with cflt[0]:
+            opt_d1 = ["(전체)"] + sorted([x for x in base.get("부서1", []).dropna().unique() if x])
+            f_d1 = st.selectbox("부서1", opt_d1, index=0, key="eval2_f_d1")
+        with cflt[1]:
+            sub = base if f_d1 == "(전체)" else base[base["부서1"].astype(str) == f_d1]
+            opt_d2 = ["(전체)"] + sorted([x for x in sub.get("부서2", []).dropna().unique() if x])
+            f_d2 = st.selectbox("부서2", opt_d2, index=0, key="eval2_f_d2")
+        with cflt[2]:
+            opt_g = ["(전체)"] + sorted([x for x in base.get("직급", []).dropna().unique() if x])
+            f_g = st.selectbox("직급", opt_g, index=0, key="eval2_f_grade")
+        with cflt[3]: f_q = st.text_input("검색(사번/이름)", "", key="eval2_f_q")
+        with cflt[4]: only_active = st.checkbox("재직만", True, key="eval2_f_active")
 
+        view = base[["사번","이름","부서1","부서2","직급","재직여부"]].copy()
+        if only_active and "재직여부" in view.columns: view = view[view["재직여부"] == True]
+        if f_d1 != "(전체)": view = view[view["부서1"].astype(str) == f_d1]
+        if f_d2 != "(전체)": view = view[view["부서2"].astype(str) == f_d2]
+        if f_g  != "(전체)": view = view[view["직급"].astype(str) == f_g]
+        if f_q and f_q.strip():
+            k = f_q.strip().lower()
+            view = view[view.apply(lambda r: k in str(r["사번"]).lower() or k in str(r["이름"]).lower(), axis=1)]
+        view = view.sort_values(["사번"]).reset_index(drop=True)
+        view["선택"] = (view["사번"].astype(str) == str(st.session_state.get("eval2_target_sabun","")))
+        # --- 단일 선택: selectbox로 대상자 선택 후 표는 읽기전용으로 표시 ---
+        _sabuns = view["사번"].astype(str).tolist()
+        _names  = view["이름"].astype(str).tolist() if "이름" in view.columns else [""] * len(_sabuns)
+        _opts   = [f"{s} - {n}" for s, n in zip(_sabuns, _names)]
+        _target = str(st.session_state.get("eval2_target_sabun", ""))
+        try:
+            _idx_default = _sabuns.index(_target) if _target in _sabuns else 0
+        except Exception:
+            _idx_default = 0
+        _sel = st.selectbox("대상자 선택", _opts, index=_idx_default, key="eval2_pick_editor_select")
+        _sel_sabun = _sel.split(" - ", 1)[0] if isinstance(_sel, str) and " - " in _sel else (_sel if isinstance(_sel, str) else _sabuns[_idx_default] if len(_sabuns)>0 else "")
+        st.session_state["eval2_target_sabun"] = str(_sel_sabun)
+        try:
+            st.session_state["eval2_target_name"] = str(_names[_sabuns.index(_sel_sabun)]) if _sel_sabun in _sabuns else ""
+        except Exception:
+            st.session_state["eval2_target_name"] = ""
+        view["선택"] = (view["사번"].astype(str) == str(st.session_state.get("eval2_target_sabun", "")))
+        edited_pick = view[["선택","사번","이름","부서1","부서2","직급"]] if all(c in view.columns for c in ["이름","부서1","부서2","직급"]) else view
+        st.data_editor(
+            view[["선택","사번","이름","부서1","부서2","직급"]],
+            use_container_width=True, height=360, key="eval2_pick_editor",
+            column_config={"선택": st.column_config.CheckboxColumn()}, 
+         hide_index=True, num_rows="fixed")
+        picked = edited_pick.loc[edited_pick["선택"] == True]
+        if not picked.empty:
+            _r = picked.iloc[-1]
+            st.session_state["eval2_target_sabun"] = str(_r["사번"])
+            try:
+                st.session_state["eval2_target_name"]  = str(_r["이름"])
+            except Exception:
+                st.session_state["eval2_target_name"]  = ""
+            st.session_state["eval2_target_name"]  = str(_r["이름"])
+        target_sabun = st.session_state["eval2_target_sabun"]
+        target_name  = st.session_state["eval2_target_name"]
+        st.success(f"대상자: {target_name} ({target_sabun})", icon="✅")
+        eval_type_key = f"eval2_type_{year}_{me_sabun}_{target_sabun}"
+        if eval_type_key not in st.session_state: st.session_state[eval_type_key] = "1차"
+        eval_type = st.radio("평가유형", ["자기","1차","2차"], horizontal=True, key=eval_type_key)
+
+    col_mode = st.columns([1,3])
+    with col_mode[0]:
+        if st.button(("수정모드로 전환" if not st.session_state["eval2_edit_mode"] else "보기모드로 전환"),
+                     use_container_width=True, key="eval2_toggle"):
+            st.session_state["eval2_edit_mode"] = not st.session_state["eval2_edit_mode"]; st.rerun()
+    with col_mode[1]: st.caption(f"현재: **{'수정모드' if st.session_state['eval2_edit_mode'] else '보기모드'}**")
+    edit_mode = bool(st.session_state["eval2_edit_mode"])
+
+    saved_scores, saved_meta = read_eval_saved_scores(int(year), eval_type, target_sabun, me_sabun)
+    kbase = f"E2_{year}_{eval_type}_{me_sabun}_{target_sabun}"
+    if (not am_admin_or_mgr) and (not saved_scores) and (not edit_mode):
+        st.session_state["eval2_edit_mode"] = True; edit_mode = True
+
+    st.markdown("#### 점수 입력 (각 1~5)")
+    c_head, c_slider, c_btn = st.columns([5,2,1])
+    with c_head: st.caption("라디오로 개별 점수를 고르거나, 슬라이더 ‘일괄 적용’을 사용하세요.")
+    slider_key = f"{kbase}_slider"
+    if slider_key not in st.session_state:
+        if saved_scores:
+            avg = round(sum(saved_scores.values()) / max(1, len(saved_scores)))
+            st.session_state[slider_key] = int(min(5, max(1, avg)))
+        else:
+            st.session_state[slider_key] = 3
+    with c_slider:
+        bulk_score = st.slider("일괄 점수", min_value=1, max_value=5, step=1, key=slider_key, disabled=not edit_mode)
+    with c_btn:
+        if st.button("일괄 적용", use_container_width=True, key=f"{kbase}_apply", disabled=not edit_mode):
+            st.session_state[f"__apply_bulk_{kbase}"] = int(bulk_score)
+            st.toast(f"모든 항목에 {bulk_score}점 적용", icon="✅")
+    if st.session_state.get(f"__apply_bulk_{kbase}") is not None:
+        _v = int(st.session_state[f"__apply_bulk_{kbase}"])
+        for _iid in item_ids: st.session_state[f"eval2_seg_{_iid}_{kbase}"] = str(_v)
+        del st.session_state[f"__apply_bulk_{kbase}"]
+
+    scores = {}
+    for r in items_sorted.itertuples(index=False):
+        iid = str(getattr(r, "항목ID")); name = getattr(r, "항목") or ""; desc = getattr(r, "내용") or ""
+        rkey = f"eval2_seg_{iid}_{kbase}"
+        if rkey not in st.session_state:
+            st.session_state[rkey] = str(int(saved_scores[iid])) if iid in saved_scores else "3"
+        st.markdown('<div class="eval-row">', unsafe_allow_html=True)
+        c1, c2, c3 = st.columns([2, 6, 3])
+        with c1: st.markdown(f'**{name}**')
+        with c2:
+            if desc.strip(): st.caption(desc)
+        with c3:
+            st.radio(" ", ["1","2","3","4","5"], horizontal=True, key=rkey,
+                     label_visibility="collapsed", disabled=not edit_mode)
+        st.markdown('</div>', unsafe_allow_html=True)
+        scores[iid] = int(st.session_state[rkey])
+
+    total_100 = round(sum(scores.values()) * (100.0 / max(1, len(items_sorted) * 5)), 1)
+    st.markdown("---")
+    cM1, cM2 = st.columns([1, 3])
+    with cM1: st.metric("합계(100점 만점)", total_100)
+    with cM2: st.progress(min(1.0, total_100 / 100.0), text=f"총점 {total_100}점")
+    col_submit = st.columns([1, 4])
+    with col_submit[0]:
+        do_save = st.button("제출/저장", type="primary", use_container_width=True,
+                            key=f"eval2_save_{kbase}", disabled=not edit_mode)
+    if do_save:
+        try:
+            rep = upsert_eval_response(emp_df, int(year), eval_type, str(target_sabun), str(me_sabun), scores, "제출")
+            st.success(("제출 완료" if rep["action"] == "insert" else "업데이트 완료") + f" (총점 {rep['total']}점)", icon="✅")
+            st.toast("평가 저장됨", icon="✅")
+            st.session_state["eval2_edit_mode"] = False; st.rerun()
+        except Exception as e:
+            st.exception(e)
+
+    st.markdown("#### 내 제출 현황")
+    try:
+        my = read_my_eval_rows(int(year), me_sabun)
+        if my.empty: st.caption("제출된 평가가 없습니다.")
+        else:
+            st.dataframe(my[["평가유형", "평가대상사번", "평가대상이름", "총점", "상태", "제출시각"]], use_container_width=True, height=260)
+    except Exception:
+        st.caption("제출 현황을 불러오지 못했습니다.")
+
+# ======================================================================
+# 📌 직무기술서(Job Description)
+# ======================================================================
+# ── 직무기술서 ────────────────────────────────────────────────────────────────
+JOBDESC_SHEET="직무기술서"
+JOBDESC_HEADERS = [
+    "사번","연도","버전","부서1","부서2","작성자사번","작성자이름",
+    "직군","직종","직무명","제정일","개정일","검토주기",
+    "직무개요","주업무","기타업무",
+    "필요학력","전공계열","직원공통필수교육","보수교육","기타교육","특성화교육",
+    "면허","경력(자격요건)","비고","서명방식","서명데이터","제출시각"
+]
 
 def ensure_jobdesc_sheet():
     wb=get_workbook()
@@ -1252,11 +1423,225 @@ def upsert_jobdesc(rec:dict, as_new_version:bool=False)->dict:
         return {"action":"update","version":ver}
 
 def tab_job_desc(emp_df: pd.DataFrame):
+    st.subheader("직무기술서")
+    def _jd_latest_for(sabun: str, year: int) -> dict | None:
+        try: df = read_jobdesc_df()
+        except Exception: return None
+        if df.empty: return None
+        sub = df[(df["사번"].astype(str) == str(sabun)) & (df["연도"].astype(int) == int(year))].copy()
+        if sub.empty: return None
+        try: sub["버전"] = sub["버전"].astype(int)
+        except Exception: pass
+        sub = sub.sort_values(["버전"], ascending=[False]).reset_index(drop=True)
+        row = sub.iloc[0].to_dict()
+        for k, v in row.items(): row[k] = "" if v is None else str(v)
+        return row
+    def _jd_blank_from_emp(emp_df: pd.DataFrame, sabun: str, year: int) -> dict:
+        me = emp_df.loc[emp_df["사번"].astype(str) == str(sabun)]
+        r = me.iloc[0] if not me.empty else {}
+        today = datetime.now(tz=tz_kst()).date().strftime("%Y-%m-%d")
+        def _g(key, default=""):
+            try: return str(r.get(key, default))
+            except Exception: return str(default)
+        return {
+            "사번": str(sabun), "연도": int(year), "버전": 0,
+            "부서1": _g("부서1"), "부서2": _g("부서2"),
+            "작성자사번": str(sabun), "작성자이름": _emp_name_by_sabun(emp_df, sabun),
+            "직군": _g("직군"), "직종": _g("직종"), "직무명": _g("직무"),
+            "제정일": get_setting("JD.제정일", today), "개정일": get_setting("JD.개정일", today),
+            "검토주기": get_setting("JD.검토주기", "1년"),
+            "직무개요": "", "주업무": "", "기타업무": "",
+            "필요학력": "", "전공계열": "", "직원공통필수교육": "", "보수교육": "", "기타교육": "", "특성화교육": "",
+            "면허": "", "경력(자격요건)": "", "비고": "", "서명방식": "", "서명데이터": "",
+        }
 
-    # 통일 UI: 직무기술서
-    _unified_people_tab(emp_df, "jd2", "직무기술서")
+    this_year = datetime.now(tz=tz_kst()).year
+    year = st.number_input("연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="jd2_year")
+    u = st.session_state["user"]; me_sabun = str(u["사번"]); me_name = str(u["이름"])
+    am_admin_or_mgr = (is_admin(me_sabun) or is_manager(emp_df, me_sabun))
+    allowed_sabuns = get_allowed_sabuns(emp_df, me_sabun, include_self=True)
+    st.session_state.setdefault("jd2_target_sabun", me_sabun)
+    st.session_state.setdefault("jd2_target_name",  me_name)
+    st.session_state.setdefault("jd2_edit_mode",    False)
+
+    if not am_admin_or_mgr:
+        target_sabun = me_sabun; target_name  = me_name
+        st.info(f"대상자: {target_name} ({target_sabun})", icon="👤")
+    else:
+        base = emp_df.copy(); base["사번"] = base["사번"].astype(str)
+        base = base[base["사번"].isin({str(s) for s in allowed_sabuns})]
+        if "재직여부" in base.columns: base = base[base["재직여부"] == True]
+        cflt = st.columns([1,1,1,2])
+        with cflt[0]:
+            opt_d1 = ["(전체)"] + sorted([x for x in base.get("부서1", []).dropna().unique() if x])
+            f_d1 = st.selectbox("부서1", opt_d1, index=0, key="jd2_f_d1")
+        with cflt[1]:
+            sub = base if f_d1 == "(전체)" else base[base["부서1"].astype(str) == f_d1]
+            opt_d2 = ["(전체)"] + sorted([x for x in sub.get("부서2", []).dropna().unique() if x])
+            f_d2 = st.selectbox("부서2", opt_d2, index=0, key="jd2_f_d2")
+        with cflt[2]:
+            opt_g = ["(전체)"] + sorted([x for x in base.get("직급", []).dropna().unique() if x])
+            f_g = st.selectbox("직급", opt_g, index=0, key="jd2_f_grade")
+        with cflt[3]: f_q = st.text_input("검색(사번/이름)", key="jd2_f_q")
+        view = base[["사번","이름","부서1","부서2","직급"]].copy()
+        if f_d1 != "(전체)": view = view[view["부서1"].astype(str) == f_d1]
+        if f_d2 != "(전체)": view = view[view["부서2"].astype(str) == f_d2]
+        if f_g  != "(전체)": view = view[view["직급"].astype(str) == f_g]
+        if f_q and f_q.strip():
+            k = f_q.strip().lower()
+            view = view[view.apply(lambda r: k in str(r["사번"]).lower() or k in str(r["이름"]).lower(), axis=1)]
+        view = view.sort_values(["사번"]).reset_index(drop=True)
+        view["선택"] = (view["사번"].astype(str) == str(st.session_state.get("jd2_target_sabun","")))
+        # --- 단일 선택: selectbox로 대상자 선택 후 표는 읽기전용으로 표시 ---
+        _sabuns = view["사번"].astype(str).tolist()
+        _names  = view["이름"].astype(str).tolist() if "이름" in view.columns else [""] * len(_sabuns)
+        _opts   = [f"{s} - {n}" for s, n in zip(_sabuns, _names)]
+        _target = str(st.session_state.get("jd2_target_sabun", ""))
+        try:
+            _idx_default = _sabuns.index(_target) if _target in _sabuns else 0
+        except Exception:
+            _idx_default = 0
+        _sel = st.selectbox("대상자 선택", _opts, index=_idx_default, key="jd2_pick_editor_select")
+        _sel_sabun = _sel.split(" - ", 1)[0] if isinstance(_sel, str) and " - " in _sel else (_sel if isinstance(_sel, str) else _sabuns[_idx_default] if len(_sabuns)>0 else "")
+        st.session_state["jd2_target_sabun"] = str(_sel_sabun)
+        try:
+            st.session_state["jd2_target_name"] = str(_names[_sabuns.index(_sel_sabun)]) if _sel_sabun in _sabuns else ""
+        except Exception:
+            st.session_state["jd2_target_name"] = ""
+        view["선택"] = (view["사번"].astype(str) == str(st.session_state.get("jd2_target_sabun", "")))
+        edited = view[["선택","사번","이름","부서1","부서2","직급"]] if all(c in view.columns for c in ["이름","부서1","부서2","직급"]) else view
+        st.data_editor(
+            view[["선택","사번","이름","부서1","부서2","직급"]],
+            use_container_width=True, height=360, key="jd2_pick_editor",
+            column_config={"선택": st.column_config.CheckboxColumn()}, 
+         hide_index=True, num_rows="fixed")
+        picked = edited.loc[edited["선택"] == True]
+        if not picked.empty:
+            _r = picked.iloc[-1]
+            st.session_state["jd2_target_sabun"] = str(_r["사번"])
+            try:
+                st.session_state["jd2_target_name"]  = str(_r["이름"])
+            except Exception:
+                st.session_state["jd2_target_name"]  = ""
+            st.session_state["jd2_target_name"]  = str(_r["이름"])
+        target_sabun = st.session_state["jd2_target_sabun"]
+        target_name  = st.session_state["jd2_target_name"]
+        st.success(f"대상자: {target_name} ({target_sabun})", icon="✅")
+
+    col_mode = st.columns([1,3])
+    with col_mode[0]:
+        if st.button(("수정모드로 전환" if not st.session_state["jd2_edit_mode"] else "보기모드로 전환"),
+                     use_container_width=True, key="jd2_toggle"):
+            st.session_state["jd2_edit_mode"] = not st.session_state["jd2_edit_mode"]; st.rerun()
+    with col_mode[1]: st.caption(f"현재: **{'수정모드' if st.session_state['jd2_edit_mode'] else '보기모드'}**")
+    edit_mode = bool(st.session_state["jd2_edit_mode"])
+
+    jd_saved   = _jd_latest_for(target_sabun, int(year))
+    jd_current = jd_saved if jd_saved else _jd_blank_from_emp(emp_df, target_sabun, int(year))
+    if (not am_admin_or_mgr) and (jd_saved is None) and (not st.session_state["jd2_edit_mode"]):
+        st.session_state["jd2_edit_mode"] = True; edit_mode = True
+
+    with st.expander("현재 저장된 직무기술서 요약", expanded=False):
+        st.write(f"**직무명:** {(jd_saved or {}).get('직무명','')}")
+        cc = st.columns(2)
+        with cc[0]: st.markdown("**주업무**");  st.write((jd_saved or {}).get("주업무","") or "—")
+        with cc[1]: st.markdown("**기타업무**"); st.write((jd_saved or {}).get("기타업무","") or "—")
+
+    col = st.columns([1,1,2,2])
+    with col[0]:
+        version = st.number_input("버전(없으면 자동)", min_value=0, max_value=999,
+                                  value=int(str(jd_current.get("버전", 0)) or 0),
+                                  step=1, key="jd2_ver", disabled=not edit_mode)
+    with col[1]:
+        jobname = st.text_input("직무명", value=jd_current.get("직무명",""),
+                                key="jd2_jobname", disabled=not edit_mode)
+    with col[2]:
+        memo = st.text_input("비고", value=jd_current.get("비고",""),
+                             key="jd2_memo", disabled=not edit_mode)
+    with col[3]: pass
+
+    c2 = st.columns([1,1,1,1])
+    with c2[0]: dept1 = st.text_input("부서1", value=jd_current.get("부서1",""), key="jd2_dept1", disabled=not edit_mode)
+    with c2[1]: dept2 = st.text_input("부서2", value=jd_current.get("부서2",""), key="jd2_dept2", disabled=not edit_mode)
+    with c2[2]: group = st.text_input("직군",  value=jd_current.get("직군",""),  key="jd2_group",  disabled=not edit_mode)
+    with c2[3]: series= st.text_input("직종",  value=jd_current.get("직종",""),  key="jd2_series", disabled=not edit_mode)
+
+    c3 = st.columns([1,1,1])
+    with c3[0]: d_create = st.text_input("제정일",   value=jd_current.get("제정일",""),   key="jd2_d_create", disabled=not edit_mode)
+    with c3[1]: d_update = st.text_input("개정일",   value=jd_current.get("개정일",""),   key="jd2_d_update", disabled=not edit_mode)
+    with c3[2]: review   = st.text_input("검토주기", value=jd_current.get("검토주기",""), key="jd2_review",   disabled=not edit_mode)
+
+    job_summary = st.text_area("직무개요", value=jd_current.get("직무개요",""), height=80,  key="jd2_summary", disabled=not edit_mode)
+    job_main    = st.text_area("주업무",   value=jd_current.get("주업무",""),   height=120, key="jd2_main",    disabled=not edit_mode)
+    job_other   = st.text_area("기타업무", value=jd_current.get("기타업무",""), height=80,  key="jd2_other",   disabled=not edit_mode)
+
+    c4 = st.columns([1,1,1,1,1,1])
+    with c4[0]: edu_req    = st.text_input("필요학력",        value=jd_current.get("필요학력",""),        key="jd2_edu",        disabled=not edit_mode)
+    with c4[1]: major_req  = st.text_input("전공계열",        value=jd_current.get("전공계열",""),        key="jd2_major",      disabled=not edit_mode)
+    with c4[2]: edu_common = st.text_input("직원공통필수교육", value=jd_current.get("직원공통필수교육",""), key="jd2_edu_common", disabled=not edit_mode)
+    with c4[3]: edu_cont   = st.text_input("보수교육",        value=jd_current.get("보수교육",""),        key="jd2_edu_cont",   disabled=not edit_mode)
+    with c4[4]: edu_etc    = st.text_input("기타교육",        value=jd_current.get("기타교육",""),        key="jd2_edu_etc",    disabled=not edit_mode)
+    with c4[5]: edu_spec   = st.text_input("특성화교육",      value=jd_current.get("특성화교육",""),      key="jd2_edu_spec",   disabled=not edit_mode)
+
+    c5 = st.columns([1,1,2])
+    with c5[0]: license_ = st.text_input("면허", value=jd_current.get("면허",""), key="jd2_license", disabled=not edit_mode)
+    with c5[1]: career   = st.text_input("경력(자격요건)", value=jd_current.get("경력(자격요건)",""), key="jd2_career", disabled=not edit_mode)
+    with c5[2]: pass
+
+    c6 = st.columns([1,2,1])
+    with c6[0]:
+        _opt = ["", "text", "image"]
+        _sv  = jd_current.get("서명방식","")
+        _idx = _opt.index(_sv) if _sv in _opt else 0
+        sign_type = st.selectbox("서명방식", _opt, index=_idx, key="jd2_sign_type", disabled=not edit_mode)
+    with c6[1]:
+        sign_data = st.text_input("서명데이터", value=jd_current.get("서명데이터",""), key="jd2_sign_data", disabled=not edit_mode)
+    with c6[2]:
+        do_save = st.button("저장/업서트", type="primary", use_container_width=True, key="jd2_save", disabled=not edit_mode)
+
+    if do_save:
+        rec = {
+            "사번": str(target_sabun), "연도": int(year), "버전": int(version or 0),
+            "부서1": dept1, "부서2": dept2, "작성자사번": me_sabun, "작성자이름": _emp_name_by_sabun(emp_df, me_sabun),
+            "직군": group, "직종": series, "직무명": jobname,
+            "제정일": d_create, "개정일": d_update, "검토주기": review,
+            "직무개요": job_summary, "주업무": job_main, "기타업무": job_other,
+            "필요학력": edu_req, "전공계열": major_req,
+            "직원공통필수교육": edu_common, "보수교육": edu_cont, "기타교육": edu_etc, "특성화교육": edu_spec,
+            "면허": license_, "경력(자격요건)": career, "비고": memo, "서명방식": sign_type, "서명데이터": sign_data,
+        }
+        try:
+            rep = upsert_jobdesc(rec, as_new_version=(version == 0))
+            st.success(f"저장 완료 (버전 {rep['version']})", icon="✅"); st.rerun()
+        except Exception as e:
+            st.exception(e)
 
 
+# ======================================================================
+# 📌 직무능력평가(Competency) — 간편형 + ACL(권한 부여 직원만) + 자동 선택/대상 표시
+# ======================================================================
+# 교체 대상: 기존 "직무능력평가 권한관리" 블럭 전체
+# 기능 요약:
+#   - 인사평가/직무기술서와 동일: "권한 부여된 직원만" 목록/평가 가능(관리자/매니저도 ACL 준수)
+#   - 로그인한 본인이 목록에 있으면 기본 선택(체크박스) 처리, 아니면 1행 자동 선택
+#   - 표 아래에 "✅ 대상자: 이름 (사번)" 표시
+#   - JD(직무개요) 값 유무와 무관 — 있으면 요약만 표시, 없어도 평가 가능
+#   - 간편형 입력 UI 유지(등급/자격/의견/교육이수/저장/내 제출 현황)
+#
+# 의존 함수(프로젝트에 존재해야 함):
+#   get_workbook, tz_kst, kst_now_str, _emp_name_by_sabun
+#   read_jobdesc_df, get_allowed_sabuns(emp_df, sabun)  # 없으면 get_evaluable_targets로 대체
+#
+# Google Sheets API 대비 재시도 래퍼 포함
+
+import time
+import pandas as pd
+import streamlit as st
+from datetime import datetime
+from gspread.exceptions import APIError as _GS_APIError
+
+
+# ===== 공통: 대상자 success 배너 유틸 =====
 def _target_success_banner():
     u = st.session_state.get("user") or {}
     name  = (u.get("이름") or u.get("성명") or u.get("name") or "").strip() or "-"
@@ -1468,10 +1853,187 @@ def _has_competency_access(emp_df: pd.DataFrame, sabun: str) -> bool:
 
 # ───────────────────────── 메인 섹션(간편형 + 자동 선택/대상 표시) ─────────────────────────
 def tab_competency(emp_df: pd.DataFrame):
+    user = st.session_state.get("user", {}) or {}
+    me_sabun = str(user.get("사번", "") or "").strip()
+    if not me_sabun or not _has_competency_access(emp_df, me_sabun):
+        return
 
-    # 통일 UI: 직무능력평가
-    _unified_people_tab(emp_df, "cmpS", "직무능력평가")
+    st.subheader("직무능력평가")
 
+    try:
+        this_year = datetime.now(tz=tz_kst()).year
+    except Exception:
+        this_year = datetime.now().year
+    colY = st.columns([1,3])
+    with colY[0]:
+        year = st.number_input("평가 연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="cmpS_year")
+
+    st.markdown("#### 평가 대상 선택")
+    allowed = _allowed_sabuns_for(emp_df, me_sabun)
+
+    df = emp_df.copy()
+    df["사번"] = df["사번"].astype(str)
+    if "재직여부" in df.columns:
+        df = df[df["재직여부"] == True]
+    if allowed:
+        df = df[df["사번"].isin(allowed)]
+
+    if df.empty:
+        st.info("현재 권한 범위 내 표시할 대상이 없습니다.", icon="ℹ️")
+        return
+
+    if "부서2" not in df.columns:
+        df["부서2"] = ""
+
+    df_view = df[["사번","부서2","이름"]].copy().sort_values(["사번"]).reset_index(drop=True)
+
+    # ── 기본 선택: 로그인 사용자가 보이면 우선 선택, 아니면 1행 선택 ──
+    sabun_series = df_view["사번"].astype(str)
+    default_sabun = st.session_state.get("cmpS_target_sabun", "")
+    if (not default_sabun) or (str(default_sabun) not in set(sabun_series)):
+        if str(me_sabun) in set(sabun_series):
+            default_sabun = str(me_sabun)
+        else:
+            default_sabun = str(df_view.iloc[0]["사번"])
+        st.session_state["cmpS_target_sabun"] = default_sabun
+        try:
+            st.session_state["cmpS_target_name"] = str(df_view.loc[sabun_series==default_sabun, "이름"].iloc[0])
+        except Exception:
+            st.session_state["cmpS_target_name"] = ""
+
+    df_view["선택"] = (df_view["사번"].astype(str) == str(st.session_state.get("cmpS_target_sabun","")))
+
+    st.caption("※ 표에서 평가할 직원을 체크하세요. (여러 명 체크 시 마지막 선택 1명이 적용됩니다)")
+    # --- 단일 선택: selectbox로 대상자 선택 후 표는 읽기전용으로 표시 ---
+    _sabuns = df_view["사번"].astype(str).tolist()
+    _names  = df_view["이름"].astype(str).tolist() if "이름" in df_view.columns else [""] * len(_sabuns)
+    _opts   = [f"{s} - {n}" for s, n in zip(_sabuns, _names)]
+    _target = str(st.session_state.get("cmpS_target_sabun", ""))
+    try:
+        _idx_default = _sabuns.index(_target) if _target in _sabuns else 0
+    except Exception:
+        _idx_default = 0
+    _sel = st.selectbox("대상자 선택", _opts, index=_idx_default, key="cmpS_pick_editor_select")
+    _sel_sabun = _sel.split(" - ", 1)[0] if isinstance(_sel, str) and " - " in _sel else (_sel if isinstance(_sel, str) else _sabuns[_idx_default] if len(_sabuns)>0 else "")
+    st.session_state["cmpS_target_sabun"] = str(_sel_sabun)
+    try:
+        st.session_state["cmpS_target_name"] = str(_names[_sabuns.index(_sel_sabun)]) if _sel_sabun in _sabuns else ""
+    except Exception:
+        st.session_state["cmpS_target_name"] = ""
+    df_view["선택"] = (df_view["사번"].astype(str) == str(st.session_state.get("cmpS_target_sabun", "")))
+    edited = df_view[["선택","사번","이름","부서1","부서2","직급"]] if all(c in df_view.columns for c in ["이름","부서1","부서2","직급"]) else df_view
+    st.data_editor(
+        df_view[["선택","사번","이름","부서1","부서2","직급"]],
+        use_container_width=True,
+        height=340,
+        key="cmpS_pick_editor",
+        column_config={"선택": st.column_config.CheckboxColumn()},
+        hide_index=True,
+        num_rows="fixed"
+    )
+
+    picked = edited.loc[edited["선택"] == True]
+    if not picked.empty:
+        _r = picked.iloc[-1]
+        st.session_state["cmpS_target_sabun"] = str(_r["사번"])
+        try:
+            st.session_state["cmpS_target_name"]  = str(_r["이름"])
+        except Exception:
+            st.session_state["cmpS_target_name"]  = ""
+        # 안정화 목적: 선택 UI 이후 나머지 로직은 임시 중단
+    return
+
+    target_sabun = str(st.session_state.get("cmpS_target_sabun",""))
+    target_name  = str(st.session_state.get("cmpS_target_name",""))
+
+    # ✅ 현재 대상자 표시
+    st.success(f"대상자: {target_name} ({target_sabun})", icon="✅")
+
+    # JD 요약(있으면 표시, 없어도 진행)
+    jd = _jd_latest_for(target_sabun, int(year))
+    with st.expander("직무기술서 요약", expanded=True):
+        st.write(f"**직무명:** {jd.get('직무명','') if jd else ''}")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.markdown("**직무개요**")
+            st.write((jd.get("직무개요","") or "").strip() or "—")
+        with c2:
+            st.markdown("**주업무**")
+            st.write((jd.get("주업무","") or "").strip() or "—")
+        with c3:
+            st.markdown("**기타업무**")
+            st.write((jd.get("기타업무","") or "").strip() or "—")
+        st.caption("※ 해당 연도의 직무기술서 최신 버전을 표시합니다. (없으면 빈 값)")
+
+    # ── 입력 UI ──
+    st.markdown("#### 평가 입력")
+    grade_options = [("A","탁월(A)"), ("B","우수(B)"), ("C","보통(C)"), ("D","부족(D)"), ("E","저조(E)")]
+    grade_labels  = [lbl for _, lbl in grade_options]
+    label2code    = {lbl:code for code,lbl in grade_options}
+
+    colG = st.columns([1,1,1,2])
+    with colG[0]:
+        g_main_lbl = st.radio("주업무", grade_labels, index=2, horizontal=False, key="cmpS_main")
+        g_main = label2code[g_main_lbl]
+    with colG[1]:
+        extra_labels = ["해당없음"] + grade_labels
+        g_extra_lbl = st.radio("기타업무", extra_labels, index=0, horizontal=False, key="cmpS_extra")
+        g_extra = "해당없음" if g_extra_lbl=="해당없음" else label2code[g_extra_lbl]
+    with colG[2]:
+        qual = st.radio("직무 자격 유지 여부", ["직무 유지","직무 변경","직무비부여"], index=0, key="cmpS_qual")
+    with colG[3]:
+        try:
+            eval_date = st.date_input("평가일자", datetime.now(tz=tz_kst()).date(), key="cmpS_date").strftime("%Y-%m-%d")
+        except Exception:
+            eval_date = st.date_input("평가일자", datetime.now().date(), key="cmpS_date").strftime("%Y-%m-%d")
+
+    edu_status = _edu_completion_from_jd(jd)
+    st.metric("교육이수 (자동)", edu_status)
+
+    opinion = st.text_area("종합평가 의견", value="", height=150, key="cmpS_opinion")
+
+    cbtn = st.columns([1,1,3])
+    with cbtn[0]:
+        do_save = st.button("제출/저장", type="primary", use_container_width=True, key="cmpS_save")
+    with cbtn[1]:
+        do_reset = st.button("초기화", use_container_width=True, key="cmpS_reset")
+
+    if do_reset:
+        for k in ["cmpS_main","cmpS_extra","cmpS_qual","cmpS_opinion"]:
+            if k in st.session_state: del st.session_state[k]
+        st.rerun()
+
+    if do_save:
+        try:
+            rep = upsert_comp_simple_response(
+                emp_df, int(year), str(target_sabun), str(me_sabun),
+                g_main, g_extra, qual, opinion, eval_date
+            )
+            st.success(("제출 완료" if rep["action"]=="insert" else "업데이트 완료"), icon="✅")
+            st.toast("직무능력평가 저장됨", icon="✅")
+        except Exception as e:
+            st.exception(e)
+
+    st.markdown("#### 내 제출 현황")
+    try:
+        my = read_my_comp_simple_rows(int(year), me_sabun)
+        if my.empty:
+            st.caption("제출된 평가가 없습니다.")
+        else:
+            st.dataframe(
+                my[["평가대상사번","평가대상이름","평가일자","주업무평가","기타업무평가","교육이수","자격유지","상태","제출시각"]],
+                use_container_width=True, height=260
+            )
+    except Exception:
+        st.caption("제출 현황을 불러오지 못했습니다.")
+
+
+# ======================================================================
+# 📌 권한관리(Admin / ACL & Admin Tools)
+# ======================================================================
+# ── 부서이력/이동(필수 최소) ──────────────────────────────────────────────────
+
+HIST_SHEET = "부서이력"
 
 def ensure_dept_history_sheet():
     """
@@ -1891,7 +2453,7 @@ def tab_admin_eval_items():
             column_config={
                 "항목ID": st.column_config.TextColumn(disabled=True),
                 "항목": st.column_config.TextColumn(disabled=True),
-                "활성": st.column_config.CheckboxColumn(disabled=True),
+                "활성": st.column_config.CheckboxColumn(),
                 "순서": st.column_config.NumberColumn(step=1, min_value=0),
             },
         )
@@ -2311,47 +2873,6 @@ def tab_admin_acl(emp_df):
 # ======================================================================
 # 📌 Startup Checks
 # ======================================================================
-
-def _unified_people_tab(emp_df: pd.DataFrame, state_prefix: str, title_text: str):
-    st.subheader(title_text)
-    df = emp_df.copy()
-    # Ensure required columns exist
-    for col in ["사번","이름","부서1","부서2","직급"]:
-        if col not in df.columns:
-            df[col] = ""
-    # Build view
-    view = df[["사번","이름","부서1","부서2","직급"]].copy()
-    # Sort by 사번
-    try:
-        view["사번"] = view["사번"].astype(str)
-    except Exception:
-        view["사번"] = view["사번"].astype(str)
-    view = view.sort_values(["사번"]).reset_index(drop=True)
-    # Single select by selectbox
-    sabuns = view["사번"].astype(str).tolist()
-    names  = view["이름"].astype(str).tolist()
-    opts   = [f"{s} - {n}" for s,n in zip(sabuns, names)]
-    tgt_s  = str(st.session_state.get(f"{state_prefix}_target_sabun", ""))
-    idx    = sabuns.index(tgt_s) if tgt_s in sabuns else 0 if sabuns else 0
-    sel    = st.selectbox("대상자 선택", opts if opts else ["-"], index=idx if opts else 0, key=f"{state_prefix}_pick_select")
-    if isinstance(sel, str) and " - " in sel:
-        sel_sabun = sel.split(" - ", 1)[0]
-    else:
-        sel_sabun = sabuns[idx] if sabuns else ""
-    st.session_state[f"{state_prefix}_target_sabun"] = str(sel_sabun)
-    try:
-        st.session_state[f"{state_prefix}_target_name"]  = str(view.loc[view["사번"]==sel_sabun, "이름"].iloc[0]) if sel_sabun in sabuns else ""
-    except Exception:
-        st.session_state[f"{state_prefix}_target_name"]  = ""
-    # Mark selection
-    view["선택"] = (view["사번"].astype(str) == str(st.session_state.get(f"{state_prefix}_target_sabun","")))
-    # Display read-only table with unified columns
-    _show = view[["선택","사번","이름","부서1","부서2","직급"]]
-    st.dataframe(_show, use_container_width=True, height=360)
-    # Return selected row (or None)
-    if sel_sabun in sabuns:
-        return view.loc[view["사번"]==sel_sabun].iloc[0].to_dict()
-    return None
 # ── Startup Sanity Checks & Safe Runner (BEGIN) ──────────────────────────────
 def startup_sanity_checks():
     problems = []
@@ -2588,8 +3109,39 @@ def main():
 
 
     def _render_help():
-    st.subheader("도움말")
-    st.caption("도움말 콘텐츠는 준비 중입니다.")
+        st.markdown(
+            """
+            ### 사용 안내
+            - 직원 탭: 전체 데이터(의사 포함), 권한에 따라 행 제한
+            - 평가/직무기술서/직무능력평가/관리자: 동일 데이터 기반, 권한에 따라 접근
+            - 상태표시: 상단에 'DB연결 … (KST)'
+
+            ### 권한(Role) 설명
+            - **admin**: 시스템 최상위 관리자, 모든 메뉴 접근 가능
+            - **manager**: 지정된 부서 소속 직원 관리 가능 (부장/팀장은 자동 권한 부여)
+            - **evaluator**: 평가 권한 보유, 지정된 부서 직원 평가 가능
+            - **seed**: 초기 시스템에서 강제로 삽입된 보장 관리자 계정 (삭제 불가)
+            """
+        )
+
+            # 관리자 전용: DB열기
+        me = st.session_state.get("user", {})
+        my_empno = str(me.get("사번", ""))
+        if my_empno and is_admin(my_empno):
+            sheet_id = st.secrets.get("sheets", {}).get("HR_SHEET_ID")
+            if sheet_id:
+                url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit"
+                st.caption(f"📄 DB열기: [{url}]({url})")
+
+    with tabs[-1]:
+        safe_run(_render_help, title="도움말")
+
+
+# ── 엔트리포인트 ─────────────────────────────────────────────────────────────
+
+
+# =================== HR SESSION HOTFIX (BEGIN) ===================
+# ⚠️ 이 블록은 기존 정의를 "덮어쓰기" 합니다. 이 줄 아래에 main() 호출이 와야 합니다.
 
 def _start_session(user_info: dict):
     """
