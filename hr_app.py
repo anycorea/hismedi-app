@@ -960,6 +960,7 @@ def tab_staff(emp_df: pd.DataFrame):
                 pass
             st.session_state.pop("emp_last_loaded_ver", None)
             try:
+                pass
                 # (removed) rerun
             except Exception:
                 # (removed) rerun
