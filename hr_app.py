@@ -1204,8 +1204,21 @@ def main():
     emp_df = read_emp_df()
     require_login(emp_df)
 
-    # 좌측 선택
+    # 좌측 사이드바 상단 정보 영역
     with st.sidebar:
+        u = st.session_state.get("user", {})
+        uname = str(u.get("이름", "") or "")
+        usabun = str(u.get("사번", "") or "")
+        st.markdown(
+            f"""
+- **{APP_TITLE}**
+- DB연결 {kst_now_str()}
+- 사용자: {uname} ({usabun})
+            """.strip()
+        )
+        st.divider()
+
+        # 기존 좌측 직원 검색/선택 + 로그아웃
         st.markdown("#### 직원 검색/선택")
         render_staff_picker_left(emp_df)
         if st.button("로그아웃", use_container_width=True):
