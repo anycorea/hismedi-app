@@ -1345,3 +1345,132 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+# --- ACL Tab Injection ---
+
+def tab_admin_acl(emp_df: pd.DataFrame):
+    st.markdown("### 권한 관리")
+    df = read_auth_df().copy()
+    for c in AUTH_HEADERS:
+        if c not in df.columns:
+            df[c] = ""
+    role_opts = ["admin","manager","evaluator"]
+    scope_opts = ["부서","개별"]
+    emp_map = {str(r["사번"]): str(r.get("이름","")) for _,r in emp_df.iterrows() if str(r.get("사번","")).strip()}
+    df["사번"] = df["사번"].astype(str)
+    df["이름"] = df["사번"].map(emp_map).fillna(df.get("이름",""))
+    if "활성" in df.columns:
+        df["활성"] = df["활성"].map(_to_bool)
+    column_config = {
+        "사번": st.column_config.TextColumn("사번", help="권한 부여자 사번", width="small"),
+        "이름": st.column_config.TextColumn("이름", help="자동 맵핑(사번→이름)", width="small", disabled=True),
+        "역할": st.column_config.SelectboxColumn("역할", options=role_opts, width="small"),
+        "범위유형": st.column_config.SelectboxColumn("범위유형", options=scope_opts, width="small"),
+        "부서1": st.column_config.TextColumn("부서1", width="small"),
+        "부서2": st.column_config.TextColumn("부서2", width="small"),
+        "대상사번": st.column_config.TextColumn("대상사번", help="개별일 때 콤마/공백 구분", width="medium"),
+        "활성": st.column_config.CheckboxColumn("활성", width="small"),
+        "비고": st.column_config.TextColumn("비고", width="medium"),
+    }
+    st.caption("행 추가 후 '전체 저장'을 누르면 시트를 덮어쓰는 방식으로 반영됩니다.")
+    edited = st.data_editor(
+        df[AUTH_HEADERS],
+        num_rows="dynamic",
+        use_container_width=True,
+        hide_index=True,
+        column_config=column_config,
+        key="acl_editor",
+    )
+    errors = []
+    for i, r in edited.reset_index(drop=True).iterrows():
+        sab = str(r.get("사번","")).strip()
+        role = str(r.get("역할","")).strip()
+        scope = str(r.get("범위유형","")).strip()
+        act = _to_bool(r.get("활성", True))
+        if not sab:
+            errors.append(f"{i+1}행: 사번 필수")
+        if role and role not in ("admin","manager","evaluator"):
+            errors.append(f"{i+1}행: 역할 값 오류")
+        if scope and scope not in ("부서","개별"):
+            errors.append(f"{i+1}행: 범위유형 값 오류")
+        if act and role in ("manager","evaluator"):
+            if scope=="부서" and not (str(r.get("부서1","")).strip() or str(r.get("부서2","")).strip()):
+                errors.append(f"{i+1}행: 범위유형=부서인 경우 부서1/부서2 중 하나 이상 필요")
+            if scope=="개별" and not str(r.get("대상사번","")).strip():
+                errors.append(f"{i+1}행: 범위유형=개별인 경우 대상사번 필요")
+        if sab and sab in emp_map:
+            edited.at[i,"이름"] = emp_map[sab]
+    if not edited.empty:
+        keys = edited.apply(lambda r: (str(r.get("사번","")).strip(),
+                                       str(r.get("역할","")).strip(),
+                                       str(r.get("범위유형","")).strip(),
+                                       str(r.get("부서1","")).strip(),
+                                       str(r.get("부서2","")).strip(),
+                                       str(r.get("대상사번","")).strip()), axis=1)
+        dup = keys.duplicated(keep=False)
+        if dup.any():
+            idxs = [str(i+1) for i, v in enumerate(dup) if v]
+            errors.append(f"중복 행 존재: {', '.join(idxs)}행")
+    c1, c2 = st.columns([1,1])
+    with c1:
+        do_save = st.button("전체 저장", type="primary", use_container_width=True, key="acl_save")
+    with c2:
+        do_reload = st.button("새로고침", use_container_width=True, key="acl_reload")
+    if do_reload:
+        try: read_auth_df.clear()
+        except Exception: pass
+        st.rerun()
+    if do_save:
+        if errors:
+            st.error("저장 불가:\n- " + "\n- ".join(errors))
+        else:
+            try:
+                wb = get_book()
+                try:
+                    ws = wb.worksheet(AUTH_SHEET)
+                except WorksheetNotFound:
+                    ws = _retry(wb.add_worksheet, title=AUTH_SHEET, rows=max(1000, len(edited)+10), cols=len(AUTH_HEADERS)+2)
+                _retry(ws.clear)
+                _retry(ws.update, "A1", [AUTH_HEADERS])
+                values = []
+                for _, r in edited.iterrows():
+                    row = [str(r.get(h,"")) for h in AUTH_HEADERS]
+                    i_act = AUTH_HEADERS.index("활성")
+                    row[i_act] = "TRUE" if _to_bool(row[i_act]) else "FALSE"
+                    values.append(row)
+                if values:
+                    _retry(ws.update, f"A2", values)
+                try: read_auth_df.clear()
+                except Exception: pass
+                st.success("권한 저장 완료", icon="✅")
+                st.rerun()
+            except Exception as e:
+                st.exception(e)
+
+
+
+def _render_admin_tabs_with_acl(emp_df: pd.DataFrame):
+    a1,a2,a3,a4,a5 = st.tabs(["직원","PIN 관리","부서 이동","평가 항목 관리","권한 관리"])
+    with a1: tab_staff_admin(emp_df)
+    with a2: tab_admin_pin(emp_df)
+    with a3:
+        st.markdown("### 부서 이동")
+        sel = st.selectbox("사번 선택", ["(선택)"] + emp_df["사번"].astype(str).tolist(), index=0, key="adm_mv_pick")
+        if sel and sel!="(선택)":
+            new_d1 = st.text_input("새 부서1", key="adm_mv_d1")
+            new_d2 = st.text_input("새 부서2", key="adm_mv_d2")
+            d = st.date_input("발령일", datetime.now(tz=tz_kst()).date(), key="adm_mv_date")
+            if st.button("부서 이동 저장", key="adm_mv_save"):
+                try:
+                    rep = dept_transfer_inline(sel, new_d1, new_d2, d)
+                    st.success(f"이동 완료: {rep['사번']} / {rep['부서1']} / {rep['부서2']} ({rep['발령일']})", icon="✅")
+                except Exception as e:
+                    st.exception(e)
+    with a4:
+        st.markdown("### 평가 항목 관리")
+        st.caption("상세 관리는 기존 UI를 사용하세요.")
+    with a5: tab_admin_acl(emp_df)
+
+
+# NOTE: 메인 탭의 '관리자' 섹션에서 `_render_admin_tabs_with_acl(emp_df)`를 호출해 권한관리 탭을 표시하세요.
