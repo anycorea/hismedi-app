@@ -312,11 +312,8 @@ def tab_admin_acl(emp_df):
     - 저장 시 전체 덮어쓰기
     """
     st.markdown("### 권한 관리")
-
-    
-    
     ACL_EDITOR_KEY = f"acl_editor_simple_{st.session_state.get('user', {}).get('사번', '')}_{datetime.now().year}_v1"
-ACL_EDITOR_KEY = f"acl_editor_simple_{st.session_state.get('user', {}).get('사번', '')}_{datetime.now().year}_v1"
+    ACL_EDITOR_KEY = f"acl_editor_simple_{st.session_state.get('user', {}).get('사번', '')}_{datetime.now().year}_v1"
 me = st.session_state.get("user", {})
     try:
         am_admin = is_admin(str(me.get("사번", "")))
@@ -324,8 +321,7 @@ me = st.session_state.get("user", {})
         am_admin = False
     if not am_admin:
         st.error("Master만 저장할 수 있습니다. (표/저장 모두 비활성화)", icon="🛡️")
-
-    try:
+        try:
         base = emp_df[["사번", "이름", "부서1", "부서2"]].copy()
     except Exception:
         base = pd.DataFrame(columns=["사번","이름","부서1","부서2"])
