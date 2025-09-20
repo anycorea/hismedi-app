@@ -486,7 +486,8 @@ def tab_admin_acl(emp_df):
     if errs:
         msg = "저장 전 확인이 필요합니다:\n- " + "
 - ".join(errs)
-        st.warning(msg)
+
+    st.warning(msg)
 
     colb = st.columns([1,2,4])
     with colb[0]:
