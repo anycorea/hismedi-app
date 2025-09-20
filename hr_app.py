@@ -314,7 +314,7 @@ def tab_admin_acl(emp_df):
     st.markdown("### 권한 관리")
 
     
-    ACL_EDITOR_KEY = f"acl_editor_simple_{st.session_state.get(\'user\',{}).get(\'사번\',\'\')}_v1"
+    ACL_EDITOR_KEY = f"acl_editor_simple_{st.session_state.get('user', {}).get('사번', '')}_{datetime.now().year}_v1"
 me = st.session_state.get("user", {})
     try:
         am_admin = is_admin(str(me.get("사번", "")))
