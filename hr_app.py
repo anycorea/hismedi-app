@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-HISMEDI - 인사/HR (0920, 5 Main Tabs)
+HISMEDI - 인사/HR (0920, 5 Tabs, UI polish)
 - 메인 탭: 인사평가 / 직무기술서 / 직무능력평가 / 관리자 / 도움말
-- 로그인: Enter(사번→PIN, PIN→로그인) 정상 동작
-- 좌측 "직원선택": 권한(ACL) 기반 목록, 선택값은 탭들과 동기화(가능하면 사용)
-- 관리자 탭 내부에 "직원" 화면 포함(전 직원 노출은 관리자만)
-- 인사평가: 기존 기능 유지(평가항목 로딩, 라디오, 일괄적용, 저장/제출, 내 제출 현황)
-- 직무기술서/직무능력평가: 기존 간소화 UI 유지, ACL 동일 적용
+- 로그인: Enter(사번→PIN, PIN→로그인) 고정
+- 좌측 "직원선택": ACL 기반 목록, 선택값은 탭과 동기화
+- 관리자 탭 내부에 "직원" 보기(관리자만)
+- 인사평가: 평가항목/일괄적용/저장/제출/내 제출현황 유지
+- 좌우 레이아웃/타이포 조정, 탭 내부 중복 제목 제거
 """
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -52,11 +52,14 @@ if not getattr(st, "_help_disabled", False):
 st.markdown(
     """
     <style>
-      .block-container{ padding-top: 2.5rem !important; }  /* 탭 잘림 방지 */
+      /* 탭 잘림 방지 */
+      .block-container{ padding-top: 2.5rem !important; } 
       .stTabs [role='tab']{ padding:10px 16px !important; font-size:1.02rem !important; }
       .badge{display:inline-block;padding:.25rem .5rem;border-radius:.5rem;border:1px solid #9ae6b4;background:#e6ffed;color:#0f5132;font-weight:600;}
       section[data-testid="stHelp"], div[data-testid="stHelp"]{ display:none !important; }
       .muted{color:#6b7280;}
+      .app-title-hero{ font-weight:800; font-size:1.6rem; line-height:1.15; margin:.2rem 0 .6rem; }
+      @media (min-width:1400px){ .app-title-hero{ font-size:1.8rem; } }
     </style>
     """,
     unsafe_allow_html=True,
@@ -173,7 +176,7 @@ def logout():
         except Exception: pass
     try: st.cache_data.clear()
     except Exception: pass
-    st.rerun()
+    st.rerun()  # NOT a callback (버튼 본문에서 직접 호출)
 
 # --- Enter Key Binder (사번→PIN, PIN→로그인) -------------------------------
 import streamlit.components.v1 as components
@@ -230,7 +233,6 @@ def _inject_login_keybinder():
     )
 
 def show_login(emp_df: pd.DataFrame):
-    st.header("로그인")
     sabun = st.text_input("사번", key="login_sabun")
     pin   = st.text_input("PIN (숫자)", type="password", key="login_pin")
     _inject_login_keybinder()
@@ -253,6 +255,7 @@ def show_login(emp_df: pd.DataFrame):
 def require_login(emp_df: pd.DataFrame):
     if not _session_valid():
         for k in ("authed","user","auth_expires_at","_state_owner_sabun"): st.session_state.pop(k, None)
+        st.markdown("### 로그인")
         show_login(emp_df); st.stop()
     else:
         _ensure_state_owner()
@@ -315,10 +318,9 @@ def get_global_target()->Tuple[str,str]:
             str(st.session_state.get("glob_target_name","") or ""))
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Left: 직원선택 (관리자=전직원, 일반=ACL)
+# Left: 직원선택 (관리자=전직원, 일반=ACL) — 제목 제거(요청 반영)
 # ══════════════════════════════════════════════════════════════════════════════
 def render_staff_picker_left(emp_df: pd.DataFrame):
-    st.markdown("### 직원선택")
     u=st.session_state.get("user",{}); me=str(u.get("사번",""))
     df=emp_df.copy()
     if not is_admin(me):
@@ -346,7 +348,7 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
     st.dataframe(view[cols], use_container_width=True, height=260, hide_index=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 인사평가 (기존 UI 유지 + 일괄적용)
+# 인사평가 (기존 UI 유지 + 일괄적용) — 탭 내부 제목 삭제
 # ══════════════════════════════════════════════════════════════════════════════
 EVAL_ITEMS_SHEET = "평가_항목"
 EVAL_ITEM_HEADERS = ["항목ID", "항목", "내용", "순서", "활성", "비고"]
@@ -470,7 +472,6 @@ def read_my_eval_rows(year: int, sabun: str) -> pd.DataFrame:
     return df
 
 def tab_eval(emp_df: pd.DataFrame):
-    st.subheader("인사평가")
     this_year = datetime.now(tz=tz_kst()).year
     year = st.number_input("연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="eval2_year")
 
@@ -613,7 +614,7 @@ def tab_eval(emp_df: pd.DataFrame):
         st.caption("제출 현황을 불러오지 못했습니다.")
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 직무기술서
+# 직무기술서 — 탭 내부 제목 삭제
 # ══════════════════════════════════════════════════════════════════════════════
 JOBDESC_SHEET="직무기술서"
 JOBDESC_HEADERS = [
@@ -713,7 +714,6 @@ def upsert_jobdesc(rec:dict, as_new_version:bool=False)->dict:
         return {"action":"update","version":ver}
 
 def tab_job_desc(emp_df: pd.DataFrame):
-    st.subheader("직무기술서")
     this_year = datetime.now(tz=tz_kst()).year
     year = st.number_input("연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="jd2_year")
     u=st.session_state["user"]; me_sabun=str(u["사번"]); me_name=str(u["이름"])
@@ -844,7 +844,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
             st.exception(e)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 직무능력평가 (간편형)
+# 직무능력평가 (간편형) — 탭 내부 제목 삭제
 # ══════════════════════════════════════════════════════════════════════════════
 COMP_SIMPLE_PREFIX = "직무능력_간편_응답_"
 COMP_SIMPLE_HEADERS = [
@@ -937,7 +937,6 @@ def read_my_comp_simple_rows(year:int, sabun:str)->pd.DataFrame:
     return df.reset_index(drop=True)
 
 def tab_competency(emp_df: pd.DataFrame):
-    st.subheader("직무능력평가")
     try: this_year = datetime.now(tz=tz_kst()).year
     except Exception: this_year = datetime.now().year
     year = st.number_input("연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="cmpS_year")
@@ -1239,11 +1238,25 @@ def tab_admin_eval_items():
                     st.exception(e)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 도움말
+# 도움말 (이전 도움말 대체본)
 # ══════════════════════════════════════════════════════════════════════════════
 def tab_help():
-    st.subheader("도움말")
-    st.caption("현재 도움말은 기존 내용을 유지합니다.")
+    st.markdown("""
+    **도움말**
+    - 좌측에서 `검색(사번/이름)`으로 대상 직원을 선택하면, 선택값이 우측 모든 탭에 동기화됩니다.
+    - 권한(ACL)에 따라 보이는 직원 범위가 달라집니다. 관리자는 전 직원이 보입니다.
+    - 로그인: `사번` 입력 후 **Enter** → `PIN` 포커스 / `PIN` 입력 후 **Enter** → 로그인.
+    - 인사평가: 평가 항목은 관리자 메뉴의 **평가 항목 관리**에서 활성/순서를 조정합니다.
+    - 직무기술서/직무능력평가: 동기화된 대상자를 기준으로 편집·제출합니다.
+    - PIN/부서 이동: 관리자 탭에서 처리합니다.
+    - 구글시트 구조
+        - 직원: `직원` 시트
+        - 권한: `권한` 시트 (admin/범위유형: 부서|개별)
+        - 평가 항목: `평가_항목`
+        - 인사평가 응답: `평가_응답_YYYY`
+        - 직무기술서: `직무기술서`
+        - 직무능력(간편) 응답: `직무능력_간편_응답_YYYY`
+    """)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Main App
@@ -1253,16 +1266,23 @@ def main():
     st.session_state["emp_df"]=emp_df.copy()
 
     if not _session_valid():
+        # 로그인 전: 전체 화면 중앙
+        st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=True)
         show_login(emp_df); return
+
     require_login(emp_df)
 
-    left, right = st.columns([1, 4], gap="large")
+    # 좌우 레이아웃: 왼쪽 폭을 '조금' 더 넓게
+    left, right = st.columns([1.3, 3.7], gap="large")
+
     with left:
         u=st.session_state.get("user",{})
-        st.markdown(f"**{APP_TITLE}**")
+        st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=True)
         st.caption(f"DB연결 {kst_now_str()}")
         st.markdown(f"- 사용자: **{u.get('이름','')} ({u.get('사번','')})**")
-        st.button("로그아웃", on_click=logout, use_container_width=True)
+        # callback 대신 본문에서 직접 처리하여 rerun 경고 방지
+        if st.button("로그아웃", use_container_width=True):
+            logout()
         st.divider()
         render_staff_picker_left(emp_df)
 
@@ -1276,7 +1296,6 @@ def main():
             if not is_admin(me):
                 st.warning("관리자 전용 메뉴입니다.", icon="🔒")
             else:
-                st.markdown("## 관리자")
                 a1,a2,a3,a4 = st.tabs(["직원","PIN 관리","부서 이동","평가 항목 관리"])
                 with a1: tab_staff_admin(emp_df)
                 with a2: tab_admin_pin(emp_df)
