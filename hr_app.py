@@ -484,8 +484,7 @@ def tab_admin_acl(emp_df):
     fixed_df, errs = _validate_and_fix(edited_canon)
 
     if errs:
-        msg = "저장 전 확인이 필요합니다:
-- " + "
+        msg = "저장 전 확인이 필요합니다:\n- " + "
 - ".join(errs)
         st.warning(msg)
 
