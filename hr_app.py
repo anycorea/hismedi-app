@@ -1336,12 +1336,128 @@ def main():
             if not is_admin(me):
                 st.warning("관리자 전용 메뉴입니다.", icon="🔒")
             else:
-                a1,a2,a3,a4 = st.tabs(["직원","PIN 관리","부서 이동","평가 항목 관리"])
+                a1,a2,a3,a4,a5 = st.tabs(["직원","PIN 관리","부서 이동","평가 항목 관리", "권한 관리"])
                 with a1: tab_staff_admin(emp_df)
                 with a2: tab_admin_pin(emp_df)
                 with a3: tab_admin_transfer(emp_df)
                 with a4: tab_admin_eval_items()
-        with tabs[4]: tab_help()
+
+                                with a5: tab_admin_acl()with tabs[4]: tab_help()
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 관리자: 권한 관리 (AUTH_SHEET 편집 UI)
+# ══════════════════════════════════════════════════════════════════════════════
+def ensure_auth_sheet():
+    wb = get_book()
+    try:
+        ws = wb.worksheet(AUTH_SHEET)
+        header = _retry(ws.row_values, 1) or []
+        need = [h for h in AUTH_HEADERS if h not in header]
+        if need:
+            _retry(ws.update, "1:1", [header + need])
+        return ws
+    except WorksheetNotFound:
+        ws = _retry(wb.add_worksheet, title=AUTH_SHEET, rows=1000, cols=30)
+        _retry(ws.update, "A1", [AUTH_HEADERS])
+        return ws
+
+def save_auth_df(df):
+    ws = ensure_auth_sheet()
+    # Coerce schema/order and boolean
+    for c in AUTH_HEADERS:
+        if c not in df.columns:
+            df[c] = "" if c not in ("활성",) else False
+    df = df[AUTH_HEADERS].copy()
+    # normalize types
+    df["사번"] = df["사번"].astype(str)
+    df["활성"] = df["활성"].map(lambda x: True if str(x).strip().lower() in ("true","1","y","yes","t","on") else False)
+    payload = [AUTH_HEADERS] + df.fillna("").values.tolist()
+    _retry(ws.clear)
+    _retry(ws.update, "A1", payload, value_input_option="RAW")
+    try:
+        read_auth_df.clear()
+    except Exception:
+        pass
+
+def tab_admin_acl():
+    st.markdown("### 권한 관리")
+    st.caption('데이터 소스: 구글시트 **\"권한\"** 시트')
+
+    df = read_auth_df().copy()
+    # Provide minimal scaffold if empty
+    if df.empty:
+        df = pd.DataFrame(columns=AUTH_HEADERS)
+
+    # Column configs
+    colcfg = {
+        "사번": st.column_config.TextColumn(width="small", help="사번(문자열)"),
+        "이름": st.column_config.TextColumn(width="small"),
+        "역할": st.column_config.TextColumn(width="small", help="예: admin / (빈칸)"),
+        "범위유형": st.column_config.SelectboxColumn(options=["","부서","개별"], help="권한 범위 방식"),
+        "부서1": st.column_config.TextColumn(width="small"),
+        "부서2": st.column_config.TextColumn(width="small"),
+        "대상사번": st.column_config.TextColumn(help="개별 선택 시 쉼표/공백 구분"),
+        "활성": st.column_config.CheckboxColumn(),
+        "비고": st.column_config.TextColumn(width="medium"),
+    }
+
+    st.write(f"현재 등록: **{len(df):,}건**")
+    edited = st.data_editor(
+        df,
+        key="acl_editor",
+        num_rows="dynamic",
+        use_container_width=True,
+        hide_index=True,
+        column_config=colcfg,
+    )
+
+    c = st.columns([1,1,1,2])
+    with c[0]:
+        if st.button("변경 저장", type="primary", use_container_width=True, key="acl_save"):
+            try:
+                save_auth_df(edited)
+                st.success("저장 완료 · 권한 시트에 반영되었습니다.", icon="✅")
+                st.rerun()
+            except Exception as e:
+                st.exception(e)
+    with c[1]:
+        if st.button("새로고침", use_container_width=True, key="acl_refresh"):
+            try:
+                read_auth_df.clear()
+            except Exception:
+                pass
+            st.rerun()
+    with c[2]:
+        # Export CSV
+        try:
+            csv_bytes = edited.to_csv(index=False).encode("utf-8-sig")
+        except Exception:
+            csv_bytes = df.to_csv(index=False).encode("utf-8-sig")
+        st.download_button(
+            "CSV로 내보내기",
+            data=csv_bytes,
+            file_name=f"권한_backup.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+    with c[3]:
+        up = st.file_uploader("CSV 업로드(헤더 포함)", type=["csv"], accept_multiple_files=False, key="acl_upload")
+        if up is not None:
+            try:
+                df_up = pd.read_csv(up)
+                for c in AUTH_HEADERS:
+                    if c not in df_up.columns:
+                        df_up[c] = "" if c not in ("활성",) else False
+                df_up = df_up[AUTH_HEADERS]
+                df_up["사번"] = df_up["사번"].astype(str)
+                df_up["활성"] = df_up["활성"].map(lambda x: True if str(x).strip().lower() in ("true","1","y","yes","t","on") else False)
+                st.dataframe(df_up, use_container_width=True, hide_index=True)
+                if st.button("업로드 내용을 저장", type="primary", key="acl_upload_commit"):
+                    save_auth_df(df_up)
+                    st.success("업로드 내용을 저장했습니다.", icon="✅")
+                    st.rerun()
+            except Exception as e:
+                st.error(f"업로드 실패: {e}")
 
 if __name__ == "__main__":
     main()
