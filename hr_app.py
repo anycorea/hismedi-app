@@ -9,6 +9,86 @@ HISMEDI - 인사/HR (0920, 5 Tabs, cache tuned, Enter-sync, JD Summary scroll, J
 - 직무기술서 탭: 편집/보기 기능 복원
 """
 
+
+def tab_admin_acl():
+    st.markdown("### 권한 관리")
+    st.caption('데이터 소스: 구글시트 **"권한"** 시트')
+    # 권한 시트 읽기
+    try:
+        df = read_auth_df().copy()
+    except Exception:
+        df = pd.DataFrame(columns=AUTH_HEADERS)
+
+    if df is None or df.empty:
+        df = pd.DataFrame(columns=AUTH_HEADERS)
+
+    colcfg = {
+        "사번":      st.column_config.TextColumn(width="small"),
+        "이름":      st.column_config.TextColumn(width="small"),
+        "역할":      st.column_config.TextColumn(width="small", help="예: admin / (빈칸)"),
+        "범위유형":  st.column_config.SelectboxColumn(options=["","부서","개별"], help="권한 범위 방식"),
+        "부서1":     st.column_config.TextColumn(width="small"),
+        "부서2":     st.column_config.TextColumn(width="small"),
+        "대상사번":  st.column_config.TextColumn(help="개별 선택 시 쉼표/공백 구분"),
+        "활성":      st.column_config.CheckboxColumn(),
+        "비고":      st.column_config.TextColumn(width="medium"),
+    }
+
+    st.write(f"현재 등록: **{len(df):,}건**")
+    edited = st.data_editor(
+        df, key="acl_editor",
+        num_rows="dynamic", use_container_width=True, hide_index=True,
+        column_config=colcfg,
+    )
+
+    c = st.columns([1,1,1,2])
+    with c[0]:
+        if st.button("변경 저장", type="primary", use_container_width=True, key="acl_save"):
+            try:
+                ws = _ws(AUTH_SHEET)
+                payload = [list(edited.columns)] + edited.fillna("").values.tolist()
+                _retry(ws.clear)
+                _retry(ws.update, "A1", payload, value_input_option="RAW")
+                try: read_auth_df.clear()
+                except Exception: pass
+                st.success("저장 완료 · 권한 시트에 반영되었습니다.", icon="✅")
+                st.rerun()
+            except Exception as e:
+                st.exception(e)
+    with c[1]:
+        if st.button("새로고침", use_container_width=True, key="acl_refresh"):
+            try: read_auth_df.clear()
+            except Exception: pass
+            st.rerun()
+    with c[2]:
+        csv_bytes = edited.to_csv(index=False).encode("utf-8-sig")
+        st.download_button("CSV로 내보내기", data=csv_bytes, file_name="권한_backup.csv",
+                           mime="text/csv", use_container_width=True)
+    with c[3]:
+        up = st.file_uploader("CSV 업로드(헤더 포함)", type=["csv"], accept_multiple_files=False, key="acl_upload")
+        if up is not None:
+            try:
+                df_up = pd.read_csv(up)
+                for col in AUTH_HEADERS:
+                    if col not in df_up.columns:
+                        df_up[col] = "" if col != "활성" else False
+                df_up = df_up[AUTH_HEADERS]
+                df_up["사번"] = df_up["사번"].astype(str)
+                if "활성" in df_up.columns:
+                    df_up["활성"] = df_up["활성"].map(lambda x: str(x).strip().lower() in ("true","1","y","yes","t","on"))
+                st.dataframe(df_up, use_container_width=True, hide_index=True)
+                if st.button("업로드 내용을 저장", type="primary", key="acl_upload_commit"):
+                    ws = _ws(AUTH_SHEET)
+                    payload = [list(df_up.columns)] + df_up.fillna("").values.tolist()
+                    _retry(ws.clear)
+                    _retry(ws.update, "A1", payload, value_input_option="RAW")
+                    try: read_auth_df.clear()
+                    except Exception: pass
+                    st.success("업로드 내용을 저장했습니다.", icon="✅")
+                    st.rerun()
+            except Exception as e:
+                st.error(f"업로드 실패: {e}")
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Imports
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1345,82 +1425,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-def tab_admin_acl():
-    st.markdown("### 권한 관리")
-    st.caption('데이터 소스: 구글시트 **"권한"** 시트')
-    try:
-        df = read_auth_df().copy()
-    except Exception:
-        df = pd.DataFrame(columns=["사번","이름","역할","범위유형","부서1","부서2","대상사번","활성","비고"])
-    if df is None or df.empty:
-        df = pd.DataFrame(columns=["사번","이름","역할","범위유형","부서1","부서2","대상사번","활성","비고"])
-
-    colcfg = {
-        "사번":      st.column_config.TextColumn(width="small"),
-        "이름":      st.column_config.TextColumn(width="small"),
-        "역할":      st.column_config.TextColumn(width="small", help="예: admin / (빈칸)"),
-        "범위유형":  st.column_config.SelectboxColumn(options=["","부서","개별"], help="권한 범위를 선택"),
-        "부서1":     st.column_config.TextColumn(width="small"),
-        "부서2":     st.column_config.TextColumn(width="small"),
-        "대상사번":  st.column_config.TextColumn(help="개별 선택 시 쉼표/공백 구분"),
-        "활성":      st.column_config.CheckboxColumn(),
-        "비고":      st.column_config.TextColumn(width="medium"),
-    }
-
-    st.write(f"현재 등록: **{len(df):,}건**")
-    edited = st.data_editor(
-        df, key="acl_editor",
-        num_rows="dynamic", use_container_width=True, hide_index=True,
-        column_config=colcfg,
-    )
-
-    c = st.columns([1,1,1,2])
-    with c[0]:
-        if st.button("변경 저장", type="primary", use_container_width=True, key="acl_save"):
-            try:
-                ws = _ws("권한")
-                payload = [list(edited.columns)] + edited.fillna("").values.tolist()
-                _retry(ws.clear)
-                _retry(ws.update, "A1", payload, value_input_option="RAW")
-                try: read_auth_df.clear()
-                except Exception: pass
-                st.success("저장 완료 · 권한 시트에 반영되었습니다.", icon="✅")
-                st.rerun()
-            except Exception as e:
-                st.exception(e)
-    with c[1]:
-        if st.button("새로고침", use_container_width=True, key="acl_refresh"):
-            try: read_auth_df.clear()
-            except Exception: pass
-            st.rerun()
-    with c[2]:
-        csv_bytes = edited.to_csv(index=False).encode("utf-8-sig")
-        st.download_button("CSV로 내보내기", data=csv_bytes, file_name="권한_backup.csv",
-                           mime="text/csv", use_container_width=True)
-    with c[3]:
-        up = st.file_uploader("CSV 업로드(헤더 포함)", type=["csv"], accept_multiple_files=False, key="acl_upload")
-        if up is not None:
-            try:
-                df_up = pd.read_csv(up)
-                cols = ["사번","이름","역할","범위유형","부서1","부서2","대상사번","활성","비고"]
-                for col in cols:
-                    if col not in df_up.columns:
-                        df_up[col] = "" if col != "활성" else False
-                df_up = df_up[cols]
-                df_up["사번"] = df_up["사번"].astype(str)
-                df_up["활성"] = df_up["활성"].map(lambda x: str(x).strip().lower() in ("true","1","y","yes","t","on"))
-                st.dataframe(df_up, use_container_width=True, hide_index=True)
-                if st.button("업로드 내용을 저장", type="primary", key="acl_upload_commit"):
-                    ws = _ws("권한")
-                    payload = [list(df_up.columns)] + df_up.fillna("").values.tolist()
-                    _retry(ws.clear)
-                    _retry(ws.update, "A1", payload, value_input_option="RAW")
-                    try: read_auth_df.clear()
-                    except Exception: pass
-                    st.success("업로드 내용을 저장했습니다.", icon="✅")
-                    st.rerun()
-            except Exception as e:
-                st.error(f"업로드 실패: {e}")
-
