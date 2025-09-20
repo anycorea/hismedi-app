@@ -1474,3 +1474,24 @@ def _render_admin_tabs_with_acl(emp_df: pd.DataFrame):
 
 
 # NOTE: 메인 탭의 '관리자' 섹션에서 `_render_admin_tabs_with_acl(emp_df)`를 호출해 권한관리 탭을 표시하세요.
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Sidebar Quick Panel: 권한 관리 (보조 경로)
+# 메인 "관리자" 탭에 연결이 누락되더라도, 관리자에게 사이드바에서 바로 노출되도록 보조 진입점을 둔다.
+# ══════════════════════════════════════════════════════════════════════════════
+def _acl_quickpanel():
+    try:
+        if _session_valid():
+            u = st.session_state.get("user", {})
+            me = str(u.get("사번",""))
+            if is_admin(me):
+                with st.sidebar.expander("권한 관리 (빠른 접근)", expanded=False):
+                    st.caption("※ 메인 관리자 탭 연결이 누락되더라도 여기서 바로 편집 가능합니다.")
+                    tab_admin_acl(read_emp_df())
+    except Exception as _e:
+        # 보조 경로 실패 시에도 앱 전체 흐름에 영향이 없도록 무시
+        pass
+
+# 보조 패널 즉시 활성화
+_acl_quickpanel()
