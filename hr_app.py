@@ -52,7 +52,7 @@ if not getattr(st, "_help_disabled", False):
 st.markdown(
     """
     <style>
-      .block-container{ padding-top: 2.0rem !important; }  /* 탭 잘림 방지 */
+      .block-container{ padding-top: 2.5rem !important; }  /* 탭 잘림 방지 */
       .stTabs [role='tab']{ padding:10px 16px !important; font-size:1.02rem !important; }
       .badge{display:inline-block;padding:.25rem .5rem;border-radius:.5rem;border:1px solid #9ae6b4;background:#e6ffed;color:#0f5132;font-weight:600;}
       section[data-testid="stHelp"], div[data-testid="stHelp"]{ display:none !important; }
