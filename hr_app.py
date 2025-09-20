@@ -1277,6 +1277,9 @@ def tab_admin_eval_items():
                             if "비고" in hmap: ws.update_cell(idx, hmap["비고"], memo.strip())
                             st.cache_data.clear(); st.success("업데이트 완료"); st.rerun()
 
+        except Exception as e:
+            st.exception(e)
+
 def tab_admin_acl(emp_df):
     st.markdown("### 권한 관리")
 
