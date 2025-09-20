@@ -1562,7 +1562,8 @@ def main():
                 with a3: tab_admin_transfer(emp_df)
                 with a4: tab_admin_eval_items()
                 with a5: tab_admin_acl(emp_df)
-a5 = a4  # placeholderwith tabs[4]: tab_help()
+                with a5: tab_admin_acl(emp_df)
+
 
 if __name__ == "__main__":
     main()
