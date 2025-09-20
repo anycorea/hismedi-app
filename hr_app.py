@@ -17,6 +17,31 @@ from datetime import datetime, timedelta
 from typing import Any, Tuple
 import pandas as pd
 import streamlit as st
+
+# --- Global Widget State Guards (suppress default+session_state collision warnings) ---
+# We wrap st.slider and st.radio so that if a key already exists in session_state,
+# we do NOT pass an explicit default (value/index). This removes the initial-login warning.
+try:
+    _orig_slider = st.slider
+    def _slider_guard(label, *args, **kwargs):
+        key = kwargs.get("key", None)
+        if key is not None and key in st.session_state:
+            # Remove explicit defaults if already controlled by session_state
+            kwargs.pop("value", None)
+            kwargs.pop("index", None)
+        return _orig_slider(label, *args, **kwargs)
+    st.slider = _slider_guard  # monkey-patch
+
+    _orig_radio = st.radio
+    def _radio_guard(label, options, *args, **kwargs):
+        key = kwargs.get("key", None)
+        if key is not None and key in st.session_state:
+            kwargs.pop("index", None)
+        return _orig_radio(label, options, *args, **kwargs)
+    st.radio = _radio_guard  # monkey-patch
+except Exception:
+    pass
+
 from html import escape as _html_escape
 
 # Optional zoneinfo (KST)
