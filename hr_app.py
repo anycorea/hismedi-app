@@ -312,21 +312,25 @@ def tab_admin_acl(emp_df):
     - 저장 시 전체 덮어쓰기
     """
     st.markdown("### 권한 관리")
+
+    # 고유 위젯 키 (사용자별로 분리)
     ACL_EDITOR_KEY = f"acl_editor_simple_{st.session_state.get('user', {}).get('사번', '')}_{datetime.now().year}_v1"
-    ACL_EDITOR_KEY = f"acl_editor_simple_{st.session_state.get('user', {}).get('사번', '')}_{datetime.now().year}_v1"
-me = st.session_state.get("user", {})
+
+    me = st.session_state.get("user", {})
     try:
         am_admin = is_admin(str(me.get("사번", "")))
     except Exception:
         am_admin = False
     if not am_admin:
         st.error("Master만 저장할 수 있습니다. (표/저장 모두 비활성화)", icon="🛡️")
-        try:
+
+    try:
         base = emp_df[["사번", "이름", "부서1", "부서2"]].copy()
     except Exception:
         base = pd.DataFrame(columns=["사번","이름","부서1","부서2"])
     if "사번" in base.columns:
         base["사번"] = base["사번"].astype(str).str.strip()
+
     emp_lookup = {}
     for _, r in base.iterrows():
         s = str(r.get("사번", "")).strip()
@@ -480,7 +484,9 @@ me = st.session_state.get("user", {})
     fixed_df, errs = _validate_and_fix(edited_canon)
 
     if errs:
-        msg = "저장 전 확인이 필요합니다:\n- " + "\n- ".join(errs)
+        msg = "저장 전 확인이 필요합니다:
+- " + "
+- ".join(errs)
         st.warning(msg)
 
     colb = st.columns([1,2,4])
@@ -522,9 +528,7 @@ me = st.session_state.get("user", {})
 
         except Exception as e:
             st.exception(e)
-# ══════════════════════════════════════════════════════════════════════════════
-# Global Target Sync
-# ══════════════════════════════════════════════════════════════════════════════
+
 def set_global_target(sabun:str, name:str=""):
     st.session_state["glob_target_sabun"]=str(sabun).strip()
     st.session_state["glob_target_name"]=str(name).strip()
@@ -1555,6 +1559,7 @@ def main():
                 with a2: tab_admin_pin(emp_df)
                 with a3: tab_admin_transfer(emp_df)
                 with a4: tab_admin_eval_items()
+                with a5: tab_admin_acl(emp_df)
                 with a5: tab_admin_acl(emp_df)
                 with a5: tab_admin_acl(emp_df)
 
