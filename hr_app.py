@@ -928,7 +928,6 @@ def tab_competency(emp_df: pd.DataFrame):
 # 관리자 서브탭들
 # ──────────────────────────────────────────────────────────────────────────────
 def tab_staff_admin(emp_df: pd.DataFrame):
-    st.markdown("#### 직원/관리")
     st.caption("직원 시트는 외부 소스(인사 DB) 연동 권장. 이 화면은 조회/내보내기 중심입니다.")
     cols=[c for c in ["사번","이름","부서1","부서2","직급","재직여부"] if c in emp_df.columns]
     st.dataframe(emp_df[cols] if cols else emp_df, use_container_width=True, height=460)
@@ -937,7 +936,6 @@ def tab_staff_admin(emp_df: pd.DataFrame):
                        mime="text/csv", use_container_width=True)
 
 def tab_admin_pin(emp_df: pd.DataFrame):
-    st.markdown("#### PIN 관리")
     me=st.session_state["user"]["사번"]
     if not is_admin(me):
         st.error("관리자만 접근할 수 있습니다.", icon="🛡️"); return
@@ -968,7 +966,6 @@ def tab_admin_pin(emp_df: pd.DataFrame):
             st.exception(e)
 
 def tab_admin_eval_items(emp_df: pd.DataFrame):
-    st.markdown("#### 평가 항목 관리")
     me=st.session_state["user"]["사번"]
     if not is_admin(me):
         st.error("관리자만 접근할 수 있습니다.", icon="🛡️"); return
@@ -1026,7 +1023,6 @@ def tab_admin_eval_items(emp_df: pd.DataFrame):
             st.exception(e)
 
 def tab_admin_acl(emp_df: pd.DataFrame):
-    st.markdown("#### 권한 관리")
     me = st.session_state.get("user", {})
     am_admin = is_admin(str(me.get("사번","")))
     if not am_admin:
