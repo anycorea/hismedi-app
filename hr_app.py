@@ -1211,7 +1211,6 @@ def main():
         usabun = str(u.get("사번", "") or "")
         st.markdown(
             f"""
-- **{APP_TITLE}**
 - DB연결 {kst_now_str()}
 - 사용자: {uname} ({usabun})
             """.strip()
