@@ -1341,8 +1341,6 @@ def main():
                 with a2: tab_admin_pin(emp_df)
                 with a3: tab_admin_transfer(emp_df)
                 with a4: tab_admin_eval_items()
-                with a5:
-                    tab_admin_acl()
         with tabs[4]: tab_help()
 
 if __name__ == "__main__":
@@ -1356,28 +1354,25 @@ def tab_admin_acl():
         df = read_auth_df().copy()
     except Exception:
         df = pd.DataFrame(columns=["사번","이름","역할","범위유형","부서1","부서2","대상사번","활성","비고"])
-
-    if df.empty:
+    if df is None or df.empty:
         df = pd.DataFrame(columns=["사번","이름","역할","범위유형","부서1","부서2","대상사번","활성","비고"])
 
     colcfg = {
         "사번":      st.column_config.TextColumn(width="small"),
         "이름":      st.column_config.TextColumn(width="small"),
         "역할":      st.column_config.TextColumn(width="small", help="예: admin / (빈칸)"),
-        "범위유형":  st.column_config.SelectboxColumn(options=["","부서","개별"]),
+        "범위유형":  st.column_config.SelectboxColumn(options=["","부서","개별"], help="권한 범위를 선택"),
         "부서1":     st.column_config.TextColumn(width="small"),
         "부서2":     st.column_config.TextColumn(width="small"),
         "대상사번":  st.column_config.TextColumn(help="개별 선택 시 쉼표/공백 구분"),
         "활성":      st.column_config.CheckboxColumn(),
         "비고":      st.column_config.TextColumn(width="medium"),
     }
+
     st.write(f"현재 등록: **{len(df):,}건**")
     edited = st.data_editor(
-        df,
-        key="acl_editor",
-        num_rows="dynamic",
-        use_container_width=True,
-        hide_index=True,
+        df, key="acl_editor",
+        num_rows="dynamic", use_container_width=True, hide_index=True,
         column_config=colcfg,
     )
 
@@ -1409,10 +1404,11 @@ def tab_admin_acl():
         if up is not None:
             try:
                 df_up = pd.read_csv(up)
-                for col in ["사번","이름","역할","범위유형","부서1","부서2","대상사번","활성","비고"]:
+                cols = ["사번","이름","역할","범위유형","부서1","부서2","대상사번","활성","비고"]
+                for col in cols:
                     if col not in df_up.columns:
                         df_up[col] = "" if col != "활성" else False
-                df_up = df_up[["사번","이름","역할","범위유형","부서1","부서2","대상사번","활성","비고"]]
+                df_up = df_up[cols]
                 df_up["사번"] = df_up["사번"].astype(str)
                 df_up["활성"] = df_up["활성"].map(lambda x: str(x).strip().lower() in ("true","1","y","yes","t","on"))
                 st.dataframe(df_up, use_container_width=True, hide_index=True)
