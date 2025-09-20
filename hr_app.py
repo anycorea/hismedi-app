@@ -407,7 +407,7 @@ def tab_admin_acl(emp_df):
 
     edited = st.data_editor(
         df_disp[[c for c in AUTH_HEADERS if c in df_disp.columns] + ["삭제"]],
-        key="acl_editor_simple",
+        key="acl_editor_simple_v2",
         use_container_width=True,
         height=520,
         hide_index=True,
