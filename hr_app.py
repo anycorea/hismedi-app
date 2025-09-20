@@ -18,29 +18,53 @@ from typing import Any, Tuple
 import pandas as pd
 import streamlit as st
 
-# --- Global Widget State Guards (suppress default+session_state collision warnings) ---
-# We wrap st.slider and st.radio so that if a key already exists in session_state,
-# we do NOT pass an explicit default (value/index). This removes the initial-login warning.
-try:
-    _orig_slider = st.slider
-    def _slider_guard(label, *args, **kwargs):
-        key = kwargs.get("key", None)
-        if key is not None and key in st.session_state:
-            # Remove explicit defaults if already controlled by session_state
-            kwargs.pop("value", None)
-            kwargs.pop("index", None)
-        return _orig_slider(label, *args, **kwargs)
-    st.slider = _slider_guard  # monkey-patch
 
-    _orig_radio = st.radio
-    def _radio_guard(label, options, *args, **kwargs):
-        key = kwargs.get("key", None)
-        if key is not None and key in st.session_state:
-            kwargs.pop("index", None)
-        return _orig_radio(label, options, *args, **kwargs)
-    st.radio = _radio_guard  # monkey-patch
+# --- Global No-Warning Widget Guards (hardened) ---
+# Any widget created with a 'key' will NOT receive an explicit default
+# ('value' or 'index') to avoid: "created with a default value but also had its value set via Session State".
+try:
+    import types as _types
+    def _strip_defaults(kwargs):
+        # remove conflicting default params
+        for k in ("value","index","key"):
+            # keep key, drop only value/index
+            if k in ("value","index"):
+                kwargs.pop(k, None)
+        return kwargs
+
+    # Patch helpers
+    def _wrap0(fn):
+        def _inner(*args, **kwargs):
+            if "key" in kwargs: kwargs = _strip_defaults(dict(kwargs))
+            return fn(*args, **kwargs)
+        return _inner
+
+    def _wrap1(fn):  # widgets where first arg is 'label' and second is 'options' (radio/selectbox)
+        def _inner(label, *args, **kwargs):
+            if "key" in kwargs: kwargs = _strip_defaults(dict(kwargs))
+            return fn(label, *args, **kwargs)
+        return _inner
+
+    # Keep originals
+    _orig_slider     = st.slider
+    _orig_radio      = st.radio
+    _orig_selectbox  = st.selectbox
+    _orig_text_input = st.text_input
+    _orig_text_area  = st.text_area
+    _orig_number_in  = st.number_input
+    _orig_date_input = st.date_input
+
+    # Monkey-patch
+    st.slider      = _wrap1(_orig_slider)
+    st.radio       = _wrap1(_orig_radio)
+    st.selectbox   = _wrap1(_orig_selectbox)
+    st.text_input  = _wrap0(_orig_text_input)
+    st.text_area   = _wrap0(_orig_text_area)
+    st.number_input= _wrap0(_orig_number_in)
+    st.date_input  = _wrap0(_orig_date_input)
 except Exception:
     pass
+
 
 from html import escape as _html_escape
 
