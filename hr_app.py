@@ -595,7 +595,7 @@ def tab_eval(emp_df: pd.DataFrame):
         else:
             st.session_state[slider_key]=3
     with c_slider:
-        bulk_score=st.slider("일괄 점수", 1, 5, step=1, key=slider_key, disabled=not edit_mode)
+        bulk_score=st.slider("일괄 점수",1,5,st.session_state[slider_key],1, key=slider_key, disabled=not edit_mode)
     with c_btn:
         if st.button("일괄 적용", use_container_width=True, key=f"{kbase}_apply", disabled=not edit_mode):
             st.session_state[f"__apply_bulk_{kbase}"]=int(bulk_score); st.toast(f"모든 항목에 {bulk_score}점 적용", icon="✅")
@@ -1279,6 +1279,171 @@ def tab_admin_eval_items():
                 except Exception as e:
                     st.exception(e)
 
+
+def tab_admin_acl(emp_df: pd.DataFrame):
+    st.markdown("#### 권한 관리")
+    me = st.session_state.get("user", {})
+    am_admin = is_admin(str(me.get("사번","")))
+    if not am_admin:
+        st.error("Master만 저장할 수 있습니다. (표/저장 모두 비활성화)", icon="🛡️")
+
+    # 직원 레이블/룩업
+    base = emp_df[["사번","이름","부서1","부서2"]].copy() if not emp_df.empty else pd.DataFrame(columns=["사번","이름","부서1","부서2"])
+    base["사번"]=base["사번"].astype(str).str.strip()
+    emp_lookup = {str(r["사번"]).strip(): {"이름": str(r.get("이름","")).strip(),
+                                           "부서1": str(r.get("부서1","")).strip(),
+                                           "부서2": str(r.get("부서2","")).strip()} for _,r in base.iterrows()}
+    sabuns = sorted(emp_lookup.keys())
+    labels, label_by_sabun, sabun_by_label = [], {}, {}
+    for s in sabuns:
+        nm=emp_lookup[s]["이름"]; lab=f"{s} - {nm}" if nm else s
+        labels.append(lab); label_by_sabun[s]=lab; sabun_by_label[lab]=s
+
+    df_auth = read_auth_df().copy()
+    if df_auth.empty: df_auth = pd.DataFrame(columns=AUTH_HEADERS)
+    def _tostr(x): return "" if x is None else str(x)
+    for c in ["사번","이름","역할","범위유형","부서1","부서2","대상사번","비고"]:
+        if c in df_auth.columns: df_auth[c]=df_auth[c].map(_tostr)
+    if "활성" in df_auth.columns:
+        df_auth["활성"]=df_auth["활성"].map(lambda x: str(x).strip().lower() in ("true","1","y","yes","t"))
+
+    df_disp=df_auth.copy()
+    if "사번" in df_disp.columns:
+        df_disp["사번"]=df_disp["사번"].map(lambda v: label_by_sabun.get(str(v).strip(), str(v).strip()))
+
+    role_options  = ["admin","manager","evaluator"]
+    scope_options = ["","부서","개별"]
+
+    if "삭제" not in df_disp.columns:
+        df_disp.insert(len(df_disp.columns), "삭제", False)
+
+    column_config = {
+        "사번": st.column_config.SelectboxColumn("사번 - 이름", options=labels, help="사번을 선택하면 이름은 자동 동기화됩니다."),
+        "이름": st.column_config.TextColumn("이름", help="사번 선택 시 자동 보정됩니다."),
+        "역할": st.column_config.SelectboxColumn("역할", options=role_options),
+        "범위유형": st.column_config.SelectboxColumn("범위유형", options=scope_options, help="빈값=전체 / 부서 / 개별"),
+        "부서1": st.column_config.TextColumn("부서1"),
+        "부서2": st.column_config.TextColumn("부서2"),
+        "대상사번": st.column_config.TextColumn("대상사번", help="범위유형이 '개별'일 때 대상 사번(쉼표/공백 구분)"),
+        "활성": st.column_config.CheckboxColumn("활성"),
+        "비고": st.column_config.TextColumn("비고"),
+        "삭제": st.column_config.CheckboxColumn("삭제", help="저장 시 체크된 행은 삭제됩니다."),
+    }
+
+    edited = st.data_editor(
+        df_disp[[c for c in AUTH_HEADERS if c in df_disp.columns] + ["삭제"]],
+        key="auth_editor",
+        use_container_width=True,
+        hide_index=True,
+        num_rows="dynamic",
+        height=520,
+        disabled=not am_admin,
+        column_config=column_config,
+    )
+
+    def _editor_to_canonical(df: pd.DataFrame) -> pd.DataFrame:
+        df=df.copy()
+        if "사번" in df.columns:
+            for i, val in df["사번"].items():
+                v=str(val).strip()
+                if not v: continue
+                sab = sabun_by_label.get(v) or (v.split(" - ",1)[0].strip() if " - " in v else v)
+                df.at[i,"사번"]=sab
+                nm = emp_lookup.get(sab,{}).get("이름","")
+                if nm: df.at[i,"이름"]=nm
+        return df
+
+    edited_canon = _editor_to_canonical(edited.drop(columns=["삭제"], errors="ignore"))
+
+    def _validate_and_fix(df: pd.DataFrame):
+        df=df.copy().fillna("")
+        errs=[]
+
+        # 빈행 제거
+        df = df[df.astype(str).apply(lambda r: "".join(r.values).strip() != "", axis=1)]
+
+        # 기본 필드 보정
+        if "사번" in df.columns:
+            for i,row in df.iterrows():
+                sab=str(row.get("사번","")).strip()
+                if not sab:
+                    errs.append(f"{i+1}행: 사번이 비어 있습니다."); continue
+                if sab not in emp_lookup:
+                    errs.append(f"{i+1}행: 사번 '{sab}' 은(는) 직원 목록에 없습니다."); continue
+                nm=emp_lookup[sab]["이름"]
+                if str(row.get("이름","")).strip()!=nm: df.at[i,"이름"]=nm
+                if not str(row.get("부서1","")).strip(): df.at[i,"부서1"]=emp_lookup[sab]["부서1"]
+                if not str(row.get("부서2","")).strip(): df.at[i,"부서2"]=emp_lookup[sab]["부서2"]
+
+        if "역할" in df.columns:
+            bad=df[~df["역할"].isin(role_options) & (df["역할"].astype(str).str.strip()!="")]
+            for i in bad.index.tolist():
+                errs.append(f"{i+1}행: 역할 값이 잘못되었습니다. ({df.loc[i,'역할']})")
+        if "범위유형" in df.columns:
+            bad=df[~df["범위유형"].isin(scope_options) & (df["범위유형"].astype(str).str.strip()!="")]
+            for i in bad.index.tolist():
+                errs.append(f"{i+1}행: 범위유형 값이 잘못되었습니다. ({df.loc[i,'범위유형']})")
+
+        # 중복 규칙 탐지
+        keycols=[c for c in ["사번","역할","범위유형","부서1","부서2","대상사번"] if c in df.columns]
+        if keycols:
+            dup=df.assign(_key=df[keycols].astype(str).agg("|".join, axis=1)).duplicated("_key", keep=False)
+            if dup.any():
+                dup_idx=(dup[dup]).index.tolist()
+                errs.append("중복 규칙 발견: " + ", ".join(str(i+1) for i in dup_idx) + " 행")
+
+        if "활성" in df.columns:
+            df["활성"]=df["활성"].map(lambda x: str(x).strip().lower() in ("true","1","y","yes","t"))
+
+        for c in AUTH_HEADERS:
+            if c not in df.columns: df[c]=""
+        df=df[AUTH_HEADERS].copy()
+        return df, errs
+
+    fixed_df, errs = _validate_and_fix(edited_canon)
+
+    if errs:
+        st.warning("저장 전 확인이 필요합니다:\n- " + "\n- ".join(errs))
+
+    c1, c2 = st.columns([1,4])
+    with c1:
+        do_save = st.button("🗂️ 권한 전체 반영", type="primary", use_container_width=True, disabled=(not am_admin))
+    with c2:
+        st.caption("※ 표에서 추가·수정·삭제 후 **저장**을 눌러 반영합니다. (전체 덮어쓰기)")
+
+    if do_save:
+        if errs:
+            st.error("유효성 오류가 있어 저장하지 않았습니다. 위 경고를 확인해주세요.", icon="⚠️")
+            return
+        try:
+            wb=get_book()
+            try:
+                ws=wb.worksheet(AUTH_SHEET)
+            except WorksheetNotFound:
+                ws=wb.add_worksheet(title=AUTH_SHEET, rows=500, cols=12)
+                ws.update("A1", [AUTH_HEADERS])
+            header = ws.row_values(1) or AUTH_HEADERS
+
+            # 전체 초기화 후 헤더 재기입
+            ws.clear()
+            ws.update("A1", [header])
+
+            out=fixed_df.copy()
+            rows = out.apply(lambda r: [str(r.get(h, "")) for h in header], axis=1).tolist()
+            if rows:
+                CHUNK=500
+                for i in range(0, len(rows), CHUNK):
+                    ws.append_rows(rows[i:i+CHUNK], value_input_option="USER_ENTERED")
+
+            st.cache_data.clear()
+            st.success("권한이 전체 반영되었습니다.", icon="✅")
+            st.rerun()
+        except Exception as e:
+            st.exception(e)
+
+# ─
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # 도움말
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1341,150 +1506,8 @@ def main():
                 with a2: tab_admin_pin(emp_df)
                 with a3: tab_admin_transfer(emp_df)
                 with a4: tab_admin_eval_items()
+                with a5: tab_admin_acl(emp_df)
         with tabs[4]: tab_help()
 
 if __name__ == "__main__":
     main()
-
-
-# --- ACL Tab Injection ---
-
-
-def tab_admin_acl(emp_df: pd.DataFrame):
-    st.markdown("### 권한 관리")
-    DEFAULT_AUTH_HEADERS = ["사번","이름","역할","범위유형","부서1","부서2","대상사번","활성","비고"]
-    global AUTH_HEADERS
-    if "AUTH_HEADERS" not in globals() or not isinstance(AUTH_HEADERS, list) or not AUTH_HEADERS:
-        AUTH_HEADERS = DEFAULT_AUTH_HEADERS
-
-    # Try to load; always render an editor
-    read_err = None
-    try:
-        df = read_auth_df().copy()
-    except Exception as e:
-        read_err = e
-        df = pd.DataFrame(columns=AUTH_HEADERS)
-
-    if df is None or df.empty:
-        df = pd.DataFrame(columns=AUTH_HEADERS)
-    for c in AUTH_HEADERS:
-        if c not in df.columns:
-            df[c] = ""
-
-    role_opts = ["admin","manager","evaluator"]
-    scope_opts = ["부서","개별"]
-
-    # Map sabun -> name
-    try:
-        emp_map = {str(r["사번"]): str(r.get("이름","")) for _,r in emp_df.iterrows() if str(r.get("사번","")).strip()}
-    except Exception:
-        emp_map = {}
-
-    try:
-        df["사번"] = df["사번"].astype(str)
-    except Exception:
-        df["사번"] = df["사번"].apply(lambda x: str(x) if x is not None else "")
-    df["이름"] = df["사번"].map(emp_map).fillna(df.get("이름",""))
-    if "활성" in df.columns:
-        df["활성"] = df["활성"].map(_to_bool)
-
-    if read_err:
-        st.info("권한 시트를 아직 만들지 않았습니다. 아래에서 행을 추가한 뒤 **전체 저장**을 누르면 시트가 생성됩니다.", icon="ℹ️")
-
-    column_config = {
-        "사번": st.column_config.TextColumn("사번", help="권한 부여자 사번", width="small"),
-        "이름": st.column_config.TextColumn("이름", help="자동 맵핑(사번→이름)", width="small", disabled=True),
-        "역할": st.column_config.SelectboxColumn("역할", options=role_opts, width="small"),
-        "범위유형": st.column_config.SelectboxColumn("범위유형", options=scope_opts, width="small"),
-        "부서1": st.column_config.TextColumn("부서1", width="small"),
-        "부서2": st.column_config.TextColumn("부서2", width="small"),
-        "대상사번": st.column_config.TextColumn("대상사번", help="개별일 때 콤마/공백 구분", width="medium"),
-        "활성": st.column_config.CheckboxColumn("활성", width="small"),
-        "비고": st.column_config.TextColumn("비고", width="medium"),
-    }
-
-    st.caption("행을 추가한 뒤 **전체 저장**을 누르면 권한 시트가 (없다면 생성되어) 전체 덮어쓰기 됩니다.")
-    edited = st.data_editor(
-        df[AUTH_HEADERS],
-        num_rows="dynamic",
-        use_container_width=True,
-        hide_index=True,
-        column_config=column_config,
-        key="acl_editor",
-    )
-
-    # Validate
-    errors = []
-    if not edited.empty:
-        edited = edited.reset_index(drop=True)
-        for i, r in edited.iterrows():
-            sab = str(r.get("사번","")).strip()
-            role = str(r.get("역할","")).strip()
-            scope = str(r.get("범위유형","")).strip()
-            act = _to_bool(r.get("활성", True))
-            if not sab:
-                errors.append(f"{i+1}행: 사번 필수")
-            if role and role not in ("admin","manager","evaluator"):
-                errors.append(f"{i+1}행: 역할 값 오류")
-            if scope and scope not in ("부서","개별"):
-                errors.append(f"{i+1}행: 범위유형 값 오류")
-            if act and role in ("manager","evaluator"):
-                if scope=="부서" and not (str(r.get("부서1","")).strip() or str(r.get("부서2","")).strip()):
-                    errors.append(f"{i+1}행: 범위유형=부서인 경우 부서1/부서2 중 하나 이상 필요")
-                if scope=="개별" and not str(r.get("대상사번","")).strip():
-                    errors.append(f"{i+1}행: 범위유형=개별인 경우 대상사번 필요")
-            # sync name
-            if sab and sab in emp_map:
-                edited.at[i,"이름"] = emp_map[sab]
-
-        keys = edited.apply(lambda r: (str(r.get("사번","")).strip(),
-                                       str(r.get("역할","")).strip(),
-                                       str(r.get("범위유형","")).strip(),
-                                       str(r.get("부서1","")).strip(),
-                                       str(r.get("부서2","")).strip(),
-                                       str(r.get("대상사번","")).strip()), axis=1)
-        dup = keys.duplicated(keep=False)
-        if dup.any():
-            idxs = [str(i+1) for i, v in enumerate(dup) if v]
-            errors.append(f"중복 행 존재: {', '.join(idxs)}행")
-
-    c1, c2 = st.columns([1,1])
-    with c1:
-        do_save = st.button("전체 저장", type="primary", use_container_width=True, key="acl_save")
-    with c2:
-        do_reload = st.button("새로고침", use_container_width=True, key="acl_reload")
-
-    if do_reload:
-        try: read_auth_df.clear()
-        except Exception: pass
-        st.rerun()
-
-    if do_save:
-        if errors:
-            st.error("저장 불가:
-- " + "
-- ".join(errors))
-        else:
-            try:
-                wb = get_book()
-                try:
-                    ws = wb.worksheet(AUTH_SHEET)
-                except Exception:
-                    ws = _retry(wb.add_worksheet, title=AUTH_SHEET, rows=max(1000, len(edited)+10), cols=len(AUTH_HEADERS)+2)
-                _retry(ws.clear)
-                _retry(ws.update, "A1", [AUTH_HEADERS])
-                values = []
-                for _, r in edited.iterrows():
-                    row = [str(r.get(h,"")) for h in AUTH_HEADERS]
-                    i_act = AUTH_HEADERS.index("활성")
-                    row[i_act] = "TRUE" if _to_bool(row[i_act]) else "FALSE"
-                    values.append(row)
-                if values:
-                    _retry(ws.update, "A2", values)
-                try: read_auth_df.clear()
-                except Exception: pass
-                st.success("권한 저장 완료", icon="✅")
-                st.rerun()
-            except Exception as e:
-                st.exception(e)
-
