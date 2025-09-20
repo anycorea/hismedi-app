@@ -1276,17 +1276,8 @@ def tab_admin_eval_items():
                             ws.update_cell(idx, hmap["활성"], bool(active))
                             if "비고" in hmap: ws.update_cell(idx, hmap["비고"], memo.strip())
                             st.cache_data.clear(); st.success("업데이트 완료"); st.rerun()
-                except Exception as e:
-                    st.exception(e)
 
 def tab_admin_acl(emp_df):
-    """
-    권한관리 — 단일 표에서 추가/수정/삭제 + 전체 반영 저장
-    - 사번 컬럼은 '사번 - 이름' 레이블로 선택
-    - 선택 시 자동으로 이름 컬럼 동기화
-    - 검색/필터 등 부가 UI 제거 (심플)
-    - 저장 시 전체 덮어쓰기
-    """
     st.markdown("### 권한 관리")
 
     me = st.session_state.get("user", {})
