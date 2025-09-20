@@ -38,12 +38,6 @@ from gspread.exceptions import WorksheetNotFound, APIError
 APP_TITLE = st.secrets.get("app", {}).get("TITLE", "HISMEDI - 인사/HR")
 st.set_page_config(page_title=APP_TITLE, layout="wide")
 
-# Disable st.help "No docs available"
-if not getattr(st, "_help_disabled", False):
-    def _noop_help(*args, **kwargs): return None
-    st.help = _noop_help
-    st._help_disabled = True
-
 st.markdown(
     """
     <style>
@@ -319,7 +313,9 @@ def tab_admin_acl(emp_df):
     """
     st.markdown("### 권한 관리")
 
-    me = st.session_state.get("user", {})
+    
+    ACL_EDITOR_KEY = f"acl_editor_simple_{st.session_state.get(\'user\',{}).get(\'사번\',\'\')}_v1"
+me = st.session_state.get("user", {})
     try:
         am_admin = is_admin(str(me.get("사번", "")))
     except Exception:
@@ -407,7 +403,7 @@ def tab_admin_acl(emp_df):
 
     edited = st.data_editor(
         df_disp[[c for c in AUTH_HEADERS if c in df_disp.columns] + ["삭제"]],
-        key="acl_editor_simple_v2",
+        key=ACL_EDITOR_KEY,
         use_container_width=True,
         height=520,
         hide_index=True,
