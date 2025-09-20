@@ -1342,7 +1342,8 @@ def main():
                 with a3: tab_admin_transfer(emp_df)
                 with a4: tab_admin_eval_items()
 
-                                with a5: tab_admin_acl()with tabs[4]: tab_help()
+                                with a5: tab_admin_acl()
+with tabs[4]: tab_help()
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 관리자: 권한 관리 (AUTH_SHEET 편집 UI)
