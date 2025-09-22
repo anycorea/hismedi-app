@@ -1085,7 +1085,6 @@ def _find_row_by_sabun(ws, hmap, sabun: str) -> int:
     return 0
 
 def tab_staff_admin(emp_df: pd.DataFrame):
-    st.markdown("### 직원(관리자 전용)")
     st.write(f"결과: **{len(emp_df):,}명**")
     st.dataframe(emp_df.drop(columns=["PIN_hash"], errors="ignore"), use_container_width=True, height=560, hide_index=True)
 
@@ -1119,7 +1118,6 @@ def dept_transfer_inline(sabun: str, new_d1: str, new_d2: str, start_date):
     return {"사번": sabun, "부서1": new_d1, "부서2": new_d2, "발령일": d}
 
 def tab_admin_pin(emp_df):
-    st.markdown("### PIN 관리")
     ws, header, hmap = ensure_emp_sheet_columns()
     df = emp_df.copy()
     df["표시"] = df.apply(lambda r: f"{str(r.get('사번',''))} - {str(r.get('이름',''))}", axis=1)
@@ -1155,7 +1153,6 @@ def tab_admin_pin(emp_df):
             st.cache_data.clear(); st.success("PIN 초기화 완료", icon="✅")
 
 def tab_admin_transfer(emp_df):
-    st.markdown("### 부서(근무지) 이동")
     ws, header, hmap = ensure_emp_sheet_columns()
     df = emp_df.copy()
     df["표시"] = df.apply(lambda r: f"{str(r.get('사번',''))} - {str(r.get('이름',''))}", axis=1)
@@ -1176,7 +1173,6 @@ def tab_admin_transfer(emp_df):
             st.exception(e)
 
 def tab_admin_eval_items():
-    st.markdown("### 평가 항목 관리")
     df = read_eval_items_df(only_active=False).copy()
     for c in ["항목ID", "항목", "내용", "비고"]:
         if c in df.columns: df[c]=df[c].astype(str)
@@ -1281,7 +1277,6 @@ def tab_admin_eval_items():
 
 
 def tab_admin_acl(emp_df: pd.DataFrame):
-    st.markdown("#### 권한 관리")
     me = st.session_state.get("user", {})
     am_admin = is_admin(str(me.get("사번","")))
     if not am_admin:
