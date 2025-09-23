@@ -595,7 +595,7 @@ def tab_eval(emp_df: pd.DataFrame):
         else:
             st.session_state[slider_key]=3
     with c_slider:
-        bulk_score=st.slider("일괄 점수",1,5,st.session_state[slider_key],1, key=slider_key, disabled=not edit_mode)
+        bulk_score = st.slider("일괄 점수", 1, 5, step=1, key=slider_key, disabled=not edit_mode)
     with c_btn:
         if st.button("일괄 적용", use_container_width=True, key=f"{kbase}_apply", disabled=not edit_mode):
             st.session_state[f"__apply_bulk_{kbase}"]=int(bulk_score); st.toast(f"모든 항목에 {bulk_score}점 적용", icon="✅")
