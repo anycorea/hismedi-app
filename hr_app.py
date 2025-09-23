@@ -1306,7 +1306,7 @@ def tab_admin_acl(emp_df: pd.DataFrame):
     if "사번" in df_disp.columns:
         df_disp["사번"]=df_disp["사번"].map(lambda v: label_by_sabun.get(str(v).strip(), str(v).strip()))
 
-    role_options  = ["admin","manager","evaluator"]
+    role_options  = ["admin","manager"]
     scope_options = ["","부서","개별"]
 
     if "삭제" not in df_disp.columns:
