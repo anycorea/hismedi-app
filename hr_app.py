@@ -1019,7 +1019,7 @@ def tab_competency(emp_df: pd.DataFrame):
     # 권한 게이트: 관리자/평가권한자만 접근 가능 (일반 직원 접근 불가)
     u_check = st.session_state.get('user', {})
     me_check = str(u_check.get('사번',''))
-    am_admin_or_mgr = (is_admin(me_check) or len(get_allowed_sabuns(emp_df, me_check, include_self=False))>0)
+    am_admin_or_mgr = is_admin_or_manager(me_check)
     if not am_admin_or_mgr:
         st.warning('권한이 없습니다. 관리자/평가 권한자만 접근할 수 있습니다.', icon='🔒')
         return
