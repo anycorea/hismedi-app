@@ -1019,7 +1019,7 @@ def tab_competency(emp_df: pd.DataFrame):
     # 권한 게이트: 관리자/평가권한자만 접근 가능 (일반 직원 접근 불가)
     u_check = st.session_state.get('user', {})
     me_check = str(u_check.get('사번',''))
-    am_admin_or_mgr = is_admin_or_manager(me_check)
+    am_admin_or_mgr = (is_admin(me_check) or len(get_allowed_sabuns(emp_df, me_check, include_self=False))>0)
     if not am_admin_or_mgr:
         st.warning('권한이 없습니다. 관리자/평가 권한자만 접근할 수 있습니다.', icon='🔒')
         return
@@ -1557,5 +1557,237 @@ if __name__ == "__main__":
     main()
 
 
-# ===== PATCHED BLOCKS (2~4) =====
-# Patch content not found
+
+# ==== BEGIN: FORCE SIGN BUTTONS RENDER (robust overrides) =====================
+import streamlit as st
+import pandas as pd
+import gspread
+from datetime import datetime
+
+def _is_admin_or_mgr_safe(sabun:str)->bool:
+    try:
+        return bool(is_admin_or_manager(str(sabun)))
+    except Exception:
+        try:
+            return bool(is_admin(str(sabun)))
+        except Exception:
+            return False
+
+def _get_sign_link_safe(sabun:str)->str:
+    try:
+        return str(get_sign_link(str(sabun)) or "")
+    except Exception:
+        return ""
+
+def _render_eval_mgr_sign(year:int, eval_type:str, me_sabun:str, me_name:str, target_sabun:str, item_ids:list[str]):
+    if not _is_admin_or_mgr_safe(me_sabun): 
+        return
+    st.markdown("#### 결재 서명(관리자/매니저)")
+    _link=_get_sign_link_safe(me_sabun)
+    if _link: st.image(_link, caption=f"{me_name} 서명 이미지 미리보기", use_column_width=False)
+    else: st.info("서명관리 시트에 내 서명링크가 없습니다.", icon="ℹ️")
+    if st.button("이 대상자 문서에 결재 서명 입력", key=f"mgr_sign_eval_fix_{year}_{eval_type}_{me_sabun}_{target_sabun}"):
+        try:
+            ws=_ensure_eval_resp_sheet(int(year), item_ids)
+            header=_retry(ws.row_values,1) or []; hmap={n:i+1 for i,n in enumerate(header)}
+            values=_retry(ws.get_all_values); cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
+            row_idx2=0
+            for i in range(2, len(values)+1):
+                r=values[i-1]
+                try:
+                    if (str(r[cY-1]).strip()==str(year) and str(r[cT-1]).strip()==str(eval_type)
+                        and str(r[cTS-1]).strip()==str(target_sabun) and str(r[cES-1]).strip()==str(me_sabun)):
+                        row_idx2=i; break
+                except: pass
+            if row_idx2==0:
+                st.error("먼저 본 평가 건을 저장(제출)한 뒤 결재 서명을 넣을 수 있습니다.")
+            else:
+                now2 = kst_now_str()
+                _retry(ws.update_cell, row_idx2, hmap.get("서명_평가자"), me_name)
+                _retry(ws.update_cell, row_idx2, hmap.get("서명시각_평가자"), now2)
+                st.success("결재 서명 반영 완료", icon="✅")
+        except Exception as e:
+            st.exception(e)
+
+def _render_jd_mgr_sign(year:int, me_sabun:str, me_name:str, target_sabun:str):
+    if not _is_admin_or_mgr_safe(me_sabun): 
+        return
+    st.markdown("#### 결재 서명(관리자/매니저)")
+    _link=_get_sign_link_safe(me_sabun)
+    if _link: st.image(_link, caption=f"{me_name} 서명 이미지", use_column_width=False)
+    else: st.info("서명관리 시트에 내 서명링크가 없습니다.", icon="ℹ️")
+    if st.button("이 문서에 결재 서명(이미지) 입력", key=f"mgr_sign_jd_fix_{year}_{me_sabun}_{target_sabun}"):
+        try:
+            rec2 = {
+                "사번": str(target_sabun), "연도": int(year),
+                "버전": int(st.session_state.get("jd2_ver", 0) or 0),
+                "서명방식": "image",
+                "서명데이터": _link or "",
+            }
+            rep2 = upsert_jobdesc(rec2, as_new_version=(rec2["버전"]==0))
+            st.success(f"결재 서명 반영 완료 (버전 {rep2.get('version','?')})", icon="✅")
+        except Exception as e:
+            st.exception(e)
+
+def _render_comp_mgr_sign(year:int, me_sabun:str, me_name:str, target_sabun:str):
+    if not _is_admin_or_mgr_safe(me_sabun): 
+        return
+    st.markdown("#### 결재 서명(관리자/매니저)")
+    _link=_get_sign_link_safe(me_sabun)
+    if _link: st.image(_link, caption=f"{me_name} 서명 이미지 미리보기", use_column_width=False)
+    else: st.info("서명관리 시트에 내 서명링크가 없습니다.", icon="ℹ️")
+    if st.button("이 평가 건에 결재 서명 입력", key=f"mgr_sign_comp_fix_{year}_{me_sabun}_{target_sabun}"):
+        try:
+            ws = _ensure_comp_simple_sheet(int(year))
+            header=_retry(ws.row_values,1) or []; hmap={n:i+1 for i,n in enumerate(header)}
+            values=_retry(ws.get_all_values); cY=hmap.get("연도"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
+            row_idx2=0
+            for i in range(2, len(values)+1):
+                r=values[i-1]
+                try:
+                    if (str(r[cY-1]).strip()==str(year) and str(r[cTS-1]).strip()==str(target_sabun) and str(r[cES-1]).strip()==str(me_sabun)):
+                        row_idx2=i; break
+                except: pass
+            if row_idx2==0:
+                st.error("먼저 본 평가 건을 저장(제출)한 뒤 결재 서명을 넣을 수 있습니다.")
+            else:
+                now2 = kst_now_str()
+                _retry(ws.update_cell, row_idx2, hmap.get("서명_평가자"), me_name)
+                _retry(ws.update_cell, row_idx2, hmap.get("서명시각_평가자"), now2)
+                st.success("결재 서명 반영 완료", icon="✅")
+        except Exception as e:
+            st.exception(e)
+
+def tab_eval(emp_df: pd.DataFrame):
+    this_year = datetime.now(tz=tz_kst()).year
+    year = st.number_input("연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="eval_fix_year")
+
+    u = st.session_state["user"]; me_sabun = str(u["사번"]); me_name = str(u["이름"])
+    allowed = get_allowed_sabuns(emp_df, me_sabun, include_self=True)
+    items = read_eval_items_df(True)
+    if items.empty:
+        st.warning("활성화된 평가 항목이 없습니다.", icon="⚠️"); return
+    items_sorted = items.sort_values(["순서","항목"]).reset_index(drop=True)
+    item_ids = [str(x) for x in items_sorted["항목ID"].tolist()]
+
+    glob_sab, glob_name = get_global_target()
+    if _is_admin_or_mgr_safe(me_sabun):
+        base=emp_df.copy(); base["사번"]=base["사번"].astype(str)
+        base=base[base["사번"].isin({str(s) for s in allowed})]
+        if "재직여부" in base.columns: base=base[base["재직여부"]==True]
+        view=base[["사번","이름"]].copy().sort_values(["사번"]).reset_index(drop=True)
+        sabuns=view["사번"].astype(str).tolist(); names=view["이름"].astype(str).tolist()
+        opts=[f"{s} - {n}" for s,n in zip(sabuns,names)]
+        default = glob_sab if glob_sab in sabuns else (me_sabun if me_sabun in sabuns else (sabuns[0] if sabuns else me_sabun))
+        idx = sabuns.index(default) if default in sabuns else 0
+        picked = st.selectbox("대상자 선택", opts, index=idx, key="eval_fix_pick")
+        target_sabun=picked.split(" - ",1)[0]; target_name=names[sabuns.index(target_sabun)]
+        eval_type = st.radio("평가유형", ["자기","1차","2차"], horizontal=True, key=f"eval_fix_type_{year}_{me_sabun}_{target_sabun}")
+    else:
+        target_sabun=me_sabun; target_name=glob_name or u["이름"]
+        st.info(f"대상자: {target_name} ({target_sabun})", icon="👤")
+        eval_type="자기"
+
+    # 점수 입력
+    scores={}
+    for r in items_sorted.itertuples(index=False):
+        iid=str(getattr(r,"항목ID")); name=getattr(r,"항목") or ""
+        rkey=f"eval_fix_seg_{iid}_{year}_{me_sabun}_{target_sabun}"
+        if rkey not in st.session_state: st.session_state[rkey]="3"
+        col = st.columns([6,3])
+        with col[0]: st.markdown(f'**{name}**')
+        with col[1]: st.radio(" ", ["1","2","3","4","5"], horizontal=True, key=rkey, label_visibility="collapsed")
+        scores[iid]=int(st.session_state[rkey])
+    total_100 = round(sum(scores.values()) * (100.0 / max(1, len(items_sorted) * 5)), 1)
+    st.metric("합계(100점 만점)", total_100)
+
+    if st.button("제출/저장", type="primary", key=f"eval_fix_save_{year}_{me_sabun}_{target_sabun}"):
+        rep=upsert_eval_response(emp_df, int(year), eval_type, str(target_sabun), str(me_sabun), scores, "제출")
+        st.success(("제출 완료" if rep["action"]=="insert" else "업데이트 완료")+f" (총점 {rep['total']}점)", icon="✅")
+
+    # 결재 서명 버튼
+    _render_eval_mgr_sign(int(year), str(eval_type), str(me_sabun), str(me_name), str(target_sabun), item_ids)
+
+def tab_job_desc(emp_df: pd.DataFrame):
+    this_year = datetime.now(tz=tz_kst()).year
+    year = st.number_input("연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="jd_fix_year")
+    u=st.session_state["user"]; me_sabun=str(u["사번"]); me_name=str(u["이름"])
+    allowed = get_allowed_sabuns(emp_df, me_sabun, include_self=True)
+
+    glob_sab, glob_name = get_global_target()
+    if _is_admin_or_mgr_safe(me_sabun):
+        base=emp_df.copy(); base["사번"]=base["사번"].astype(str)
+        base=base[base["사번"].isin({str(s) for s in allowed})]
+        if "재직여부" in base.columns: base=base[base["재직여부"]==True]
+        view=base[["사번","이름"]].copy().sort_values(["사번"]).reset_index(drop=True)
+        sabuns=view["사번"].astype(str).tolist(); names=view["이름"].astype(str).tolist()
+        opts=[f"{s} - {n}" for s,n in zip(sabuns,names)]
+        default = glob_sab if glob_sab in sabuns else (me_sabun if me_sabun in sabuns else (sabuns[0] if sabuns else me_sabun))
+        idx = sabuns.index(default) if default in sabuns else 0
+        picked = st.selectbox("대상자 선택", opts, index=idx, key="jd_fix_pick")
+        target_sabun=picked.split(" - ",1)[0]; target_name=names[sabuns.index(target_sabun)]
+    else:
+        target_sabun=me_sabun; target_name=glob_name or u["이름"]
+        st.info(f"대상자: {target_name} ({target_sabun})", icon="👤")
+
+    # 저장/업서트
+    if st.button("저장/업서트", type="primary", use_container_width=True, key=f"jd_fix_save_{year}_{me_sabun}_{target_sabun}"):
+        rec = {
+            "사번": str(target_sabun), "연도": int(year), "버전": int(st.session_state.get("jd2_ver", 0) or 0),
+            "서명방식": st.session_state.get("jd2_sign_type",""), "서명데이터": st.session_state.get("jd2_sign_data",""),
+        }
+        if not _is_admin_or_mgr_safe(me_sabun):
+            rec["서명방식"] = "text"
+            rec["서명데이터"] = f"{target_name} / {kst_now_str()}"
+        rep = upsert_jobdesc(rec, as_new_version=(rec["버전"]==0))
+        st.success(f"저장 완료 (버전 {rep['version']})", icon="✅")
+
+    # 결재 서명 버튼
+    _render_jd_mgr_sign(int(year), str(me_sabun), str(me_name), str(target_sabun))
+
+def tab_competency(emp_df: pd.DataFrame):
+    # 역할 기반 접근 가드
+    u_check = st.session_state.get('user', {})
+    me_check = str(u_check.get('사번',''))
+    if not _is_admin_or_mgr_safe(me_check):
+        st.warning('권한이 없습니다. 관리자/평가 권한자만 접근할 수 있습니다.', icon='🔒')
+        return
+
+    this_year = datetime.now(tz=tz_kst()).year
+    year = st.number_input("연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="cmp_fix_year")
+
+    u=st.session_state.get("user",{}); me_sabun=str(u.get("사번","")); me_name=str(u.get("이름",""))
+    allowed=set(map(str, get_allowed_sabuns(emp_df, me_sabun, include_self=True)))
+    df=emp_df.copy(); df["사번"]=df["사번"].astype(str); df=df[df["사번"].isin(allowed)].copy()
+    if "재직여부" in df.columns: df=df[df["재직여부"]==True]
+    for c in ["이름","부서1","부서2","직급"]:
+        if c not in df.columns: df[c]=""
+
+    try: df["사번_sort"]=df["사번"].astype(int)
+    except Exception: df["사번_sort"]=df["사번"].astype(str)
+    df=df.sort_values(["사번_sort","이름"]).reset_index(drop=True)
+
+    sabuns=df["사번"].astype(str).tolist(); names=df["이름"].astype(str).tolist()
+    default = me_sabun if me_sabun in sabuns else (sabuns[0] if sabuns else me_sabun)
+    idx = sabuns.index(default) if default in sabuns else 0
+    picked = st.selectbox("대상자 선택", [f"{s} - {n}" for s,n in zip(sabuns,names)], index=idx, key="cmp_fix_pick")
+    sel_sab=picked.split(" - ",1)[0]
+
+    grade_options=["우수","양호","보통","미흡"]
+    g_main = st.radio("주업무 평가", grade_options, index=2, key="cmp_fix_main", horizontal=True)
+    g_extra= st.radio("기타업무 평가", grade_options, index=2, key="cmp_fix_extra", horizontal=True)
+    qual   = st.radio("직무 자격 유지 여부", ["직무 유지","직무 변경","직무비부여"], index=0, key="cmp_fix_qual", horizontal=True)
+    eval_date=st.date_input("평가일자", datetime.now(tz=tz_kst()).date(), key="cmp_fix_date").strftime("%Y-%m-%d")
+
+    try: edu_status=_edu_completion_from_jd(_jd_latest_for_comp(sel_sab, int(year)))
+    except Exception: edu_status="미완료"
+    st.metric("교육이수 (자동)", edu_status)
+    opinion=st.text_area("종합평가 의견", value="", height=150, key="cmp_fix_opinion")
+
+    if st.button("제출/저장", type="primary", use_container_width=True, key=f"cmp_fix_save_{year}_{me_sabun}_{sel_sab}"):
+        rep=upsert_comp_simple_response(emp_df, int(year), str(sel_sab), str(me_sabun), g_main, g_extra, qual, opinion, eval_date)
+        st.success(("제출 완료" if rep.get("action")=="insert" else "업데이트 완료"), icon="✅")
+
+    # 결재 서명 버튼
+    _render_comp_mgr_sign(int(year), str(me_sabun), str(me_name), str(sel_sab))
+# ==== END: FORCE SIGN BUTTONS RENDER =========================================
