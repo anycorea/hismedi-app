@@ -307,6 +307,60 @@ def get_allowed_sabuns(emp_df:pd.DataFrame, sabun:str, include_self:bool=True)->
     return allowed
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Signatures: 시트/역할/도움 함수 〈ADD〉
+# ══════════════════════════════════════════════════════════════════════════════
+SIGN_SHEET = "서명관리"
+SIGN_HEADERS = ["사번","이름","서명링크","활성","비고"]
+
+@st.cache_data(ttl=300, show_spinner=False)
+def read_sign_df() -> pd.DataFrame:
+    try:
+        ws = _ws(SIGN_SHEET)
+        df = pd.DataFrame(_ws_get_all_records(ws))
+    except Exception:
+        return pd.DataFrame(columns=SIGN_HEADERS)
+    if df.empty: return pd.DataFrame(columns=SIGN_HEADERS)
+    for c in SIGN_HEADERS:
+        if c not in df.columns: df[c] = ""
+    df["사번"] = df["사번"].astype(str).str.strip()
+    if "활성" in df.columns:
+        df["활성"] = df["활성"].map(_to_bool)
+    return df
+
+def is_manager(sabun: str) -> bool:
+    try:
+        df = read_auth_df()
+        if df.empty: return False
+        q = df[(df["사번"].astype(str)==str(sabun)) &
+               (df["역할"].str.lower()=="manager") &
+               (df["활성"]==True)]
+        return not q.empty
+    except Exception:
+        return False
+
+def is_admin_or_manager(sabun: str) -> bool:
+    return is_admin(str(sabun)) or is_manager(str(sabun))
+
+def get_sign_link(sabun: str) -> str:
+    """서명관리 시트에서 (활성=True)인 서명 링크를 찾음."""
+    try:
+        df = read_sign_df()
+        if df.empty: return ""
+        row = df[(df["사번"].astype(str)==str(sabun)) & (df["활성"]==True)]
+        if row.empty: return ""
+        return str(row.iloc[0].get("서명링크","")).strip()
+    except Exception:
+        return ""
+
+def record_text_signature(meta: dict, signer_name: str) -> dict:
+    """텍스트 전자서명 필드 세트(서명자/시각) 반환"""
+    now = kst_now_str()
+    out = dict(meta or {})
+    out["서명자"] = signer_name
+    out["서명시각"] = now
+    return out
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Global Target Sync
 # ══════════════════════════════════════════════════════════════════════════════
 def set_global_target(sabun:str, name:str=""):
@@ -377,7 +431,7 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
 # ══════════════════════════════════════════════════════════════════════════════
 EVAL_ITEMS_SHEET = "평가_항목"
 EVAL_ITEM_HEADERS = ["항목ID", "항목", "내용", "순서", "활성", "비고"]
-EVAL_RESP_SHEET_PREFIX = "평가_응답_"
+EVAL_RESP_SHEET_PREFIX = "인사평가_"
 EVAL_BASE_HEADERS = ["연도","평가유형","평가대상사번","평가대상이름","평가자사번","평가자이름","총점","상태","제출시각","서명_대상","서명시각_대상","서명_평가자","서명시각_평가자","잠금"]
 
 def _eval_sheet_name(year: int | str) -> str: return f"{EVAL_RESP_SHEET_PREFIX}{int(year)}"
@@ -871,7 +925,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
 # ══════════════════════════════════════════════════════════════════════════════
 # 직무능력평가 (간편형) + JD 요약 스크롤
 # ══════════════════════════════════════════════════════════════════════════════
-COMP_SIMPLE_PREFIX = "직무능력_간편_응답_"
+COMP_SIMPLE_PREFIX = "직무능력평가_"
 COMP_SIMPLE_HEADERS = [
     "연도","평가대상사번","평가대상이름","평가자사번","평가자이름",
     "평가일자","주업무평가","기타업무평가","교육이수","자격유지","종합의견",
@@ -1451,9 +1505,9 @@ def tab_help():
         - 직원: `직원` 시트
         - 권한: `권한` 시트 (admin/범위유형: 부서|개별)
         - 평가 항목: `평가_항목`
-        - 인사평가 응답: `평가_응답_YYYY`
+        - 인사평가 응답: `인사평가_YYYY`
         - 직무기술서: `직무기술서`
-        - 직무능력(간편) 응답: `직무능력_간편_응답_YYYY`
+        - 직무능력(간편) 응답: `직무능력평가_YYYY`
     """)
 
 # ══════════════════════════════════════════════════════════════════════════════
