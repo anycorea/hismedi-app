@@ -307,6 +307,60 @@ def get_allowed_sabuns(emp_df:pd.DataFrame, sabun:str, include_self:bool=True)->
     return allowed
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Signatures: 시트/역할/도움 함수 〈ADD〉
+# ══════════════════════════════════════════════════════════════════════════════
+SIGN_SHEET = "서명관리"
+SIGN_HEADERS = ["사번","이름","서명링크","활성","비고"]
+
+@st.cache_data(ttl=300, show_spinner=False)
+def read_sign_df() -> pd.DataFrame:
+    try:
+        ws = _ws(SIGN_SHEET)
+        df = pd.DataFrame(_ws_get_all_records(ws))
+    except Exception:
+        return pd.DataFrame(columns=SIGN_HEADERS)
+    if df.empty: return pd.DataFrame(columns=SIGN_HEADERS)
+    for c in SIGN_HEADERS:
+        if c not in df.columns: df[c] = ""
+    df["사번"] = df["사번"].astype(str).str.strip()
+    if "활성" in df.columns:
+        df["활성"] = df["활성"].map(_to_bool)
+    return df
+
+def is_manager(sabun: str) -> bool:
+    try:
+        df = read_auth_df()
+        if df.empty: return False
+        q = df[(df["사번"].astype(str)==str(sabun)) &
+               (df["역할"].str.lower()=="manager") &
+               (df["활성"]==True)]
+        return not q.empty
+    except Exception:
+        return False
+
+def is_admin_or_manager(sabun: str) -> bool:
+    return is_admin(str(sabun)) or is_manager(str(sabun))
+
+def get_sign_link(sabun: str) -> str:
+    """서명관리 시트에서 (활성=True)인 서명 링크를 찾음."""
+    try:
+        df = read_sign_df()
+        if df.empty: return ""
+        row = df[(df["사번"].astype(str)==str(sabun)) & (df["활성"]==True)]
+        if row.empty: return ""
+        return str(row.iloc[0].get("서명링크","")).strip()
+    except Exception:
+        return ""
+
+def record_text_signature(meta: dict, signer_name: str) -> dict:
+    """텍스트 전자서명 필드 세트(서명자/시각) 반환"""
+    now = kst_now_str()
+    out = dict(meta or {})
+    out["서명자"] = signer_name
+    out["서명시각"] = now
+    return out
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Global Target Sync
 # ══════════════════════════════════════════════════════════════════════════════
 def set_global_target(sabun:str, name:str=""):
@@ -1501,3 +1555,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+# ===== PATCHED BLOCKS (2~4) =====
+# Patch content not found
