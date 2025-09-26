@@ -1,46 +1,3 @@
-# ---- Signature utilities (display only) --------------------------------------
-def drive_direct(url: str) -> str:
-    """Convert Google Drive share URL to direct view URL; otherwise return as-is."""
-    if not url: return ""
-    m = re.search(r"/d/([a-zA-Z0-9_-]+)", url) or re.search(r"[?&]id=([a-zA-Z0-9_-]+)", url)
-    return f"https://drive.google.com/uc?export=view&id={m.group(1)}" if m else url
-
-@st.cache_data(ttl=300, show_spinner=False)
-def read_sign_df() -> pd.DataFrame:
-    """Read signature registry sheet '서명관리' -> DataFrame."""
-    try:
-        df = read_sheet_df("서명관리")
-    except Exception:
-        df = pd.DataFrame(columns=["사번","서명URL","활성","비고"])
-    if df is None or df.empty:
-        return pd.DataFrame(columns=["사번","서명URL","활성","비고"])
-    if "사번" not in df.columns: df["사번"]=""
-    if "서명URL" not in df.columns:
-        for alt in ["서명", "서명링크", "SignURL", "sign_url"]:
-            if alt in df.columns:
-                df["서명URL"] = df[alt]; break
-        else:
-            df["서명URL"] = ""
-    df["사번"] = df["사번"].astype(str)
-    if "활성" in df.columns:
-        df["활성"] = df["활성"].astype(str).str.lower().isin(["true","1","y","yes","t"])
-    else:
-        df["활성"] = True
-    df["sign_url"] = df["서명URL"].astype(str).fillna("").map(drive_direct)
-    return df
-
-@st.cache_data(ttl=300, show_spinner=False)
-def build_sign_map(df: pd.DataFrame) -> dict:
-    """Return { 사번: sign_url } for rows where 활성=True and URL exists."""
-    if df is None or df.empty: return {}
-    d = {}
-    for _, r in df.iterrows():
-        sab = str(r.get("사번",""))
-        url = str(r.get("sign_url",""))
-        act = bool(r.get("활성", True))
-        if sab and url and act: d[sab]=url
-    return d
-# ------------------------------------------------------------------------------
 # -*- coding: utf-8 -*-
 """
 HISMEDI - 인사/HR
@@ -74,6 +31,50 @@ from google.oauth2.service_account import Credentials
 from gspread.exceptions import WorksheetNotFound, APIError
 
 # ══════════════════════════════════════════════════════════════════════════════
+
+# ---- Signature utilities (display only) --------------------------------------
+def drive_direct(url: str) -> str:
+    """Convert Google Drive share URL to direct view URL; otherwise return as-is."""
+    if not url: return ""
+    m = re.search(r"/d/([a-zA-Z0-9_-]+)", url) or re.search(r"[?&]id=([a-zA-Z0-9_-]+)", url)
+    return f"https://drive.google.com/uc?export=view&id={m.group(1)}" if m else url
+
+@st.cache_data(ttl=300, show_spinner=False)
+def read_sign_df() -> pd.DataFrame:
+    """Read signature registry sheet '서명관리' -> DataFrame (사번, 서명URL, 활성, 비고)."""
+    try:
+        df = read_sheet_df("서명관리")
+    except Exception:
+        df = pd.DataFrame(columns=["사번","서명URL","활성","비고"])
+    if df is None or df.empty:
+        return pd.DataFrame(columns=["사번","서명URL","활성","비고"])
+    if "사번" not in df.columns: df["사번"]=""
+    if "서명URL" not in df.columns:
+        for alt in ["서명", "서명링크", "SignURL", "sign_url"]:
+            if alt in df.columns:
+                df["서명URL"] = df[alt]; break
+        else:
+            df["서명URL"] = ""
+    df["사번"] = df["사번"].astype(str)
+    if "활성" in df.columns:
+        df["활성"] = df["활성"].astype(str).str.lower().isin(["true","1","y","yes","t"])
+    else:
+        df["활성"] = True
+    df["sign_url"] = df["서명URL"].astype(str).fillna("").map(drive_direct)
+    return df
+
+@st.cache_data(ttl=300, show_spinner=False)
+def build_sign_map(df: pd.DataFrame) -> dict:
+    """Return {사번: sign_url} where 활성=True and URL exists."""
+    if df is None or df.empty: return {}
+    d = {}
+    for _, r in df.iterrows():
+        sab = str(r.get("사번",""))
+        url = str(r.get("sign_url",""))
+        act = bool(r.get("활성", True))
+        if sab and url and act: d[sab] = url
+    return d
+# ------------------------------------------------------------------------------
 # App Config / Style
 # ══════════════════════════════════════════════════════════════════════════════
 APP_TITLE = st.secrets.get("app", {}).get("TITLE", "HISMEDI - 인사/HR")
@@ -680,7 +681,6 @@ def tab_eval(emp_df: pd.DataFrame):
         st.dataframe(my[cols] if cols else my, use_container_width=True, height=260)
     except Exception:
         st.caption("제출 현황을 불러오지 못했습니다.")
-
     # --- 서명 포함 표 보기 (미리보기) ---
     try:
         _sign_df = read_sign_df()
@@ -1116,7 +1116,6 @@ def tab_competency(emp_df: pd.DataFrame):
         st.dataframe(my[cols] if cols else my, use_container_width=True, height=260)
     except Exception:
         st.caption("제출 현황을 불러오지 못했습니다.")
-
     # --- 서명 포함 표 보기 (미리보기) ---
     try:
         _sign_df2 = read_sign_df()
@@ -1546,7 +1545,6 @@ def tab_admin_acl(emp_df: pd.DataFrame):
                 st.info("표시할 직무기술서 데이터가 없습니다.")
         except Exception:
             st.caption("서명 미리보기 생성 중 오류가 발생했습니다.")
-
 # ══════════════════════════════════════════════════════════════════════════════
 # 도움말
 # ══════════════════════════════════════════════════════════════════════════════
