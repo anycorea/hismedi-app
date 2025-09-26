@@ -1,3 +1,47 @@
+# ---- Signature utilities (display only) --------------------------------------
+def drive_direct(url: str) -> str:
+    """Convert Google Drive share URL to direct view URL; otherwise return as-is."""
+    if not url: return ""
+    m = re.search(r"/d/([a-zA-Z0-9_-]+)", url) or re.search(r"[?&]id=([a-zA-Z0-9_-]+)", url)
+    return f"https://drive.google.com/uc?export=view&id={m.group(1)}" if m else url
+
+@st.cache_data(ttl=300, show_spinner=False)
+def read_sign_df() -> pd.DataFrame:
+    """Read signature registry sheet '서명관리' -> DataFrame."""
+    try:
+        df = read_sheet_df("서명관리")
+    except Exception:
+        df = pd.DataFrame(columns=["사번","서명URL","활성","비고"])
+    if df is None or df.empty:
+        return pd.DataFrame(columns=["사번","서명URL","활성","비고"])
+    cols = list(df.columns)
+    if "사번" not in cols: df["사번"] = ""
+    if "서명URL" not in cols:
+        # try alternative header names
+        for alt in ["서명", "서명링크", "SignURL", "sign_url"]:
+            if alt in df.columns: df["서명URL"] = df[alt]
+            else: df.setdefault("서명URL", "")
+    # normalize
+    df["사번"] = df["사번"].astype(str)
+    if "활성" in df.columns:
+        df["활성"] = df["활성"].astype(str).str.lower().isin(["true","1","y","yes","t"])
+    else:
+        df["활성"] = True
+    df["sign_url"] = df["서명URL"].astype(str).fillna("").map(drive_direct)
+    return df
+
+@st.cache_data(ttl=300, show_spinner=False)
+def build_sign_map(df: pd.DataFrame) -> dict:
+    """Return { 사번: sign_url } for rows where 활성=True and URL exists."""
+    if df is None or df.empty: return {}
+    d = {}
+    for _, r in df.iterrows():
+        sab = str(r.get("사번",""))
+        url = str(r.get("sign_url",""))
+        act = bool(r.get("활성", True))
+        if sab and url and act: d[sab]=url
+    return d
+# ------------------------------------------------------------------------------
 # -*- coding: utf-8 -*-
 """
 HISMEDI - 인사/HR
@@ -377,7 +421,7 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
 # ══════════════════════════════════════════════════════════════════════════════
 EVAL_ITEMS_SHEET = "평가_항목"
 EVAL_ITEM_HEADERS = ["항목ID", "항목", "내용", "순서", "활성", "비고"]
-EVAL_RESP_SHEET_PREFIX = "평가_응답_"
+EVAL_RESP_SHEET_PREFIX = "인사평가_"
 EVAL_BASE_HEADERS = ["연도","평가유형","평가대상사번","평가대상이름","평가자사번","평가자이름","총점","상태","제출시각","서명_대상","서명시각_대상","서명_평가자","서명시각_평가자","잠금"]
 
 def _eval_sheet_name(year: int | str) -> str: return f"{EVAL_RESP_SHEET_PREFIX}{int(year)}"
@@ -635,6 +679,27 @@ def tab_eval(emp_df: pd.DataFrame):
         my=read_my_eval_rows(int(year), me_sabun)
         cols=[c for c in ["평가유형","평가대상사번","평가대상이름","총점","상태","제출시각"] if c in my.columns]
         st.dataframe(my[cols] if cols else my, use_container_width=True, height=260)
+
+    # --- 서명 포함 표 보기 (미리보기) ---
+    try:
+        _sign_df = read_sign_df()
+        _sign_map = build_sign_map(_sign_df)
+        _df_disp = my.copy() if 'my' in locals() else pd.DataFrame()
+        if not _df_disp.empty and _sign_map:
+            if "평가자사번" in _df_disp.columns:
+                _df_disp["서명(평가자)"] = _df_disp["평가자사번"].astype(str).map(lambda s: _sign_map.get(s, ""))
+            if "평가대상사번" in _df_disp.columns:
+                _df_disp["서명(대상)"] = _df_disp["평가대상사번"].astype(str).map(lambda s: _sign_map.get(s, ""))
+            _cols = [c for c in ["평가유형","평가대상사번","평가대상이름","총점","상태","제출시각"] if c in _df_disp.columns]
+            _img_cols = [c for c in ["서명(평가자)","서명(대상)"] if c in _df_disp.columns]
+            st.markdown("##### 서명 포함 표 보기")
+            st.data_editor(
+                _df_disp[_cols + _img_cols] if _cols else _df_disp,
+                use_container_width=True, height=320, hide_index=True,
+                column_config={ k: st.column_config.ImageColumn(k) for k in _img_cols }
+            )
+    except Exception as _e:
+        st.caption("서명 미리보기 생성 중 오류가 발생했습니다.")
     except Exception:
         st.caption("제출 현황을 불러오지 못했습니다.")
 
@@ -871,7 +936,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
 # ══════════════════════════════════════════════════════════════════════════════
 # 직무능력평가 (간편형) + JD 요약 스크롤
 # ══════════════════════════════════════════════════════════════════════════════
-COMP_SIMPLE_PREFIX = "직무능력_간편_응답_"
+COMP_SIMPLE_PREFIX = "직무능력평가_"
 COMP_SIMPLE_HEADERS = [
     "연도","평가대상사번","평가대상이름","평가자사번","평가자이름",
     "평가일자","주업무평가","기타업무평가","교육이수","자격유지","종합의견",
@@ -1050,6 +1115,25 @@ def tab_competency(emp_df: pd.DataFrame):
         my=read_my_comp_simple_rows(int(year), me_sabun)
         cols=[c for c in ["평가대상사번","평가대상이름","평가일자","주업무평가","기타업무평가","교육이수","자격유지","상태","제출시각"] if c in my.columns]
         st.dataframe(my[cols] if cols else my, use_container_width=True, height=260)
+
+    # --- 서명 포함 표 보기 (미리보기) ---
+    try:
+        _sign_df2 = read_sign_df()
+        _sign_map2 = build_sign_map(_sign_df2)
+        _df_disp2 = my.copy() if 'my' in locals() else pd.DataFrame()
+        if not _df_disp2.empty and _sign_map2:
+            if "평가자사번" in _df_disp2.columns:
+                _df_disp2["서명(평가자)"] = _df_disp2["평가자사번"].astype(str).map(lambda s: _sign_map2.get(s, ""))
+            _cols2 = [c for c in ["평가대상사번","평가대상이름","평가일자","주업무평가","기타업무평가","교육이수","자격유지","상태","제출시각"] if c in _df_disp2.columns]
+            _img_cols2 = [c for c in ["서명(평가자)"] if c in _df_disp2.columns]
+            st.markdown("#### 서명 포함 표 보기")
+            st.data_editor(
+                _df_disp2[_cols2 + _img_cols2] if _cols2 else _df_disp2,
+                use_container_width=True, height=320, hide_index=True,
+                column_config={ k: st.column_config.ImageColumn(k) for k in _img_cols2 }
+            )
+    except Exception as _e:
+        st.caption("서명 미리보기 생성 중 오류가 발생했습니다.")
     except Exception:
         st.caption("제출 현황을 불러오지 못했습니다.")
 
@@ -1434,6 +1518,37 @@ def tab_admin_acl(emp_df: pd.DataFrame):
         except Exception as e:
             st.exception(e)
 
+
+    # --- 서명 포함 표 보기 (직무기술서) ---
+    with st.expander("서명 포함 표 보기", expanded=False):
+        try:
+            _sign_df3 = read_sign_df()
+            _sign_map3 = build_sign_map(_sign_df3)
+            _jd_row = jd_current.copy() if isinstance(jd_current, dict) and jd_current else {}
+            if _jd_row:
+                _df_jd = pd.DataFrame([_jd_row])
+                # Determine approver sabun if available
+                _sab_series = None
+                if "승인자사번" in _df_jd.columns:
+                    _sab_series = _df_jd["승인자사번"].astype(str)
+                elif "승인자" in _df_jd.columns and "이름" in emp_df.columns and "사번" in emp_df.columns:
+                    _name_to_sab = {str(r["이름"]): str(r["사번"]) for _, r in emp_df[["사번","이름"]].iterrows()}
+                    _sab_series = _df_jd["승인자"].apply(lambda nm: _name_to_sab.get(str(nm), ""))
+                elif "사번" in _df_jd.columns:
+                    _sab_series = _df_jd["사번"].astype(str)
+                if _sab_series is not None:
+                    _df_jd["서명(승인자)"] = _sab_series.map(lambda s: _sign_map3.get(s, ""))
+                _cols3 = [c for c in ["사번","작성자이름","직무명","승인자","승인자사번","제출시각"] if c in _df_jd.columns]
+                _img_cols3 = [c for c in ["서명(승인자)"] if c in _df_jd.columns]
+                st.data_editor(
+                    _df_jd[_cols3 + _img_cols3] if _cols3 else _df_jd,
+                    use_container_width=True, height=280, hide_index=True,
+                    column_config={ k: st.column_config.ImageColumn(k) for k in _img_cols3 }
+                )
+            else:
+                st.info("표시할 직무기술서 데이터가 없습니다.")
+        except Exception as _e:
+            st.caption("서명 미리보기 생성 중 오류가 발생했습니다.")
 # ══════════════════════════════════════════════════════════════════════════════
 # 도움말
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1451,9 +1566,9 @@ def tab_help():
         - 직원: `직원` 시트
         - 권한: `권한` 시트 (admin/범위유형: 부서|개별)
         - 평가 항목: `평가_항목`
-        - 인사평가 응답: `평가_응답_YYYY`
+        - 인사평가 응답: `인사평가_YYYY`
         - 직무기술서: `직무기술서`
-        - 직무능력(간편) 응답: `직무능력_간편_응답_YYYY`
+        - 직무능력평가 응답: `직무능력평가_YYYY`
     """)
 
 # ══════════════════════════════════════════════════════════════════════════════
