@@ -377,7 +377,7 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
 # ══════════════════════════════════════════════════════════════════════════════
 EVAL_ITEMS_SHEET = "평가_항목"
 EVAL_ITEM_HEADERS = ["항목ID", "항목", "내용", "순서", "활성", "비고"]
-EVAL_RESP_SHEET_PREFIX = "인사평가_"
+EVAL_RESP_SHEET_PREFIX = "평가_응답_"
 EVAL_BASE_HEADERS = ["연도","평가유형","평가대상사번","평가대상이름","평가자사번","평가자이름","총점","상태","제출시각","서명_대상","서명시각_대상","서명_평가자","서명시각_평가자","잠금"]
 
 def _eval_sheet_name(year: int | str) -> str: return f"{EVAL_RESP_SHEET_PREFIX}{int(year)}"
@@ -871,7 +871,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
 # ══════════════════════════════════════════════════════════════════════════════
 # 직무능력평가 (간편형) + JD 요약 스크롤
 # ══════════════════════════════════════════════════════════════════════════════
-COMP_SIMPLE_PREFIX = "직무능력평가_"
+COMP_SIMPLE_PREFIX = "직무능력_간편_응답_"
 COMP_SIMPLE_HEADERS = [
     "연도","평가대상사번","평가대상이름","평가자사번","평가자이름",
     "평가일자","주업무평가","기타업무평가","교육이수","자격유지","종합의견",
@@ -1451,9 +1451,9 @@ def tab_help():
         - 직원: `직원` 시트
         - 권한: `권한` 시트 (admin/범위유형: 부서|개별)
         - 평가 항목: `평가_항목`
-        - 인사평가 응답: `인사평가_YYYY`
+        - 인사평가 응답: `평가_응답_YYYY`
         - 직무기술서: `직무기술서`
-        - 직무능력(간편) 응답: `직무능력평가_YYYY`
+        - 직무능력(간편) 응답: `직무능력_간편_응답_YYYY`
     """)
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1491,7 +1491,7 @@ def main():
             if not is_admin(me):
                 st.warning("관리자 전용 메뉴입니다.", icon="🔒")
             else:
-                a1,a2,a3,a4,a5 = st.tabs(["직원","PIN 관리","부서 이동","평가 항목 관리","권한 관리", "서명 관리"])
+                a1,a2,a3,a4,a5 = st.tabs(["직원","PIN 관리","부서 이동","평가 항목 관리","권한 관리"])
                 with a1: tab_staff_admin(emp_df)
                 with a2: tab_admin_pin(emp_df)
                 with a3: tab_admin_transfer(emp_df)
@@ -1501,166 +1501,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
-# ==== [BEGIN: 서명관리 추가 모듈] ==========================================
-try:
-    import pandas as _pd  # ensure pandas alias
-    pd  # noqa
-except Exception:
-    import pandas as pd  # fallback alias if not present
-
-SIGN_SHEET = "서명관리"
-SIGN_HEADERS = ["사번","이름","서명링크","활성","비고"]
-
-def _to_bool(v):
-    s = str(v).strip().lower()
-    return s in ("true","1","y","yes","t","on")
-
-def ensure_sign_sheet():
-    wb = get_book()
-    try:
-        ws = wb.worksheet(SIGN_SHEET)
-        header = _retry(ws.row_values, 1) or []
-        need = [h for h in SIGN_HEADERS if h not in header]
-        if need:
-            # merge headers at row 1
-            new_header = list(header) + [h for h in SIGN_HEADERS if h not in header]
-            _retry(ws.update, "1:1", [new_header])
-        return ws
-    except Exception:
-        ws = _retry(wb.add_worksheet, title=SIGN_SHEET, rows=500, cols=10)
-        _retry(ws.update, "A1", [SIGN_HEADERS])
-        return ws
-
-@st.cache_data(ttl=300, show_spinner=False)
-def read_sign_df():
-    ensure_sign_sheet()
-    try:
-        ws = get_book().worksheet(SIGN_SHEET)
-        rows = _ws_get_all_records(ws)
-        df = pd.DataFrame(rows)
-    except Exception:
-        df = pd.DataFrame(columns=SIGN_HEADERS)
-    if df.empty:
-        return df
-    if "사번" in df.columns:
-        df["사번"] = df["사번"].astype(str)
-    if "활성" in df.columns:
-        df["활성"] = df["활성"].map(_to_bool)
-    return df
-
-def _get_signature_link_for(sabun: str) -> str:
-    try:
-        d = read_sign_df()
-        q = d[(d["사번"].astype(str) == str(sabun)) & (d["활성"] == True)]
-        return "" if q.empty else str(q.iloc[0].get("서명링크","")).strip()
-    except Exception:
-        return ""
-
-def tab_admin_signatures(emp_df):
-    st.subheader("서명 관리")
-    ensure_sign_sheet()
-    sig = read_sign_df().copy()
-
-    base = emp_df[["사번","이름"]].copy() if not emp_df.empty else pd.DataFrame(columns=["사번","이름"])
-    base["사번"] = base["사번"].astype(str)
-    labels = [f"{s} - {n}" for s,n in zip(base["사번"], base["이름"])]
-    label_to_sabun = {lab: lab.split(" - ",1)[0] for lab in labels}
-
-    disp = sig.copy() if not sig.empty else pd.DataFrame(columns=SIGN_HEADERS)
-    disp["사번 - 이름"] = disp.apply(lambda r: f"{str(r.get('사번',''))} - {str(r.get('이름',''))}", axis=1) if not disp.empty else ""
-
-    edited = st.data_editor(
-        (disp[["사번 - 이름","서명링크","활성","비고"]]).copy() if not isinstance(disp, str) and not disp == "" and not disp.empty else pd.DataFrame(columns=["사번 - 이름","서명링크","활성","비고"]),
-        key="adm_sign_editor",
-        use_container_width=True,
-        height=420,
-        num_rows="dynamic",
-        column_config={
-            "사번 - 이름": st.column_config.SelectboxColumn(options=["(선택)"]+labels, required=True),
-            "서명링크": st.column_config.TextColumn(help="이미지 URL 또는 드라이브 공유링크"),
-            "활성": st.column_config.CheckboxColumn(),
-            "비고": st.column_config.TextColumn(),
-        },
-    )
-
-    if st.button("서명관리 저장(전체 반영)", type="primary", use_container_width=True, key="adm_sign_save"):
-        try:
-            ws = ensure_sign_sheet()
-            header = _retry(ws.row_values, 1) or SIGN_HEADERS
-            out = []
-            _iter = edited.fillna("").iterrows() if hasattr(edited, "iterrows") else []
-            for _,r in _iter:
-                lab = str(r.get("사번 - 이름","")).strip()
-                if not lab or lab == "(선택)":
-                    continue
-                sabun = label_to_sabun.get(lab, lab.split(" - ",1)[0] if " - " in lab else lab)
-                name  = lab.split(" - ",1)[1] if " - " in lab else ""
-                out.append([
-                    sabun, name, str(r.get("서명링크","")).strip(),
-                    _to_bool(r.get("활성","")), str(r.get("비고","")).strip()
-                ])
-            _retry(ws.clear)
-            _retry(ws.update, "A1", [header])
-            if out:
-                _retry(ws.append_rows, out, value_input_option="USER_ENTERED")
-            st.cache_data.clear()
-            st.success("서명관리 저장을 완료했습니다.", icon="✅")
-        except Exception as e:
-            st.exception(e)
-
-def mount_sign_admin_ui(emp_df):
-    """
-    안전 장착용: 기존 관리자 탭에 붙이지 못한 경우라도
-    별도의 섹션으로 서명관리 UI를 표시합니다.
-    """
-    st.markdown("---")
-    with st.container():
-        st.header("관리자 · 서명 관리(보조 장착)")
-        tab_admin_signatures(emp_df)
-# ==== [END: 서명관리 추가 모듈] ============================================
-
-
-# 자동 삽입: 서명 관리 탭 장착
-try:
-    with a6:
-        tab_admin_signatures(emp_df)
-except Exception:
-    pass
-
-
-
-# ==== [BEGIN: 강제 표시 블록 · 서명 관리] ==============================
-# 일부 환경에서 탭 자동삽입이 보이지 않는 경우를 대비해,
-# 관리자 계정에게 화면 하단에 "서명 관리" 섹션을 강제로 노출합니다.
-try:
-    _emp_df_for_sign = None
-    try:
-        _emp_df_for_sign = emp_df  # 기존 변수 재사용
-    except NameError:
-        pass
-    # 직원 데이터프레임이 지역 변수명으로만 존재하는 경우를 대비 (일부 코드 구조)
-    if _emp_df_for_sign is None:
-        for _name, _obj in globals().items():
-            if _name.lower().endswith(("emp_df","employee_df","employees_df")):
-                _emp_df_for_sign = _obj
-                break
-
-    _me_admin_check = str(st.session_state.get("user",{}).get("사번",""))
-    if 'tab_admin_signatures' in globals() and callable(tab_admin_signatures):
-        if 'is_admin' in globals() and callable(is_admin) and is_admin(_me_admin_check):
-            st.markdown("---")
-            st.header("관리자 · 서명 관리 (강제 표시)")
-            tab_admin_signatures(_emp_df_for_sign)
-        else:
-            # 사이드바 토글로 관리자만 열람 가능하도록 보조 옵션 제공
-            _open = st.sidebar.checkbox("서명 관리(관리자)", value=False, help="관리자 권한 전용")
-            if _open:
-                st.warning("관리자 전용입니다. 권한이 없으면 데이터 저장이 제한됩니다.", icon="🔒")
-                tab_admin_signatures(_emp_df_for_sign)
-except Exception as _e:
-    # 안전 무시
-    pass
-# ==== [END: 강제 표시 블록 · 서명 관리] ================================
