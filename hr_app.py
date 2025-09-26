@@ -14,14 +14,13 @@ def read_sign_df() -> pd.DataFrame:
         df = pd.DataFrame(columns=["사번","서명URL","활성","비고"])
     if df is None or df.empty:
         return pd.DataFrame(columns=["사번","서명URL","활성","비고"])
-    cols = list(df.columns)
-    if "사번" not in cols: df["사번"] = ""
-    if "서명URL" not in cols:
-        # try alternative header names
+    if "사번" not in df.columns: df["사번"]=""
+    if "서명URL" not in df.columns:
         for alt in ["서명", "서명링크", "SignURL", "sign_url"]:
-            if alt in df.columns: df["서명URL"] = df[alt]
-            else: df.setdefault("서명URL", "")
-    # normalize
+            if alt in df.columns:
+                df["서명URL"] = df[alt]; break
+        else:
+            df["서명URL"] = ""
     df["사번"] = df["사번"].astype(str)
     if "활성" in df.columns:
         df["활성"] = df["활성"].astype(str).str.lower().isin(["true","1","y","yes","t"])
@@ -679,6 +678,8 @@ def tab_eval(emp_df: pd.DataFrame):
         my=read_my_eval_rows(int(year), me_sabun)
         cols=[c for c in ["평가유형","평가대상사번","평가대상이름","총점","상태","제출시각"] if c in my.columns]
         st.dataframe(my[cols] if cols else my, use_container_width=True, height=260)
+    except Exception:
+        st.caption("제출 현황을 불러오지 못했습니다.")
 
     # --- 서명 포함 표 보기 (미리보기) ---
     try:
@@ -698,10 +699,8 @@ def tab_eval(emp_df: pd.DataFrame):
                 use_container_width=True, height=320, hide_index=True,
                 column_config={ k: st.column_config.ImageColumn(k) for k in _img_cols }
             )
-    except Exception as _e:
-        st.caption("서명 미리보기 생성 중 오류가 발생했습니다.")
     except Exception:
-        st.caption("제출 현황을 불러오지 못했습니다.")
+        st.caption("서명 미리보기 생성 중 오류가 발생했습니다.")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 직무기술서
@@ -1115,6 +1114,8 @@ def tab_competency(emp_df: pd.DataFrame):
         my=read_my_comp_simple_rows(int(year), me_sabun)
         cols=[c for c in ["평가대상사번","평가대상이름","평가일자","주업무평가","기타업무평가","교육이수","자격유지","상태","제출시각"] if c in my.columns]
         st.dataframe(my[cols] if cols else my, use_container_width=True, height=260)
+    except Exception:
+        st.caption("제출 현황을 불러오지 못했습니다.")
 
     # --- 서명 포함 표 보기 (미리보기) ---
     try:
@@ -1132,10 +1133,8 @@ def tab_competency(emp_df: pd.DataFrame):
                 use_container_width=True, height=320, hide_index=True,
                 column_config={ k: st.column_config.ImageColumn(k) for k in _img_cols2 }
             )
-    except Exception as _e:
-        st.caption("서명 미리보기 생성 중 오류가 발생했습니다.")
     except Exception:
-        st.caption("제출 현황을 불러오지 못했습니다.")
+        st.caption("서명 미리보기 생성 중 오류가 발생했습니다.")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 관리자: 직원/ PIN 관리 / 부서 이동 / 인사평가 항목 관리 / 권한 관리
@@ -1518,7 +1517,6 @@ def tab_admin_acl(emp_df: pd.DataFrame):
         except Exception as e:
             st.exception(e)
 
-
     # --- 서명 포함 표 보기 (직무기술서) ---
     with st.expander("서명 포함 표 보기", expanded=False):
         try:
@@ -1527,7 +1525,6 @@ def tab_admin_acl(emp_df: pd.DataFrame):
             _jd_row = jd_current.copy() if isinstance(jd_current, dict) and jd_current else {}
             if _jd_row:
                 _df_jd = pd.DataFrame([_jd_row])
-                # Determine approver sabun if available
                 _sab_series = None
                 if "승인자사번" in _df_jd.columns:
                     _sab_series = _df_jd["승인자사번"].astype(str)
@@ -1547,8 +1544,9 @@ def tab_admin_acl(emp_df: pd.DataFrame):
                 )
             else:
                 st.info("표시할 직무기술서 데이터가 없습니다.")
-        except Exception as _e:
+        except Exception:
             st.caption("서명 미리보기 생성 중 오류가 발생했습니다.")
+
 # ══════════════════════════════════════════════════════════════════════════════
 # 도움말
 # ══════════════════════════════════════════════════════════════════════════════
