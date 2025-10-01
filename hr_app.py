@@ -1088,13 +1088,20 @@ def tab_competency(emp_df: pd.DataFrame):
     render_pdf_controls("직무능력평가_서명", _cmp_print_html, images_to_embed=None)
 
 # ══════════════════════════════════════════════════════════════════════════════
+
 # PDF Controls (브라우저 인쇄 + ReportLab 보조)
+def _slug_key(s: str) -> str:
+    s = (s or "").strip().lower()
+    s = re.sub(r"[^a-z0-9]+", "_", s)
+    return s.strip("_") or "sec"
+
 # ══════════════════════════════════════════════════════════════════════════════
 def render_pdf_controls(section_title: str, html_content_getter, images_to_embed: dict|None):
+    slug = _slug_key(section_title)
     st.markdown("#### 출력 / PDF")
     col = st.columns([1,1,3])
     with col[0]:
-        if st.button("브라우저로 인쇄하기", use_container_width=True):
+        if st.button("브라우저로 인쇄하기", key=f"print_{slug}", use_container_width=True):
             st.info("브라우저 메뉴에서 인쇄(Ctrl/⌘+P) → PDF로 저장을 선택하세요.", icon="🖨️")
 
     with col[1]:
@@ -1103,7 +1110,7 @@ def render_pdf_controls(section_title: str, html_content_getter, images_to_embed
             from reportlab.pdfgen import canvas
             from reportlab.lib.utils import ImageReader
             import base64
-            if st.button("PDF 다운로드", use_container_width=True):
+            if st.button("PDF 다운로드", key=f"pdfdl_{slug}", use_container_width=True):
                 buf = io.BytesIO()
                 c = canvas.Canvas(buf, pagesize=A4)
                 width, height = A4
@@ -1137,7 +1144,7 @@ def render_pdf_controls(section_title: str, html_content_getter, images_to_embed
 
                 c.showPage(); c.save()
                 pdf_bytes = buf.getvalue()
-                st.download_button("PDF 저장", data=pdf_bytes,
+                st.download_button("PDF 저장", key=f"pdfsave_{slug}", data=pdf_bytes,
                                    file_name=f"{section_title}.pdf",
                                    mime="application/pdf",
                                    use_container_width=True)
@@ -1156,7 +1163,7 @@ def admin_sign_uploader():
     st.markdown("### 서명 등록(이미지 업로드) - 관리자용")
     sabun_for_upload = st.text_input("사번", value="", key="sign_upload_sabun")
     file = st.file_uploader("서명 이미지 (PNG/JPG 권장)", type=["png","jpg","jpeg"], key="sign_upload_file")
-    if st.button("업로드/저장", type="primary", disabled=not sabun_for_upload or not file):
+    if st.button("업로드/저장", key="admin_sign_upload", type="primary", disabled=not sabun_for_upload or not file):
         try:
             import base64
             b64 = base64.b64encode(file.read()).decode("utf-8")
