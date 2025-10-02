@@ -981,24 +981,49 @@ def tab_job_desc(emp_df: pd.DataFrame):
     with c6[1]:
         sign_data = st.text_input("서명데이터", value=jd_current.get("서명데이터",""), key="jd2_sign_data", disabled=not edit_mode)
     with c6[2]:
-        do_save = st.button("저장/업서트", type="primary", use_container_width=True, key="jd2_save", disabled=not edit_mode)
+        pass  # 버튼은 아래 '제출 확인' 블럭으로 이동
+
+    # ===== 제출 확인(PIN 재확인 + 동의 체크) =====
+    st.markdown("#### 제출 확인")
+    ca1, ca2 = st.columns([2, 1])
+    with ca1:
+        jd_attest_ok = st.checkbox(
+            "본인은 입력한 직무기술서 내용이 사실이며, 회사 정책에 따라 제출함을 확인합니다.",
+            key=f"jd_attest_ok_{year}_{target_sabun}_{me_sabun}",
+        )
+    with ca2:
+        jd_pin_input = st.text_input(
+            "PIN 재입력",
+            value="",
+            type="password",
+            key=f"jd_attest_pin_{year}_{target_sabun}_{me_sabun}",
+        )
+
+    do_save = st.button("저장/업서트", type="primary", use_container_width=True, key="jd2_save", disabled=not edit_mode)
 
     if do_save:
-        rec = {
-            "사번": str(target_sabun), "연도": int(year), "버전": int(version or 0),
-            "부서1": dept1, "부서2": dept2, "작성자사번": me_sabun, "작성자이름": _emp_name_by_sabun(emp_df, me_sabun),
-            "직군": group, "직종": series, "직무명": jobname,
-            "제정일": d_create, "개정일": d_update, "검토주기": review,
-            "직무개요": job_summary, "주업무": job_main, "기타업무": job_other,
-            "필요학력": edu_req, "전공계열": major_req,
-            "직원공통필수교육": edu_common, "보수교육": edu_cont, "기타교육": edu_etc, "특성화교육": edu_spec,
-            "면허": license_, "경력(자격요건)": career, "비고": memo, "서명방식": sign_type, "서명데이터": sign_data,
-        }
-        try:
-            rep = upsert_jobdesc(rec, as_new_version=(version == 0))
-            st.success(f"저장 완료 (버전 {rep['version']})", icon="✅"); st.rerun()
-        except Exception as e:
-            st.exception(e)
+        # 1) 동의 체크
+        if not jd_attest_ok:
+            st.error("제출 전에 확인란에 체크해주세요.")
+        # 2) PIN 검증
+        elif not verify_pin(me_sabun, jd_pin_input):
+            st.error("PIN이 올바르지 않습니다.")
+        else:
+            rec = {
+                "사번": str(target_sabun), "연도": int(year), "버전": int(version or 0),
+                "부서1": dept1, "부서2": dept2, "작성자사번": me_sabun, "작성자이름": _emp_name_by_sabun(emp_df, me_sabun),
+                "직군": group, "직종": series, "직무명": jobname,
+                "제정일": d_create, "개정일": d_update, "검토주기": review,
+                "직무개요": job_summary, "주업무": job_main, "기타업무": job_other,
+                "필요학력": edu_req, "전공계열": major_req,
+                "직원공통필수교육": edu_common, "보수교육": edu_cont, "기타교육": edu_etc, "특성화교육": edu_spec,
+                "면허": license_, "경력(자격요건)": career, "비고": memo, "서명방식": sign_type, "서명데이터": sign_data,
+            }
+            try:
+                rep = upsert_jobdesc(rec, as_new_version=(version == 0))
+                st.success(f"저장 완료 (버전 {rep['version']})", icon="✅"); st.rerun()
+            except Exception as e:
+                st.exception(e)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 직무능력평가 + JD 요약 스크롤
@@ -1166,16 +1191,45 @@ def tab_competency(emp_df: pd.DataFrame):
     st.metric("교육이수 (자동)", edu_status)
     opinion=st.text_area("종합평가 의견", value="", height=150, key="cmpS_opinion")
 
-    cbtn=st.columns([1,1,3])
-    with cbtn[0]: do_save=st.button("제출/저장", type="primary", use_container_width=True, key="cmpS_save")
-    with cbtn[1]: do_reset=st.button("초기화", use_container_width=True, key="cmpS_reset")
+    # ===== 제출 확인(PIN 재확인 + 동의 체크) =====
+    st.markdown("#### 제출 확인")
+    cb1, cb2 = st.columns([2, 1])
+    with cb1:
+        comp_attest_ok = st.checkbox(
+            "본인은 입력한 직무능력평가 내용이 사실이며, 회사 정책에 따라 제출함을 확인합니다.",
+            key=f"comp_attest_ok_{year}_{sel_sab}_{me_sabun}",
+        )
+    with cb2:
+        comp_pin_input = st.text_input(
+            "PIN 재입력",
+            value="",
+            type="password",
+            key=f"comp_attest_pin_{year}_{sel_sab}_{me_sabun}",
+        )
+
+    cbtn = st.columns([1, 1, 3])
+    with cbtn[0]:
+        do_save = st.button("제출/저장", type="primary", use_container_width=True, key="cmpS_save")
+    with cbtn[1]:
+        do_reset = st.button("초기화", use_container_width=True, key="cmpS_reset")
+
     if do_reset:
         for k in ["cmpS_main","cmpS_extra","cmpS_qual","cmpS_opinion"]:
             if k in st.session_state: del st.session_state[k]
         st.rerun()
+
     if do_save:
-        rep=upsert_comp_simple_response(emp_df, int(year), str(sel_sab), str(me_sabun), g_main, g_extra, qual, opinion, eval_date)
-        st.success(("제출 완료" if rep.get("action")=="insert" else "업데이트 완료"), icon="✅")
+        # 1) 동의 체크
+        if not comp_attest_ok:
+            st.error("제출 전에 확인란에 체크해주세요.")
+        # 2) PIN 검증
+        elif not verify_pin(me_sabun, comp_pin_input):
+            st.error("PIN이 올바르지 않습니다.")
+        else:
+            rep = upsert_comp_simple_response(
+                emp_df, int(year), str(sel_sab), str(me_sabun), g_main, g_extra, qual, opinion, eval_date
+            )
+            st.success(("제출 완료" if rep.get("action")=="insert" else "업데이트 완료"), icon="✅")
 
     st.markdown("### 내 제출 현황")
     try:
