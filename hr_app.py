@@ -597,7 +597,7 @@ def tab_eval(emp_df: pd.DataFrame):
         with c_slider:
             bulk_score = st.slider("일괄 점수", 1, 5, step=1, key=slider_key, disabled=not edit_mode)
         with c_btn:
-            apply_bulk = st.form_submit_button("일괄 적용", use_container_width=True, key=f"{kbase}_apply", disabled=not edit_mode)
+            apply_bulk = st.form_submit_button("일괄 적용", disabled=not edit_mode)
         if apply_bulk and edit_mode:
             st.session_state[f"__apply_bulk_{kbase}"] = int(bulk_score)
             st.toast(f"모든 항목에 {bulk_score}점 적용", icon="✅")
@@ -626,14 +626,14 @@ def tab_eval(emp_df: pd.DataFrame):
             scores[iid] = int(st.session_state[rkey])
 
         total_100 = round(sum(scores.values()) * (100.0 / max(1, len(items_sorted) * 5)), 1)
-        st.markdown("---")
+        st.mark다운("---")
         cM1, cM2 = st.columns([1, 3])
         with cM1:
             st.metric("합계(100점 만점)", total_100)
         with cM2:
             st.progress(min(1.0, total_100 / 100.0), text=f"총점 {total_100}점")
 
-        submitted = st.form_submit_button("제출/저장", type="primary", key=f"eval2_save_{kbase}", disabled=not edit_mode)
+        submitted = st.form_submit_button("제출/저장", type="primary", disabled=not edit_mode)
         if submitted and edit_mode:
             try:
                 rep = upsert_eval_response(emp_df, int(year), eval_type, str(target_sabun), str(me_sabun), scores, "제출")
