@@ -1093,11 +1093,11 @@ def tab_competency(emp_df: pd.DataFrame):
         st.caption("제출 현황을 불러오지 못했습니다.")
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 관리자: 직원/ PIN 관리 / 부서 이동 / 인사평가 항목 관리 / 권한 관리
+# 관리자: 직원/ PIN 관리 / 인사평가 항목 관리 / 권한 관리
 # ══════════════════════════════════════════════════════════════════════════════
 REQ_EMP_COLS = [
     "사번","이름","부서1","부서2","직급","직무","직군","입사일","퇴사일","기타1","기타2","재직여부",
-    "PIN_hash","PIN_No","이전부서1","이전부서1_발령일","이전부서2","이전부서2_발령일","현부서_발령일"
+    "PIN_hash","PIN_No"
 ]
 
 def _get_ws_and_headers(sheet_name: str):
@@ -1137,23 +1137,6 @@ def reissue_pin_inline(sabun: str, length: int = 4):
     st.cache_data.clear()
     return {"PIN_No": pin, "PIN_hash": ph}
 
-def dept_transfer_inline(sabun: str, new_d1: str, new_d2: str, start_date):
-    ws, header, hmap = ensure_emp_sheet_columns()
-    row_idx = _find_row_by_sabun(ws, hmap, str(sabun))
-    if row_idx == 0: raise RuntimeError("사번을 찾지 못했습니다.")
-    cur_d1 = "" if "부서1" not in hmap else (_retry(ws.cell, row_idx, hmap["부서1"]).value or "")
-    cur_d2 = "" if "부서2" not in hmap else (_retry(ws.cell, row_idx, hmap["부서2"]).value or "")
-    d = start_date.strftime("%Y-%m-%d")
-    if "이전부서1" in hmap: _retry(ws.update_cell, row_idx, hmap["이전부서1"], cur_d1)
-    if "이전부서1_발령일" in hmap: _retry(ws.update_cell, row_idx, hmap["이전부서1_발령일"], d)
-    if "이전부서2" in hmap: _retry(ws.update_cell, row_idx, hmap["이전부서2"], cur_d2)
-    if "이전부서2_발령일" in hmap: _retry(ws.update_cell, row_idx, hmap["이전부서2_발령일"], d)
-    if "현부서_발령일" in hmap: _retry(ws.update_cell, row_idx, hmap["현부서_발령일"], d)
-    if "부서1" in hmap: _retry(ws.update_cell, row_idx, hmap["부서1"], str(new_d1).strip())
-    if "부서2" in hmap: _retry(ws.update_cell, row_idx, hmap["부서2"], str(new_d2).strip())
-    st.cache_data.clear()
-    return {"사번": sabun, "부서1": new_d1, "부서2": new_d2, "발령일": d}
-
 def tab_admin_pin(emp_df):
     ws, header, hmap = ensure_emp_sheet_columns()
     df = emp_df.copy()
@@ -1188,26 +1171,6 @@ def tab_admin_pin(emp_df):
             _retry(ws.update_cell, r, hmap["PIN_hash"], "")
             _retry(ws.update_cell, r, hmap["PIN_No"], "")
             st.cache_data.clear(); st.success("PIN 초기화 완료", icon="✅")
-
-def tab_admin_transfer(emp_df):
-    ws, header, hmap = ensure_emp_sheet_columns()
-    df = emp_df.copy()
-    df["표시"] = df.apply(lambda r: f"{str(r.get('사번',''))} - {str(r.get('이름',''))}", axis=1)
-    df = df.sort_values(["사번"]) if "사번" in df.columns else df
-    sel = st.selectbox("직원 선택(사번 - 이름)", ["(선택)"] + df.get("표시", pd.Series(dtype=str)).tolist(), index=0, key="adm_tr_pick")
-    if sel == "(선택)": return
-    sabun = sel.split(" - ", 1)[0]
-    c = st.columns([1, 1, 1])
-    with c[0]: nd1 = st.text_input("새 부서1", "", key="staff_nd1")
-    with c[1]: nd2 = st.text_input("새 부서2", "", key="staff_nd2")
-    with c[2]: sdt = st.date_input("발령일", datetime.now(tz=tz_kst()).date(), key="staff_tr_date")
-    if st.button("이동 반영(직원시트 인라인)", type="primary", use_container_width=True, key="adm_tr_apply_inline"):
-        if not (str(nd1).strip() or str(nd2).strip()): st.error("부서1/부서2 중 하나는 입력 필요"); return
-        try:
-            rep = dept_transfer_inline(str(sabun), str(nd1).strip(), str(nd2).strip(), sdt)
-            st.success(f"{rep['부서1']} / {rep['부서2']} (발령일 {rep['발령일']}) 반영", icon="✅")
-        except Exception as e:
-            st.exception(e)
 
 def tab_admin_eval_items():
     df = read_eval_items_df(only_active=False).copy()
@@ -1485,7 +1448,7 @@ def tab_help():
     - 로그인: `사번` 입력 후 **Enter** → `PIN` 포커스 / `PIN` 입력 후 **Enter** → 로그인.
     - 인사평가: 평가 항목은 관리자 메뉴의 **평가 항목 관리**에서 활성/순서를 조정합니다.
     - 직무기술서/직무능력평가: 동기화된 대상자를 기준으로 편집·제출합니다.
-    - PIN/부서 이동: 관리자 탭에서 처리합니다.
+    - PIN/평가항목/권한관리: 관리자 탭에서 처리합니다.
     - 구글시트 구조
         - 직원: `직원` 시트
         - 권한: `권한` 시트 (admin/범위유형: 부서|개별)
@@ -1541,12 +1504,11 @@ def main():
             if not is_admin(me):
                 st.warning("관리자 전용 메뉴입니다.", icon="🔒")
             else:
-                a1, a2, a3, a4, a5 = st.tabs(["직원","PIN 관리","부서 이동","평가 항목 관리","권한 관리"])
+                a1, a2, a3, a4 = st.tabs(["직원","PIN 관리","평가 항목 관리","권한 관리"])
                 with a1: tab_staff_admin(emp_df)
                 with a2: tab_admin_pin(emp_df)
-                with a3: tab_admin_transfer(emp_df)
-                with a4: tab_admin_eval_items()
-                with a5: tab_admin_acl(emp_df)
+                with a3: tab_admin_eval_items()
+                with a4: tab_admin_acl(emp_df)
         with tabs[4]: tab_help()
 
 if __name__ == "__main__":
