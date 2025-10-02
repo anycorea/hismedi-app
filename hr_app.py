@@ -496,210 +496,247 @@ def read_my_eval_rows(year: int, sabun: str) -> pd.DataFrame:
     if sort_cols: df=df.sort_values(sort_cols, ascending=[True,True,False]).reset_index(drop=True)
     return df
 
-
-
-def tab_eval(emp_df):
-    # 연도 선택
-    try:
-        this_year = datetime.now(tz=tz_kst()).year  # tz_kst가 앱 내 유틸에 존재
-    except Exception:
-        this_year = datetime.now().year
+def tab_eval(emp_df: pd.DataFrame):
+    this_year = datetime.now(tz=tz_kst()).year
     year = st.number_input("연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="eval2_year")
 
-    # 사용자/권한
-    u = st.session_state["user"]
-    me_sabun = str(u["사번"]); me_name = str(u["이름"])
-    am_admin_or_mgr = (is_admin(me_sabun) or len(get_allowed_sabuns(emp_df, me_sabun, include_self=False)) > 0)
+    u = st.session_state["user"]; me_sabun = str(u["사번"]); me_name = str(u["이름"])
+    am_admin_or_mgr = (is_admin(me_sabun) or len(get_allowed_sabuns(emp_df, me_sabun, include_self=False))>0)
     allowed = get_allowed_sabuns(emp_df, me_sabun, include_self=True)
-
-    # 평가 항목
     items = read_eval_items_df(True)
-    if items.empty:
-        st.warning("활성화된 평가 항목이 없습니다.", icon="⚠️")
-        return
+    if items.empty: st.warning("활성화된 평가 항목이 없습니다.", icon="⚠️"); return
     items_sorted = items.sort_values(["순서", "항목"]).reset_index(drop=True)
     item_ids = [str(x) for x in items_sorted["항목ID"].tolist()]
 
-    # 대상자 선택
     glob_sab, glob_name = get_global_target()
     st.session_state.setdefault("eval2_target_sabun", glob_sab or me_sabun)
     st.session_state.setdefault("eval2_target_name",  glob_name or me_name)
+    st.session_state.setdefault("eval2_edit_mode",    False)
 
     if not am_admin_or_mgr:
         target_sabun = me_sabun; target_name = me_name
         st.info(f"대상자: {target_name} ({target_sabun})", icon="👤")
-        eval_type = "자기"
-        st.caption("평가유형: **자기**")
+        eval_type = "자기"; st.caption("평가유형: **자기**")
     else:
-        base = emp_df.copy(); base["사번"] = base["사번"].astype(str)
-        base = base[base["사번"].isin({str(s) for s in allowed})]
-        if "재직여부" in base.columns:
-            base = base[base["재직여부"] == True]
-        view = base[["사번","이름","부서1","부서2","직급"]].copy().sort_values(["사번"]).reset_index(drop=True)
-        _sabuns = view["사번"].astype(str).tolist()
-        _names  = view["이름"].astype(str).tolist()
-        _d2     = view["부서2"].astype(str).tolist() if "부서2" in view.columns else [""]*len(_sabuns)
-        _opts   = [f"{s} - {n} - {d2}" for s,n,d2 in zip(_sabuns,_names,_d2)]
+        base=emp_df.copy(); base["사번"]=base["사번"].astype(str)
+        base=base[base["사번"].isin({str(s) for s in allowed})]
+        if "재직여부" in base.columns: base=base[base["재직여부"]==True]
+        view=base[["사번","이름","부서1","부서2","직급"]].copy().sort_values(["사번"]).reset_index(drop=True)
+        _sabuns=view["사번"].astype(str).tolist(); _names=view["이름"].astype(str).tolist()
+        _d2=view["부서2"].astype(str).tolist() if "부서2" in view.columns else [""]*len(_sabuns)
+        _opts=[f"{s} - {n} - {d2}" for s,n,d2 in zip(_sabuns,_names,_d2)]
         _target = st.session_state.get("eval2_target_sabun", glob_sab or "")
-        _idx    = _sabuns.index(_target) if _target in _sabuns else 0
-        _sel    = st.selectbox("대상자 선택", _opts, index=_idx, key="eval2_pick_editor_select")
+        _idx = _sabuns.index(_target) if _target in _sabuns else 0
+        _sel = st.selectbox("대상자 선택", _opts, index=_idx, key="eval2_pick_editor_select")
         _sel_sab = _sel.split(" - ",1)[0] if isinstance(_sel,str) and " - " in _sel else (_sabuns[_idx] if _sabuns else "")
-        st.session_state["eval2_target_sabun"] = str(_sel_sab)
+        st.session_state["eval2_target_sabun"]=str(_sel_sab)
         try:
-            st.session_state["eval2_target_name"] = str(_names[_sabuns.index(_sel_sab)]) if _sel_sab in _sabuns else ""
+            st.session_state["eval2_target_name"]=str(_names[_sabuns.index(_sel_sab)]) if _sel_sab in _sabuns else ""
         except Exception:
-            st.session_state["eval2_target_name"] = ""
-        target_sabun = st.session_state["eval2_target_sabun"]
-        target_name  = st.session_state["eval2_target_name"]
+            st.session_state["eval2_target_name"]=""
+        target_sabun=st.session_state["eval2_target_sabun"]
+        target_name =st.session_state["eval2_target_name"]
         st.success(f"대상자: {target_name} ({target_sabun})", icon="✅")
         eval_type = st.radio("평가유형", ["자기","1차","2차"], horizontal=True, key=f"eval2_type_{year}_{me_sabun}_{target_sabun}")
 
-    # 저장된 점수 읽기 (현재 평가유형/대상/평가자 기준)
-    def _read_saved_scores(year, eval_type, target_sabun, evaluator_sabun):
+    col_mode = st.columns([1,3])
+    with col_mode[0]:
+        if st.button(("수정모드로 전환" if not st.session_state["eval2_edit_mode"] else "보기모드로 전환"),
+                     use_container_width=True, key="eval2_toggle"):
+            st.session_state["eval2_edit_mode"] = not st.session_state["eval2_edit_mode"]; st.rerun()
+    with col_mode[1]: st.caption(f"현재: **{'수정모드' if st.session_state['eval2_edit_mode'] else '보기모드'}**")
+    edit_mode = bool(st.session_state["eval2_edit_mode"])
+
+    def read_eval_saved_scores(year: int, eval_type: str, target_sabun: str, evaluator_sabun: str) -> Tuple[dict, dict]:
         try:
-            ws = _ensure_eval_resp_sheet(int(year), item_ids)
-            header = _retry(ws.row_values, 1) or []
-            hmap = {n:i+1 for i,n in enumerate(header)}
-            values = _retry(ws.get_all_values)
-
-            cY  = hmap.get("연도")
-            cT  = hmap.get("평가유형")
-            cTS = hmap.get("평가대상사번")
-            cES = hmap.get("평가자사번")
-
-            row_idx = 0
+            ws=_ensure_eval_resp_sheet(int(year), item_ids)
+            header=_retry(ws.row_values,1) or []; hmap={n:i+1 for i,n in enumerate(header)}
+            values=_retry(ws.get_all_values); cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
+            row_idx=0
             for i in range(2, len(values)+1):
-                r = values[i-1]
+                r=values[i-1]
                 try:
                     if (str(r[cY-1]).strip()==str(year) and str(r[cT-1]).strip()==str(eval_type)
                         and str(r[cTS-1]).strip()==str(target_sabun) and str(r[cES-1]).strip()==str(evaluator_sabun)):
-                        row_idx = i
-                        break
-                except Exception:
-                    pass
-            if row_idx == 0:
-                return {}, {}
-            row = values[row_idx-1]
-            scores = {}
+                        row_idx=i; break
+                except: pass
+            if row_idx==0: return {}, {}
+            row=values[row_idx-1]; scores={}
             for iid in item_ids:
-                col = hmap.get(f"점수_{iid}")
+                col=hmap.get(f"점수_{iid}")
                 if col:
-                    try:
-                        v = int(str(row[col-1]).strip() or "0")
-                    except Exception:
-                        v = 0
-                    if v:
-                        scores[iid] = v
-            meta = {}
+                    try: v=int(str(row[col-1]).strip() or "0")
+                    except: v=0
+                    if v: scores[iid]=v
+            meta={}
             for k in ["상태","잠금","제출시각","총점"]:
-                c = hmap.get(k)
-                if c:
-                    meta[k] = row[c-1]
+                c=hmap.get(k)
+                if c: meta[k]=row[c-1]
             return scores, meta
         except Exception:
             return {}, {}
 
-    saved_scores, saved_meta = _read_saved_scores(int(year), eval_type, target_sabun, me_sabun)
+    saved_scores, saved_meta = read_eval_saved_scores(int(year), eval_type, target_sabun, me_sabun)
 
-    # 보기/수정 모드 결정
-    kbase = f"E2_{year}_{eval_type}_{me_sabun}_{target_sabun}"
-    if f"{kbase}_edit_mode" not in st.session_state:
-        st.session_state[f"{kbase}_edit_mode"] = False if saved_scores else True
-    edit_mode = bool(st.session_state[f"{kbase}_edit_mode"])
+    kbase=f"E2_{year}_{eval_type}_{me_sabun}_{target_sabun}"
+    if (not am_admin_or_mgr) and (not saved_scores) and (not edit_mode):
+        st.session_state["eval2_edit_mode"]=True; edit_mode=True
 
-    col_mode = st.columns([1,3])
-    with col_mode[0]:
-        if st.button(("수정모드로 전환" if not edit_mode else "보기모드로 전환"),
-                     use_container_width=True, key=f"eval2_toggle_{kbase}"):
-            st.session_state[f"{kbase}_edit_mode"] = not edit_mode
-            st.rerun()
-    with col_mode[1]:
-        st.caption(f"현재: **{'수정모드' if st.session_state[f'{kbase}_edit_mode'] else '보기모드'}**")
-
-    # 점수 입력 UI (폼으로 묶어 체크 시 rerun 방지)
     st.markdown("#### 점수 입력 (각 1~5)")
-    with st.form(f"eval_form_{kbase}"):
-        c_head, c_slider, c_btn = st.columns([5,2,1])
-        with c_head:
-            st.caption("개별 점수 선택 또는 슬라이더로 일괄 적용하세요. (초기값: 미선택, 일괄 슬라이더 기본 3점)")
-        slider_key = f"{kbase}_slider"
-        if slider_key not in st.session_state:
-            st.session_state[slider_key] = 3
-        with c_slider:
-            bulk_score = st.slider("일괄 점수", 1, 5, value=int(st.session_state[slider_key]), step=1, key=slider_key, disabled=not edit_mode)
-        with c_btn:
-            apply_bulk = st.form_submit_button("일괄 적용", disabled=not edit_mode)
-        if apply_bulk and edit_mode:
-            for _iid in item_ids:
-                base_key = f"eval2_seg_{_iid}_{kbase}"
-                st.session_state[base_key] = int(bulk_score)
-                for m in [1,2,3,4,5]:
-                    st.session_state[f"{base_key}_ck{m}"] = (m == int(bulk_score))
-            st.toast(f"모든 항목에 {int(bulk_score)}점 적용", icon="✅")
+    c_head, c_slider, c_btn = st.columns([5,2,1])
+    with c_head: st.caption("라디오로 개별 점수를 고르거나, 슬라이더 ‘일괄 적용’을 사용하세요.")
+    slider_key=f"{kbase}_slider"
+    if slider_key not in st.session_state:
+        if saved_scores:
+            avg=round(sum(saved_scores.values())/max(1,len(saved_scores)))
+            st.session_state[slider_key]=int(min(5,max(1,avg)))
+        else:
+            st.session_state[slider_key]=3
+    with c_slider:
+        bulk_score = st.slider("일괄 점수", 1, 5, step=1, key=slider_key, disabled=not edit_mode)
+    with c_btn:
+        if st.button("일괄 적용", use_container_width=True, key=f"{kbase}_apply", disabled=not edit_mode):
+            st.session_state[f"__apply_bulk_{kbase}"]=int(bulk_score); st.toast(f"모든 항목에 {bulk_score}점 적용", icon="✅")
+    if st.session_state.get(f"__apply_bulk_{kbase}") is not None:
+        _v=int(st.session_state[f"__apply_bulk_{kbase}"]); 
+        for _iid in item_ids: st.session_state[f"eval2_seg_{_iid}_{kbase}"]=str(_v)
+        del st.session_state[f"__apply_bulk_{kbase}"]
 
-        # 항목별 점수 (초기값: 미선택)
-        scores = {}
-        for r in items_sorted.itertuples(index=False):
-            iid  = str(getattr(r, "항목ID"))
-            name = getattr(r, "항목") or ""
-            desc = getattr(r, "내용") or ""
+    scores={}
+    for r in items_sorted.itertuples(index=False):
+        iid=str(getattr(r, "항목ID")); name=getattr(r, "항목") or ""; desc=getattr(r, "내용") or ""
+        rkey=f"eval2_seg_{iid}_{kbase}"
+        if rkey not in st.session_state:
+            st.session_state[rkey]=str(int(saved_scores[iid])) if iid in saved_scores else "3"
+        col = st.columns([2,6,3])
+        with col[0]: st.markdown(f'**{name}**')
+        with col[1]:
+            if str(desc).strip(): st.caption(str(desc))
+        with col[2]:
+            st.radio(" ", ["1","2","3","4","5"], horizontal=True, key=rkey, label_visibility="collapsed", disabled=not edit_mode)
+        scores[iid]=int(st.session_state[rkey])
 
-            base_key = f"eval2_seg_{iid}_{kbase}"
-            if base_key not in st.session_state:
-                st.session_state[base_key] = int(saved_scores[iid]) if iid in saved_scores else None
+    total_100 = round(sum(scores.values()) * (100.0 / max(1, len(items_sorted) * 5)), 1)
+    st.markdown("---")
+    cM1, cM2 = st.columns([1, 3])
+    with cM1: st.metric("합계(100점 만점)", total_100)
+    with cM2: st.progress(min(1.0, total_100/100.0), text=f"총점 {total_100}점")
 
-            cols = st.columns([2,6,1,1,1,1,1])
-            with cols[0]:
-                st.markdown(f"**{name}**")
-            with cols[1]:
-                if str(desc).strip():
-                    st.caption(str(desc))
+    if st.button("제출/저장", type="primary", key=f"eval2_save_{kbase}", disabled=not edit_mode):
+        try:
+            rep=upsert_eval_response(emp_df, int(year), eval_type, str(target_sabun), str(me_sabun), scores, "제출")
+            st.success(("제출 완료" if rep["action"]=="insert" else "업데이트 완료")+f" (총점 {rep['total']}점)", icon="✅")
+            st.session_state["eval2_edit_mode"]=False; st.rerun()
+        except Exception as e:
+            st.exception(e)
 
-            current = st.session_state[base_key]
-            for idx, n in enumerate([1,2,3,4,5], start=2):
-                with cols[idx]:
-                    ck = st.checkbox(str(n), value=(current==n), key=f"{base_key}_ck{n}", disabled=not edit_mode)
-                    if edit_mode and ck:
-                        st.session_state[base_key] = n
-                        for m in [1,2,3,4,5]:
-                            if m != n:
-                                st.session_state[f"{base_key}_ck{m}"] = False
+    st.markdown("#### 내 제출 현황")
+    try:
+        my=read_my_eval_rows(int(year), me_sabun)
+        cols=[c for c in ["평가유형","평가대상사번","평가대상이름","총점","상태","제출시각"] if c in my.columns]
+        st.dataframe(my[cols] if cols else my, use_container_width=True, height=260)
+    except Exception:
+        st.caption("제출 현황을 불러오지 못했습니다.")
 
-            val = st.session_state[base_key]
-            if isinstance(val, int):
-                scores[iid] = val
+# ══════════════════════════════════════════════════════════════════════════════
+# 직무기술서
+# ══════════════════════════════════════════════════════════════════════════════
+JOBDESC_SHEET="직무기술서"
+JOBDESC_HEADERS = [
+    "사번","연도","버전","부서1","부서2","작성자사번","작성자이름",
+    "직군","직종","직무명","제정일","개정일","검토주기",
+    "직무개요","주업무","기타업무",
+    "필요학력","전공계열","직원공통필수교육","보수교육","기타교육","특성화교육",
+    "면허","경력(자격요건)","비고","서명방식","서명데이터","제출시각"
+]
 
-        # 요약/지표
-        st.markdown("---")
-        chosen = len(scores)
-        total_100 = None
-        if chosen == len(items_sorted) and len(items_sorted) > 0:
-            total_100 = round(sum(scores.values()) * (100.0 / (len(items_sorted) * 5)), 1)
+def ensure_jobdesc_sheet():
+    wb=get_book()
+    try:
+        ws=wb.worksheet(JOBDESC_SHEET)
+        header=_retry(ws.row_values,1) or []
+        need=[h for h in JOBDESC_HEADERS if h not in header]
+        if need: _retry(ws.update,"1:1",[header+need])
+        return ws
+    except WorksheetNotFound:
+        ws=_retry(wb.add_worksheet,title=JOBDESC_SHEET, rows=1200, cols=60)
+        _retry(ws.update,"A1",[JOBDESC_HEADERS]); return ws
 
-        cM1, cM2, cM3 = st.columns([1,2,2])
-        with cM1:
-            st.metric("선택 항목", f"{chosen} / {len(items_sorted)}")
-        with cM2:
-            st.metric("합계(100점 만점)", ("—" if total_100 is None else total_100))
-        with cM3:
-            prog = 0.0 if total_100 is None else min(1.0, total_100/100.0)
-            st.progress(prog, text=(f"총점 {total_100}점" if total_100 is not None else "총점 —"))
+@st.cache_data(ttl=600, show_spinner=False)
+def read_jobdesc_df()->pd.DataFrame:
+    ensure_jobdesc_sheet()
+    ws=_ws(JOBDESC_SHEET)
+    df=pd.DataFrame(_ws_get_all_records(ws))
+    if df.empty: return pd.DataFrame(columns=JOBDESC_HEADERS)
+    for c in JOBDESC_HEADERS:
+        if c in df.columns: df[c]=df[c].astype(str)
+    for c in ["연도","버전"]:
+        if c in df.columns:
+            def _i(x):
+                try: return int(float(str(x).strip()))
+                except: return 0
+            df[c]=df[c].apply(_i)
+    if "사번" in df.columns: df["사번"]=df["사번"].astype(str)
+    return df
 
-        # 제출/저장
-        do_submit = st.form_submit_button("제출/저장", disabled=not edit_mode, type="primary")
-        if do_submit and edit_mode:
-            missing = [iid for iid in item_ids if iid not in scores]
-            if missing:
-                st.error(f"모든 항목을 선택해주세요. (미선택 {len(missing)}개)")
-            else:
-                try:
-                    rep = upsert_eval_response(emp_df, int(year), eval_type, str(target_sabun), str(me_sabun), scores, "제출")
-                    st.success(("제출 완료" if rep.get("action")=="insert" else "업데이트 완료")+f" (총점 {rep.get('total','?')}점)", icon="✅")
-                    st.session_state[f"{kbase}_edit_mode"] = False
-                    st.rerun()
-                except Exception as e:
-                    st.exception(e)
+def _jd_latest_for(sabun:str, year:int)->dict|None:
+    df=read_jobdesc_df()
+    if df.empty: return None
+    sub=df[(df["사번"].astype(str)==str(sabun))&(df["연도"].astype(int)==int(year))].copy()
+    if sub.empty: return None
+    try: sub["버전"]=sub["버전"].astype(int)
+    except Exception: pass
+    sub=sub.sort_values(["버전"], ascending=[False]).reset_index(drop=True)
+    row=sub.iloc[0].to_dict()
+    for k,v in row.items(): row[k]=("" if v is None else str(v))
+    return row
 
+def _jobdesc_next_version(sabun:str, year:int)->int:
+    df=read_jobdesc_df()
+    if df.empty: return 1
+    sub=df[(df["사번"]==str(sabun))&(df["연도"].astype(int)==int(year))]
+    return 1 if sub.empty else int(sub["버전"].astype(int).max())+1
+
+def upsert_jobdesc(rec:dict, as_new_version:bool=False)->dict:
+    ensure_jobdesc_sheet()
+    ws=_ws(JOBDESC_SHEET)
+    header=_retry(ws.row_values,1); hmap={n:i+1 for i,n in enumerate(header)}
+    sabun=str(rec.get("사번","")).strip(); year=int(rec.get("연도",0))
+    if as_new_version:
+        ver=_jobdesc_next_version(sabun,year)
+    else:
+        try_ver=int(str(rec.get("버전",0) or 0))
+        if try_ver<=0: ver=_jobdesc_next_version(sabun,year)
+        else:
+            df=read_jobdesc_df()
+            exist=not df[(df["사번"]==sabun)&(df["연도"].astype(int)==year)&(df["버전"].astype(int)==try_ver)].empty
+            ver=try_ver if exist else 1
+    rec["버전"]=int(ver); rec["제출시각"]=kst_now_str()
+
+    values=_retry(ws.get_all_values); row_idx=0
+    cS,cY,cV=hmap.get("사번"),hmap.get("연도"),hmap.get("버전")
+    for i in range(2,len(values)+1):
+        row=values[i-1]
+        if str(row[cS-1]).strip()==sabun and str(row[cY-1]).strip()==str(year) and str(row[cV-1]).strip()==str(ver):
+            row_idx=i; break
+
+    def build_row():
+        buf=[""]*len(header)
+        for k,v in rec.items():
+            c=hmap.get(k)
+            if c: buf[c-1]=v
+        return buf
+
+    if row_idx==0:
+        _retry(ws.append_row, build_row(), value_input_option="USER_ENTERED")
+        st.cache_data.clear()
+        return {"action":"insert","version":ver}
+    else:
+        for k,v in rec.items():
+            c=hmap.get(k)
+            if c: _retry(ws.update_cell, row_idx, c, v)
+        st.cache_data.clear()
+        return {"action":"update","version":ver}
 
 def tab_job_desc(emp_df: pd.DataFrame):
     this_year = datetime.now(tz=tz_kst()).year
@@ -855,7 +892,6 @@ def _ensure_comp_simple_sheet(year:int):
     return ws
 
 def _jd_latest_for_comp(sabun:str, year:int)->dict:
-
     try:
         df=read_jobdesc_df()
         if df is None or len(df)==0: return {}
@@ -1465,12 +1501,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-# --- compatibility alias (appended) ---
-try:
-    _jd_latest_for
-except NameError:
-    def _jd_latest_for(sabun: str, year: int) -> dict:
-        # 호환용 별칭: 일부 구버전 코드에서 _jd_latest_for를 호출합니다.
-        return _jd_latest_for_comp(sabun, year)
