@@ -31,6 +31,32 @@ from google.oauth2.service_account import Credentials
 from gspread.exceptions import WorksheetNotFound, APIError
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Sync Utility (Force refresh Google Sheets caches)
+# ══════════════════════════════════════════════════════════════════════════════
+def force_sync():
+    """모든 캐시를 무효화하고 즉시 리런하여 구글시트 최신 데이터로 갱신합니다."""
+    # 1) Streamlit 캐시 비우기
+    try:
+        st.cache_data.clear()
+    except Exception:
+        pass
+    try:
+        st.cache_resource.clear()
+    except Exception:
+        pass
+
+    # 2) 세션 상태 중 로컬 캐시성 키 초기화(프로젝트 규칙에 맞게 prefix 추가/수정)
+    try:
+        for k in list(st.session_state.keys()):
+            if k.startswith(("__cache_", "_df_", "_cache_", "gs_")):
+                del st.session_state[k]
+    except Exception:
+        pass
+
+    # 3) 즉시 리런
+    st.rerun()
+
+# ══════════════════════════════════════════════════════════════════════════════
 # App Config / Style
 # ══════════════════════════════════════════════════════════════════════════════
 APP_TITLE = st.secrets.get("app", {}).get("TITLE", "HISMEDI - 인사/HR")
@@ -1481,6 +1507,15 @@ def main():
         show_login(emp_df); return
 
     require_login(emp_df)
+
+    # === 사이드바: 동기화 버튼 추가 ===
+    with st.sidebar:
+        if st.button(
+            "🔄 동기화 (구글시트 재불러오기)",
+            help="캐시를 비우고 구글시트에서 다시 불러옵니다.",
+            use_container_width=True,
+        ):
+            force_sync()
 
     left, right = st.columns([1.35, 3.65], gap="large")
 
