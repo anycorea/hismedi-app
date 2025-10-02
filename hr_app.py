@@ -1522,7 +1522,7 @@ def main():
 
     with right:
         # 탭 바로 위 오른쪽에 동기화 버튼 배치
-        _spacer, _sync_col = st.columns([1, 0.15])
+        _spacer, _sync_col = st.columns([0.5, 0.15])
         with _sync_col:
             if st.button(
                 "🔄 동기화",
