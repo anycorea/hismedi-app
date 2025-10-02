@@ -608,24 +608,22 @@ def tab_eval(emp_df: pd.DataFrame):
         scores = {}
         for r in items_sorted.itertuples(index=False):
             iid=str(getattr(r, "항목ID")); name=getattr(r, "항목") or ""; desc=getattr(r, "내용") or ""
-            base_key=f"eval2_seg_{iid}_{kbase}"
+                        base_key=f"eval2_seg_{iid}_{kbase}"
             if base_key not in st.session_state:
                 st.session_state[base_key]=int(saved_scores[iid]) if iid in saved_scores else None
-            col = st.columns([2,6,3])
-            with col[0]: st.markdown(f"**{name}**")
-            with col[1]:
+            cols = st.columns([2,6,1,1,1,1,1])
+            with cols[0]: st.markdown(f"**{name}**")
+            with cols[1]:
                 if str(desc).strip(): st.caption(str(desc))
-            with col[2]:
-                cb_cols = st.columns(5)
-                current = st.session_state[base_key]
-                for idx, n in enumerate([1,2,3,4,5]):
-                    with cb_cols[idx]:
-                        ck = st.checkbox(str(n), value=(current==n), key=f"{base_key}_ck{n}", disabled=not edit_mode)
-                        if edit_mode and ck:
-                            st.session_state[base_key] = n
-                            for m in [1,2,3,4,5]:
-                                if m != n:
-                                    st.session_state[f"{base_key}_ck{m}"] = False
+            current = st.session_state[base_key]
+            for idx, n in enumerate([1,2,3,4,5], start=2):
+                with cols[idx]:
+                    ck = st.checkbox(str(n), value=(current==n), key=f"{base_key}_ck{n}", disabled=not edit_mode)
+                    if edit_mode and ck:
+                        st.session_state[base_key] = n
+                        for m in [1,2,3,4,5]:
+                            if m != n:
+                                st.session_state[f"{base_key}_ck{m}"] = False
             val = st.session_state[base_key]
             if isinstance(val, int):
                 scores[iid] = val
