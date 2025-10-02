@@ -729,30 +729,14 @@ def tab_eval(emp_df: pd.DataFrame):
         with c1:
             attest_ok = st.checkbox(
                 "본인은 입력한 내용이 사실이며, 회사의 인사평가 정책에 따라 제출함을 확인합니다.",
-                key=f"eval_attest_ok_{kbase}",
+                key=f"eval_attest_ok_{kbase}_v2",
             )
         with c2:
             pin_input = st.text_input(
                 "PIN 재입력",
                 value="",
                 type="password",
-                key=f"eval_attest_pin_{kbase}",
-            )
-
-        # ===== 제출 확인(PIN 재확인 + 동의 체크) =====
-        st.markdown("#### 제출 확인")
-        c1, c2 = st.columns([2, 1])
-        with c1:
-            attest_ok = st.checkbox(
-                "본인은 입력한 내용이 사실이며, 회사의 인사평가 정책에 따라 제출함을 확인합니다.",
-                key=f"eval_attest_ok_{kbase}",
-            )
-        with c2:
-            pin_input = st.text_input(
-                "PIN 재입력",
-                value="",
-                type="password",
-                key=f"eval_attest_pin_{kbase}",
+                key=f"eval_attest_pin_{kbase}_v2",
             )
 
         # 🔐 PIN 검증 대상 결정:
