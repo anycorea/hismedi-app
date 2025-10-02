@@ -583,52 +583,65 @@ def tab_eval(emp_df: pd.DataFrame):
         st.session_state["eval2_edit_mode"]=True; edit_mode=True
 
     st.markdown("#### 점수 입력 (각 1~5)")
-    c_head, c_slider, c_btn = st.columns([5,2,1])
-    with c_head: st.caption("라디오로 개별 점수를 고르거나, 슬라이더 ‘일괄 적용’을 사용하세요.")
-    slider_key=f"{kbase}_slider"
-    if slider_key not in st.session_state:
-        if saved_scores:
-            avg=round(sum(saved_scores.values())/max(1,len(saved_scores)))
-            st.session_state[slider_key]=int(min(5,max(1,avg)))
-        else:
-            st.session_state[slider_key]=3
-    with c_slider:
-        bulk_score = st.slider("일괄 점수", 1, 5, step=1, key=slider_key, disabled=not edit_mode)
-    with c_btn:
-        if st.button("일괄 적용", use_container_width=True, key=f"{kbase}_apply", disabled=not edit_mode):
-            st.session_state[f"__apply_bulk_{kbase}"]=int(bulk_score); st.toast(f"모든 항목에 {bulk_score}점 적용", icon="✅")
-    if st.session_state.get(f"__apply_bulk_{kbase}") is not None:
-        _v=int(st.session_state[f"__apply_bulk_{kbase}"]); 
-        for _iid in item_ids: st.session_state[f"eval2_seg_{_iid}_{kbase}"]=str(_v)
-        del st.session_state[f"__apply_bulk_{kbase}"]
+    with st.form(f"eval_form_{kbase}"):
+        c_head, c_slider, c_btn = st.columns([5,2,1])
+        with c_head:
+            st.caption("라디오로 개별 점수를 고르거나, 슬라이더 ‘일괄 적용’을 사용하세요.")
+        slider_key = f"{kbase}_slider"
+        if slider_key not in st.session_state:
+            if saved_scores:
+                avg = round(sum(saved_scores.values()) / max(1, len(saved_scores)))
+                st.session_state[slider_key] = int(min(5, max(1, avg)))
+            else:
+                st.session_state[slider_key] = 3
+        with c_slider:
+            bulk_score = st.slider("일괄 점수", 1, 5, step=1, key=slider_key, disabled=not edit_mode)
+        with c_btn:
+            apply_bulk = st.form_submit_button("일괄 적용", use_container_width=True, key=f"{kbase}_apply", disabled=not edit_mode)
+        if apply_bulk and edit_mode:
+            st.session_state[f"__apply_bulk_{kbase}"] = int(bulk_score)
+            st.toast(f"모든 항목에 {bulk_score}점 적용", icon="✅")
+        if st.session_state.get(f"__apply_bulk_{kbase}") is not None:
+            _v = int(st.session_state[f"__apply_bulk_{kbase}"])
+            for _iid in item_ids:
+                st.session_state[f"eval2_seg_{_iid}_{kbase}"] = str(_v)
+            del st.session_state[f"__apply_bulk_{kbase}"]
 
-    scores={}
-    for r in items_sorted.itertuples(index=False):
-        iid=str(getattr(r, "항목ID")); name=getattr(r, "항목") or ""; desc=getattr(r, "내용") or ""
-        rkey=f"eval2_seg_{iid}_{kbase}"
-        if rkey not in st.session_state:
-            st.session_state[rkey]=str(int(saved_scores[iid])) if iid in saved_scores else "3"
-        col = st.columns([2,6,3])
-        with col[0]: st.markdown(f'**{name}**')
-        with col[1]:
-            if str(desc).strip(): st.caption(str(desc))
-        with col[2]:
-            st.radio(" ", ["1","2","3","4","5"], horizontal=True, key=rkey, label_visibility="collapsed", disabled=not edit_mode)
-        scores[iid]=int(st.session_state[rkey])
+        scores = {}
+        for r in items_sorted.itertuples(index=False):
+            iid = str(getattr(r, "항목ID"))
+            name = getattr(r, "항목") or ""
+            desc = getattr(r, "내용") or ""
+            rkey = f"eval2_seg_{iid}_{kbase}"
+            if rkey not in st.session_state:
+                st.session_state[rkey] = str(int(saved_scores[iid])) if iid in saved_scores else "3"
+            col = st.columns([2, 6, 3])
+            with col[0]:
+                st.markdown(f"**{name}**")
+            with col[1]:
+                if str(desc).strip():
+                    st.caption(str(desc))
+            with col[2]:
+                st.radio(" ", ["1", "2", "3", "4", "5"], horizontal=True, key=rkey, label_visibility="collapsed", disabled=not edit_mode)
+            scores[iid] = int(st.session_state[rkey])
 
-    total_100 = round(sum(scores.values()) * (100.0 / max(1, len(items_sorted) * 5)), 1)
-    st.markdown("---")
-    cM1, cM2 = st.columns([1, 3])
-    with cM1: st.metric("합계(100점 만점)", total_100)
-    with cM2: st.progress(min(1.0, total_100/100.0), text=f"총점 {total_100}점")
+        total_100 = round(sum(scores.values()) * (100.0 / max(1, len(items_sorted) * 5)), 1)
+        st.markdown("---")
+        cM1, cM2 = st.columns([1, 3])
+        with cM1:
+            st.metric("합계(100점 만점)", total_100)
+        with cM2:
+            st.progress(min(1.0, total_100 / 100.0), text=f"총점 {total_100}점")
 
-    if st.button("제출/저장", type="primary", key=f"eval2_save_{kbase}", disabled=not edit_mode):
-        try:
-            rep=upsert_eval_response(emp_df, int(year), eval_type, str(target_sabun), str(me_sabun), scores, "제출")
-            st.success(("제출 완료" if rep["action"]=="insert" else "업데이트 완료")+f" (총점 {rep['total']}점)", icon="✅")
-            st.session_state["eval2_edit_mode"]=False; st.rerun()
-        except Exception as e:
-            st.exception(e)
+        submitted = st.form_submit_button("제출/저장", type="primary", key=f"eval2_save_{kbase}", disabled=not edit_mode)
+        if submitted and edit_mode:
+            try:
+                rep = upsert_eval_response(emp_df, int(year), eval_type, str(target_sabun), str(me_sabun), scores, "제출")
+                st.success(("제출 완료" if rep["action"] == "insert" else "업데이트 완료") + f" (총점 {rep['total']}점)", icon="✅")
+                st.session_state["eval2_edit_mode"] = False
+                st.rerun()
+            except Exception as e:
+                st.exception(e)
 
     st.markdown("#### 내 제출 현황")
     try:
