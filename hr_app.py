@@ -608,19 +608,27 @@ def tab_eval(emp_df: pd.DataFrame):
         scores = {}
         for r in items_sorted.itertuples(index=False):
             iid=str(getattr(r, "항목ID")); name=getattr(r, "항목") or ""; desc=getattr(r, "내용") or ""
-            rkey=f"eval2_seg_{iid}_{kbase}"
-            if rkey not in st.session_state:
-                st.session_state[rkey]=str(int(saved_scores[iid])) if iid in saved_scores else "—"
+            base_key=f"eval2_seg_{iid}_{kbase}"
+            if base_key not in st.session_state:
+                st.session_state[base_key]=int(saved_scores[iid]) if iid in saved_scores else None
             col = st.columns([2,6,3])
-            with col[0]: st.markdown(f'**{name}**')
+            with col[0]: st.markdown(f"**{name}**")
             with col[1]:
                 if str(desc).strip(): st.caption(str(desc))
             with col[2]:
-                st.radio(" ", ["—","1","2","3","4","5"], horizontal=True, key=rkey, label_visibility="collapsed", disabled=not edit_mode)
-            val = st.session_state[rkey]
-            if val and val != "—":
-                try: scores[iid] = int(val)
-                except: pass
+                cb_cols = st.columns(5)
+                current = st.session_state[base_key]
+                for idx, n in enumerate([1,2,3,4,5]):
+                    with cb_cols[idx]:
+                        ck = st.checkbox(str(n), value=(current==n), key=f"{base_key}_ck{n}", disabled=not edit_mode)
+                        if edit_mode and ck:
+                            st.session_state[base_key] = n
+                            for m in [1,2,3,4,5]:
+                                if m != n:
+                                    st.session_state[f"{base_key}_ck{m}"] = False
+            val = st.session_state[base_key]
+            if isinstance(val, int):
+                scores[iid] = val
 
         # 점수 요약 (모든 항목 선택 시에만 총점 계산)
         chosen = len(scores)
@@ -801,6 +809,11 @@ def _ensure_comp_simple_sheet(year:int):
     return ws
 
 def _jd_latest_for_comp(sabun:str, year:int)->dict:
+
+def _jd_latest_for(sabun: str, year: int) -> dict:
+    # 호환용 별칭
+    return _jd_latest_for_comp(sabun, year)
+
     try:
         df=read_jobdesc_df()
         if df is None or len(df)==0: return {}
