@@ -1521,7 +1521,7 @@ def main():
         render_staff_picker_left(emp_df)
 
     with right:
-        # 탭 바로 위 오른쪽에 동기화 버튼 배치
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
         _spacer, _sync_col = st.columns([1, 0.18], gap="small")
         with _sync_col:
             if st.button(
