@@ -1500,7 +1500,7 @@ def tab_help():
 # ══════════════════════════════════════════════════════════════════════════════
 def main():
     emp_df = read_emp_df()
-    st.session_state["emp_df"]=emp_df.copy()
+    st.session_state["emp_df"] = emp_df.copy()
 
     if not _session_valid():
         st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=True)
@@ -1508,19 +1508,10 @@ def main():
 
     require_login(emp_df)
 
-    # === 사이드바: 동기화 버튼 추가 ===
-    with st.sidebar:
-        if st.button(
-            "🔄 동기화 (구글시트 재불러오기)",
-            help="캐시를 비우고 구글시트에서 다시 불러옵니다.",
-            use_container_width=True,
-        ):
-            force_sync()
-
     left, right = st.columns([1.35, 3.65], gap="large")
 
     with left:
-        u=st.session_state.get("user",{})
+        u = st.session_state.get("user", {})
         st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=True)
         st.caption(f"DB연결 {kst_now_str()}")
         st.markdown(f"- 사용자: **{u.get('이름','')} ({u.get('사번','')})**")
@@ -1530,16 +1521,27 @@ def main():
         render_staff_picker_left(emp_df)
 
     with right:
+        # 탭 바로 위 오른쪽에 동기화 버튼 배치
+        _spacer, _sync_col = st.columns([1, 0.18])
+        with _sync_col:
+            if st.button(
+                "🔄 동기화",
+                key="sync_top",
+                help="캐시를 비우고 구글시트에서 다시 불러옵니다.",
+                use_container_width=True,
+            ):
+                force_sync()
+
         tabs = st.tabs(["인사평가","직무기술서","직무능력평가","관리자","도움말"])
         with tabs[0]: tab_eval(emp_df)
         with tabs[1]: tab_job_desc(emp_df)
         with tabs[2]: tab_competency(emp_df)
         with tabs[3]:
-            me=str(st.session_state.get("user",{}).get("사번",""))
+            me = str(st.session_state.get("user", {}).get("사번", ""))
             if not is_admin(me):
                 st.warning("관리자 전용 메뉴입니다.", icon="🔒")
             else:
-                a1,a2,a3,a4,a5 = st.tabs(["직원","PIN 관리","부서 이동","평가 항목 관리","권한 관리"])
+                a1, a2, a3, a4, a5 = st.tabs(["직원","PIN 관리","부서 이동","평가 항목 관리","권한 관리"])
                 with a1: tab_staff_admin(emp_df)
                 with a2: tab_admin_pin(emp_df)
                 with a3: tab_admin_transfer(emp_df)
