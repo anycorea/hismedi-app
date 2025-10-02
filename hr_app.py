@@ -30,18 +30,6 @@ import gspread
 from google.oauth2.service_account import Credentials
 from gspread.exceptions import WorksheetNotFound, APIError
 
-# ============================================================
-# Google Sheet 시트명 조립 유틸 함수
-# ============================================================
-
-def sheetname_eval(year: int) -> str:
-    """인사평가 응답 시트명 생성"""
-    return f"인사평가_{int(year)}"
-
-def sheetname_skill(year: int) -> str:
-    """직무능력평가 응답 시트명 생성"""
-    return f"직무능력평가_{int(year)}"
-
 # ══════════════════════════════════════════════════════════════════════════════
 # App Config / Style
 # ══════════════════════════════════════════════════════════════════════════════
