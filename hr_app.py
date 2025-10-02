@@ -810,10 +810,6 @@ def _ensure_comp_simple_sheet(year:int):
 
 def _jd_latest_for_comp(sabun:str, year:int)->dict:
 
-def _jd_latest_for(sabun: str, year: int) -> dict:
-    # 호환용 별칭
-    return _jd_latest_for_comp(sabun, year)
-
     try:
         df=read_jobdesc_df()
         if df is None or len(df)==0: return {}
@@ -1423,3 +1419,12 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+# --- compatibility alias (appended) ---
+try:
+    _jd_latest_for
+except NameError:
+    def _jd_latest_for(sabun: str, year: int) -> dict:
+        # 호환용 별칭: 일부 구버전 코드에서 _jd_latest_for를 호출합니다.
+        return _jd_latest_for_comp(sabun, year)
