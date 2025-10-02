@@ -97,6 +97,76 @@ def _normalize_private_key(raw: str) -> str:
 def _pin_hash(pin: str, sabun: str) -> str:
     return hashlib.sha256(f"{str(sabun).strip()}:{str(pin).strip()}".encode()).hexdigest()
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Attestation / PIN Utilities
+# ─────────────────────────────────────────────────────────────────────────────
+import json as _json  # (추가) 제출 데이터 해시 직렬화용
+
+def _attest_hash(payload: dict) -> str:
+    """
+    제출 데이터(payload)를 key-sorted JSON으로 직렬화 후 SHA256(hex) 반환.
+    - payload 예: {"year":2025,"eval_type":"자기","target":"1001","evaluator":"2001","scores":{...},"ts":"...","v":"1.0"}
+    """
+    s = _json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(s.encode("utf-8")).hexdigest()
+
+def _client_meta() -> str:
+    """
+    간단한 클라이언트 메타(UA 등) 반환. 세션에 저장된 _ua 가 있으면 우선 사용.
+    내부 런타임 접근은 환경에 따라 실패할 수 있으므로 안전하게 처리.
+    """
+    ua = st.session_state.get("_ua", "")
+    if not ua:
+        try:
+            # 환경에 따라 None 일 수 있음 → 예외 무시
+            ctx = st.runtime.scriptrunner.script_run_context.get_script_run_ctx()
+            if ctx and getattr(ctx, "request", None):
+                ua = ctx.request.headers.get("User-Agent", "")
+        except Exception:
+            ua = ""
+        st.session_state["_ua"] = ua
+    return (ua or "")[:180]  # 너무 길면 잘라서 저장
+
+def verify_pin(user_sabun: str, pin: str) -> bool:
+    """
+    제출 직전 PIN 재인증용.
+    - 우선순위:
+      1) st.session_state["pin_map"] 에 평문 PIN 저장된 경우 → 직접 비교
+      2) st.session_state["pin_hash_map"] 에 사번별 해시 저장된 경우 → _pin_hash 로 비교
+      3) st.session_state["user"] 안에 pin / pin_hash 있는 경우 → 비교
+      4) (없으면) False
+    ※ _pin_hash(pin, sabun): 이미 유틸에 정의되어 있다고 가정
+    """
+    sabun = str(user_sabun).strip()
+    val = str(pin).strip()
+
+    # 1) 평문 맵: { "1001": "1234", ... }
+    pin_map = st.session_state.get("pin_map", {})
+    if sabun in pin_map:
+        return str(pin_map.get(sabun, "")) == val
+
+    # 2) 해시 맵: { "1001": "<hash>", ... }
+    pin_hash_map = st.session_state.get("pin_hash_map", {})
+    if sabun in pin_hash_map:
+        try:
+            return str(pin_hash_map.get(sabun, "")) == _pin_hash(val, sabun)
+        except Exception:
+            pass
+
+    # 3) 현재 사용자 세션 객체에 있는 경우
+    u = st.session_state.get("user", {}) or {}
+    if str(u.get("사번", "")).strip() == sabun:
+        if "pin" in u:
+            return str(u.get("pin", "")) == val
+        if "pin_hash" in u:
+            try:
+                return str(u.get("pin_hash", "")) == _pin_hash(val, sabun)
+            except Exception:
+                pass
+
+    # 4) 기타 미지원 저장소 → 실패
+    return False
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Google Auth / Sheets
 # ══════════════════════════════════════════════════════════════════════════════
@@ -653,15 +723,44 @@ def tab_eval(emp_df: pd.DataFrame):
         with cM2:
             st.progress(min(1.0, total_100 / 100.0), text=f"총점 {total_100}점")
 
+        # ===== 제출 확인(PIN 재확인 + 동의 체크) =====
+        st.markdown("#### 제출 확인")
+        c1, c2 = st.columns([2, 1])
+        with c1:
+            attest_ok = st.checkbox(
+                "본인은 입력한 내용이 사실이며, 회사의 인사평가 정책에 따라 제출함을 확인합니다.",
+                key=f"eval_attest_ok_{kbase}",
+            )
+        with c2:
+            pin_input = st.text_input(
+                "PIN 재입력",
+                value="",
+                type="password",
+                key=f"eval_attest_pin_{kbase}",
+            )
+
         submitted = st.form_submit_button("제출/저장", type="primary", disabled=not edit_mode)
         if submitted and edit_mode:
-            try:
-                rep = upsert_eval_response(emp_df, int(year), eval_type, str(target_sabun), str(me_sabun), scores, "제출")
-                st.success(("제출 완료" if rep["action"] == "insert" else "업데이트 완료") + f" (총점 {rep['total']}점)", icon="✅")
-                st.session_state["eval2_edit_mode"] = False
-                st.rerun()
-            except Exception as e:
-                st.exception(e)
+            # 1) 동의 체크
+            if not attest_ok:
+                st.error("제출 전에 확인란에 체크해주세요.")
+            # 2) PIN 검증
+            elif not verify_pin(me_sabun, pin_input):
+                st.error("PIN이 올바르지 않습니다.")
+            else:
+                try:
+                    rep = upsert_eval_response(
+                        emp_df, int(year), eval_type, str(target_sabun), str(me_sabun), scores, "제출"
+                    )
+                    st.success(
+                        ("제출 완료" if rep.get("action") == "insert" else "업데이트 완료")
+                        + f" (총점 {rep.get('total','?')}점)",
+                        icon="✅",
+                    )
+                    st.session_state["eval2_edit_mode"] = False
+                    st.rerun()
+                except Exception as e:
+                    st.exception(e)
 
     st.markdown("#### 내 제출 현황")
     try:
