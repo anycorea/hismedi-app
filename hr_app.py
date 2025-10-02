@@ -626,7 +626,7 @@ def tab_eval(emp_df: pd.DataFrame):
             scores[iid] = int(st.session_state[rkey])
 
         total_100 = round(sum(scores.values()) * (100.0 / max(1, len(items_sorted) * 5)), 1)
-        st.mark다운("---")
+        st.markdown("---")
         cM1, cM2 = st.columns([1, 3])
         with cM1:
             st.metric("합계(100점 만점)", total_100)
