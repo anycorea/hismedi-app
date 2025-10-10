@@ -411,56 +411,120 @@ def get_global_target()->Tuple[str,str]:
 # Left: 직원선택 (Enter 동기화)
 # ══════════════════════════════════════════════════════════════════════════════
 def render_staff_picker_left(emp_df: pd.DataFrame):
-    u=st.session_state.get("user",{}); me=str(u.get("사번",""))
-    df=emp_df.copy()
-    if not is_admin(me):
-        allowed=get_allowed_sabuns(emp_df, me, include_self=True)
-        df=df[df["사번"].astype(str).isin(allowed)].copy()
+    """
+    좌측 패널: 검색 + 표(단일행 클릭으로 대상자 동기화)
+    - 체크박스/버튼 없음
+    - 행 클릭 시 hidden input 을 통해 sabun 전달 -> 전역 타겟 set
+    - 현재 선택된 sabun 을 표에 하이라이트
+    """
+    u = st.session_state.get("user", {})
+    me = str(u.get("사번", ""))
 
+    # 권한 필터
+    df = emp_df.copy()
+    if not is_admin(me):
+        allowed = get_allowed_sabuns(emp_df, me, include_self=True)
+        df = df[df["사번"].astype(str).isin(allowed)].copy()
+
+    # 검색
     with st.form("left_search_form", clear_on_submit=False):
         q = st.text_input("검색(사번/이름)", key="pick_q", placeholder="사번 또는 이름")
         submitted = st.form_submit_button("검색 적용(Enter)")
-    view=df.copy()
+
+    view = df.copy()
     if q.strip():
-        k=q.strip().lower()
-        view=view[view.apply(lambda r: any(k in str(r[c]).lower() for c in ["사번","이름"] if c in r), axis=1)]
+        k = q.strip().lower()
+        view = view[view.apply(
+            lambda r: any(k in str(r[c]).lower() for c in ["사번", "이름"] if c in r),
+            axis=1
+        )]
 
-    view=view.sort_values("사번") if "사번" in view.columns else view
-    sabuns = view["사번"].astype(str).tolist()
-    names  = view.get("이름", pd.Series(['']*len(view))).astype(str).tolist()
-    opts   = [f"{s} - {n}" for s,n in zip(sabuns, names)]
+    if "사번" in view.columns:
+        try: view["__sab_int__"] = pd.to_numeric(view["사번"], errors="coerce")
+        except Exception: view["__sab_int__"] = None
+        view = view.sort_values(["__sab_int__", "사번"]).drop(columns=["__sab_int__"])
 
-    pre_sel_sab = st.session_state.get("left_preselect_sabun", "")
-    if submitted:
-        exact_idx = -1
-        if q.strip():
-            for i,(s,n) in enumerate(zip(sabuns,names)):
-                if q.strip()==s or q.strip()==n:
-                    exact_idx = i; break
-        target_idx = exact_idx if exact_idx >= 0 else (0 if sabuns else -1)
-        if target_idx >= 0:
-            pre_sel_sab = sabuns[target_idx]
-            st.session_state["left_preselect_sabun"] = pre_sel_sab
+    # Enter 검색 시 첫 행 자동 선택
+    if submitted and not view.empty:
+        first = str(view.iloc[0]["사번"])
+        st.session_state["__rowpick_value__"] = first
 
-    idx0 = 0
-    if pre_sel_sab:
-        try: idx0 = 1 + sabuns.index(pre_sel_sab)
-        except ValueError: idx0 = 0
+    # 현재 글로벌 타겟
+    g_sab, g_name = get_global_target()
+    cur = (st.session_state.get("__rowpick_value__") or g_sab or "").strip()
 
-    picked=st.selectbox("대상 선택", ["(선택)"]+opts, index=idx0, key="left_pick")
-    if picked and picked!="(선택)":
-        sab=picked.split(" - ",1)[0].strip()
-        name=picked.split(" - ",1)[1].strip() if " - " in picked else ""
-        set_global_target(sab, name)
-        st.session_state["eval2_target_sabun"]=sab
-        st.session_state["eval2_target_name"]=name
-        st.session_state["jd2_target_sabun"]=sab
-        st.session_state["jd2_target_name"]=name
-        st.session_state["cmpS_target_sabun"]=sab
-        st.session_state["cmpS_target_name"]=name
+    # 표시 컬럼
+    cols = [c for c in ["사번", "이름", "부서1", "부서2", "직급"] if c in view.columns]
+    v = view[cols].copy().astype(str)
 
-    cols=[c for c in ["사번","이름","부서1","부서2","직급"] if c in view.columns]
-    st.dataframe(view[cols], use_container_width=True, height=300, hide_index=True)
+    # ----- HTML 테이블 + JS(행 클릭) -----
+    # 숨겨진 입력 훅(행 클릭 시 sabun 값을 주입)
+    hook_key = "left_rowpick_hook"
+    st.text_input(" ", key=hook_key, label_visibility="collapsed", value=cur)
+
+    # 스타일 + 테이블 렌더
+    def _row_html(r):
+        sab = str(r["사번"])
+        tds = "".join(f"<td>{_html_escape(str(r[c]))}</td>" for c in cols)
+        cls = "picked" if (sab == cur and cur) else ""
+        return f'<tr data-sabun="{_html_escape(sab)}" class="{cls}">{tds}</tr>'
+
+    table_html = f"""
+    <style>
+      .picktbl {{ width:100%; border-collapse:collapse; }}
+      .picktbl th, .picktbl td {{ border:1px solid #e5e7eb; padding:.5rem .6rem; font-size:.92rem; }}
+      .picktbl tbody tr:hover {{ background:#f3f4f6; cursor:pointer; }}
+      .picktbl tr.picked {{ background:#e6ffed !important; }}
+    </style>
+    <table class="picktbl" id="picktbl">
+      <thead><tr>{"".join(f"<th>{_html_escape(c)}</th>" for c in cols)}</tr></thead>
+      <tbody>
+        {"".join(_row_html(r) for _, r in v.iterrows())}
+      </tbody>
+    </table>
+    <script>
+    (function(){{
+      const doc = window.parent.document;
+      const tbl = doc.getElementById('picktbl');
+      function setHook(val){{
+        const input = Array.from(doc.querySelectorAll('input'))
+          .find(i => (i.getAttribute('data-testid')||'').includes('{hook_key}') || (i.name||'')==='stTextInput');
+        if(!input) return;
+        input.value = val;
+        input.dispatchEvent(new Event('input', {{bubbles:true}}));
+        input.dispatchEvent(new Event('change', {{bubbles:true}}));
+      }}
+      if(tbl && !tbl._bound){{
+        tbl._bound = true;
+        tbl.addEventListener('click', function(e){{
+          const tr = e.target.closest('tr[data-sabun]');
+          if(!tr) return;
+          const sab = tr.getAttribute('data-sabun');
+          setHook(sab);
+        }});
+      }}
+    }})();
+    </script>
+    """
+    st.markdown(table_html, unsafe_allow_html=True)
+
+    # 훅 값이 갱신되면 전역 타겟 동기화
+    picked = st.session_state.get(hook_key, "").strip()
+    if picked:
+        name = _emp_name_by_sabun(emp_df, picked)
+        set_global_target(picked, name)
+        st.session_state["eval2_target_sabun"] = picked
+        st.session_state["eval2_target_name"]  = name
+        st.session_state["jd2_target_sabun"]   = picked
+        st.session_state["jd2_target_name"]    = name
+        st.session_state["cmpS_target_sabun"]  = picked
+        st.session_state["cmpS_target_name"]   = name
+
+    # 선택 상태 안내
+    if picked:
+        st.success(f"대상자: {name} ({picked})", icon="✅")
+    elif g_sab:
+        st.info(f"대상자: {g_name} ({g_sab})", icon="👤")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 인사평가
