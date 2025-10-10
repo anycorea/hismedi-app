@@ -395,13 +395,13 @@ def get_global_target()->Tuple[str,str]:
             str(st.session_state.get("glob_target_name","") or ""))
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Left: 직원선택 (표 왼쪽 '선택' 버튼 컬럼 / 잔상 無 / 기본 폰트·줄간격 / JS·URL 無)
+# Left: 직원선택 (첫 열 '▶' 초소형 버튼 + 나머지 표 / 기본 폰트·줄간격 / 잔상 無)
 # ══════════════════════════════════════════════════════════════════════════════
 def render_staff_picker_left(emp_df: pd.DataFrame):
     """
-    - st.data_editor 표에 '선택' 버튼 컬럼을 사용 (눌림 상태가 남지 않아 잔상 無)
-    - 본문 컬럼은 읽기 전용
-    - 버튼 클릭 즉시 전역 동기화 + 1회 rerun으로 하이라이트/상태 안정화
+    - 첫 열: 아주 작은 '▶' 버튼(선택)
+    - 나머지 열: 텍스트(사번/이름/부서1/부서2/직급) → 표처럼 한눈에
+    - 한 번 클릭으로 즉시 동기화, 잔상(두 줄 체크) 없음, JS/URL/라디오 없음
     """
 
     # 1) 권한 필터
@@ -433,101 +433,69 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
             view["__sab_int__"] = None
         view = view.sort_values(["__sab_int__", "사번"]).drop(columns=["__sab_int__"])
 
-    # 4) 표 데이터 준비
-    cols_body = [c for c in ["사번", "이름", "부서1", "부서2", "직급"] if c in view.columns]
-    table_df = view[cols_body].copy().astype(str)
-
-    # 5) 현재 선택값 (하이라이트 용)
+    # 4) 표시 컬럼 / 현재 선택
+    cols = [c for c in ["사번", "이름", "부서1", "부서2", "직급"] if c in view.columns]
     g_sab, _ = get_global_target()
     cur = (st.session_state.get("left_selected_sabun") or g_sab or "").strip()
 
-    # 6) 스타일(기본 톤 유지, 패딩만 살짝 다이어트 + 선택 행 약한 하이라이트)
-    st.markdown("""
-    <style>
-      div[data-testid="stDataEditor"] .st-de-table td,
-      div[data-testid="stDataEditor"] .st-de-table th { padding: 6px 8px !important; }
-      /* 선택된 행을 약하게 표시하고 싶다면 아래를 켜세요 (현재 주석) */
-      /* div[data-testid="stDataEditor"] tr[data-st-de-row-selected="true"] td { background:#e6ffed !important; } */
-    </style>
-    """, unsafe_allow_html=True)
+    # 5) 표 헤더 (columns로 얇게)
+    #    첫 열(버튼)은 아주 좁게, 나머지는 균형 있게
+    widths = [0.5, 1.2, 1.0, 1.0, 1.0, 0.9]  # [버튼, 사번, 이름, 부서1, 부서2, 직급]
+    h = st.columns(widths, gap="small")
+    with h[0]: st.markdown("****")  # 버튼 헤더는 비워둠(너무 시끄럽지 않게)
+    with h[1]: st.markdown("**사번**")
+    with h[2]: st.markdown("**이름**")
+    with h[3]: st.markdown("**부서1**")
+    with h[4]: st.markdown("**부서2**")
+    with h[5]: st.markdown("**직급**")
 
-    # 7) 컬럼 설정: '선택'은 버튼, 본문은 읽기 전용 텍스트
-    #    ButtonColumn은 값이 남지 않으므로 "두 개 체크" 같은 잔상이 생기지 않습니다.
-    col_cfg = {
-        "선택": st.column_config.ButtonColumn(
-            "선택",
-            help="이 행을 선택합니다.",
-            width="small",
-            label="선택",
-        )
-    }
-    for c in cols_body:
-        col_cfg[c] = st.column_config.TextColumn(c, disabled=True)
+    # 6) 각 행 렌더
+    #    - 첫 열: 아주 작은 버튼(▶). 라벨은 이모지/문자라 기본 폰트/줄간격 유지.
+    #    - 선택된 행은 이름 앞에 ✅ 아이콘만 가볍게 표시(배경색 하이라이트 없이 깔끔).
+    picked = None
 
-    # 8) 표에 버튼 컬럼 삽입(맨 앞)
-    table_df = table_df.copy()
-    table_df.insert(0, "선택", "선택")  # 표시용. 클릭 이벤트는 위젯 상태에서 감지
+    for _, r in view[cols].iterrows():
+        sab = str(r["사번"])
+        name = str(r.get("이름",""))
+        d1 = str(r.get("부서1",""))
+        d2 = str(r.get("부서2",""))
+        rk = str(r.get("직급",""))
 
-    table_key = "left_picker_table"
+        row = st.columns(widths, gap="small")
 
-    # 9) 표 렌더 (st.data_editor 반환값: 편집 반영된 DF)
-    edited_df = st.data_editor(
-        table_df,
-        key=table_key,
-        hide_index=True,
-        use_container_width=True,
-        height=min(380, 52 + 28 * (len(table_df) + 1)),
-        num_rows="fixed",
-        column_order=["선택"] + cols_body,
-        column_config=col_cfg,
-        disabled=False,  # 버튼 클릭을 위해 False (본문은 컬럼 단위로 잠금)
-    )
+        # 첫 열: 작고 조용한 선택 버튼
+        with row[0]:
+            # 작은 라벨(▶) + 키는 고유
+            if st.button("▶", key=f"pick_{sab}"):
+                picked = sab
 
-    # 10) 어떤 버튼이 눌렸는지 감지
-    #  - Streamlit은 ButtonColumn 클릭 시 해당 셀에 "clicked" 이벤트를 남깁니다.
-    #  - 버전별 state 구조 차이를 고려하여 폭넓게 탐색합니다.
-    clicked_row_idx = None
-    try:
-        st_state = st.session_state.get(table_key, {})
-        # 신버전: edited_rows에 {row_index: {'선택': True, '_action': 'clicked'}} 형태
-        er = st_state.get("edited_rows", {})
-        for idx, payload in (er.items() if isinstance(er, dict) else []):
-            if isinstance(payload, dict) and payload.get("_action") == "clicked":
-                clicked_row_idx = int(idx)
-                break
-        # 일부 버전: 'clicked' 목록이 따로 올 수도 있음
-        if clicked_row_idx is None and isinstance(st_state.get("clicked"), list):
-            cl = st_state.get("clicked")
-            if cl: clicked_row_idx = int(cl[0])
-    except Exception:
-        clicked_row_idx = None
+        # 나머지 열: 텍스트만 렌더 (앱 기본 폰트/줄간격)
+        # 선택된 행이면 이름 앞에 ✅만 살짝
+        sel_marker = "✅ " if cur and sab == cur else ""
+        with row[1]: st.markdown(sab)
+        with row[2]: st.markdown(f"{sel_marker}{name}")
+        with row[3]: st.markdown(d1 or "-")
+        with row[4]: st.markdown(d2 or "-")
+        with row[5]: st.markdown(rk or "-")
 
-    picked_sabun = ""
-    if clicked_row_idx is not None:
-        # 해당 행의 사번을 취득
-        try:
-            picked_sabun = str(edited_df.iloc[clicked_row_idx]["사번"])
-        except Exception:
-            pass
+    # 7) 검색 Enter 시 첫 행 자동 선택
+    if submitted and not view.empty:
+        picked = str(view.iloc[0]["사번"])
 
-    # 11) 검색 Enter 시 첫 행 자동 선택
-    if submitted and not table_df.empty:
-        picked_sabun = str(edited_df.iloc[0]["사번"])
+    # 8) 선택 즉시 반영
+    if picked and picked != cur:
+        nm = _emp_name_by_sabun(emp_df, picked)
+        set_global_target(picked, nm)
+        st.session_state["eval2_target_sabun"] = picked
+        st.session_state["eval2_target_name"]  = nm
+        st.session_state["jd2_target_sabun"]   = picked
+        st.session_state["jd2_target_name"]    = nm
+        st.session_state["cmpS_target_sabun"]  = picked
+        st.session_state["cmpS_target_name"]   = nm
+        st.session_state["left_selected_sabun"]= picked
+        st.rerun()  # 버튼은 상태가 남지 않으므로, 1회 리런으로 표시 안정화
 
-    # 12) 선택 반영 (전역 동기화 + 1회 rerun 으로 UI 업데이트 확정)
-    if picked_sabun and picked_sabun != cur:
-        name = _emp_name_by_sabun(emp_df, picked_sabun)
-        set_global_target(picked_sabun, name)
-        st.session_state["eval2_target_sabun"] = picked_sabun
-        st.session_state["eval2_target_name"]  = name
-        st.session_state["jd2_target_sabun"]   = picked_sabun
-        st.session_state["jd2_target_name"]    = name
-        st.session_state["cmpS_target_sabun"]  = picked_sabun
-        st.session_state["cmpS_target_name"]   = name
-        st.session_state["left_selected_sabun"]= picked_sabun
-        st.rerun()
-
-    # 13) 안내
+    # 9) 상태 안내
     cur = st.session_state.get("left_selected_sabun", cur)
     if cur:
         sel_name = _emp_name_by_sabun(emp_df, cur)
