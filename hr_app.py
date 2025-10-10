@@ -411,14 +411,7 @@ def get_global_target()->Tuple[str,str]:
 # Left: 직원선택 (단일 행 클릭 선택 + Enter 자동선택 동기화)
 # ══════════════════════════════════════════════════════════════════════════════
 def render_staff_picker_left(emp_df: pd.DataFrame):
-    """
-    좌측 패널: 검색 + 표(단일행 클릭으로 대상자 동기화)
-    - 체크박스/버튼 없음
-    - 행 클릭 시 숨은 입력(훅)에 사번 주입 → 전역 타겟 set → 세 탭 대상 동기화
-    - 현재 선택된 사번 행은 연두색 하이라이트
-    """
-
-    # 1회성 rerun 플래그 리셋 (이전에 한번 돌았다면 False로 복귀)
+    # 1회성 rerun 플래그 리셋
     if st.session_state.get("__did_rerun__", False):
         st.session_state["__did_rerun__"] = False
 
@@ -431,7 +424,7 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
         allowed = get_allowed_sabuns(emp_df, me, include_self=True)
         df = df[df["사번"].astype(str).isin(allowed)].copy()
 
-    # ── 검색 ───────────────────────────────────────────────────────────────────
+    # 검색
     with st.form("left_search_form", clear_on_submit=False):
         q = st.text_input("검색(사번/이름)", key="pick_q", placeholder="사번 또는 이름")
         submitted = st.form_submit_button("검색 적용(Enter)")
@@ -455,7 +448,7 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
     if submitted and not view.empty:
         first = str(view.iloc[0]["사번"])
         st.session_state["__rowpick_value__"] = first
-        st.session_state["left_rowpick_hook"] = first  # 훅 주입(즉시 동기화용)
+        st.session_state["left_rowpick_hook"] = first
 
     # 현재 글로벌 타겟
     g_sab, g_name = get_global_target()
@@ -465,19 +458,19 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
     cols = [c for c in ["사번", "이름", "부서1", "부서2", "직급"] if c in view.columns]
     v = view[cols].copy().astype(str)
 
-    # ── 숨은 입력 훅(행 클릭 시 sabun 값을 주입) ────────────────────────────────
+    # 숨은 입력 훅
     hook_key   = "left_rowpick_hook"
-    hook_label = f"hook::{hook_key}"  # JS가 찾을 고유 라벨(aria-label)
+    hook_label = f"hook::{hook_key}"
     st.text_input(hook_label, key=hook_key, label_visibility="collapsed", value=cur)
 
-    # ── HTML 테이블 + JS(행 클릭) ───────────────────────────────────────────────
+    # HTML 테이블 + 클릭 JS
     def _row_html(r):
         sab = str(r["사번"])
         tds = "".join(f"<td>{_html_escape(str(r[c]))}</td>" for c in cols)
         cls = "picked" if (sab == cur and cur) else ""
         return f'<tr data-sabun="{_html_escape(sab)}" class="{cls}">{tds}</tr>'
 
-    rows_html = "".join(_row_html(r) for _, r in v.iterrows())
+    rows_html  = "".join(_row_html(r) for _, r in v.iterrows())
     thead_html = "".join(f"<th>{_html_escape(c)}</th>" for c in cols)
 
     table_html = f"""
@@ -493,7 +486,7 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
     </table>
     <script>
     (function(){{
-      const doc = document;  // parent 아님!
+      const doc = document;
       const tbl = doc.getElementById('picktbl');
 
       function setHook(val){{
@@ -516,15 +509,24 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
     }})();
     </script>
     """
-    st.markdown(table_html, unsafe_allow_html=True)
 
-    # ── 훅 값이 갱신되면 전역 타겟/세 탭 동기화 + 1회 rerun ────────────────────
+    # ★★ 핵심: st.html 사용 (Streamlit 1.38+)
+    _used_html = False
+    try:
+        st.html(table_html)   # 실행 가능한 HTML
+        _used_html = True
+    except Exception:
+        pass
+
+    if not _used_html:
+        # B안으로 폴백
+        _render_picker_with_data_editor(v, cols, hook_key)
+
+    # 훅 값 변화 → 전역 타겟/세 탭 동기화 + 1회 rerun
     picked = st.session_state.get(hook_key, "").strip()
     if picked:
         name = _emp_name_by_sabun(emp_df, picked)
         set_global_target(picked, name)
-
-        # 각 탭 대상 동기화
         st.session_state["eval2_target_sabun"] = picked
         st.session_state["eval2_target_name"]  = name
         st.session_state["jd2_target_sabun"]   = picked
@@ -532,12 +534,11 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
         st.session_state["cmpS_target_sabun"]  = picked
         st.session_state["cmpS_target_name"]   = name
 
-        # 하이라이트/상태 즉시 반영(무한루프 방지용 플래그)
         if not st.session_state.get("__did_rerun__", False):
             st.session_state["__did_rerun__"] = True
             st.rerun()
 
-    # ── 선택 상태 안내 ─────────────────────────────────────────────────────────
+    # 안내
     if picked:
         st.success(f"대상자: {name} ({picked})", icon="✅")
     elif g_sab:
