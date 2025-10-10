@@ -395,13 +395,13 @@ def get_global_target()->Tuple[str,str]:
             str(st.session_state.get("glob_target_name","") or ""))
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Left: 직원선택 (첫 열 '▶' 초소형 버튼 + 나머지 표 / 기본 폰트·줄간격 / 잔상 無)
+# Left: 직원선택 (표형 헤더 정렬 + 초소형 ▶ 버튼 / 기본 폰트·줄간격 / JS·URL 無)
 # ══════════════════════════════════════════════════════════════════════════════
 def render_staff_picker_left(emp_df: pd.DataFrame):
     """
-    - 첫 열: 아주 작은 '▶' 버튼(선택)
-    - 나머지 열: 텍스트(사번/이름/부서1/부서2/직급) → 표처럼 한눈에
-    - 한 번 클릭으로 즉시 동기화, 잔상(두 줄 체크) 없음, JS/URL/라디오 없음
+    - 첫 열 ▶ 초소형 버튼 + 나머지 텍스트 열 → 표처럼 1:1 정렬
+    - 버튼은 상태가 남지 않아 잔상 無, 한 번 클릭으로 즉시 동기화
+    - 기본 폰트/줄간격 유지 + 가는 구분선으로 표 느낌 강화
     """
 
     # 1) 권한 필터
@@ -438,22 +438,44 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
     g_sab, _ = get_global_target()
     cur = (st.session_state.get("left_selected_sabun") or g_sab or "").strip()
 
-    # 5) 표 헤더 (columns로 얇게)
-    #    첫 열(버튼)은 아주 좁게, 나머지는 균형 있게
-    widths = [0.5, 1.2, 1.0, 1.0, 1.0, 0.9]  # [버튼, 사번, 이름, 부서1, 부서2, 직급]
+    # 5) 스타일: ▶ 버튼 초소형화 + 행 구분선 + 호버
+    st.markdown("""
+    <style>
+      /* 이 섹션 안에서만 적용되도록 data-testid 기준 약하게 범위 제한 */
+      div[data-testid="column"] button[kind="secondary"]{
+        padding: 0.1rem 0.35rem !important;
+        font-size: 12px !important;
+        line-height: 1 !important;
+        min-height: 22px !important;
+        height: 22px !important;
+        border-radius: 6px !important;
+      }
+      /* 행 구분선 */
+      .row-sep { border-bottom: 1px solid #eef2f7; margin: 2px 0 6px 0; }
+      /* 호버시 약간 강조(텍스트 칼럼) */
+      .row-hover:hover { background: #f9fafb; border-radius: 6px; }
+    </style>
+    """, unsafe_allow_html=True)
+
+    # 6) 칼럼 폭(헤더와 행에서 동일하게 재사용)  ▶ | 사번 | 이름 | 부서1 | 부서2 | 직급
+    widths = [0.6, 1.1, 1.2, 1.1, 1.1, 0.9]  # 필요시 숫자만 살짝 조절하시면 됩니다.
+
+    # 7) 헤더(표형)
     h = st.columns(widths, gap="small")
-    with h[0]: st.markdown("****")  # 버튼 헤더는 비워둠(너무 시끄럽지 않게)
+    with h[0]: st.markdown("&nbsp;")  # 버튼 칸(비움)
     with h[1]: st.markdown("**사번**")
     with h[2]: st.markdown("**이름**")
     with h[3]: st.markdown("**부서1**")
     with h[4]: st.markdown("**부서2**")
     with h[5]: st.markdown("**직급**")
 
-    # 6) 각 행 렌더
-    #    - 첫 열: 아주 작은 버튼(▶). 라벨은 이모지/문자라 기본 폰트/줄간격 유지.
-    #    - 선택된 행은 이름 앞에 ✅ 아이콘만 가볍게 표시(배경색 하이라이트 없이 깔끔).
+    # 헤더 아래 얇은 선
+    st.markdown('<div class="row-sep"></div>', unsafe_allow_html=True)
+
     picked = None
 
+    # 8) 본문 행(표형 정렬 + 초소형 ▶ 버튼)
+    #    각 행은 동일한 widths로 columns를 만들어 헤더와 완전히 일치시킵니다.
     for _, r in view[cols].iterrows():
         sab = str(r["사번"])
         name = str(r.get("이름",""))
@@ -462,27 +484,32 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
         rk = str(r.get("직급",""))
 
         row = st.columns(widths, gap="small")
-
-        # 첫 열: 작고 조용한 선택 버튼
+        # ▶ 버튼(초소형)
         with row[0]:
-            # 작은 라벨(▶) + 키는 고유
             if st.button("▶", key=f"pick_{sab}"):
                 picked = sab
 
-        # 나머지 열: 텍스트만 렌더 (앱 기본 폰트/줄간격)
-        # 선택된 행이면 이름 앞에 ✅만 살짝
-        sel_marker = "✅ " if cur and sab == cur else ""
-        with row[1]: st.markdown(sab)
-        with row[2]: st.markdown(f"{sel_marker}{name}")
-        with row[3]: st.markdown(d1 or "-")
-        with row[4]: st.markdown(d2 or "-")
-        with row[5]: st.markdown(rk or "-")
+        # 텍스트 칼럼(기본 폰트/줄간격), 현재 선택만 살짝 아이콘
+        sel_prefix = "✅ " if cur and sab == cur else ""
+        with row[1]:
+            st.markdown(f'<div class="row-hover">{sab}</div>', unsafe_allow_html=True)
+        with row[2]:
+            st.markdown(f'<div class="row-hover">{sel_prefix}{name}</div>', unsafe_allow_html=True)
+        with row[3]:
+            st.markdown(f'<div class="row-hover">{d1 or "-"}</div>', unsafe_allow_html=True)
+        with row[4]:
+            st.markdown(f'<div class="row-hover">{d2 or "-"}</div>', unsafe_allow_html=True)
+        with row[5]:
+            st.markdown(f'<div class="row-hover">{rk or "-"}</div>', unsafe_allow_html=True)
 
-    # 7) 검색 Enter 시 첫 행 자동 선택
+        # 행 구분선
+        st.markdown('<div class="row-sep"></div>', unsafe_allow_html=True)
+
+    # 9) 검색 Enter 시 첫 행 자동 선택
     if submitted and not view.empty:
         picked = str(view.iloc[0]["사번"])
 
-    # 8) 선택 즉시 반영
+    # 10) 선택 반영
     if picked and picked != cur:
         nm = _emp_name_by_sabun(emp_df, picked)
         set_global_target(picked, nm)
@@ -493,9 +520,9 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
         st.session_state["cmpS_target_sabun"]  = picked
         st.session_state["cmpS_target_name"]   = nm
         st.session_state["left_selected_sabun"]= picked
-        st.rerun()  # 버튼은 상태가 남지 않으므로, 1회 리런으로 표시 안정화
+        st.rerun()  # 버튼은 상태가 남지 않으므로 1회 리런 후 UI가 안정화됩니다.
 
-    # 9) 상태 안내
+    # 11) 상태 안내
     cur = st.session_state.get("left_selected_sabun", cur)
     if cur:
         sel_name = _emp_name_by_sabun(emp_df, cur)
