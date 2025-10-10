@@ -395,11 +395,16 @@ def get_global_target()->Tuple[str,str]:
             str(st.session_state.get("glob_target_name","") or ""))
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Left: 직원선택 (라디오 + 모노스페이스 정렬 / 행 클릭)
+# Left: 직원선택 (검색 + selectbox 한 줄 선택 / 기본 폰트·줄간격 유지)
 # ══════════════════════════════════════════════════════════════════════════════
 def render_staff_picker_left(emp_df: pd.DataFrame):
-    """표처럼 보이는 라디오 목록. 행 전체 클릭으로 선택 및 전역 동기화."""
-    # 권한 필터
+    """
+    - 검색(사번/이름) + selectbox(자동완성)로 '대상자 1명'을 빠르게 선택
+    - 클릭(선택) 즉시 전역 동기화 (인사평가/직무기술서/직무능력평가에 반영)
+    - JS/컴포넌트/URL 변경 없음, 앱 기본 폰트/줄간격 그대로
+    """
+
+    # 1) 권한 범위 필터
     u  = st.session_state.get("user", {})
     me = str(u.get("사번", ""))
     df = emp_df.copy()
@@ -407,7 +412,7 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
         allowed = get_allowed_sabuns(emp_df, me, include_self=True)
         df = df[df["사번"].astype(str).isin(allowed)].copy()
 
-    # 검색
+    # 2) 검색
     with st.form("left_search_form", clear_on_submit=False):
         q = st.text_input("검색(사번/이름)", key="pick_q", placeholder="사번 또는 이름")
         submitted = st.form_submit_button("검색 적용(Enter)")
@@ -420,7 +425,7 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
             axis=1
         )]
 
-    # 정렬
+    # 정렬(사번 오름차순)
     if "사번" in view.columns:
         try:
             view["__sab_int__"] = pd.to_numeric(view["사번"], errors="coerce")
@@ -428,7 +433,20 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
             view["__sab_int__"] = None
         view = view.sort_values(["__sab_int__", "사번"]).drop(columns=["__sab_int__"])
 
-    # Enter 시 첫 행 자동 선택
+    # 3) 표시 문자열 구성 (앱 기본 폰트/줄간격 유지, 한 줄 요약)
+    cols = [c for c in ["사번", "이름", "부서1", "부서2", "직급"] if c in view.columns]
+    # 사번을 옵션 값으로 사용하고, 보기용 문자열은 format_func로 제공
+    options = view["사번"].astype(str).tolist()
+
+    def _label_row(row) -> str:
+        # 너무 길어지지 않도록 없으면 '-'로
+        c = {k: str(row.get(k, "") or "-") for k in ["사번", "이름", "부서1", "부서2", "직급"]}
+        # 가독 좋은 구분자 사용 · (중점)
+        return f"{c['사번']} · {c['이름']} · {c['부서1']} · {c['부서2']} · {c['직급']}"
+
+    disp_map = {str(r["사번"]): _label_row(r) for _, r in view.iterrows()}
+
+    # 4) 검색 Enter 시 첫 행 자동 선택 + 즉시 동기화
     if submitted and not view.empty:
         first = str(view.iloc[0]["사번"])
         name = _emp_name_by_sabun(emp_df, first)
@@ -441,82 +459,41 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
         st.session_state["cmpS_target_name"]   = name
         st.session_state["left_selected_sabun"]= first
 
-    # 현재 선택값
+    # 5) 현재 선택값
     g_sab, g_name = get_global_target()
-    cur = (st.session_state.get("left_selected_sabun") or g_sab or "").strip()
+    cur = (st.session_state.get("left_selected_sabun") or g_sab or "")
+    try:
+        cur_index = options.index(cur) if cur in options else 0 if options else 0
+    except Exception:
+        cur_index = 0
 
-    # 표시 컬럼
-    cols = [c for c in ["사번", "이름", "부서1", "부서2", "직급"] if c in view.columns]
-    v = view[cols].copy().astype(str)
-
-    # 폭 계산(가시폭 기준) 및 제한
-    maxw = {c: max([_disp_len(c)] + [_disp_len(x) for x in v[c].tolist()]) for c in cols}
-    for c in maxw: maxw[c] = min(maxw[c], 16)
-
-    header_label = "  " + "  ".join(_pad_disp(c, maxw[c]) for c in cols)
-
-    options = []
-    display_map = {}
-    for _, r in v.iterrows():
-        sab = str(r["사번"])
-        row = "  " + "  ".join(_pad_disp(str(r[c]), maxw[c]) for c in cols)
-        options.append(sab); display_map[sab]=row
-
-    cur_idx = options.index(cur) if (cur and cur in options) else 0 if options else 0
-
-    # 스타일
-    st.markdown("""
-    <style>
-      div[data-testid="stRadio"] input[type="radio"] { position:absolute !important; left:-9999px !important; opacity:0 !important; width:0 !important; height:0 !important; }
-      div[data-testid="stRadio"] label p {
-        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
-        white-space: pre !important;
-        font-size: 13px !important;
-        line-height: 1.25 !important;
-        margin: 0 !important;
-      }
-      div[data-testid="stRadio"] > div { gap: 6px !important; }
-      div[data-testid="stRadio"] label[data-selected="true"] { background: #e6ffed !important; border-radius: 6px; }
-    </style>
-    """, unsafe_allow_html=True)
-
-    # 헤더 표시 (모노스페이스 pre를 얇은 헤더 스타일로)
-    st.markdown(
-        f"<div style=\"border:1px solid #e5e7eb;border-radius:6px;padding:6px 8px;background:#f9fafb;white-space:pre;"
-        "font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;"
-        "font-size:13px;line-height:1.25\">{header_label}</div>",
-        unsafe_allow_html=True,
-    )
-
-    # 라디오
-    selected = st.radio(
-        label="직원 선택",
+    # 6) selectbox (앱 기본 UI 그대로 / 한 번 클릭으로 선택)
+    selected = st.selectbox(
+        "대상 선택",
         options=options,
-        index=cur_idx if options else 0,
-        format_func=lambda sab: display_map.get(sab, sab),
-        label_visibility="collapsed",
-        key="left_radio_picker",
+        index=cur_index if options else 0,
+        format_func=lambda sab: disp_map.get(str(sab), str(sab)),
+        help="리스트에서 대상자 한 명을 선택하세요. (입력하면 자동완성됩니다.)",
+        key="left_select_picker",
     )
 
+    # 7) 선택 즉시 전역 동기화
     if selected and selected != cur:
-        name = _emp_name_by_sabun(emp_df, selected)
-        set_global_target(selected, name)
-        st.session_state["eval2_target_sabun"] = selected
+        name = _emp_name_by_sabun(emp_df, str(selected))
+        set_global_target(str(selected), name)
+        st.session_state["eval2_target_sabun"] = str(selected)
         st.session_state["eval2_target_name"]  = name
-        st.session_state["jd2_target_sabun"]   = selected
+        st.session_state["jd2_target_sabun"]   = str(selected)
         st.session_state["jd2_target_name"]    = name
-        st.session_state["cmpS_target_sabun"]  = selected
+        st.session_state["cmpS_target_sabun"]  = str(selected)
         st.session_state["cmpS_target_name"]   = name
-        st.session_state["left_selected_sabun"]= selected
-        cur = selected
+        st.session_state["left_selected_sabun"]= str(selected)
+        cur = str(selected)
 
+    # 8) 현재 선택 안내 (기본 폰트/여백 그대로)
     if cur:
         sel_name = _emp_name_by_sabun(emp_df, cur)
-        st.success(f"대상자: {sel_name} ({cur})", icon="✅")
-    else:
-        st.info("좌측 목록에서 행을 클릭해 대상자를 선택하세요.", icon="👤")
-
-# (The rest of the app remains identical to the user's provided file.)
+        st.caption(f"선택됨: {sel_name} ({cur})")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 인사평가
