@@ -410,18 +410,17 @@ def get_global_target()->Tuple[str,str]:
 import urllib.parse
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Left: 직원선택 (st.data_editor 단일행 선택 / JS·컴포넌트·URL 변경 없음 / 컴팩트)
+# Left: 직원선택 (라디오 기반 "표 행 클릭" 버전 / JS·URL 변경 없음 / 초심플·안정)
 # ══════════════════════════════════════════════════════════════════════════════
 def render_staff_picker_left(emp_df: pd.DataFrame):
     """
-    - 표는 st.data_editor로 렌더링 (단일 행 선택)
-    - 각 컬럼은 읽기 전용(편집 불가)으로 막고, 선택만 가능하도록 구성
-    - 체크박스/라디오/버튼/JS/쿼리파라미터 전혀 사용하지 않음
-    - 검색 Enter 시 첫 행 자동 선택 및 즉시 글로벌 대상 동기화
+    - 검색 + '표처럼 보이는 라디오 리스트'로 구성
+    - 라디오의 원(circle)은 CSS로 숨기고, 각 라벨을 표 한 행처럼 스타일링
+    - 사용자는 '행 전체 클릭'만 느끼고, 내부적으로는 라디오 선택 → 즉시 전역 동기화
     """
 
     # ── 권한 필터 ─────────────────────────────────────────────────────────────
-    u = st.session_state.get("user", {})
+    u  = st.session_state.get("user", {})
     me = str(u.get("사번", ""))
     df = emp_df.copy()
     if not is_admin(me):
@@ -449,91 +448,117 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
             view["__sab_int__"] = None
         view = view.sort_values(["__sab_int__", "사번"]).drop(columns=["__sab_int__"])
 
-    # ── Enter 시 첫 행 자동선택 + 즉시 동기화 ─────────────────────────────────
+    # ── Enter 시 첫 행 자동 선택 + 즉시 동기화 ─────────────────────────────────
     if submitted and not view.empty:
         first = str(view.iloc[0]["사번"])
         _sync_global_target_from_sabun(emp_df, first)
-        st.session_state["left_selected_sabun"] = first  # 하이라이트 기준
+        st.session_state["left_selected_sabun"] = first
 
     # 현재 선택값(세션/글로벌)
     g_sab, g_name = get_global_target()
     cur = (st.session_state.get("left_selected_sabun") or g_sab or "").strip()
 
-    # ── 표시 컬럼 ────────────────────────────────────────────────────────────
+    # 표시 컬럼
     cols = [c for c in ["사번", "이름", "부서1", "부서2", "직급"] if c in view.columns]
     v = view[cols].copy().astype(str)
 
-    # ── 컴팩트 스타일: 높이·글씨 크기·패딩 축소 ──────────────────────────────
-    st.markdown("""
+    # ── 라디오 옵션 구성 : value=사번, label=표시문자열 ────────────────────────
+    options = []
+    labels  = []
+    for _, r in v.iterrows():
+        sab = str(r["사번"])
+        # 라벨: 표 느낌을 주기 위해 탭 정렬 대신 grid CSS로 맞출 것
+        lbl = [str(r.get(c, "")) for c in cols]
+        options.append(sab)
+        labels.append(lbl)
+
+    # 현재 선택 index
+    cur_idx = 0
+    if cur and cur in options:
+        cur_idx = options.index(cur)
+
+    # ── 표 스타일(CSS) : 라디오 숨기고, 라벨을 '행'처럼 ───────────────────────
+    st.markdown(f"""
     <style>
-      /* 표 전체를 컴팩트하게 */
-      div[data-testid="stDataEditor"] * { font-size: 12.5px; }
-      div[data-testid="stDataEditor"] .st-de-table { line-height: 1.2; }
-      div[data-testid="stDataEditor"] .st-de-table td, 
-      div[data-testid="stDataEditor"] .st-de-table th {
-        padding: 4px 6px !important;
-      }
-      /* 선택 열(체크박스) 시각적으로 최소화 */
-      div[data-testid="stDataEditor"] [data-testid="stCheckbox"] {
-        transform: scale(0.9);
-      }
-      /* 선택된 행 약한 하이라이트 (내장 강조 외에 추가) */
-      /* 일부 버전에선 자동 강조만 보일 수도 있음 */
+      /* 라디오 원형 숨김 */
+      div[data-testid="stRadio"] input[type="radio"] {{
+        display: none !important;
+      }}
+      /* 라디오 컨테이너 스크롤 & 컴팩트 */
+      .rowradio-wrap {{
+        border:1px solid #e5e7eb; border-radius:8px; overflow:hidden;
+      }}
+      .rowradio-head, .rowradio-row {{
+        display:grid; grid-template-columns: repeat({len(cols)}, minmax(0, 1fr));
+        align-items:center;
+      }}
+      .rowradio-head {{
+        background:#f9fafb; border-bottom:1px solid #e5e7eb; font-weight:600;
+      }}
+      .rowradio-head div, .rowradio-row label {{
+        padding:.45rem .55rem; font-size:.92rem;
+      }}
+      .rowradio-scroll {{ max-height:420px; overflow:auto; }}
+      /* 각 라벨(한 행)을 블록으로 전체 클릭 가능하게 */
+      .rowradio-row label {{
+        display:block; width:100%;
+        border-bottom:1px solid #f1f5f9;
+        cursor:pointer; user-select:none;
+      }}
+      .rowradio-row label:hover {{ background:#f3f4f6; }}
+      /* 선택된 행 하이라이트 */
+      .rowradio-row.selected label {{ background:#e6ffed !important; }}
     </style>
     """, unsafe_allow_html=True)
 
-    # ── 컬럼 전부 읽기 전용 설정 ─────────────────────────────────────────────
-    col_cfg = {}
-    for c in cols:
-        col_cfg[c] = st.column_config.TextColumn(c, disabled=True)
-
-    # ── data_editor 렌더: 편집은 막고(selection 위해 disabled=False) ──────────
-    table_key = "left_picker_table"
-    st.data_editor(
-        v,
-        key=table_key,
-        hide_index=True,
-        use_container_width=True,
-        height=min(420, 44 + 28 * (len(v) + 1)),  # 컴팩트 높이
-        num_rows="fixed",
-        column_order=cols,
-        column_config=col_cfg,
-        disabled=False,          # ★ 선택 가능하도록 False (편집은 개별 컬럼 disabled로 차단)
+    # ── 헤더 출력 ────────────────────────────────────────────────────────────
+    st.markdown('<div class="rowradio-wrap">', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="rowradio-head">' +
+        "".join(f"<div>{_html_escape(c)}</div>" for c in cols) +
+        '</div><div class="rowradio-scroll">', unsafe_allow_html=True
     )
 
-    # ── 선택 행 읽기 (버전별 selection 경로 대응) ────────────────────────────
-    selected_rows = []
-    # 신/구 버전 호환: rows, indices, selection_set 등 여러 경로 탐색
-    try:
-        sel = st.session_state[table_key].get("selection", {})
-        if isinstance(sel, dict):
-            if "rows" in sel and sel["rows"]:
-                selected_rows = sel["rows"]
-            elif "indices" in sel and sel["indices"]:
-                selected_rows = sel["indices"]
-            elif "row_indices" in sel and sel["row_indices"]:
-                selected_rows = sel["row_indices"]
-    except Exception:
-        selected_rows = []
+    # ── 라디오 자체는 하나만 렌더: label을 그리드로 변환해서 표처럼 보이게 ──
+    # 포맷 함수로 labels[cur_idx] 같은 2차원 라벨을 예쁘게 출력
+    # → trick: 라디오 기본 라벨은 안 쓰고, 아래에 우리가 동일 순서로 커스텀 라벨을 렌더
+    selected = st.radio(
+        label="직원 선택",
+        options=options,
+        index=cur_idx if options else 0,
+        format_func=lambda sab: sab,  # 실제 라벨은 아래 커스텀 블록이 담당
+        label_visibility="collapsed",
+        key="left_radio_picker",
+    )
 
-    # ── 선택이 있으면 동기화 ────────────────────────────────────────────────
-    if selected_rows:
-        idx = selected_rows[0]
-        sab = str(v.iloc[idx]["사번"])
-        if sab != st.session_state.get("left_selected_sabun"):
-            _sync_global_target_from_sabun(emp_df, sab)
-            st.session_state["left_selected_sabun"] = sab
-            cur = sab
+    # 커스텀 라벨(표처럼) 렌더: 라디오가 이미 렌더된 뒤, 동일 순서로 보여줌
+    # 선택된 값과 매칭되는 행에 selected 스타일 부여
+    for i, sab in enumerate(options):
+        row_cls = "rowradio-row selected" if selected == sab else "rowradio-row"
+        cells = labels[i]
+        # 라벨 클릭 시 해당 라디오가 선택되므로, 셀 텍스트만 출력
+        st.markdown(
+            f'<div class="{row_cls}"><label>{"".join(f"<span>{_html_escape(c)}</span>" for c in cells)}</label></div>',
+            unsafe_allow_html=True
+        )
+
+    st.markdown('</div></div>', unsafe_allow_html=True)
+
+    # ── 선택 변경 시 전역 동기화 ─────────────────────────────────────────────
+    if selected and selected != cur:
+        _sync_global_target_from_sabun(emp_df, selected)
+        st.session_state["left_selected_sabun"] = selected
+        cur = selected
 
     # ── 선택 상태 안내 ───────────────────────────────────────────────────────
     if cur:
         sel_name = _emp_name_by_sabun(emp_df, cur)
         st.success(f"대상자: {sel_name} ({cur})", icon="✅")
-    elif g_sab:
-        st.info(f"대상자: {g_name} ({g_sab})", icon="👤")
+    else:
+        st.info("좌측 목록에서 행을 클릭해 대상자를 선택하세요.", icon="👤")
 
 
-# ── 내부 유틸: 사번으로 전역 타겟/세 탭 동기화 ───────────────────────────────
+# ── 내부 유틸(안전): 사번으로 전역 타겟/세 탭 동기화 ──────────────────────────
 def _sync_global_target_from_sabun(emp_df: pd.DataFrame, sabun: str):
     name = _emp_name_by_sabun(emp_df, sabun)
     set_global_target(sabun, name)
