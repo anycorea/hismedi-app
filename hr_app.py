@@ -467,7 +467,7 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
     # 스타일
     st.markdown("""
     <style>
-      div[data-testid="stRadio"] input[type="radio"] { display:none !important; }
+      div[data-testid="stRadio"] input[type="radio"] { position:absolute !important; left:-9999px !important; opacity:0 !important; width:0 !important; height:0 !important; }
       div[data-testid="stRadio"] label p {
         font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
         white-space: pre !important;
@@ -480,8 +480,13 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
     </style>
     """, unsafe_allow_html=True)
 
-    # 헤더 표시
-    st.code(header_label, language=None)
+    # 헤더 표시 (모노스페이스 pre를 얇은 헤더 스타일로)
+    st.markdown(
+        f"<div style=\"border:1px solid #e5e7eb;border-radius:6px;padding:6px 8px;background:#f9fafb;white-space:pre;"
+        "font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;"
+        "font-size:13px;line-height:1.25\">{header_label}</div>",
+        unsafe_allow_html=True,
+    )
 
     # 라디오
     selected = st.radio(
