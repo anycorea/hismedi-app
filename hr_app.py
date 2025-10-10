@@ -544,6 +544,49 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
     elif g_sab:
         st.info(f"대상자: {g_name} ({g_sab})", icon="👤")
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# B안(폴백): st.data_editor 단일행 선택 + 체크박스 시각적 숨김
+# ─────────────────────────────────────────────────────────────────────────────
+def _render_picker_with_data_editor(v: pd.DataFrame, cols: List[str], hook_key: str):
+    # 선택 체크박스를 시각적으로 숨기기(컨테이너 범위 한정)
+    st.markdown("""
+    <style>
+      #pickbox [type="checkbox"] { display:none !important; }  /* 행 선택 체크박스 숨김 */
+      #pickbox thead th:first-child, #pickbox tbody td:first-child { display:none !important; } /* 선택열 숨김 */
+    </style>
+    """, unsafe_allow_html=True)
+
+    with st.container():
+        st.markdown('<div id="pickbox"></div>', unsafe_allow_html=True)
+
+    # 단일 선택 모드
+    key = "left_picker_table"
+    st.data_editor(
+        v,
+        key=key,
+        hide_index=True,
+        use_container_width=True,
+        height=420,
+        disabled=True,
+        column_order=cols,
+        num_rows="fixed",
+        column_config={},
+        selection_mode="row",      # 최신 버전: row / "single" 동작 (없으면 무시)
+    )
+
+    # 선택 행 읽기
+    sel_rows = []
+    try:
+        sel_rows = st.session_state[key]["selection"]["rows"]
+    except Exception:
+        pass
+
+    if sel_rows:
+        idx = sel_rows[0]
+        picked = str(v.iloc[idx]["사번"])
+        st.session_state[hook_key] = picked
+
 # ══════════════════════════════════════════════════════════════════════════════
 # 인사평가
 # ══════════════════════════════════════════════════════════════════════════════
