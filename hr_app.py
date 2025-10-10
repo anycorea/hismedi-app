@@ -399,9 +399,9 @@ def get_global_target()->Tuple[str,str]:
 # ══════════════════════════════════════════════════════════════════════════════
 def render_staff_picker_left(emp_df: pd.DataFrame):
     """
-    - st.data_editor 표에 '선택'(Checkbox) 컬럼을 추가 → 표에서만 선택
-    - 이 컬럼만 편집 가능(단일 True 보장), 나머지는 전부 읽기 전용
-    - 한 번 클릭으로 즉시 전역 동기화 (인사평가/직무기술서/직무능력평가)
+    - st.data_editor 표에서 '선택' 체크로만 단일 선택
+    - 사용자가 이번에 켠 체크(새로 True 된 행)만 선택으로 인정
+    - 다음 렌더 때 표의 체크 상태가 자동으로 단일 선택으로 정리됨
     """
 
     # 1) 권한 필터
@@ -425,7 +425,7 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
             axis=1
         )]
 
-    # 3) 정렬(사번 오름차순)
+    # 3) 정렬
     if "사번" in view.columns:
         try:
             view["__sab_int__"] = pd.to_numeric(view["사번"], errors="coerce")
@@ -433,32 +433,31 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
             view["__sab_int__"] = None
         view = view.sort_values(["__sab_int__", "사번"]).drop(columns=["__sab_int__"])
 
-    # 4) 표 데이터 준비 (선택 컬럼 + 읽기 전용 본문 컬럼)
+    # 4) 표 데이터
     cols_body = [c for c in ["사번", "이름", "부서1", "부서2", "직급"] if c in view.columns]
-    table_df = view[cols_body].copy().astype(str)
+    base_df = view[cols_body].copy().astype(str)  # ← 렌더 전 상태(비교 기준)
 
-    # 현재 선택값을 반영해 '선택' 초기화
-    g_sab, g_name = get_global_target()
+    # 5) 현재 선택값 → 초기 체크 상태 구성
+    g_sab, _ = get_global_target()
     cur = (st.session_state.get("left_selected_sabun") or g_sab or "").strip()
+    table_df = base_df.copy()
     table_df.insert(0, "선택", table_df["사번"].astype(str).eq(cur))
 
-    # 5) 표 스타일(기본 폰트/줄간격 유지, 패딩만 살짝 다이어트)
+    # 6) 스타일(톤 유지, 패딩만 살짝)
     st.markdown("""
     <style>
       div[data-testid="stDataEditor"] .st-de-table td,
       div[data-testid="stDataEditor"] .st-de-table th { padding: 6px 8px !important; }
-      /* 선택 True 행을 연두색으로(내장 선택강조가 없는 버전 대비) */
-      /* 편집 후 rerun에서만 반영되므로 UX가 거슬리면 지워도 무방 */
     </style>
     """, unsafe_allow_html=True)
 
-    # 6) 컬럼 설정: '선택'만 편집 가능(체크박스), 본문은 읽기 전용 텍스트
+    # 7) 컬럼 설정: '선택'만 편집 가능
     col_cfg = {"선택": st.column_config.CheckboxColumn("선택", help="이 행을 선택합니다.", default=False)}
     for c in cols_body:
         col_cfg[c] = st.column_config.TextColumn(c, disabled=True)
 
-    # 7) 표 렌더 (편집 가능: 오직 '선택' 컬럼)
     table_key = "left_picker_table"
+
     edited_df = st.data_editor(
         table_df,
         key=table_key,
@@ -468,30 +467,32 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
         num_rows="fixed",
         column_order=["선택"] + cols_body,
         column_config=col_cfg,
-        disabled=False,  # 표 전체는 편집 가능 상태지만, 본문 컬럼은 개별 disabled=True
+        disabled=False,  # 표 전체는 편집 가능(=선택 가능), 본문은 컬럼 단위로 잠금
     )
 
-    # 8) 단일선택 강제: '선택' True가 여러 개면 첫 번째만 남기고 나머지 False로 정리
-    #    그리고 변경이 있으면 즉시 전역 동기화
+    # 8) 이번 렌더에서 "새로 True"가 된 행 찾기 (단일선택 판단의 핵심)
     picked_sabun = ""
     if not edited_df.empty:
-        true_rows = edited_df.index[edited_df["선택"] == True].tolist()
-        if true_rows:
-            # 첫 번째 True만 유지
-            keep_idx = true_rows[0]
-            picked_sabun = str(edited_df.loc[keep_idx, "사번"])
-            if len(true_rows) > 1:
-                edited_df.loc[edited_df.index.difference([keep_idx]), "선택"] = False
-                # 세션의 테이블 값도 정리(깜빡임 최소화)
-                st.session_state[table_key]["edited_rows"] = {}
-                st.session_state[table_key]["data"] = edited_df.to_dict(orient="records")
-        # 만약 아무것도 안 찍혀 있으면 cur 유지
+        # a) 이번 렌더 전후 비교: False → True 로 바뀐 행(=사용자가 방금 켠 체크)
+        changed_up = edited_df.index[(~table_df["선택"].astype(bool)) & (edited_df["선택"].astype(bool))].tolist()
+        if changed_up:
+            # 방금 켠 체크가 여러 개라도 첫 번째만 선택으로 인정
+            picked_sabun = str(edited_df.loc[changed_up[0], "사번"])
+        else:
+            # b) 새로 켠 건 없지만 True가 하나 이상이면
+            true_rows = edited_df.index[edited_df["선택"] == True].tolist()
+            if true_rows:
+                # 기존 cur이 포함돼 있으면 유지, 아니면 첫 True 채택
+                if cur and any(str(edited_df.loc[i, "사번"]) == cur for i in true_rows):
+                    picked_sabun = cur
+                else:
+                    picked_sabun = str(edited_df.loc[true_rows[0], "사번"])
 
-    # 9) 검색 Enter 시 첫 행 자동 선택
-    if submitted and not table_df.empty:
-        picked_sabun = str(table_df.iloc[0]["사번"])
+    # 9) 검색 Enter 시 첫 행 자동 선택 우선 처리
+    if submitted and not base_df.empty:
+        picked_sabun = str(base_df.iloc[0]["사번"])
 
-    # 10) 선택 반영(동기화)
+    # 10) 선택 반영(전역 동기화 + 세션 저장)
     if picked_sabun and picked_sabun != cur:
         name = _emp_name_by_sabun(emp_df, picked_sabun)
         set_global_target(picked_sabun, name)
@@ -504,7 +505,10 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
         st.session_state["left_selected_sabun"]= picked_sabun
         cur = picked_sabun
 
-    # 11) 안내
+    # 11) 다음 렌더에서 "단일 체크 상태"로 자동 정리됨
+    #     (우리가 cur만 유지하고 초기 테이블(table_df)을 그리므로 이전 True들은 자연히 초기화)
+
+    # 12) 상태 안내
     if cur:
         sel_name = _emp_name_by_sabun(emp_df, cur)
         st.caption(f"선택됨: {sel_name} ({cur})")
