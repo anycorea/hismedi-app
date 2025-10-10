@@ -394,6 +394,9 @@ def get_global_target()->Tuple[str,str]:
     return (str(st.session_state.get("glob_target_sabun","") or ""),
             str(st.session_state.get("glob_target_name","") or ""))
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Left: 직원선택 (표형 헤더 정렬 + 초소형 ▶ 버튼 / 폰트 축소 / 구분선 유지 / 상단선 삭제)
+# ══════════════════════════════════════════════════════════════════════════════
 def render_staff_picker_left(emp_df: pd.DataFrame):
     # 권한 필터
     u = st.session_state.get("user", {})
@@ -429,38 +432,41 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
     g_sab, _ = get_global_target()
     cur = (st.session_state.get("left_selected_sabun") or g_sab or "").strip()
 
-    # ── 스타일: 범위 제한 + 강한 우선순위 ─────────────────────────────────────
+    # ── 스타일 (행 전체 하이라이트 + 작은 버튼 + 폰트·줄간격 축소) ──
     st.markdown("""
     <style>
-      /* 이 컨테이너 내부에만 적용 */
-      .leftpick * { font-size:11px !important; line-height:1.15 !important; }
-      .leftpick .lp-cell{ padding:2px 4px !important; display:block !important; }
-      .leftpick .lp-cell:hover{ background:#f9fafb !important; border-radius:4px !important; }
-      .leftpick .lp-cell.selected{ background:#e6ffed !important; border-radius:4px !important; }
-
-      /* ▶ 버튼 초소형 강제 */
-      .leftpick .pick-btn button{
-        padding:0.05rem 0.25rem !important;
-        font-size:10px !important;
-        line-height:1 !important;
-        height:18px !important;
-        min-height:18px !important;
-        border-radius:4px !important;
-      }
-      .leftpick .pick-btn.selected button{
-        background:#bbf7d0 !important; /* 연두색 */
-        border-color:#86efac !important;
+      .leftpick * { font-size: 11px !important; line-height: 1.1 !important; }
+      .leftpick .lp-cell { padding: 1px 4px !important; }
+      .leftpick .lp-row { display: flex; align-items: center; }
+      .leftpick .lp-row:hover { background: #f9fafb; border-radius: 4px; }
+      .leftpick .lp-row.selected { background: #e6ffed !important; border-radius: 4px; }
+      .leftpick .lp-row.selected .pick-btn button {
+        background: #22c55e !important; 
+        color: white !important;
+        border: 1px solid #16a34a !important;
       }
 
-      /* 얇은 행 구분선 (표 내부만) */
-      .leftpick .row-sep{ border-bottom:1px solid #e9ecef !important; margin:2px 0 4px 0 !important; }
+      /* ▶ 버튼 초소형 */
+      .leftpick .pick-btn button {
+        padding: 0.05rem 0.25rem !important;
+        font-size: 10px !important;
+        line-height: 1 !important;
+        height: 18px !important;
+        min-height: 18px !important;
+        border-radius: 4px !important;
+      }
+
+      /* 표 내부 구분선 유지 */
+      .leftpick .row-sep {
+        border-bottom: 1px solid #e9ecef !important;
+        margin: 2px 0 3px 0 !important;
+      }
     </style>
     """, unsafe_allow_html=True)
 
     # 컨테이너 시작
     st.markdown('<div class="leftpick">', unsafe_allow_html=True)
 
-    # 폭(버튼, 사번, 이름, 부서1, 부서2, 직급)
     widths = [0.45, 1.1, 1.2, 1.05, 1.05, 0.9]
 
     # 헤더
@@ -478,29 +484,29 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
     # 본문 행
     for _, r in view[cols].iterrows():
         sab = str(r["사번"])
-        name = str(r.get("이름",""))
-        d1 = str(r.get("부서1",""))
-        d2 = str(r.get("부서2",""))
-        rk = str(r.get("직급",""))   # 빈 값 그대로
+        name = str(r.get("이름", ""))
+        d1 = str(r.get("부서1", ""))
+        d2 = str(r.get("부서2", ""))
+        rk = str(r.get("직급", ""))
+        is_sel = (cur == sab)
 
-        is_sel = bool(cur and sab == cur)
-        cell_cls = "lp-cell selected" if is_sel else "lp-cell"
-        btn_wrap_cls = "pick-btn selected" if is_sel else "pick-btn"
+        row_cls = "lp-row selected" if is_sel else "lp-row"
 
+        # 행 전체를 감싸는 DIV로 구조화 (정렬 보장)
+        st.markdown(f'<div class="{row_cls}">', unsafe_allow_html=True)
         row = st.columns(widths, gap="small")
 
         with row[0]:
-            st.markdown(f'<div class="{btn_wrap_cls}">', unsafe_allow_html=True)
+            st.markdown('<div class="pick-btn">', unsafe_allow_html=True)
             if st.button("▶", key=f"pick_{sab}"):
                 picked = sab
             st.markdown('</div>', unsafe_allow_html=True)
-
-        with row[1]: st.markdown(f'<div class="{cell_cls}">{sab}</div>',  unsafe_allow_html=True)
-        with row[2]: st.markdown(f'<div class="{cell_cls}">{name}</div>', unsafe_allow_html=True)
-        with row[3]: st.markdown(f'<div class="{cell_cls}">{d1 or ""}</div>', unsafe_allow_html=True)
-        with row[4]: st.markdown(f'<div class="{cell_cls}">{d2 or ""}</div>', unsafe_allow_html=True)
-        with row[5]: st.markdown(f'<div class="{cell_cls}">{rk or ""}</div>',  unsafe_allow_html=True)
-
+        with row[1]: st.markdown(f'<div class="lp-cell">{sab}</div>', unsafe_allow_html=True)
+        with row[2]: st.markdown(f'<div class="lp-cell">{name}</div>', unsafe_allow_html=True)
+        with row[3]: st.markdown(f'<div class="lp-cell">{d1}</div>', unsafe_allow_html=True)
+        with row[4]: st.markdown(f'<div class="lp-cell">{d2}</div>', unsafe_allow_html=True)
+        with row[5]: st.markdown(f'<div class="lp-cell">{rk}</div>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)  # 행 닫기
         st.markdown('<div class="row-sep"></div>', unsafe_allow_html=True)
 
     # 검색 Enter 시 첫 행 자동 선택
@@ -512,15 +518,14 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
         nm = _emp_name_by_sabun(emp_df, picked)
         set_global_target(picked, nm)
         st.session_state["eval2_target_sabun"] = picked
-        st.session_state["eval2_target_name"]  = nm
-        st.session_state["jd2_target_sabun"]   = picked
-        st.session_state["jd2_target_name"]    = nm
-        st.session_state["cmpS_target_sabun"]  = picked
-        st.session_state["cmpS_target_name"]   = nm
-        st.session_state["left_selected_sabun"]= picked
+        st.session_state["eval2_target_name"] = nm
+        st.session_state["jd2_target_sabun"] = picked
+        st.session_state["jd2_target_name"] = nm
+        st.session_state["cmpS_target_sabun"] = picked
+        st.session_state["cmpS_target_name"] = nm
+        st.session_state["left_selected_sabun"] = picked
         st.rerun()
 
-    # 컨테이너 닫기
     st.markdown('</div>', unsafe_allow_html=True)
 
     # 상태 안내
