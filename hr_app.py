@@ -395,13 +395,13 @@ def get_global_target()->Tuple[str,str]:
             str(st.session_state.get("glob_target_name","") or ""))
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Left: 직원선택 (검색 + selectbox 한 줄 선택 / 기본 폰트·줄간격 유지)
+# Left: 직원선택 (위=표(보기용), 아래=selectbox(선택용) / 기본 폰트·줄간격 유지)
 # ══════════════════════════════════════════════════════════════════════════════
 def render_staff_picker_left(emp_df: pd.DataFrame):
     """
-    - 검색(사번/이름) + selectbox(자동완성)로 '대상자 1명'을 빠르게 선택
-    - 클릭(선택) 즉시 전역 동기화 (인사평가/직무기술서/직무능력평가에 반영)
-    - JS/컴포넌트/URL 변경 없음, 앱 기본 폰트/줄간격 그대로
+    - 위쪽: 보기 전용 표(컴팩트). 앱 기본 폰트/줄간격 유지.
+    - 아래쪽: selectbox(자동완성)로 1명 선택 → 즉시 전역 동기화.
+    - JS/컴포넌트/URL 변경 없음. 클릭은 selectbox 한 번으로 끝.
     """
 
     # 1) 권한 범위 필터
@@ -433,18 +433,29 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
             view["__sab_int__"] = None
         view = view.sort_values(["__sab_int__", "사번"]).drop(columns=["__sab_int__"])
 
-    # 3) 표시 문자열 구성 (앱 기본 폰트/줄간격 유지, 한 줄 요약)
+    # 3) 표(보기용) 매우 컴팩트하게
     cols = [c for c in ["사번", "이름", "부서1", "부서2", "직급"] if c in view.columns]
-    # 사번을 옵션 값으로 사용하고, 보기용 문자열은 format_func로 제공
-    options = view["사번"].astype(str).tolist()
+    table_df = view[cols].copy()
 
-    def _label_row(row) -> str:
-        # 너무 길어지지 않도록 없으면 '-'로
-        c = {k: str(row.get(k, "") or "-") for k in ["사번", "이름", "부서1", "부서2", "직급"]}
-        # 가독 좋은 구분자 사용 · (중점)
-        return f"{c['사번']} · {c['이름']} · {c['부서1']} · {c['부서2']} · {c['직급']}"
+    st.markdown("""
+    <style>
+      /* 데이터 에디터를 '보기 전용 표' 느낌으로 컴팩트하게 */
+      div[data-testid="stDataEditor"] * { font-size: 13px; }
+      div[data-testid="stDataEditor"] .st-de-table { line-height: 1.2; }
+      div[data-testid="stDataEditor"] .st-de-table td,
+      div[data-testid="stDataEditor"] .st-de-table th { padding: 4px 6px !important; }
+    </style>
+    """, unsafe_allow_html=True)
 
-    disp_map = {str(r["사번"]): _label_row(r) for _, r in view.iterrows()}
+    st.data_editor(
+        table_df,
+        hide_index=True,
+        use_container_width=True,
+        height=min(360, 44 + 28 * (len(table_df) + 1)),
+        num_rows="fixed",
+        column_order=cols,
+        disabled=True,   # 편집/선택 불가 → 보기 전용
+    )
 
     # 4) 검색 Enter 시 첫 행 자동 선택 + 즉시 동기화
     if submitted and not view.empty:
@@ -459,7 +470,15 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
         st.session_state["cmpS_target_name"]   = name
         st.session_state["left_selected_sabun"]= first
 
-    # 5) 현재 선택값
+    # 5) selectbox(선택용) — 앱 기본 폰트/줄간격 그대로, 한 번 클릭으로 선택
+    options = view["사번"].astype(str).tolist()
+
+    def _label_row(row) -> str:
+        c = {k: str(row.get(k, "") or "-") for k in ["사번", "이름", "부서1", "부서2", "직급"]}
+        return f"{c['사번']} · {c['이름']} · {c['부서1']} · {c['부서2']} · {c['직급']}"
+
+    disp_map = {str(r["사번"]): _label_row(r) for _, r in view.iterrows()}
+
     g_sab, g_name = get_global_target()
     cur = (st.session_state.get("left_selected_sabun") or g_sab or "")
     try:
@@ -467,17 +486,15 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
     except Exception:
         cur_index = 0
 
-    # 6) selectbox (앱 기본 UI 그대로 / 한 번 클릭으로 선택)
     selected = st.selectbox(
         "대상 선택",
         options=options,
         index=cur_index if options else 0,
         format_func=lambda sab: disp_map.get(str(sab), str(sab)),
-        help="리스트에서 대상자 한 명을 선택하세요. (입력하면 자동완성됩니다.)",
+        placeholder="표를 보고 고른 뒤, 여기서 선택하세요.",
         key="left_select_picker",
     )
 
-    # 7) 선택 즉시 전역 동기화
     if selected and selected != cur:
         name = _emp_name_by_sabun(emp_df, str(selected))
         set_global_target(str(selected), name)
@@ -488,9 +505,9 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
         st.session_state["cmpS_target_sabun"]  = str(selected)
         st.session_state["cmpS_target_name"]   = name
         st.session_state["left_selected_sabun"]= str(selected)
-        cur = str(selected)
 
-    # 8) 현재 선택 안내 (기본 폰트/여백 그대로)
+    # 6) 현재 선택 안내(앱 기본 톤)
+    cur = st.session_state.get("left_selected_sabun", "")
     if cur:
         sel_name = _emp_name_by_sabun(emp_df, cur)
         st.caption(f"선택됨: {sel_name} ({cur})")
