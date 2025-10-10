@@ -395,16 +395,16 @@ def get_global_target()->Tuple[str,str]:
             str(st.session_state.get("glob_target_name","") or ""))
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Left: 직원선택 (위=표(보기용), 아래=selectbox(선택용) / 기본 폰트·줄간격 유지)
+# Left: 직원선택 (표에서 "행 클릭만"으로 단일 선택 / 기본 폰트·줄간격 유지 / JS·URL 無)
 # ══════════════════════════════════════════════════════════════════════════════
 def render_staff_picker_left(emp_df: pd.DataFrame):
     """
-    - 위쪽: 보기 전용 표(컴팩트). 앱 기본 폰트/줄간격 유지.
-    - 아래쪽: selectbox(자동완성)로 1명 선택 → 즉시 전역 동기화.
-    - JS/컴포넌트/URL 변경 없음. 클릭은 selectbox 한 번으로 끝.
+    - 위젯: st.data_editor (표)
+    - 동작: 셀 편집은 막고, '행 클릭'만으로 단일 선택 → 즉시 전역 동기화
+    - JS/컴포넌트/URL 변경 없음, 기본 폰트/줄간격 그대로
     """
 
-    # 1) 권한 범위 필터
+    # 1) 권한 필터
     u  = st.session_state.get("user", {})
     me = str(u.get("사번", ""))
     df = emp_df.copy()
@@ -425,7 +425,7 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
             axis=1
         )]
 
-    # 정렬(사번 오름차순)
+    # 3) 정렬(사번 오름차순)
     if "사번" in view.columns:
         try:
             view["__sab_int__"] = pd.to_numeric(view["사번"], errors="coerce")
@@ -433,33 +433,64 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
             view["__sab_int__"] = None
         view = view.sort_values(["__sab_int__", "사번"]).drop(columns=["__sab_int__"])
 
-    # 3) 표(보기용) 매우 컴팩트하게
+    # 4) 표시 컬럼 / 표 데이터
     cols = [c for c in ["사번", "이름", "부서1", "부서2", "직급"] if c in view.columns]
-    table_df = view[cols].copy()
+    table_df = view[cols].copy().astype(str)
 
+    # 5) 현재 선택값
+    g_sab, g_name = get_global_target()
+    cur = (st.session_state.get("left_selected_sabun") or g_sab or "").strip()
+
+    # 6) 표 스타일(아주 약하게만 다이어트; 기본 폰트/줄간격 유지)
     st.markdown("""
     <style>
-      /* 데이터 에디터를 '보기 전용 표' 느낌으로 컴팩트하게 */
-      div[data-testid="stDataEditor"] * { font-size: 13px; }
-      div[data-testid="stDataEditor"] .st-de-table { line-height: 1.2; }
+      /* 기본 톤은 유지, 패딩만 살짝 줄임 */
       div[data-testid="stDataEditor"] .st-de-table td,
-      div[data-testid="stDataEditor"] .st-de-table th { padding: 4px 6px !important; }
+      div[data-testid="stDataEditor"] .st-de-table th { padding: 6px 8px !important; }
+      /* 선택 행 배경 강조(기본 강조가 약한 버전 대비) */
+      div[data-testid="stDataEditor"] [data-st-de-row-selected="true"] td { background: #e6ffed !important; }
+      /* 좌측 선택거터/체크 UI는 보이는 버전과 안 보이는 버전이 섞여 있어, 여기선 숨기지 않습니다.
+         (숨기면 일부 버전에서 클릭 타깃이 줄어들어 선택이 어려워질 수 있어요) */
     </style>
     """, unsafe_allow_html=True)
 
+    # 7) 컬럼 개별 잠금(편집 불가) + 표 렌더
+    col_cfg = {c: st.column_config.TextColumn(c, disabled=True) for c in cols}
+
+    table_key = "left_picker_table"
     st.data_editor(
         table_df,
+        key=table_key,
         hide_index=True,
         use_container_width=True,
-        height=min(360, 44 + 28 * (len(table_df) + 1)),
+        height=min(380, 52 + 28 * (len(table_df) + 1)),
         num_rows="fixed",
         column_order=cols,
-        disabled=True,   # 편집/선택 불가 → 보기 전용
+        column_config=col_cfg,
+        disabled=False,   # ★ 선택을 위해 False (편집은 각 컬럼 disabled로 차단)
     )
 
-    # 4) 검색 Enter 시 첫 행 자동 선택 + 즉시 동기화
-    if submitted and not view.empty:
-        first = str(view.iloc[0]["사번"])
+    # 8) 행 선택 상태 읽기 (버전별 키 경로 폭넓게 지원)
+    sel = st.session_state.get(table_key, {})
+    selected_rows = []
+    try:
+        # 신버전
+        if "selection" in sel and isinstance(sel["selection"], dict):
+            if sel["selection"].get("rows"):
+                selected_rows = sel["selection"]["rows"]
+            elif sel["selection"].get("row_indices"):
+                selected_rows = sel["selection"]["row_indices"]
+            elif sel["selection"].get("indices"):
+                selected_rows = sel["selection"]["indices"]
+        # 일부 버전은 top-level 키로 둘 수도 있음
+        if not selected_rows and isinstance(sel.get("rows"), list):
+            selected_rows = sel["rows"]
+    except Exception:
+        selected_rows = []
+
+    # 9) 검색 Enter 시 첫 행 자동 선택
+    if submitted and not table_df.empty:
+        first = str(table_df.iloc[0]["사번"])
         name = _emp_name_by_sabun(emp_df, first)
         set_global_target(first, name)
         st.session_state["eval2_target_sabun"] = first
@@ -469,45 +500,25 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
         st.session_state["cmpS_target_sabun"]  = first
         st.session_state["cmpS_target_name"]   = name
         st.session_state["left_selected_sabun"]= first
+        cur = first
 
-    # 5) selectbox(선택용) — 앱 기본 폰트/줄간격 그대로, 한 번 클릭으로 선택
-    options = view["사번"].astype(str).tolist()
+    # 10) 행 클릭으로 선택된 경우 동기화
+    if selected_rows:
+        idx = int(selected_rows[0])
+        sab = str(table_df.iloc[idx]["사번"])
+        if sab != cur:
+            name = _emp_name_by_sabun(emp_df, sab)
+            set_global_target(sab, name)
+            st.session_state["eval2_target_sabun"] = sab
+            st.session_state["eval2_target_name"]  = name
+            st.session_state["jd2_target_sabun"]   = sab
+            st.session_state["jd2_target_name"]    = name
+            st.session_state["cmpS_target_sabun"]  = sab
+            st.session_state["cmpS_target_name"]   = name
+            st.session_state["left_selected_sabun"]= sab
+            cur = sab
 
-    def _label_row(row) -> str:
-        c = {k: str(row.get(k, "") or "-") for k in ["사번", "이름", "부서1", "부서2", "직급"]}
-        return f"{c['사번']} · {c['이름']} · {c['부서1']} · {c['부서2']} · {c['직급']}"
-
-    disp_map = {str(r["사번"]): _label_row(r) for _, r in view.iterrows()}
-
-    g_sab, g_name = get_global_target()
-    cur = (st.session_state.get("left_selected_sabun") or g_sab or "")
-    try:
-        cur_index = options.index(cur) if cur in options else 0 if options else 0
-    except Exception:
-        cur_index = 0
-
-    selected = st.selectbox(
-        "대상 선택",
-        options=options,
-        index=cur_index if options else 0,
-        format_func=lambda sab: disp_map.get(str(sab), str(sab)),
-        placeholder="표를 보고 고른 뒤, 여기서 선택하세요.",
-        key="left_select_picker",
-    )
-
-    if selected and selected != cur:
-        name = _emp_name_by_sabun(emp_df, str(selected))
-        set_global_target(str(selected), name)
-        st.session_state["eval2_target_sabun"] = str(selected)
-        st.session_state["eval2_target_name"]  = name
-        st.session_state["jd2_target_sabun"]   = str(selected)
-        st.session_state["jd2_target_name"]    = name
-        st.session_state["cmpS_target_sabun"]  = str(selected)
-        st.session_state["cmpS_target_name"]   = name
-        st.session_state["left_selected_sabun"]= str(selected)
-
-    # 6) 현재 선택 안내(앱 기본 톤)
-    cur = st.session_state.get("left_selected_sabun", "")
+    # 11) 상태 안내
     if cur:
         sel_name = _emp_name_by_sabun(emp_df, cur)
         st.caption(f"선택됨: {sel_name} ({cur})")
