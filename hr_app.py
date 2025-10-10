@@ -407,15 +407,17 @@ def get_global_target()->Tuple[str,str]:
     return (str(st.session_state.get("glob_target_sabun","") or ""),
             str(st.session_state.get("glob_target_name","") or ""))
 
+import urllib.parse
+
 # ══════════════════════════════════════════════════════════════════════════════
-# Left: 직원선택 (단일 행 클릭 선택 + Enter 자동선택 동기화)  ※ JS/컴포넌트 없음
+# Left: 직원선택 (행 전체 클릭 → 쿼리파라미터 방식, JS/컴포넌트/에디터 선택 無)
 # ══════════════════════════════════════════════════════════════════════════════
 def render_staff_picker_left(emp_df: pd.DataFrame):
     """
-    좌측 패널: 검색 + 표(행 선택 → 전역 타겟/세 탭 동기화)
-    - 체크박스/버튼 UI는 보이지 않게 처리(CSS로 숨김)
-    - 검색 Enter 시 첫 행 자동선택 + 즉시 동기화
-    - JS/컴포넌트 사용 안 함 → 환경/버전 의존성 제거
+    - 표의 '각 셀'을 링크로 만들어 행 전체가 클릭 동작을 함(시각적 체크박스/버튼 없음)
+    - 클릭 → URL에 ?pick=<사번> 세팅 → 앱 자연 리프레시 → 전역 타겟/세 탭 동기화
+    - 검색 Enter 시 첫 행을 자동으로 ?pick=<사번>에 반영(즉시 동기화)
+    - JS/컴포넌트/에디터 selection 미사용 → 버전/환경 독립적으로 안정 동작
     """
 
     # ── 권한 필터 ─────────────────────────────────────────────────────────────
@@ -447,71 +449,77 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
             view["__sab_int__"] = None
         view = view.sort_values(["__sab_int__", "사번"]).drop(columns=["__sab_int__"])
 
-    # ── Enter 시 첫 행 자동선택 + 즉시 동기화 ─────────────────────────────────
+    # ── 현재 선택값(쿼리파라미터 → 세션/글로벌) ────────────────────────────────
+    # URL의 ?pick=<사번>을 1순위로 읽어 동기화합니다.
+    qp = dict(st.query_params)  # MutableMapping → dict 복사
+    picked_from_qs = str(qp.get("pick", "") or "").strip()
+
+    if picked_from_qs:
+        # URL로 들어온 선택을 전역/세션에 반영
+        _sync_global_target_from_sabun(emp_df, picked_from_qs)
+        st.session_state["left_selected_sabun"] = picked_from_qs
+
+    # 검색 Enter 시 첫 행 자동선택 → URL 파라미터에도 반영(즉시 동기화)
     if submitted and not view.empty:
         first = str(view.iloc[0]["사번"])
-        _sync_global_target_from_sabun(emp_df, first)
-        st.session_state["left_selected_sabun"] = first  # 하이라이트용
+        # 기존 파라미터 유지 + pick만 덮어쓰기
+        qp["pick"] = first
+        st.query_params.update(qp)  # 여기서 자연 리프레시 발생
+        st.stop()  # 아래 코드 실행하지 않고 깔끔히 반환
 
-    # 현재 선택값(세션/글로벌)
+    # 하이라이트 기준
     g_sab, g_name = get_global_target()
-    cur = (st.session_state.get("left_selected_sabun") or g_sab or "").strip()
+    cur = (st.session_state.get("left_selected_sabun") or picked_from_qs or g_sab or "").strip()
 
-    # 표시 컬럼
+    # ── 표시 컬럼/데이터 ───────────────────────────────────────────────────────
     cols = [c for c in ["사번", "이름", "부서1", "부서2", "직급"] if c in view.columns]
     v = view[cols].copy().astype(str)
 
-    # ── st.data_editor: 단일 행 선택. 선택열/체크박스는 CSS로 숨김 ────────────
-    table_key = "left_picker_table"
+    # ── 표(HTML + a링크, 행 전체 클릭) ────────────────────────────────────────
+    def _href_with_pick(sabun: str) -> str:
+        # 현재 쿼리파라미터 유지 + pick만 변경
+        base = dict(st.query_params)
+        base["pick"] = sabun
+        qs = urllib.parse.urlencode(base, doseq=True)
+        return f"?{qs}"
 
-    # 선택열/체크박스 숨김 (컨테이너 범위)
-    st.markdown("""
+    def _row_html(r):
+        sab = str(r["사번"])
+        tds = ""
+        href = _href_with_pick(sab)
+        for c in cols:
+            # 각 셀 전체를 링크로 감싸서 '행 전체 클릭' 느낌
+            val = _html_escape(str(r[c]))
+            tds += f'<td><a class="rowlink" href="{href}">{val}</a></td>'
+        cls = "picked" if (sab == cur and cur) else ""
+        return f'<tr class="{cls}">{tds}</tr>'
+
+    rows_html  = "".join(_row_html(r) for _, r in v.iterrows())
+    thead_html = "".join(f"<th>{_html_escape(c)}</th>" for c in cols)
+
+    table_html = f"""
     <style>
-      /* data editor의 좌측 선택열/체크박스 숨김 */
-      div[data-testid="stDataFrame"] div[role="rowheader"],
-      div[data-testid="stDataFrame"] [data-testid="stSelectionColumn"],
-      div[data-testid="stDataFrame"] input[type="checkbox"] {
-        display: none !important;
-      }
-      /* 선택된 행 강조(연두색) */
-      div[data-testid="stDataFrame"] div[role="row"].row-is-selected {
-        background: #e6ffed !important;
-      }
+      .picktbl {{
+        width:100%; border-collapse:collapse;
+      }}
+      .picktbl th, .picktbl td {{
+        border:1px solid #e5e7eb; padding:.5rem .6rem; font-size:.92rem;
+      }}
+      .picktbl tbody tr:hover {{ background:#f3f4f6; cursor:pointer; }}
+      .picktbl tr.picked {{ background:#e6ffed !important; }}
+      .picktbl a.rowlink {{
+        display:block; width:100%; height:100%;
+        color: inherit; text-decoration: none;
+      }}
     </style>
-    """, unsafe_allow_html=True)
+    <table class="picktbl">
+      <thead><tr>{thead_html}</tr></thead>
+      <tbody>{rows_html}</tbody>
+    </table>
+    """
+    st.markdown(table_html, unsafe_allow_html=True)
 
-    # data_editor 렌더 (읽기전용처럼)
-    edited = st.data_editor(
-        v,
-        key=table_key,
-        hide_index=True,
-        use_container_width=True,
-        height=min(420, 56 + 32 * (len(v) + 1)),  # 적당한 높이
-        disabled=True,      # 셀 편집 불가. 선택은 가능
-        num_rows="fixed",
-        column_order=cols,
-    )
-
-    # 선택 행 읽기 (버전별로 selection 구조가 다를 수 있어 try)
-    selected_rows = []
-    try:
-        selected_rows = st.session_state[table_key]["selection"]["rows"]
-    except Exception:
-        # 일부 버전에서는 selection이 'indices'에 담기기도 함
-        try:
-            selected_rows = st.session_state[table_key]["selection"].get("indices", [])
-        except Exception:
-            selected_rows = []
-
-    # 선택이 있으면 동기화
-    if selected_rows:
-        idx = selected_rows[0]
-        sab = str(v.iloc[idx]["사번"])
-        _sync_global_target_from_sabun(emp_df, sab)
-        st.session_state["left_selected_sabun"] = sab
-        cur = sab  # 하이라이트 기준 업데이트
-
-    # 선택 상태 안내
+    # ── 선택 상태 안내 ───────────────────────────────────────────────────────
     if cur:
         sel_name = _emp_name_by_sabun(emp_df, cur)
         st.success(f"대상자: {sel_name} ({cur})", icon="✅")
