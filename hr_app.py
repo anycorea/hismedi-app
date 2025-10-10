@@ -408,23 +408,26 @@ def get_global_target()->Tuple[str,str]:
             str(st.session_state.get("glob_target_name","") or ""))
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Left: 직원선택 (단일 행 클릭 선택 + Enter 자동선택 동기화)
+# Left: 직원선택 (단일 행 클릭 선택 + Enter 자동선택 동기화)  ※ JS는 components.html 사용
 # ══════════════════════════════════════════════════════════════════════════════
 def render_staff_picker_left(emp_df: pd.DataFrame):
-    # 1회성 rerun 플래그 리셋
-    if st.session_state.get("__did_rerun__", False):
-        st.session_state["__did_rerun__"] = False
+    """
+    좌측 패널: 검색 + 표(행 클릭 → 전역 타겟/세 탭 동기화)
+    - 체크박스/버튼 없음
+    - 검색 Enter 시 첫 행 자동선택 + 즉시 동기화
+    - 무한 rerun 방지: st.rerun() 사용 안 함 (컴포넌트 상호작용이 자연 rerun 유도)
+    """
+    import streamlit.components.v1 as components
 
+    # ---- 권한 필터 ----
     u = st.session_state.get("user", {})
     me = str(u.get("사번", ""))
-
-    # 권한 필터
     df = emp_df.copy()
     if not is_admin(me):
         allowed = get_allowed_sabuns(emp_df, me, include_self=True)
         df = df[df["사번"].astype(str).isin(allowed)].copy()
 
-    # 검색
+    # ---- 검색 ----
     with st.form("left_search_form", clear_on_submit=False):
         q = st.text_input("검색(사번/이름)", key="pick_q", placeholder="사번 또는 이름")
         submitted = st.form_submit_button("검색 적용(Enter)")
@@ -437,6 +440,7 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
             axis=1
         )]
 
+    # 정렬
     if "사번" in view.columns:
         try:
             view["__sab_int__"] = pd.to_numeric(view["사번"], errors="coerce")
@@ -444,26 +448,28 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
             view["__sab_int__"] = None
         view = view.sort_values(["__sab_int__", "사번"]).drop(columns=["__sab_int__"])
 
-    # Enter 검색 시 첫 행 자동 선택 (+ 훅에도 주입하여 즉시 동기화)
+    # ---- Enter 시 첫 행 자동선택 + 즉시 동기화 ----
     if submitted and not view.empty:
         first = str(view.iloc[0]["사번"])
-        st.session_state["__rowpick_value__"] = first
-        st.session_state["left_rowpick_hook"] = first
+        st.session_state["left_selected_sabun"] = first
+        name = _emp_name_by_sabun(emp_df, first)
+        set_global_target(first, name)
+        st.session_state["eval2_target_sabun"] = first
+        st.session_state["eval2_target_name"]  = name
+        st.session_state["jd2_target_sabun"]   = first
+        st.session_state["jd2_target_name"]    = name
+        st.session_state["cmpS_target_sabun"]  = first
+        st.session_state["cmpS_target_name"]   = name
 
-    # 현재 글로벌 타겟
+    # ---- 현재 선택값 ----
     g_sab, g_name = get_global_target()
-    cur = (st.session_state.get("__rowpick_value__") or g_sab or "").strip()
+    cur = (st.session_state.get("left_selected_sabun") or g_sab or "").strip()
 
-    # 표시 컬럼
+    # ---- 표시 컬럼/데이터 ----
     cols = [c for c in ["사번", "이름", "부서1", "부서2", "직급"] if c in view.columns]
     v = view[cols].copy().astype(str)
 
-    # 숨은 입력 훅
-    hook_key   = "left_rowpick_hook"
-    hook_label = f"hook::{hook_key}"
-    st.text_input(hook_label, key=hook_key, label_visibility="collapsed", value=cur)
-
-    # HTML 테이블 + 클릭 JS
+    # ---- HTML 테이블(행 클릭) - components.html 로 JS 실행/값 반환 ----
     def _row_html(r):
         sab = str(r["사번"])
         tds = "".join(f"<td>{_html_escape(str(r[c]))}</td>" for c in cols)
@@ -473,7 +479,10 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
     rows_html  = "".join(_row_html(r) for _, r in v.iterrows())
     thead_html = "".join(f"<th>{_html_escape(c)}</th>" for c in cols)
 
-    table_html = f"""
+    # 표 높이 대충 산정(헤더 40 + 행당 36px)
+    table_height = 40 + 36 * max(1, len(v))
+
+    comp_html = f"""
     <style>
       .picktbl {{ width:100%; border-collapse:collapse; }}
       .picktbl th, .picktbl td {{ border:1px solid #e5e7eb; padding:.5rem .6rem; font-size:.92rem; }}
@@ -485,107 +494,42 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
       <tbody>{rows_html}</tbody>
     </table>
     <script>
-    (function(){{
-      const doc = document;
-      const tbl = doc.getElementById('picktbl');
-
-      function setHook(val){{
-        const input = doc.querySelector('input[aria-label="{hook_label}"]');
-        if(!input) return;
-        input.value = val;
-        input.dispatchEvent(new Event('input', {{bubbles:true}}));
-        input.dispatchEvent(new Event('change', {{bubbles:true}}));
+      // 행 클릭 시 Streamlit 컴포넌트 값으로 사번을 전달
+      function sendSabun(val) {{
+        const msg = {{ isStreamlitMessage: true, type: "streamlit:setComponentValue", value: val }};
+        window.parent.postMessage(msg, "*");
       }}
-
-      if(tbl && !tbl._bound){{
-        tbl._bound = true;
-        tbl.addEventListener('click', function(e){{
-          const tr = e.target.closest('tr[data-sabun]');
-          if(!tr) return;
-          const sab = tr.getAttribute('data-sabun');
-          setHook(sab);
-        }});
-      }}
-    }})();
+      document.addEventListener("click", function(e){{
+        const tr = e.target.closest('tr[data-sabun]');
+        if(!tr) return;
+        const sab = tr.getAttribute('data-sabun');
+        sendSabun(sab);
+      }});
     </script>
     """
 
-    # ★★ 핵심: st.html 사용 (Streamlit 1.38+)
-    _used_html = False
-    try:
-        st.html(table_html)   # 실행 가능한 HTML
-        _used_html = True
-    except Exception:
-        pass
+    clicked = components.html(comp_html, height=table_height, scrolling=True, key="left_click_table")
 
-    if not _used_html:
-        # B안으로 폴백
-        _render_picker_with_data_editor(v, cols, hook_key)
-
-    # 훅 값 변화 → 전역 타겟/세 탭 동기화 + 1회 rerun
-    picked = st.session_state.get(hook_key, "").strip()
-    if picked:
-        name = _emp_name_by_sabun(emp_df, picked)
-        set_global_target(picked, name)
-        st.session_state["eval2_target_sabun"] = picked
+    # ---- 클릭 결과 처리 → 전역 타겟/세 탭 동기화 ----
+    if isinstance(clicked, str) and clicked.strip():
+        sab = clicked.strip()
+        st.session_state["left_selected_sabun"] = sab
+        name = _emp_name_by_sabun(emp_df, sab)
+        set_global_target(sab, name)
+        st.session_state["eval2_target_sabun"] = sab
         st.session_state["eval2_target_name"]  = name
-        st.session_state["jd2_target_sabun"]   = picked
+        st.session_state["jd2_target_sabun"]   = sab
         st.session_state["jd2_target_name"]    = name
-        st.session_state["cmpS_target_sabun"]  = picked
+        st.session_state["cmpS_target_sabun"]  = sab
         st.session_state["cmpS_target_name"]   = name
+        cur = sab  # 하이라이트 반영
 
-        if not st.session_state.get("__did_rerun__", False):
-            st.session_state["__did_rerun__"] = True
-            st.rerun()
-
-    # 안내
-    if picked:
-        st.success(f"대상자: {name} ({picked})", icon="✅")
+    # ---- 선택 상태 안내 ----
+    if cur:
+        sel_name = _emp_name_by_sabun(emp_df, cur)
+        st.success(f"대상자: {sel_name} ({cur})", icon="✅")
     elif g_sab:
         st.info(f"대상자: {g_name} ({g_sab})", icon="👤")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# B안(폴백): st.data_editor 단일행 선택 + 체크박스 시각적 숨김
-# ─────────────────────────────────────────────────────────────────────────────
-def _render_picker_with_data_editor(v: pd.DataFrame, cols: List[str], hook_key: str):
-    # 선택 체크박스를 시각적으로 숨기기(컨테이너 범위 한정)
-    st.markdown("""
-    <style>
-      #pickbox [type="checkbox"] { display:none !important; }  /* 행 선택 체크박스 숨김 */
-      #pickbox thead th:first-child, #pickbox tbody td:first-child { display:none !important; } /* 선택열 숨김 */
-    </style>
-    """, unsafe_allow_html=True)
-
-    with st.container():
-        st.markdown('<div id="pickbox"></div>', unsafe_allow_html=True)
-
-    # 단일 선택 모드
-    key = "left_picker_table"
-    st.data_editor(
-        v,
-        key=key,
-        hide_index=True,
-        use_container_width=True,
-        height=420,
-        disabled=True,
-        column_order=cols,
-        num_rows="fixed",
-        column_config={},
-        selection_mode="row",      # 최신 버전: row / "single" 동작 (없으면 무시)
-    )
-
-    # 선택 행 읽기
-    sel_rows = []
-    try:
-        sel_rows = st.session_state[key]["selection"]["rows"]
-    except Exception:
-        pass
-
-    if sel_rows:
-        idx = sel_rows[0]
-        picked = str(v.iloc[idx]["사번"])
-        st.session_state[hook_key] = picked
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 인사평가
