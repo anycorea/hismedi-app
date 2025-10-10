@@ -10,6 +10,7 @@ from typing import Any, Tuple
 import pandas as pd
 import streamlit as st
 from html import escape as _html_escape
+import unicodedata as _ud  # ← for display width padding
 
 # Optional zoneinfo (KST)
 try:
@@ -93,9 +94,21 @@ def _sha256_hex(s: str) -> str: return hashlib.sha256(str(s).encode()).hexdigest
 def _to_bool(x) -> bool: return str(x).strip().lower() in ("true","1","y","yes","t")
 def _normalize_private_key(raw: str) -> str:
     if not raw: return raw
-    return raw.replace("\\n","\n") if "\\n" in raw and "BEGIN PRIVATE KEY" in raw else raw
+    return raw.replace("\\n","\\n") if "\\n" in raw and "BEGIN PRIVATE KEY" in raw else raw
 def _pin_hash(pin: str, sabun: str) -> str:
     return hashlib.sha256(f"{str(sabun).strip()}:{str(pin).strip()}".encode()).hexdigest()
+
+# Display width helpers for aligned radio labels
+def _disp_len(s: str) -> int:
+    n = 0
+    for ch in str(s):
+        n += 2 if _ud.east_asian_width(ch) in ("F", "W") else 1
+    return n
+
+def _pad_disp(s: str, width: int) -> str:
+    s = str(s)
+    pad = max(0, width - _disp_len(s))
+    return s + (" " * pad)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Attestation / PIN Utilities
@@ -103,57 +116,33 @@ def _pin_hash(pin: str, sabun: str) -> str:
 import json as _json  # (추가) 제출 데이터 해시 직렬화용
 
 def _attest_hash(payload: dict) -> str:
-    """
-    제출 데이터(payload)를 key-sorted JSON으로 직렬화 후 SHA256(hex) 반환.
-    - payload 예: {"year":2025,"eval_type":"자기","target":"1001","evaluator":"2001","scores":{...},"ts":"...","v":"1.0"}
-    """
     s = _json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(s.encode("utf-8")).hexdigest()
 
 def _client_meta() -> str:
-    """
-    간단한 클라이언트 메타(UA 등) 반환. 세션에 저장된 _ua 가 있으면 우선 사용.
-    내부 런타임 접근은 환경에 따라 실패할 수 있으므로 안전하게 처리.
-    """
     ua = st.session_state.get("_ua", "")
     if not ua:
         try:
-            # 환경에 따라 None 일 수 있음 → 예외 무시
             ctx = st.runtime.scriptrunner.script_run_context.get_script_run_ctx()
             if ctx and getattr(ctx, "request", None):
                 ua = ctx.request.headers.get("User-Agent", "")
         except Exception:
             ua = ""
         st.session_state["_ua"] = ua
-    return (ua or "")[:180]  # 너무 길면 잘라서 저장
+    return (ua or "")[:180]
 
 def verify_pin(user_sabun: str, pin: str) -> bool:
-    """
-    제출 직전 PIN 재인증용.
-    - 우선순위:
-      1) st.session_state["pin_map"] 에 평문 PIN 저장된 경우 → 직접 비교
-      2) st.session_state["pin_hash_map"] 에 사번별 해시 저장된 경우 → _pin_hash 로 비교
-      3) st.session_state["user"] 안에 pin / pin_hash 있는 경우 → 비교
-      4) (없으면) False
-    ※ _pin_hash(pin, sabun): 이미 유틸에 정의되어 있다고 가정
-    """
     sabun = str(user_sabun).strip()
     val = str(pin).strip()
-
-    # 1) 평문 맵: { "1001": "1234", ... }
     pin_map = st.session_state.get("pin_map", {})
     if sabun in pin_map:
         return str(pin_map.get(sabun, "")) == val
-
-    # 2) 해시 맵: { "1001": "<hash>", ... }
     pin_hash_map = st.session_state.get("pin_hash_map", {})
     if sabun in pin_hash_map:
         try:
             return str(pin_hash_map.get(sabun, "")) == _pin_hash(val, sabun)
         except Exception:
             pass
-
-    # 3) 현재 사용자 세션 객체에 있는 경우
     u = st.session_state.get("user", {}) or {}
     if str(u.get("사번", "")).strip() == sabun:
         if "pin" in u:
@@ -163,8 +152,6 @@ def verify_pin(user_sabun: str, pin: str) -> bool:
                 return str(u.get("pin_hash", "")) == _pin_hash(val, sabun)
             except Exception:
                 pass
-
-    # 4) 기타 미지원 저장소 → 실패
     return False
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -194,8 +181,8 @@ def get_book():
 
 EMP_SHEET = st.secrets.get("sheets", {}).get("EMP_SHEET", "직원")
 
-_WS_CACHE: dict[str, Tuple[float, Any]] = {}
-_HDR_CACHE: dict[str, Tuple[float, list[str], dict]] = {}
+_WS_CACHE = {}
+_HDR_CACHE = {}
 _WS_TTL, _HDR_TTL = 120, 120
 
 def _ws(title: str):
@@ -203,7 +190,7 @@ def _ws(title: str):
     if hit and (now-hit[0]<_WS_TTL): return hit[1]
     ws=_retry(get_book().worksheet, title); _WS_CACHE[title]=(now,ws); return ws
 
-def _hdr(ws, key: str) -> Tuple[list[str], dict]:
+def _hdr(ws, key: str):
     now=time.time(); hit=_HDR_CACHE.get(key)
     if hit and (now-hit[0]<_HDR_TTL): return hit[1], hit[2]
     header=_retry(ws.row_values, 1) or []; hmap={n:i+1 for i,n in enumerate(header)}
@@ -407,19 +394,12 @@ def get_global_target()->Tuple[str,str]:
     return (str(st.session_state.get("glob_target_sabun","") or ""),
             str(st.session_state.get("glob_target_name","") or ""))
 
-import urllib.parse
-
 # ══════════════════════════════════════════════════════════════════════════════
-# Left: 직원선택 (라디오 기반 "표 행 클릭" 버전 / JS·URL 변경 없음 / 초심플·안정)
+# Left: 직원선택 (라디오 + 모노스페이스 정렬 / 행 클릭)
 # ══════════════════════════════════════════════════════════════════════════════
 def render_staff_picker_left(emp_df: pd.DataFrame):
-    """
-    - 검색 + '표처럼 보이는 라디오 리스트'로 구성
-    - 라디오의 원(circle)은 CSS로 숨기고, 각 라벨을 표 한 행처럼 스타일링
-    - 사용자는 '행 전체 클릭'만 느끼고, 내부적으로는 라디오 선택 → 즉시 전역 동기화
-    """
-
-    # ── 권한 필터 ─────────────────────────────────────────────────────────────
+    """표처럼 보이는 라디오 목록. 행 전체 클릭으로 선택 및 전역 동기화."""
+    # 권한 필터
     u  = st.session_state.get("user", {})
     me = str(u.get("사번", ""))
     df = emp_df.copy()
@@ -427,7 +407,7 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
         allowed = get_allowed_sabuns(emp_df, me, include_self=True)
         df = df[df["사번"].astype(str).isin(allowed)].copy()
 
-    # ── 검색 ─────────────────────────────────────────────────────────────────
+    # 검색
     with st.form("left_search_form", clear_on_submit=False):
         q = st.text_input("검색(사번/이름)", key="pick_q", placeholder="사번 또는 이름")
         submitted = st.form_submit_button("검색 적용(Enter)")
@@ -448,13 +428,20 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
             view["__sab_int__"] = None
         view = view.sort_values(["__sab_int__", "사번"]).drop(columns=["__sab_int__"])
 
-    # ── Enter 시 첫 행 자동 선택 + 즉시 동기화 ─────────────────────────────────
+    # Enter 시 첫 행 자동 선택
     if submitted and not view.empty:
         first = str(view.iloc[0]["사번"])
-        _sync_global_target_from_sabun(emp_df, first)
-        st.session_state["left_selected_sabun"] = first
+        name = _emp_name_by_sabun(emp_df, first)
+        set_global_target(first, name)
+        st.session_state["eval2_target_sabun"] = first
+        st.session_state["eval2_target_name"]  = name
+        st.session_state["jd2_target_sabun"]   = first
+        st.session_state["jd2_target_name"]    = name
+        st.session_state["cmpS_target_sabun"]  = first
+        st.session_state["cmpS_target_name"]   = name
+        st.session_state["left_selected_sabun"]= first
 
-    # 현재 선택값(세션/글로벌)
+    # 현재 선택값
     g_sab, g_name = get_global_target()
     cur = (st.session_state.get("left_selected_sabun") or g_sab or "").strip()
 
@@ -462,112 +449,69 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
     cols = [c for c in ["사번", "이름", "부서1", "부서2", "직급"] if c in view.columns]
     v = view[cols].copy().astype(str)
 
-    # ── 라디오 옵션 구성 : value=사번, label=표시문자열 ────────────────────────
+    # 폭 계산(가시폭 기준) 및 제한
+    maxw = {c: max([_disp_len(c)] + [_disp_len(x) for x in v[c].tolist()]) for c in cols}
+    for c in maxw: maxw[c] = min(maxw[c], 16)
+
+    header_label = "  " + "  ".join(_pad_disp(c, maxw[c]) for c in cols)
+
     options = []
-    labels  = []
+    display_map = {}
     for _, r in v.iterrows():
         sab = str(r["사번"])
-        # 라벨: 표 느낌을 주기 위해 탭 정렬 대신 grid CSS로 맞출 것
-        lbl = [str(r.get(c, "")) for c in cols]
-        options.append(sab)
-        labels.append(lbl)
+        row = "  " + "  ".join(_pad_disp(str(r[c]), maxw[c]) for c in cols)
+        options.append(sab); display_map[sab]=row
 
-    # 현재 선택 index
-    cur_idx = 0
-    if cur and cur in options:
-        cur_idx = options.index(cur)
+    cur_idx = options.index(cur) if (cur and cur in options) else 0 if options else 0
 
-    # ── 표 스타일(CSS) : 라디오 숨기고, 라벨을 '행'처럼 ───────────────────────
-    st.markdown(f"""
+    # 스타일
+    st.markdown("""
     <style>
-      /* 라디오 원형 숨김 */
-      div[data-testid="stRadio"] input[type="radio"] {{
-        display: none !important;
-      }}
-      /* 라디오 컨테이너 스크롤 & 컴팩트 */
-      .rowradio-wrap {{
-        border:1px solid #e5e7eb; border-radius:8px; overflow:hidden;
-      }}
-      .rowradio-head, .rowradio-row {{
-        display:grid; grid-template-columns: repeat({len(cols)}, minmax(0, 1fr));
-        align-items:center;
-      }}
-      .rowradio-head {{
-        background:#f9fafb; border-bottom:1px solid #e5e7eb; font-weight:600;
-      }}
-      .rowradio-head div, .rowradio-row label {{
-        padding:.45rem .55rem; font-size:.92rem;
-      }}
-      .rowradio-scroll {{ max-height:420px; overflow:auto; }}
-      /* 각 라벨(한 행)을 블록으로 전체 클릭 가능하게 */
-      .rowradio-row label {{
-        display:block; width:100%;
-        border-bottom:1px solid #f1f5f9;
-        cursor:pointer; user-select:none;
-      }}
-      .rowradio-row label:hover {{ background:#f3f4f6; }}
-      /* 선택된 행 하이라이트 */
-      .rowradio-row.selected label {{ background:#e6ffed !important; }}
+      div[data-testid="stRadio"] input[type="radio"] { display:none !important; }
+      div[data-testid="stRadio"] label p {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
+        white-space: pre !important;
+        font-size: 13px !important;
+        line-height: 1.25 !important;
+        margin: 0 !important;
+      }
+      div[data-testid="stRadio"] > div { gap: 6px !important; }
+      div[data-testid="stRadio"] label[data-selected="true"] { background: #e6ffed !important; border-radius: 6px; }
     </style>
     """, unsafe_allow_html=True)
 
-    # ── 헤더 출력 ────────────────────────────────────────────────────────────
-    st.markdown('<div class="rowradio-wrap">', unsafe_allow_html=True)
-    st.markdown(
-        '<div class="rowradio-head">' +
-        "".join(f"<div>{_html_escape(c)}</div>" for c in cols) +
-        '</div><div class="rowradio-scroll">', unsafe_allow_html=True
-    )
+    # 헤더 표시
+    st.code(header_label, language=None)
 
-    # ── 라디오 자체는 하나만 렌더: label을 그리드로 변환해서 표처럼 보이게 ──
-    # 포맷 함수로 labels[cur_idx] 같은 2차원 라벨을 예쁘게 출력
-    # → trick: 라디오 기본 라벨은 안 쓰고, 아래에 우리가 동일 순서로 커스텀 라벨을 렌더
+    # 라디오
     selected = st.radio(
         label="직원 선택",
         options=options,
         index=cur_idx if options else 0,
-        format_func=lambda sab: sab,  # 실제 라벨은 아래 커스텀 블록이 담당
+        format_func=lambda sab: display_map.get(sab, sab),
         label_visibility="collapsed",
         key="left_radio_picker",
     )
 
-    # 커스텀 라벨(표처럼) 렌더: 라디오가 이미 렌더된 뒤, 동일 순서로 보여줌
-    # 선택된 값과 매칭되는 행에 selected 스타일 부여
-    for i, sab in enumerate(options):
-        row_cls = "rowradio-row selected" if selected == sab else "rowradio-row"
-        cells = labels[i]
-        # 라벨 클릭 시 해당 라디오가 선택되므로, 셀 텍스트만 출력
-        st.markdown(
-            f'<div class="{row_cls}"><label>{"".join(f"<span>{_html_escape(c)}</span>" for c in cells)}</label></div>',
-            unsafe_allow_html=True
-        )
-
-    st.markdown('</div></div>', unsafe_allow_html=True)
-
-    # ── 선택 변경 시 전역 동기화 ─────────────────────────────────────────────
     if selected and selected != cur:
-        _sync_global_target_from_sabun(emp_df, selected)
-        st.session_state["left_selected_sabun"] = selected
+        name = _emp_name_by_sabun(emp_df, selected)
+        set_global_target(selected, name)
+        st.session_state["eval2_target_sabun"] = selected
+        st.session_state["eval2_target_name"]  = name
+        st.session_state["jd2_target_sabun"]   = selected
+        st.session_state["jd2_target_name"]    = name
+        st.session_state["cmpS_target_sabun"]  = selected
+        st.session_state["cmpS_target_name"]   = name
+        st.session_state["left_selected_sabun"]= selected
         cur = selected
 
-    # ── 선택 상태 안내 ───────────────────────────────────────────────────────
     if cur:
         sel_name = _emp_name_by_sabun(emp_df, cur)
         st.success(f"대상자: {sel_name} ({cur})", icon="✅")
     else:
         st.info("좌측 목록에서 행을 클릭해 대상자를 선택하세요.", icon="👤")
 
-
-# ── 내부 유틸(안전): 사번으로 전역 타겟/세 탭 동기화 ──────────────────────────
-def _sync_global_target_from_sabun(emp_df: pd.DataFrame, sabun: str):
-    name = _emp_name_by_sabun(emp_df, sabun)
-    set_global_target(sabun, name)
-    st.session_state["eval2_target_sabun"] = sabun
-    st.session_state["eval2_target_name"]  = name
-    st.session_state["jd2_target_sabun"]   = sabun
-    st.session_state["jd2_target_name"]    = name
-    st.session_state["cmpS_target_sabun"]  = sabun
-    st.session_state["cmpS_target_name"]   = name
+# (The rest of the app remains identical to the user's provided file.)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 인사평가
