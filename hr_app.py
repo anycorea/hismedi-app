@@ -410,17 +410,18 @@ def get_global_target()->Tuple[str,str]:
 import urllib.parse
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Left: 직원선택 (표 모양의 "행 버튼" 방식 / URL 변경 없음 / JS 없음 / 무한루프 없음)
+# Left: 직원선택 (진짜 표 + 행 클릭, JS는 components.html에서만 실행)
 # ══════════════════════════════════════════════════════════════════════════════
 def render_staff_picker_left(emp_df: pd.DataFrame):
     """
-    - 표(사번/이름/부서...)를 '행 전체가 클릭되는 버튼'으로 렌더링
-    - 클릭 시 URL 변경 없이 즉시 전역 대상 동기화 (로그아웃 문제 해결)
-    - 검색 Enter 시 첫 행 자동 선택 + 즉시 동기화
-    - 체크박스/라디오/JS/컴포넌트 전혀 사용하지 않음
+    - 표는 HTML <table>로 깔끔/컴팩트하게 렌더
+    - 행 클릭 → 숨은 text_input 값 갱신 → 세션이 변경 감지 → 전역 타겟/세 탭 동기화
+    - URL 미변경(로그아웃 방지), 체크박스/라디오/에디터 선택 사용 안 함
     """
+    import streamlit.components.v1 as components
+    from uuid import uuid4
 
-    # ── 권한 필터 ─────────────────────────────────────────────────────────────
+    # 1) 권한 필터
     u = st.session_state.get("user", {})
     me = str(u.get("사번", ""))
     df = emp_df.copy()
@@ -428,7 +429,7 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
         allowed = get_allowed_sabuns(emp_df, me, include_self=True)
         df = df[df["사번"].astype(str).isin(allowed)].copy()
 
-    # ── 검색 ─────────────────────────────────────────────────────────────────
+    # 2) 검색
     with st.form("left_search_form", clear_on_submit=False):
         q = st.text_input("검색(사번/이름)", key="pick_q", placeholder="사번 또는 이름")
         submitted = st.form_submit_button("검색 적용(Enter)")
@@ -449,75 +450,106 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
             view["__sab_int__"] = None
         view = view.sort_values(["__sab_int__", "사번"]).drop(columns=["__sab_int__"])
 
-    # ── Enter 시 첫 행 자동선택 + 즉시 동기화 ─────────────────────────────────
-    if submitted and not view.empty:
-        first = str(view.iloc[0]["사번"])
-        _sync_global_target_from_sabun(emp_df, first)
-        st.session_state["left_selected_sabun"] = first  # 하이라이트용
-
-    # 현재 선택값(세션/글로벌)
+    # 3) 현재 선택/하이라이트 기준
     g_sab, g_name = get_global_target()
     cur = (st.session_state.get("left_selected_sabun") or g_sab or "").strip()
 
-    # ── 표시 컬럼 ────────────────────────────────────────────────────────────
+    # 4) 검색 Enter 시 첫 행 자동 선택(즉시 동기화)
+    if submitted and not view.empty:
+        first = str(view.iloc[0]["사번"])
+        # 전역/세 탭 동기화 (헬퍼 없이 직접)
+        name = _emp_name_by_sabun(emp_df, first)
+        set_global_target(first, name)
+        st.session_state["eval2_target_sabun"] = first
+        st.session_state["eval2_target_name"]  = name
+        st.session_state["jd2_target_sabun"]   = first
+        st.session_state["jd2_target_name"]    = name
+        st.session_state["cmpS_target_sabun"]  = first
+        st.session_state["cmpS_target_name"]   = name
+        st.session_state["left_selected_sabun"] = first
+        cur = first
+
+    # 5) 표시 컬럼/데이터
     cols = [c for c in ["사번", "이름", "부서1", "부서2", "직급"] if c in view.columns]
     v = view[cols].copy().astype(str)
 
-    # ── 표 스타일(CSS): 버튼을 '표의 행'처럼 보이게 ───────────────────────────
-    st.markdown("""
+    # 6) 숨은 입력 훅 (부모 문서에서 JS가 이걸 찾아 값을 주입)
+    hook_key   = "left_rowpick_hook"
+    hook_label = f"hook::{hook_key}"
+    st.text_input(hook_label, key=hook_key, label_visibility="collapsed", value=cur)
+
+    # 7) 컴팩트한 테이블 + 클릭 JS (components.html로 렌더)
+    table_id = f"picktbl_{uuid4().hex}"  # 충돌 방지용 고유 id
+
+    def _row_html(r):
+        sab = str(r["사번"])
+        tds = "".join(f"<td>{_html_escape(str(r[c]))}</td>" for c in cols)
+        cls = "picked" if (sab == cur and cur) else ""
+        return f'<tr data-sabun="{_html_escape(sab)}" class="{cls}">{tds}</tr>'
+
+    rows_html  = "".join(_row_html(r) for _, r in v.iterrows())
+    thead_html = "".join(f"<th>{_html_escape(c)}</th>" for c in cols)
+
+    # 높이 계산(아주 컴팩트)
+    table_height = min(420, 40 + 28 * max(1, len(v)))
+
+    comp_html = f"""
     <style>
-      .rowbtn-wrap { border:1px solid #e5e7eb; border-radius:8px; overflow:hidden; }
-      .rowbtn-head, .rowbtn-row { display:grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr; }
-      .rowbtn-head { background:#f9fafb; border-bottom:1px solid #e5e7eb; font-weight:600; }
-      .rowbtn-head div, .rowbtn-row button { padding:.55rem .6rem; font-size:.92rem; text-align:left; }
-      .rowbtn-row { border-bottom:1px solid #f1f5f9; }
-      .rowbtn-row:last-child { border-bottom:none; }
-      /* Streamlit 버튼 기본 스타일 제거 & 행처럼 보이게 */
-      .rowbtn-row button[kind="secondary"]{
-        background:white; border:none; outline:none; width:100%; border-radius:0;
-      }
-      .rowbtn-row button:hover{ background:#f3f4f6; cursor:pointer; }
-      .rowbtn-row button:focus{ outline:none; box-shadow:none; }
-      /* 선택된 행 하이라이트 */
-      .rowbtn-row.selected button{ background:#e6ffed !important; }
-      /* 스크롤 컨테이너 */
-      .rowbtn-scroll { max-height:420px; overflow:auto; }
-      /* 모바일 대응 */
-      @media (max-width: 640px){
-        .rowbtn-head, .rowbtn-row { grid-template-columns: 1.2fr 1fr 1fr 0.8fr 0.8fr; }
-      }
+      /* 컴팩트 테이블 스타일 */
+      #{table_id} {{
+        width:100%; border-collapse:collapse; table-layout: fixed;
+      }}
+      #{table_id} th, #{table_id} td {{
+        border:1px solid #e5e7eb; padding:.3rem .45rem; font-size:.88rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+      }}
+      #{table_id} tbody tr:hover {{ background:#f3f4f6; cursor:pointer; }}
+      #{table_id} tr.picked {{ background:#e6ffed !important; }}
     </style>
-    """, unsafe_allow_html=True)
+    <table id="{table_id}">
+      <thead><tr>{thead_html}</tr></thead>
+      <tbody>{rows_html}</tbody>
+    </table>
+    <script>
+      (function(){{
+        const tbl = document.getElementById("{table_id}");
+        if(!tbl || tbl._bound) return;
+        tbl._bound = true;
+        // 부모 문서(스트림릿 앱 루트)의 숨은 input을 aria-label로 찾음
+        function setHook(val){{
+          const doc = window.parent.document;
+          const input = doc.querySelector('input[aria-label="{hook_label}"]');
+          if(!input) return;
+          input.value = val;
+          input.dispatchEvent(new Event('input', {{bubbles:true}}));
+          input.dispatchEvent(new Event('change', {{bubbles:true}}));
+        }}
+        tbl.addEventListener('click', function(e){{
+          const tr = e.target.closest('tr[data-sabun]');
+          if(!tr) return;
+          const sab = tr.getAttribute('data-sabun');
+          setHook(sab);
+        }});
+      }})();
+    </script>
+    """
+    # components.html 은 <script> 실행 가능
+    components.html(comp_html, height=table_height, scrolling=True, key="left_click_table")
 
-    # ── 헤더 렌더 ────────────────────────────────────────────────────────────
-    with st.container():
-        st.markdown('<div class="rowbtn-wrap">', unsafe_allow_html=True)
-        st.markdown(
-            '<div class="rowbtn-head">' +
-            "".join(f"<div>{_html_escape(c)}</div>" for c in cols) +
-            '</div><div class="rowbtn-scroll">', unsafe_allow_html=True
-        )
+    # 8) 훅 값 변화 감지 → 전역/세 탭 동기화 (무한루프 없음, st.rerun() 불필요)
+    picked = st.session_state.get(hook_key, "").strip()
+    if picked and picked != st.session_state.get("left_selected_sabun"):
+        name = _emp_name_by_sabun(emp_df, picked)
+        set_global_target(picked, name)
+        st.session_state["eval2_target_sabun"] = picked
+        st.session_state["eval2_target_name"]  = name
+        st.session_state["jd2_target_sabun"]   = picked
+        st.session_state["jd2_target_name"]    = name
+        st.session_state["cmpS_target_sabun"]  = picked
+        st.session_state["cmpS_target_name"]   = name
+        st.session_state["left_selected_sabun"] = picked
+        cur = picked  # 하이라이트 기준 갱신
 
-        # ── 본문(각 행=버튼) 렌더 ─────────────────────────────────────────────
-        for _, r in v.iterrows():
-            sab = str(r["사번"])
-            label = " | ".join(str(r[c]) for c in cols)  # 버튼 라벨(한 줄)
-            # 선택 여부
-            sel_cls = " rowbtn-row selected" if cur and sab == cur else " rowbtn-row"
-            st.markdown(f'<div class="{sel_cls}">', unsafe_allow_html=True)
-
-            # 각 행을 버튼으로. 클릭 시 URL 변경 없이 세션만 갱신 → 로그아웃 없음
-            if st.button(label, key=f"pick_{sab}", use_container_width=True):
-                _sync_global_target_from_sabun(emp_df, sab)
-                st.session_state["left_selected_sabun"] = sab
-                cur = sab  # 즉시 하이라이트 반영
-
-            st.markdown('</div>', unsafe_allow_html=True)
-
-        # ── 컨테이너 닫기 ────────────────────────────────────────────────────
-        st.markdown('</div></div>', unsafe_allow_html=True)
-
-    # ── 선택 상태 안내 ───────────────────────────────────────────────────────
+    # 9) 선택 상태 안내
     if cur:
         sel_name = _emp_name_by_sabun(emp_df, cur)
         st.success(f"대상자: {sel_name} ({cur})", icon="✅")
