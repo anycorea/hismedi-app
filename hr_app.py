@@ -410,18 +410,17 @@ def get_global_target()->Tuple[str,str]:
 import urllib.parse
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Left: 직원선택 (진짜 표 + 행 클릭, JS는 components.html에서만 실행)
+# Left: 직원선택 (st.data_editor 단일행 선택 / JS·컴포넌트·URL 변경 없음 / 컴팩트)
 # ══════════════════════════════════════════════════════════════════════════════
 def render_staff_picker_left(emp_df: pd.DataFrame):
     """
-    - 표는 HTML <table>로 깔끔/컴팩트하게 렌더
-    - 행 클릭 → 숨은 text_input 값 갱신 → 세션이 변경 감지 → 전역 타겟/세 탭 동기화
-    - URL 미변경(로그아웃 방지), 체크박스/라디오/에디터 선택 사용 안 함
+    - 표는 st.data_editor로 렌더링 (단일 행 선택)
+    - 각 컬럼은 읽기 전용(편집 불가)으로 막고, 선택만 가능하도록 구성
+    - 체크박스/라디오/버튼/JS/쿼리파라미터 전혀 사용하지 않음
+    - 검색 Enter 시 첫 행 자동 선택 및 즉시 글로벌 대상 동기화
     """
-    import streamlit.components.v1 as components
-    from uuid import uuid4
 
-    # 1) 권한 필터
+    # ── 권한 필터 ─────────────────────────────────────────────────────────────
     u = st.session_state.get("user", {})
     me = str(u.get("사번", ""))
     df = emp_df.copy()
@@ -429,7 +428,7 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
         allowed = get_allowed_sabuns(emp_df, me, include_self=True)
         df = df[df["사번"].astype(str).isin(allowed)].copy()
 
-    # 2) 검색
+    # ── 검색 ─────────────────────────────────────────────────────────────────
     with st.form("left_search_form", clear_on_submit=False):
         q = st.text_input("검색(사번/이름)", key="pick_q", placeholder="사번 또는 이름")
         submitted = st.form_submit_button("검색 적용(Enter)")
@@ -450,111 +449,100 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
             view["__sab_int__"] = None
         view = view.sort_values(["__sab_int__", "사번"]).drop(columns=["__sab_int__"])
 
-    # 3) 현재 선택/하이라이트 기준
+    # ── Enter 시 첫 행 자동선택 + 즉시 동기화 ─────────────────────────────────
+    if submitted and not view.empty:
+        first = str(view.iloc[0]["사번"])
+        _sync_global_target_from_sabun(emp_df, first)
+        st.session_state["left_selected_sabun"] = first  # 하이라이트 기준
+
+    # 현재 선택값(세션/글로벌)
     g_sab, g_name = get_global_target()
     cur = (st.session_state.get("left_selected_sabun") or g_sab or "").strip()
 
-    # 4) 검색 Enter 시 첫 행 자동 선택(즉시 동기화)
-    if submitted and not view.empty:
-        first = str(view.iloc[0]["사번"])
-        # 전역/세 탭 동기화 (헬퍼 없이 직접)
-        name = _emp_name_by_sabun(emp_df, first)
-        set_global_target(first, name)
-        st.session_state["eval2_target_sabun"] = first
-        st.session_state["eval2_target_name"]  = name
-        st.session_state["jd2_target_sabun"]   = first
-        st.session_state["jd2_target_name"]    = name
-        st.session_state["cmpS_target_sabun"]  = first
-        st.session_state["cmpS_target_name"]   = name
-        st.session_state["left_selected_sabun"] = first
-        cur = first
-
-    # 5) 표시 컬럼/데이터
+    # ── 표시 컬럼 ────────────────────────────────────────────────────────────
     cols = [c for c in ["사번", "이름", "부서1", "부서2", "직급"] if c in view.columns]
     v = view[cols].copy().astype(str)
 
-    # 6) 숨은 입력 훅 (부모 문서에서 JS가 이걸 찾아 값을 주입)
-    hook_key   = "left_rowpick_hook"
-    hook_label = f"hook::{hook_key}"
-    st.text_input(hook_label, key=hook_key, label_visibility="collapsed", value=cur)
-
-    # 7) 컴팩트한 테이블 + 클릭 JS (components.html로 렌더)
-    table_id = f"picktbl_{uuid4().hex}"  # 충돌 방지용 고유 id
-
-    def _row_html(r):
-        sab = str(r["사번"])
-        tds = "".join(f"<td>{_html_escape(str(r[c]))}</td>" for c in cols)
-        cls = "picked" if (sab == cur and cur) else ""
-        return f'<tr data-sabun="{_html_escape(sab)}" class="{cls}">{tds}</tr>'
-
-    rows_html  = "".join(_row_html(r) for _, r in v.iterrows())
-    thead_html = "".join(f"<th>{_html_escape(c)}</th>" for c in cols)
-
-    # 높이 계산(아주 컴팩트)
-    table_height = min(420, 40 + 28 * max(1, len(v)))
-
-    comp_html = f"""
+    # ── 컴팩트 스타일: 높이·글씨 크기·패딩 축소 ──────────────────────────────
+    st.markdown("""
     <style>
-      /* 컴팩트 테이블 스타일 */
-      #{table_id} {{
-        width:100%; border-collapse:collapse; table-layout: fixed;
-      }}
-      #{table_id} th, #{table_id} td {{
-        border:1px solid #e5e7eb; padding:.3rem .45rem; font-size:.88rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-      }}
-      #{table_id} tbody tr:hover {{ background:#f3f4f6; cursor:pointer; }}
-      #{table_id} tr.picked {{ background:#e6ffed !important; }}
+      /* 표 전체를 컴팩트하게 */
+      div[data-testid="stDataEditor"] * { font-size: 12.5px; }
+      div[data-testid="stDataEditor"] .st-de-table { line-height: 1.2; }
+      div[data-testid="stDataEditor"] .st-de-table td, 
+      div[data-testid="stDataEditor"] .st-de-table th {
+        padding: 4px 6px !important;
+      }
+      /* 선택 열(체크박스) 시각적으로 최소화 */
+      div[data-testid="stDataEditor"] [data-testid="stCheckbox"] {
+        transform: scale(0.9);
+      }
+      /* 선택된 행 약한 하이라이트 (내장 강조 외에 추가) */
+      /* 일부 버전에선 자동 강조만 보일 수도 있음 */
     </style>
-    <table id="{table_id}">
-      <thead><tr>{thead_html}</tr></thead>
-      <tbody>{rows_html}</tbody>
-    </table>
-    <script>
-      (function(){{
-        const tbl = document.getElementById("{table_id}");
-        if(!tbl || tbl._bound) return;
-        tbl._bound = true;
-        // 부모 문서(스트림릿 앱 루트)의 숨은 input을 aria-label로 찾음
-        function setHook(val){{
-          const doc = window.parent.document;
-          const input = doc.querySelector('input[aria-label="{hook_label}"]');
-          if(!input) return;
-          input.value = val;
-          input.dispatchEvent(new Event('input', {{bubbles:true}}));
-          input.dispatchEvent(new Event('change', {{bubbles:true}}));
-        }}
-        tbl.addEventListener('click', function(e){{
-          const tr = e.target.closest('tr[data-sabun]');
-          if(!tr) return;
-          const sab = tr.getAttribute('data-sabun');
-          setHook(sab);
-        }});
-      }})();
-    </script>
-    """
-    # components.html 은 <script> 실행 가능
-    components.html(comp_html, height=table_height, scrolling=True, key="left_click_table")
+    """, unsafe_allow_html=True)
 
-    # 8) 훅 값 변화 감지 → 전역/세 탭 동기화 (무한루프 없음, st.rerun() 불필요)
-    picked = st.session_state.get(hook_key, "").strip()
-    if picked and picked != st.session_state.get("left_selected_sabun"):
-        name = _emp_name_by_sabun(emp_df, picked)
-        set_global_target(picked, name)
-        st.session_state["eval2_target_sabun"] = picked
-        st.session_state["eval2_target_name"]  = name
-        st.session_state["jd2_target_sabun"]   = picked
-        st.session_state["jd2_target_name"]    = name
-        st.session_state["cmpS_target_sabun"]  = picked
-        st.session_state["cmpS_target_name"]   = name
-        st.session_state["left_selected_sabun"] = picked
-        cur = picked  # 하이라이트 기준 갱신
+    # ── 컬럼 전부 읽기 전용 설정 ─────────────────────────────────────────────
+    col_cfg = {}
+    for c in cols:
+        col_cfg[c] = st.column_config.TextColumn(c, disabled=True)
 
-    # 9) 선택 상태 안내
+    # ── data_editor 렌더: 편집은 막고(selection 위해 disabled=False) ──────────
+    table_key = "left_picker_table"
+    st.data_editor(
+        v,
+        key=table_key,
+        hide_index=True,
+        use_container_width=True,
+        height=min(420, 44 + 28 * (len(v) + 1)),  # 컴팩트 높이
+        num_rows="fixed",
+        column_order=cols,
+        column_config=col_cfg,
+        disabled=False,          # ★ 선택 가능하도록 False (편집은 개별 컬럼 disabled로 차단)
+    )
+
+    # ── 선택 행 읽기 (버전별 selection 경로 대응) ────────────────────────────
+    selected_rows = []
+    # 신/구 버전 호환: rows, indices, selection_set 등 여러 경로 탐색
+    try:
+        sel = st.session_state[table_key].get("selection", {})
+        if isinstance(sel, dict):
+            if "rows" in sel and sel["rows"]:
+                selected_rows = sel["rows"]
+            elif "indices" in sel and sel["indices"]:
+                selected_rows = sel["indices"]
+            elif "row_indices" in sel and sel["row_indices"]:
+                selected_rows = sel["row_indices"]
+    except Exception:
+        selected_rows = []
+
+    # ── 선택이 있으면 동기화 ────────────────────────────────────────────────
+    if selected_rows:
+        idx = selected_rows[0]
+        sab = str(v.iloc[idx]["사번"])
+        if sab != st.session_state.get("left_selected_sabun"):
+            _sync_global_target_from_sabun(emp_df, sab)
+            st.session_state["left_selected_sabun"] = sab
+            cur = sab
+
+    # ── 선택 상태 안내 ───────────────────────────────────────────────────────
     if cur:
         sel_name = _emp_name_by_sabun(emp_df, cur)
         st.success(f"대상자: {sel_name} ({cur})", icon="✅")
     elif g_sab:
         st.info(f"대상자: {g_name} ({g_sab})", icon="👤")
+
+
+# ── 내부 유틸: 사번으로 전역 타겟/세 탭 동기화 ───────────────────────────────
+def _sync_global_target_from_sabun(emp_df: pd.DataFrame, sabun: str):
+    name = _emp_name_by_sabun(emp_df, sabun)
+    set_global_target(sabun, name)
+    st.session_state["eval2_target_sabun"] = sabun
+    st.session_state["eval2_target_name"]  = name
+    st.session_state["jd2_target_sabun"]   = sabun
+    st.session_state["jd2_target_name"]    = name
+    st.session_state["cmpS_target_sabun"]  = sabun
+    st.session_state["cmpS_target_name"]   = name
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 인사평가
