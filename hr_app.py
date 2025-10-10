@@ -394,9 +394,6 @@ def get_global_target()->Tuple[str,str]:
     return (str(st.session_state.get("glob_target_sabun","") or ""),
             str(st.session_state.get("glob_target_name","") or ""))
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Left: 직원선택 (표형 헤더 정렬 + 초소형 ▶ 버튼 / 폰트 축소 / 구분선 유지 / 상단선 삭제)
-# ══════════════════════════════════════════════════════════════════════════════
 def render_staff_picker_left(emp_df: pd.DataFrame):
     # 권한 필터
     u = st.session_state.get("user", {})
@@ -432,34 +429,39 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
     g_sab, _ = get_global_target()
     cur = (st.session_state.get("left_selected_sabun") or g_sab or "").strip()
 
-    # 스타일 (이 컨테이너 내부에서만 적용)
+    # ── 스타일: 범위 제한 + 강한 우선순위 ─────────────────────────────────────
     st.markdown("""
     <style>
-      .leftpick * { font-size: 11.5px !important; line-height: 1.2 !important; }
-      .leftpick .lp-cell { padding: 1px 4px; }
-      .leftpick .lp-row .lp-cell:hover { background: #f9fafb; border-radius: 4px; }
-      .leftpick .lp-row.selected .lp-cell { background: #e6ffed !important; border-radius: 4px; }
+      /* 이 컨테이너 내부에만 적용 */
+      .leftpick * { font-size:11px !important; line-height:1.15 !important; }
+      .leftpick .lp-cell{ padding:2px 4px !important; display:block !important; }
+      .leftpick .lp-cell:hover{ background:#f9fafb !important; border-radius:4px !important; }
+      .leftpick .lp-cell.selected{ background:#e6ffed !important; border-radius:4px !important; }
 
-      /* ▶ 버튼 초소형화 */
-      .leftpick .pick-btn button[kind="secondary"]{
-        padding: 0.05rem 0.25rem !important;
-        font-size: 10.5px !important;
-        line-height: 1 !important;
-        min-height: 18px !important;
-        height: 18px !important;
-        border-radius: 4px !important;
+      /* ▶ 버튼 초소형 강제 */
+      .leftpick .pick-btn button{
+        padding:0.05rem 0.25rem !important;
+        font-size:10px !important;
+        line-height:1 !important;
+        height:18px !important;
+        min-height:18px !important;
+        border-radius:4px !important;
+      }
+      .leftpick .pick-btn.selected button{
+        background:#bbf7d0 !important; /* 연두색 */
+        border-color:#86efac !important;
       }
 
-      /* 얇은 행 구분선 유지 */
-      .leftpick .row-sep { border-bottom: 1px solid #e9ecef; margin: 1px 0 4px 0; }
+      /* 얇은 행 구분선 (표 내부만) */
+      .leftpick .row-sep{ border-bottom:1px solid #e9ecef !important; margin:2px 0 4px 0 !important; }
     </style>
     """, unsafe_allow_html=True)
 
-    # 표 컨테이너 시작
+    # 컨테이너 시작
     st.markdown('<div class="leftpick">', unsafe_allow_html=True)
 
-    # 폭 설정 (버튼, 사번, 이름, 부서1, 부서2, 직급)
-    widths = [0.5, 1.1, 1.2, 1.1, 1.1, 0.9]
+    # 폭(버튼, 사번, 이름, 부서1, 부서2, 직급)
+    widths = [0.45, 1.1, 1.2, 1.05, 1.05, 0.9]
 
     # 헤더
     h = st.columns(widths, gap="small")
@@ -469,7 +471,6 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
     with h[3]: st.markdown("**부서1**")
     with h[4]: st.markdown("**부서2**")
     with h[5]: st.markdown("**직급**")
-
     st.markdown('<div class="row-sep"></div>', unsafe_allow_html=True)
 
     picked = None
@@ -480,21 +481,25 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
         name = str(r.get("이름",""))
         d1 = str(r.get("부서1",""))
         d2 = str(r.get("부서2",""))
-        rk = str(r.get("직급",""))  # 직급 없으면 비워두기
-        row_cls = "lp-row selected" if cur and sab == cur else "lp-row"
+        rk = str(r.get("직급",""))   # 빈 값 그대로
+
+        is_sel = bool(cur and sab == cur)
+        cell_cls = "lp-cell selected" if is_sel else "lp-cell"
+        btn_wrap_cls = "pick-btn selected" if is_sel else "pick-btn"
 
         row = st.columns(widths, gap="small")
+
         with row[0]:
-            st.markdown(f'<div class="pick-btn {row_cls}">', unsafe_allow_html=True)
+            st.markdown(f'<div class="{btn_wrap_cls}">', unsafe_allow_html=True)
             if st.button("▶", key=f"pick_{sab}"):
                 picked = sab
             st.markdown('</div>', unsafe_allow_html=True)
 
-        with row[1]: st.markdown(f'<div class="lp-cell {row_cls}">{sab}</div>', unsafe_allow_html=True)
-        with row[2]: st.markdown(f'<div class="lp-cell {row_cls}">{name}</div>', unsafe_allow_html=True)
-        with row[3]: st.markdown(f'<div class="lp-cell {row_cls}">{d1 or ""}</div>', unsafe_allow_html=True)
-        with row[4]: st.markdown(f'<div class="lp-cell {row_cls}">{d2 or ""}</div>', unsafe_allow_html=True)
-        with row[5]: st.markdown(f'<div class="lp-cell {row_cls}">{rk or ""}</div>', unsafe_allow_html=True)
+        with row[1]: st.markdown(f'<div class="{cell_cls}">{sab}</div>',  unsafe_allow_html=True)
+        with row[2]: st.markdown(f'<div class="{cell_cls}">{name}</div>', unsafe_allow_html=True)
+        with row[3]: st.markdown(f'<div class="{cell_cls}">{d1 or ""}</div>', unsafe_allow_html=True)
+        with row[4]: st.markdown(f'<div class="{cell_cls}">{d2 or ""}</div>', unsafe_allow_html=True)
+        with row[5]: st.markdown(f'<div class="{cell_cls}">{rk or ""}</div>',  unsafe_allow_html=True)
 
         st.markdown('<div class="row-sep"></div>', unsafe_allow_html=True)
 
@@ -515,7 +520,7 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
         st.session_state["left_selected_sabun"]= picked
         st.rerun()
 
-    # 닫기
+    # 컨테이너 닫기
     st.markdown('</div>', unsafe_allow_html=True)
 
     # 상태 안내
