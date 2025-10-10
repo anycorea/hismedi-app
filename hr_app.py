@@ -395,19 +395,14 @@ def get_global_target()->Tuple[str,str]:
             str(st.session_state.get("glob_target_name","") or ""))
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Left: 직원선택 (표 왼쪽 '선택' 단일체크 / 즉시 단일화 + 1회 rerun으로 깜빡임 제거)
+# Left: 직원선택 (표 왼쪽 '선택' 버튼 컬럼 / 잔상 無 / 기본 폰트·줄간격 / JS·URL 無)
 # ══════════════════════════════════════════════════════════════════════════════
 def render_staff_picker_left(emp_df: pd.DataFrame):
     """
-    - st.data_editor 표에 '선택'(Checkbox) 컬럼을 사용한 단일 선택
-    - 사용자가 체크를 바꾸면 즉시 단일화(normalize) 후 1회 rerun → 두 줄 체크 순간 제거
-    - 무한루프 방지: __left_sync_once 플래그 사용
+    - st.data_editor 표에 '선택' 버튼 컬럼을 사용 (눌림 상태가 남지 않아 잔상 無)
+    - 본문 컬럼은 읽기 전용
+    - 버튼 클릭 즉시 전역 동기화 + 1회 rerun으로 하이라이트/상태 안정화
     """
-
-    # ── 0) 1회 rerun 플래그 리셋 ────────────────────────────────────────────
-    if st.session_state.get("__left_sync_once", False):
-        # 직전 프레임에서 우리가 강제 rerun 한 것 → 플래그만 내리고 계속 진행
-        st.session_state["__left_sync_once"] = False
 
     # 1) 권한 필터
     u  = st.session_state.get("user", {})
@@ -430,7 +425,7 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
             axis=1
         )]
 
-    # 3) 정렬
+    # 3) 정렬(사번 오름차순)
     if "사번" in view.columns:
         try:
             view["__sab_int__"] = pd.to_numeric(view["사번"], errors="coerce")
@@ -438,30 +433,44 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
             view["__sab_int__"] = None
         view = view.sort_values(["__sab_int__", "사번"]).drop(columns=["__sab_int__"])
 
-    # 4) 표 데이터
+    # 4) 표 데이터 준비
     cols_body = [c for c in ["사번", "이름", "부서1", "부서2", "직급"] if c in view.columns]
-    base_df = view[cols_body].copy().astype(str)
+    table_df = view[cols_body].copy().astype(str)
 
-    # 5) 현재 선택값 → 초기 체크
+    # 5) 현재 선택값 (하이라이트 용)
     g_sab, _ = get_global_target()
     cur = (st.session_state.get("left_selected_sabun") or g_sab or "").strip()
-    table_df = base_df.copy()
-    table_df.insert(0, "선택", table_df["사번"].astype(str).eq(cur))
 
-    # 6) 스타일(약간만 다이어트)
+    # 6) 스타일(기본 톤 유지, 패딩만 살짝 다이어트 + 선택 행 약한 하이라이트)
     st.markdown("""
     <style>
       div[data-testid="stDataEditor"] .st-de-table td,
       div[data-testid="stDataEditor"] .st-de-table th { padding: 6px 8px !important; }
+      /* 선택된 행을 약하게 표시하고 싶다면 아래를 켜세요 (현재 주석) */
+      /* div[data-testid="stDataEditor"] tr[data-st-de-row-selected="true"] td { background:#e6ffed !important; } */
     </style>
     """, unsafe_allow_html=True)
 
-    # 7) 컬럼 설정
-    col_cfg = {"선택": st.column_config.CheckboxColumn("선택", help="이 행을 선택합니다.", default=False)}
+    # 7) 컬럼 설정: '선택'은 버튼, 본문은 읽기 전용 텍스트
+    #    ButtonColumn은 값이 남지 않으므로 "두 개 체크" 같은 잔상이 생기지 않습니다.
+    col_cfg = {
+        "선택": st.column_config.ButtonColumn(
+            "선택",
+            help="이 행을 선택합니다.",
+            width="small",
+            label="선택",
+        )
+    }
     for c in cols_body:
         col_cfg[c] = st.column_config.TextColumn(c, disabled=True)
 
+    # 8) 표에 버튼 컬럼 삽입(맨 앞)
+    table_df = table_df.copy()
+    table_df.insert(0, "선택", "선택")  # 표시용. 클릭 이벤트는 위젯 상태에서 감지
+
     table_key = "left_picker_table"
+
+    # 9) 표 렌더 (st.data_editor 반환값: 편집 반영된 DF)
     edited_df = st.data_editor(
         table_df,
         key=table_key,
@@ -471,31 +480,42 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
         num_rows="fixed",
         column_order=["선택"] + cols_body,
         column_config=col_cfg,
-        disabled=False,  # 선택을 위해 False (본문 컬럼은 개별 disabled)
+        disabled=False,  # 버튼 클릭을 위해 False (본문은 컬럼 단위로 잠금)
     )
 
-    # 8) 이번 프레임에서 새로 True로 바뀐 행 찾기
+    # 10) 어떤 버튼이 눌렸는지 감지
+    #  - Streamlit은 ButtonColumn 클릭 시 해당 셀에 "clicked" 이벤트를 남깁니다.
+    #  - 버전별 state 구조 차이를 고려하여 폭넓게 탐색합니다.
+    clicked_row_idx = None
+    try:
+        st_state = st.session_state.get(table_key, {})
+        # 신버전: edited_rows에 {row_index: {'선택': True, '_action': 'clicked'}} 형태
+        er = st_state.get("edited_rows", {})
+        for idx, payload in (er.items() if isinstance(er, dict) else []):
+            if isinstance(payload, dict) and payload.get("_action") == "clicked":
+                clicked_row_idx = int(idx)
+                break
+        # 일부 버전: 'clicked' 목록이 따로 올 수도 있음
+        if clicked_row_idx is None and isinstance(st_state.get("clicked"), list):
+            cl = st_state.get("clicked")
+            if cl: clicked_row_idx = int(cl[0])
+    except Exception:
+        clicked_row_idx = None
+
     picked_sabun = ""
-    if not edited_df.empty:
-        changed_up = edited_df.index[(~table_df["선택"].astype(bool)) & (edited_df["선택"].astype(bool))].tolist()
-        if changed_up:
-            picked_sabun = str(edited_df.loc[changed_up[0], "사번"])
-        else:
-            # 새로 켠 게 없다면 현재 True 중 유지 로직
-            true_rows = edited_df.index[edited_df["선택"] == True].tolist()
-            if true_rows:
-                if cur and any(str(edited_df.loc[i, "사번"]) == cur for i in true_rows):
-                    picked_sabun = cur
-                else:
-                    picked_sabun = str(edited_df.loc[true_rows[0], "사번"])
+    if clicked_row_idx is not None:
+        # 해당 행의 사번을 취득
+        try:
+            picked_sabun = str(edited_df.iloc[clicked_row_idx]["사번"])
+        except Exception:
+            pass
 
-    # 9) 검색 Enter 시 첫 행 자동 선택
-    if submitted and not base_df.empty:
-        picked_sabun = str(base_df.iloc[0]["사번"])
+    # 11) 검색 Enter 시 첫 행 자동 선택
+    if submitted and not table_df.empty:
+        picked_sabun = str(edited_df.iloc[0]["사번"])
 
-    # 10) 선택 반영 + 즉시 단일화 + 1회 rerun
+    # 12) 선택 반영 (전역 동기화 + 1회 rerun 으로 UI 업데이트 확정)
     if picked_sabun and picked_sabun != cur:
-        # 전역 동기화
         name = _emp_name_by_sabun(emp_df, picked_sabun)
         set_global_target(picked_sabun, name)
         st.session_state["eval2_target_sabun"] = picked_sabun
@@ -505,22 +525,9 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
         st.session_state["cmpS_target_sabun"]  = picked_sabun
         st.session_state["cmpS_target_name"]   = name
         st.session_state["left_selected_sabun"]= picked_sabun
-
-        # 🔧 표 상태를 즉시 '단일 체크'로 정규화해서 위젯 상태에 주입
-        normalized = base_df.copy()
-        normalized.insert(0, "선택", normalized["사번"].astype(str).eq(picked_sabun))
-        # 세션의 data_editor 내부 상태 업데이트(버전별로 key가 다를 수 있어 try)
-        try:
-            st.session_state[table_key]["data"] = normalized.to_dict(orient="records")
-            st.session_state[table_key]["edited_rows"] = {}
-        except Exception:
-            pass
-
-        # 한 프레임만 리런하여 화면에서 “두 줄 체크” 순간 제거
-        st.session_state["__left_sync_once"] = True
         st.rerun()
 
-    # 11) 상태 안내
+    # 13) 안내
     cur = st.session_state.get("left_selected_sabun", cur)
     if cur:
         sel_name = _emp_name_by_sabun(emp_df, cur)
