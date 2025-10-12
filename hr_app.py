@@ -408,10 +408,10 @@ def get_global_target()->Tuple[str,str]:
             str(st.session_state.get("glob_target_name","") or ""))
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Left: 직원선택 (10/02 안정판 스타일 유지 + 초소형 '선택' 버튼컬럼)
+# Left: 직원선택 (버전 호환: ButtonColumn 無 / 표형 + 초소형 버튼 + 행 하이라이트)
 # ══════════════════════════════════════════════════════════════════════════════
 def render_staff_picker_left(emp_df: pd.DataFrame):
-    # ── 권한 필터 ─────────────────────────────────────────────────────────────
+    # ── 권한 필터
     u  = st.session_state.get("user", {})
     me = str(u.get("사번", ""))
     df = emp_df.copy()
@@ -419,7 +419,7 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
         allowed = get_allowed_sabuns(emp_df, me, include_self=True)
         df = df[df["사번"].astype(str).isin(allowed)].copy()
 
-    # ── 검색 ─────────────────────────────────────────────────────────────────
+    # ── 검색
     with st.form("left_search_form", clear_on_submit=False):
         q = st.text_input("검색(사번/이름)", key="pick_q", placeholder="사번 또는 이름")
         submitted = st.form_submit_button("검색 적용(Enter)")
@@ -432,6 +432,7 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
             axis=1
         )]
 
+    # 정렬
     if "사번" in view.columns:
         try:
             view["__sab_int__"] = pd.to_numeric(view["사번"], errors="coerce")
@@ -439,90 +440,78 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
             view["__sab_int__"] = None
         view = view.sort_values(["__sab_int__", "사번"]).drop(columns=["__sab_int__"])
 
-    # ── 현재 선택값 ───────────────────────────────────────────────────────────
+    # ── 현재 선택값
     g_sab, _ = get_global_target()
     cur = (st.session_state.get("left_selected_sabun") or g_sab or "").strip()
 
-    # ── 표 데이터(본문) ───────────────────────────────────────────────────────
-    cols_body = [c for c in ["사번","이름","부서1","부서2","직급"] if c in view.columns]
-    table_df  = view[cols_body].copy().astype(str)
-
-    # 직급 없으면 빈칸
-    if "직급" in table_df.columns:
-        table_df["직급"] = table_df["직급"].fillna("")
-
-    # ── 컬럼 구성: 맨 앞 '선택' 버튼 ─────────────────────────────────────────
-    table_df.insert(0, "선택", "선택")  # 표시용 값
-    col_cfg = {
-        "선택": st.column_config.ButtonColumn("선택", width="small", help="이 행을 선택합니다.")
-    }
-    for c in cols_body:
-        col_cfg[c] = st.column_config.TextColumn(c, disabled=True)
-
-    # ── 스코프 한정(다른 버튼 영향 X) 초소형 스타일 ───────────────────────────
+    # ── 스타일: 이 섹션에만 적용 (폰트/줄간격 축소 + 행 하이라이트 + 버튼 초소형)
     st.markdown("""
     <style>
       .leftpick * { font-size: 11px !important; line-height: 1.15 !important; margin: 0 !important; }
-      .leftpick .row-sep { border-bottom: 1px solid #e9ecef !important; margin: 4px 0 !important; }
-      .leftpick .sel-row td { background: #e6ffed !important; }
-      .leftpick .pick-btn-cell button {
-        padding: 0.02rem 0.25rem !important;
+      .leftpick .lp-cell { padding: 2px 6px !important; display:block !important; }
+      .leftpick .lp-row:hover .lp-cell { background:#f9fafb !important; border-radius:4px !important; }
+      .leftpick .lp-row.selected .lp-cell { background:#e6ffed !important; border-radius:4px !important; }
+      .leftpick .row-sep { border-bottom:1px solid #e9ecef !important; margin:6px 0 4px 0 !important; }
+
+      /* 초소형 '선택' 버튼 (이 컨테이너 내부 버튼만) */
+      .leftpick .pick-btn button {
+        padding: 0.02rem 0.30rem !important;
         font-size: 10px !important;
+        line-height: 1 !important;
         height: 18px !important; min-height: 18px !important;
-        line-height: 1 !important; border-radius: 4px !important;
+        border-radius: 4px !important;
       }
     </style>
     """, unsafe_allow_html=True)
 
+    # ── 렌더: 표형 레이아웃 (버튼 | 사번 | 이름 | 부서1 | 부서2 | 직급)
     st.markdown('<div class="leftpick">', unsafe_allow_html=True)
 
-    # ── 헤더(간단히) ─────────────────────────────────────────────────────────
-    st.markdown("**선택**  &nbsp;&nbsp; **사번**  &nbsp;&nbsp; **이름**  &nbsp;&nbsp; **부서1**  &nbsp;&nbsp; **부서2**  &nbsp;&nbsp; **직급**")
+    widths = [0.55, 1.0, 1.2, 1.05, 1.05, 0.9]
+
+    # 헤더
+    h = st.columns(widths, gap="small")
+    with h[0]: st.markdown("**선택**")
+    with h[1]: st.markdown("**사번**")
+    with h[2]: st.markdown("**이름**")
+    with h[3]: st.markdown("**부서1**")
+    with h[4]: st.markdown("**부서2**")
+    with h[5]: st.markdown("**직급**")
     st.markdown('<div class="row-sep"></div>', unsafe_allow_html=True)
 
-    # ── 표 렌더 ──────────────────────────────────────────────────────────────
-    #  data_editor 안의 버튼 셀에만 클래스 주기 위해 key를 활용
-    table_key = "left_picker_table"
-
-    # 선택된 행을 시각 표시하고 싶으면, data_editor 자체로는 어렵기 때문에 아래처럼 사용:
-    # 렌더 후 st.session_state에서 클릭된 버튼 행을 찾아 전역 동기화만 하고 UI는 재렌더로 표시.
-    edited_df = st.data_editor(
-        table_df,
-        key=table_key,
-        hide_index=True,
-        use_container_width=True,
-        height=min(360, 44 + 28 * (len(table_df) + 1)),
-        num_rows="fixed",
-        column_order=["선택"] + cols_body,
-        column_config=col_cfg,
-        disabled=False,
-    )
-
-    # 버튼 클릭 감지 (버전별로 edited_rows/_action 구조 다를 수 있어 넓게 커버)
-    clicked_row = None
-    try:
-        st_state = st.session_state.get(table_key, {})
-        er = st_state.get("edited_rows", {})
-        for idx, payload in (er.items() if isinstance(er, dict) else []):
-            if isinstance(payload, dict) and payload.get("_action") == "clicked":
-                clicked_row = int(idx); break
-        if clicked_row is None and isinstance(st_state.get("clicked"), list) and st_state["clicked"]:
-            clicked_row = int(st_state["clicked"][0])
-    except Exception:
-        clicked_row = None
-
     picked = None
-    if clicked_row is not None:
-        try:
-            picked = str(edited_df.iloc[clicked_row]["사번"])
-        except Exception:
-            pass
+    cols_body = [c for c in ["사번","이름","부서1","부서2","직급"] if c in view.columns]
 
-    # 검색 Enter 시 첫 행 자동선택
-    if submitted and not table_df.empty:
-        picked = str(table_df.iloc[0]["사번"])
+    for _, r in view[cols_body].iterrows():
+        sab = str(r["사번"])
+        name = str(r.get("이름",""))
+        d1 = str(r.get("부서1",""))
+        d2 = str(r.get("부서2",""))
+        rk = str(r.get("직급",""))  # 빈 값 유지
 
-    # ── 선택 반영 ────────────────────────────────────────────────────────────
+        row = st.columns(widths, gap="small")
+        is_sel = (cur == sab)
+        row_cls = "lp-row selected" if is_sel else "lp-row"
+
+        with row[0]:
+            st.markdown(f'<div class="pick-btn {row_cls}">', unsafe_allow_html=True)
+            if st.button("선택", key=f"pick_{sab}"):
+                picked = sab
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        with row[1]: st.markdown(f'<div class="lp-cell {row_cls}">{sab}</div>',  unsafe_allow_html=True)
+        with row[2]: st.markdown(f'<div class="lp-cell {row_cls}">{name}</div>', unsafe_allow_html=True)
+        with row[3]: st.markdown(f'<div class="lp-cell {row_cls}">{d1}</div>',   unsafe_allow_html=True)
+        with row[4]: st.markdown(f'<div class="lp-cell {row_cls}">{d2}</div>',   unsafe_allow_html=True)
+        with row[5]: st.markdown(f'<div class="lp-cell {row_cls}">{rk}</div>',   unsafe_allow_html=True)
+
+        st.markdown('<div class="row-sep"></div>', unsafe_allow_html=True)
+
+    # ── 검색 Enter 시 첫 행 자동선택
+    if submitted and not view.empty:
+        picked = str(view.iloc[0]["사번"])
+
+    # ── 선택 반영
     if picked and picked != cur:
         name = _emp_name_by_sabun(emp_df, picked)
         set_global_target(picked, name)
@@ -535,13 +524,13 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
         st.session_state["left_selected_sabun"]= picked
         st.rerun()
 
-    # 상태 안내
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # ── 상태 안내
     cur = st.session_state.get("left_selected_sabun", cur)
     if cur:
         sel_name = _emp_name_by_sabun(emp_df, cur)
         st.caption(f"선택됨: {sel_name} ({cur})")
-
-    st.markdown('</div>', unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 인사평가
