@@ -408,59 +408,140 @@ def get_global_target()->Tuple[str,str]:
             str(st.session_state.get("glob_target_name","") or ""))
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Left: 직원선택 (Enter 동기화)
+# Left: 직원선택 (10/02 안정판 스타일 유지 + 초소형 '선택' 버튼컬럼)
 # ══════════════════════════════════════════════════════════════════════════════
 def render_staff_picker_left(emp_df: pd.DataFrame):
-    u=st.session_state.get("user",{}); me=str(u.get("사번",""))
-    df=emp_df.copy()
+    # ── 권한 필터 ─────────────────────────────────────────────────────────────
+    u  = st.session_state.get("user", {})
+    me = str(u.get("사번", ""))
+    df = emp_df.copy()
     if not is_admin(me):
-        allowed=get_allowed_sabuns(emp_df, me, include_self=True)
-        df=df[df["사번"].astype(str).isin(allowed)].copy()
+        allowed = get_allowed_sabuns(emp_df, me, include_self=True)
+        df = df[df["사번"].astype(str).isin(allowed)].copy()
 
+    # ── 검색 ─────────────────────────────────────────────────────────────────
     with st.form("left_search_form", clear_on_submit=False):
         q = st.text_input("검색(사번/이름)", key="pick_q", placeholder="사번 또는 이름")
         submitted = st.form_submit_button("검색 적용(Enter)")
-    view=df.copy()
+
+    view = df.copy()
     if q.strip():
-        k=q.strip().lower()
-        view=view[view.apply(lambda r: any(k in str(r[c]).lower() for c in ["사번","이름"] if c in r), axis=1)]
+        k = q.strip().lower()
+        view = view[view.apply(
+            lambda r: any(k in str(r[c]).lower() for c in ["사번", "이름"] if c in r),
+            axis=1
+        )]
 
-    view=view.sort_values("사번") if "사번" in view.columns else view
-    sabuns = view["사번"].astype(str).tolist()
-    names  = view.get("이름", pd.Series(['']*len(view))).astype(str).tolist()
-    opts   = [f"{s} - {n}" for s,n in zip(sabuns, names)]
+    if "사번" in view.columns:
+        try:
+            view["__sab_int__"] = pd.to_numeric(view["사번"], errors="coerce")
+        except Exception:
+            view["__sab_int__"] = None
+        view = view.sort_values(["__sab_int__", "사번"]).drop(columns=["__sab_int__"])
 
-    pre_sel_sab = st.session_state.get("left_preselect_sabun", "")
-    if submitted:
-        exact_idx = -1
-        if q.strip():
-            for i,(s,n) in enumerate(zip(sabuns,names)):
-                if q.strip()==s or q.strip()==n:
-                    exact_idx = i; break
-        target_idx = exact_idx if exact_idx >= 0 else (0 if sabuns else -1)
-        if target_idx >= 0:
-            pre_sel_sab = sabuns[target_idx]
-            st.session_state["left_preselect_sabun"] = pre_sel_sab
+    # ── 현재 선택값 ───────────────────────────────────────────────────────────
+    g_sab, _ = get_global_target()
+    cur = (st.session_state.get("left_selected_sabun") or g_sab or "").strip()
 
-    idx0 = 0
-    if pre_sel_sab:
-        try: idx0 = 1 + sabuns.index(pre_sel_sab)
-        except ValueError: idx0 = 0
+    # ── 표 데이터(본문) ───────────────────────────────────────────────────────
+    cols_body = [c for c in ["사번","이름","부서1","부서2","직급"] if c in view.columns]
+    table_df  = view[cols_body].copy().astype(str)
 
-    picked=st.selectbox("대상 선택", ["(선택)"]+opts, index=idx0, key="left_pick")
-    if picked and picked!="(선택)":
-        sab=picked.split(" - ",1)[0].strip()
-        name=picked.split(" - ",1)[1].strip() if " - " in picked else ""
-        set_global_target(sab, name)
-        st.session_state["eval2_target_sabun"]=sab
-        st.session_state["eval2_target_name"]=name
-        st.session_state["jd2_target_sabun"]=sab
-        st.session_state["jd2_target_name"]=name
-        st.session_state["cmpS_target_sabun"]=sab
-        st.session_state["cmpS_target_name"]=name
+    # 직급 없으면 빈칸
+    if "직급" in table_df.columns:
+        table_df["직급"] = table_df["직급"].fillna("")
 
-    cols=[c for c in ["사번","이름","부서1","부서2","직급"] if c in view.columns]
-    st.dataframe(view[cols], use_container_width=True, height=300, hide_index=True)
+    # ── 컬럼 구성: 맨 앞 '선택' 버튼 ─────────────────────────────────────────
+    table_df.insert(0, "선택", "선택")  # 표시용 값
+    col_cfg = {
+        "선택": st.column_config.ButtonColumn("선택", width="small", help="이 행을 선택합니다.")
+    }
+    for c in cols_body:
+        col_cfg[c] = st.column_config.TextColumn(c, disabled=True)
+
+    # ── 스코프 한정(다른 버튼 영향 X) 초소형 스타일 ───────────────────────────
+    st.markdown("""
+    <style>
+      .leftpick * { font-size: 11px !important; line-height: 1.15 !important; margin: 0 !important; }
+      .leftpick .row-sep { border-bottom: 1px solid #e9ecef !important; margin: 4px 0 !important; }
+      .leftpick .sel-row td { background: #e6ffed !important; }
+      .leftpick .pick-btn-cell button {
+        padding: 0.02rem 0.25rem !important;
+        font-size: 10px !important;
+        height: 18px !important; min-height: 18px !important;
+        line-height: 1 !important; border-radius: 4px !important;
+      }
+    </style>
+    """, unsafe_allow_html=True)
+
+    st.markdown('<div class="leftpick">', unsafe_allow_html=True)
+
+    # ── 헤더(간단히) ─────────────────────────────────────────────────────────
+    st.markdown("**선택**  &nbsp;&nbsp; **사번**  &nbsp;&nbsp; **이름**  &nbsp;&nbsp; **부서1**  &nbsp;&nbsp; **부서2**  &nbsp;&nbsp; **직급**")
+    st.markdown('<div class="row-sep"></div>', unsafe_allow_html=True)
+
+    # ── 표 렌더 ──────────────────────────────────────────────────────────────
+    #  data_editor 안의 버튼 셀에만 클래스 주기 위해 key를 활용
+    table_key = "left_picker_table"
+
+    # 선택된 행을 시각 표시하고 싶으면, data_editor 자체로는 어렵기 때문에 아래처럼 사용:
+    # 렌더 후 st.session_state에서 클릭된 버튼 행을 찾아 전역 동기화만 하고 UI는 재렌더로 표시.
+    edited_df = st.data_editor(
+        table_df,
+        key=table_key,
+        hide_index=True,
+        use_container_width=True,
+        height=min(360, 44 + 28 * (len(table_df) + 1)),
+        num_rows="fixed",
+        column_order=["선택"] + cols_body,
+        column_config=col_cfg,
+        disabled=False,
+    )
+
+    # 버튼 클릭 감지 (버전별로 edited_rows/_action 구조 다를 수 있어 넓게 커버)
+    clicked_row = None
+    try:
+        st_state = st.session_state.get(table_key, {})
+        er = st_state.get("edited_rows", {})
+        for idx, payload in (er.items() if isinstance(er, dict) else []):
+            if isinstance(payload, dict) and payload.get("_action") == "clicked":
+                clicked_row = int(idx); break
+        if clicked_row is None and isinstance(st_state.get("clicked"), list) and st_state["clicked"]:
+            clicked_row = int(st_state["clicked"][0])
+    except Exception:
+        clicked_row = None
+
+    picked = None
+    if clicked_row is not None:
+        try:
+            picked = str(edited_df.iloc[clicked_row]["사번"])
+        except Exception:
+            pass
+
+    # 검색 Enter 시 첫 행 자동선택
+    if submitted and not table_df.empty:
+        picked = str(table_df.iloc[0]["사번"])
+
+    # ── 선택 반영 ────────────────────────────────────────────────────────────
+    if picked and picked != cur:
+        name = _emp_name_by_sabun(emp_df, picked)
+        set_global_target(picked, name)
+        st.session_state["eval2_target_sabun"] = picked
+        st.session_state["eval2_target_name"]  = name
+        st.session_state["jd2_target_sabun"]   = picked
+        st.session_state["jd2_target_name"]    = name
+        st.session_state["cmpS_target_sabun"]  = picked
+        st.session_state["cmpS_target_name"]   = name
+        st.session_state["left_selected_sabun"]= picked
+        st.rerun()
+
+    # 상태 안내
+    cur = st.session_state.get("left_selected_sabun", cur)
+    if cur:
+        sel_name = _emp_name_by_sabun(emp_df, cur)
+        st.caption(f"선택됨: {sel_name} ({cur})")
+
+    st.markdown('</div>', unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 인사평가
