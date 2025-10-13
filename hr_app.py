@@ -933,14 +933,13 @@ def _jd_print_html(jd: dict, meta: dict) -> str:
     if m('부서2') != '—' and m('부서2'):
         dept = f"{dept} / {m('부서2')}" if dept and dept != '—' else m('부서2')
 
-    # ----- Row definitions -----
+    # ----- Meta rows -----
     row1 = [("사번", m('사번')), ("이름", m('이름')), ("부서", dept or "—")]
     row2 = [("직종", m('직종')), ("직군", m('직군')), ("직무명", m('직무명'))]
     row3 = [("연도", m('연도')), ("버전", m('버전')), ("제정일", m('제정일')), ("개정일", m('개정일')), ("검토주기", m('검토주기'))]
 
-    # Helpers to render tables with desired widths
+    # Helpers
     def trow_3cols_kvk(title_pairs, wide_last=True):
-        # Table with 6 cells: k v | k v | k v; last v is wider via CSS
         cells = []
         for i, (k, v) in enumerate(title_pairs):
             wide_cls = " wide" if (wide_last and i == 2) else ""
@@ -954,21 +953,19 @@ def _jd_print_html(jd: dict, meta: dict) -> str:
         return "<tr>" + "".join(cells) + "</tr>"
 
     def block(title, body):
-        body_val = (body or "").strip()
-        if not body_val:
-            body_val = "—"
+        body_val = (body or "").strip() or "—"
         return f"""
         <section class="blk">
-          <h3>{title}</h3>
+          <div class="cap">{title}</div>
           <div class="body">{body_val}</div>
         </section>
         """
 
     body_html = (
         block("직무개요", g("직무개요")) +
-        block("주요 업무", g("주업무")) +
-        block("기타 업무", g("기타업무")) +
-        block("자격·교육 요건", f"""
+        block("주요업무", g("주업무")) +
+        block("기타업무", g("기타업무")) +
+        block("자격교육요건", f"""
             <div class="grid">
               <div><b>필요학력</b><div>{g("필요학력")}</div></div>
               <div><b>전공계열</b><div>{g("전공계열")}</div></div>
@@ -999,25 +996,32 @@ def _jd_print_html(jd: dict, meta: dict) -> str:
         header {{ border-bottom:1px solid var(--line); padding-bottom:10px; margin-bottom:18px; }}
         header h1 {{ margin:0; font-size: 22px; }}
 
-        /* Row tables */
+        /* === Meta tables (3 rows) === */
         table.meta6 {{ width:100%; border-collapse:collapse; margin-top:4px; font-size:13px; color:var(--muted); table-layout:fixed; }}
         table.meta6 td {{ padding:4px 6px; vertical-align:top; border-bottom:1px dashed var(--line); }}
         table.meta6 td.k {{ width:10%; color:#111; font-weight:700; white-space:nowrap; }}
         table.meta6 td.v {{ width:20%; color:#333; overflow:hidden; text-overflow:ellipsis; }}
-        table.meta6 td.v.wide {{ width:30%; }} /* 부서, 직무명 등 넓은 칸 */
+        table.meta6 td.v.wide {{ width:30%; }} /* 부서/직무명 등 넓은 칸 */
 
         table.meta10 {{ width:100%; border-collapse:collapse; margin-top:4px; font-size:13px; color:var(--muted); table-layout:fixed; }}
         table.meta10 td {{ padding:4px 6px; vertical-align:top; border-bottom:1px dashed var(--line); }}
         table.meta10 td.k {{ width:10%; color:#111; font-weight:700; white-space:nowrap; }}
         table.meta10 td.v {{ width:10%; color:#333; overflow:hidden; text-overflow:ellipsis; }}
 
-        .blk {{ break-inside: auto; page-break-inside: auto; margin: 14px 0 18px; }}
-        .blk h3 {{ margin:0 0 8px; font-size: 16px; break-after: avoid-page; page-break-after: avoid; }}
+        /* === Blocks with SMALL captions === */
+        .blk {{ break-inside: auto; page-break-inside: auto; margin: 12px 0 16px; }}
+        .blk .cap {{ font-size:13px; color:var(--muted); font-weight:700; margin: 2px 0 6px; }}
         .blk .body {{ white-space: pre-wrap; line-height: 1.65; border:1px solid var(--line); padding:12px; border-radius:8px; min-height:60px; }}
+
+        /* Education grid inside the body */
         .grid {{ display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:10px; }}
         .grid > div {{ border:1px solid var(--line); border-radius:8px; padding:10px; }}
-        .sign {{ margin-top:24px; display:flex; gap:16px; }}
+        .grid > div > b {{ font-size:13px; color:#111; }}
+
+        /* Signature area with SMALL labels */
+        .sign {{ margin-top:20px; display:flex; gap:16px; }}
         .sign > div {{ flex:1; border:1px dashed var(--line); border-radius:8px; padding:12px; min-height:70px; }}
+        .sign .cap {{ font-size:13px; color:var(--muted); font-weight:700; margin-bottom:6px; }}
         @media print {{
           @page {{ size: A4; margin: 18mm 14mm; }}
           body {{ -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
@@ -1045,8 +1049,8 @@ def _jd_print_html(jd: dict, meta: dict) -> str:
         </header>
         {body_html}
         <div class="sign">
-          <div><b>직원 확인 서명</b></div>
-          <div><b>부서장 확인 서명</b></div>
+          <div><div class="cap">직원 확인 서명</div></div>
+          <div><div class="cap">부서장 확인 서명</div></div>
         </div>
       </div>
     </body>
