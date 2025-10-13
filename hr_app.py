@@ -925,24 +925,24 @@ def upsert_jobdesc(rec: dict, as_new_version: bool = False) -> dict:
 # - 한글 폰트 스택 강화, 줄바꿈 품질 향상
 # -----------------------------------------------------------------------------
 def _jd_print_html(jd: dict, meta: dict) -> str:
-    """Print HTML with requested header field order and combined 부서."""
     def g(k): return (str(jd.get(k, "")) or "—").strip()
     def m(k): return (str(meta.get(k, "")) or "—").strip()
 
-    # Combine 부서1 + 부서2 for display
+    # Combine departments
     dept = m('부서1')
     if m('부서2') != '—' and m('부서2'):
         dept = f"{dept} / {m('부서2')}" if dept and dept != '—' else m('부서2')
 
-    # Requested header order:
-    # 연도/버전/사번/이름/부서(부서1+부서2)/작성자/직종/직군/직무명/제정일/개정일/검토주기
-    header_rows = [
+    # Prepare pairs for 2-row layout (6 pairs per row)
+    row1 = [
         ("연도", m('연도')),
         ("버전", m('버전')),
         ("사번", m('사번')),
         ("이름", m('이름')),
         ("부서", dept or "—"),
         ("작성자", m('작성자이름')),
+    ]
+    row2 = [
         ("직종", m('직종')),
         ("직군", m('직군')),
         ("직무명", m('직무명')),
@@ -950,6 +950,12 @@ def _jd_print_html(jd: dict, meta: dict) -> str:
         ("개정일", m('개정일')),
         ("검토주기", m('검토주기')),
     ]
+
+    def trow(pairs):
+        cells = []
+        for k, v in pairs:
+            cells.append(f"<td class='k'>{k}</td><td class='v'>{v}</td>")
+        return "<tr>" + "".join(cells) + "</tr>"
 
     def block(title, body):
         body_val = (body or "").strip()
@@ -996,9 +1002,13 @@ def _jd_print_html(jd: dict, meta: dict) -> str:
         .actionbar button {{ padding:6px 12px; border:1px solid var(--line); background:#fff; border-radius:6px; cursor:pointer; }}
         header {{ border-bottom:1px solid var(--line); padding-bottom:10px; margin-bottom:18px; }}
         header h1 {{ margin:0; font-size: 22px; }}
-        .meta-table {{ width:100%; border-collapse: collapse; margin-top:8px; font-size:13px; color:var(--muted); }}
-        .meta-table td {{ padding:4px 6px; vertical-align:top; }}
-        .meta-table td.k {{ width:96px; color:#111; font-weight:700; }}
+
+        /* === 2-row meta table === */
+        .meta-table {{ width:100%; border-collapse: collapse; margin-top:8px; font-size:13px; color:var(--muted); table-layout: fixed; }}
+        .meta-table td {{ padding:4px 6px; vertical-align:top; border-bottom: 1px dashed var(--line); }}
+        .meta-table td.k {{ width:8%; color:#111; font-weight:700; white-space:nowrap; }}
+        .meta-table td.v {{ width:8.6%; color:#333; overflow:hidden; text-overflow:ellipsis; }}
+
         .blk {{ break-inside: auto; page-break-inside: auto; margin: 14px 0 18px; }}
         .blk h3 {{ margin:0 0 8px; font-size: 16px; break-after: avoid-page; page-break-after: avoid; }}
         .blk .body {{ white-space: pre-wrap; line-height: 1.65; border:1px solid var(--line); padding:12px; border-radius:8px; min-height:60px; }}
@@ -1019,7 +1029,8 @@ def _jd_print_html(jd: dict, meta: dict) -> str:
         <header>
           <h1>직무기술서 (Job Description)</h1>
           <table class="meta-table">
-            {"".join([f"<tr><td class='k'>{k}</td><td>{v}</td></tr>" for k,v in header_rows])}
+            {trow(row1)}
+            {trow(row2)}
           </table>
         </header>
         {body_html}
