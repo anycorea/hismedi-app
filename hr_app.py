@@ -1034,9 +1034,9 @@ def _jd_print_html(jd: dict, meta: dict) -> str:
     return html
 
 def tab_job_desc(emp_df: pd.DataFrame):
-    """JD editor with requested 2-column order/size and updated print button."""
+    """JD editor with 2-row (horizontal) header layout + print button order already handled by _jd_print_html()."""
     try:
-        this_year = datetime.now(tz=tz_kst()).year
+        this_year = datetime.now(tz=tz_kst()).year  # type: ignore
     except Exception:
         this_year = datetime.now().year
     year = st.number_input("연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="jd2_year")
@@ -1052,7 +1052,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
     st.session_state.setdefault("jd2_target_name",  glob_name or me_name)
     st.session_state.setdefault("jd2_edit_mode",    False)
 
-    # 대상자 선택 UI
+    # 대상자 선택
     if not am_admin_or_mgr:
         target_sabun = me_sabun; target_name = me_name
         st.info(f"대상자: {target_name} ({target_sabun})", icon="👤")
@@ -1121,21 +1121,34 @@ def tab_job_desc(emp_df: pd.DataFrame):
             st.markdown("**기타업무**")
             st.write((jd_saved or {}).get("기타업무", "") or "—")
 
-    # ========== 레이아웃: 2열 구성 ==========
-    left, right = st.columns([1, 1.4])
-    with left:
+    # =================== 1행 (가로) ===================
+    # 비고가 넓게 보이도록 마지막 칸 배수 확장
+    r1 = st.columns([1, 1, 1, 1, 1.6])
+    with r1[0]:
         version = st.number_input("버전(없으면 자동)", min_value=0, max_value=999,
                                   value=int(str(jd_current.get("버전", 0)) or 0),
                                   step=1, key="jd2_ver", disabled=not edit_mode)
-        d_create = st.text_input("제정일",   value=jd_current.get("제정일",""),   key="jd2_d_create", disabled=not edit_mode)
-        d_update = st.text_input("개정일",   value=jd_current.get("개정일",""),   key="jd2_d_update", disabled=not edit_mode)
-        review   = st.text_input("검토주기", value=jd_current.get("검토주기",""), key="jd2_review",   disabled=not edit_mode)
-        memo     = st.text_input("비고",     value=jd_current.get("비고",""),     key="jd2_memo",     disabled=not edit_mode)
-    with right:
-        dept1  = st.text_input("부서1", value=jd_current.get("부서1",""), key="jd2_dept1",  disabled=not edit_mode)
-        dept2  = st.text_input("부서2", value=jd_current.get("부서2",""), key="jd2_dept2",  disabled=not edit_mode)
-        group  = st.text_input("직군",  value=jd_current.get("직군",""),  key="jd2_group",   disabled=not edit_mode)
-        series = st.text_input("직종",  value=jd_current.get("직종",""),  key="jd2_series",  disabled=not edit_mode)
+    with r1[1]:
+        d_create = st.text_input("제정일", value=jd_current.get("제정일",""), key="jd2_d_create", disabled=not edit_mode)
+    with r1[2]:
+        d_update = st.text_input("개정일", value=jd_current.get("개정일",""), key="jd2_d_update", disabled=not edit_mode)
+    with r1[3]:
+        review = st.text_input("검토주기", value=jd_current.get("검토주기",""), key="jd2_review", disabled=not edit_mode)
+    with r1[4]:
+        memo = st.text_input("비고", value=jd_current.get("비고",""), key="jd2_memo", disabled=not edit_mode)
+
+    # =================== 2행 (가로) ===================
+    # 직무명이 넓게 보이도록 마지막 칸 배수 확장
+    r2 = st.columns([1, 1, 1, 1, 1.6])
+    with r2[0]:
+        dept1  = st.text_input("부서1", value=jd_current.get("부서1",""), key="jd2_dept1", disabled=not edit_mode)
+    with r2[1]:
+        dept2  = st.text_input("부서2", value=jd_current.get("부서2",""), key="jd2_dept2", disabled=not edit_mode)
+    with r2[2]:
+        group  = st.text_input("직군", value=jd_current.get("직군",""), key="jd2_group", disabled=not edit_mode)
+    with r2[3]:
+        series = st.text_input("직종", value=jd_current.get("직종",""), key="jd2_series", disabled=not edit_mode)
+    with r2[4]:
         jobname= st.text_input("직무명", value=jd_current.get("직무명",""), key="jd2_jobname", disabled=not edit_mode)
 
     # 본문
@@ -1143,7 +1156,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
     job_main    = st.text_area("주업무",   value=jd_current.get("주업무",""),   height=120, key="jd2_main",    disabled=not edit_mode)
     job_other   = st.text_area("기타업무", value=jd_current.get("기타업무",""), height=80,  key="jd2_other",   disabled=not edit_mode)
 
-    # 교육/자격/경력
+    # 교육/자격/경력 (가로 폭 분할)
     c4 = st.columns([1,1,1,1,1,1])
     with c4[0]: edu_req    = st.text_input("필요학력",        value=jd_current.get("필요학력",""),        key="jd2_edu",        disabled=not edit_mode)
     with c4[1]: major_req  = st.text_input("전공계열",        value=jd_current.get("전공계열",""),        key="jd2_major",      disabled=not edit_mode)
