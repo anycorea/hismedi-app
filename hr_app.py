@@ -840,6 +840,41 @@ def read_jobdesc_df() -> pd.DataFrame:
         df["사번"] = df["사번"].astype(str)
     return df
 
+@st.cache_data(ttl=300, show_spinner=False)
+def read_my_jobdesc_rows(year:int, sabun:str)->pd.DataFrame:
+    """
+    직무기술서 시트에서 내가 제출(작성)한 행만 필터링하여 반환.
+    - year: 연도
+    - sabun: 작성자 사번(본인)
+    """
+    try:
+        df = read_jobdesc_df()
+    except Exception:
+        return pd.DataFrame(columns=JOBDESC_HEADERS)
+    if df is None or len(df)==0:
+        return pd.DataFrame(columns=JOBDESC_HEADERS)
+    # 형 변환 및 필터
+    if "연도" in df.columns:
+        try:
+            df["연도"] = pd.to_numeric(df["연도"], errors="coerce").fillna(0).astype(int)
+        except Exception:
+            pass
+    for c in ["작성자사번", "사번"]:
+        if c in df.columns:
+            df[c] = df[c].astype(str)
+    q = df[(df.get("연도", 0) == int(year)) & (df.get("작성자사번", "") == str(sabun))].copy()
+    if q.empty:
+        return q
+    # 정렬: 사번 오름차순, 버전 내림차순, 제출시각 내림차순(있을 경우)
+    sort_cols = [c for c in ["사번","버전","제출시각"] if c in q.columns]
+    if sort_cols:
+        asc = [True] * len(sort_cols)
+        # 버전, 제출시각은 내림차순
+        if "버전" in sort_cols: asc[sort_cols.index("버전")] = False
+        if "제출시각" in sort_cols: asc[sort_cols.index("제출시각")] = False
+        q = q.sort_values(sort_cols, ascending=asc)
+    return q.reset_index(drop=True)
+
 def _jd_latest_for(sabun: str, year: int) -> dict | None:
     df = read_jobdesc_df()
     if df.empty:
@@ -1273,6 +1308,15 @@ def tab_job_desc(emp_df: pd.DataFrame):
         import streamlit.components.v1 as components
         components.html(html, height=1000, scrolling=True)
 
+        # =================== 내 제출 현황 ===================
+        st.markdown("#### 내 제출 현황")
+        try:
+            _my_jd = read_my_jobdesc_rows(int(year), me_sabun)
+            _cols = [c for c in ["사번","이름","직무명","버전","제정일","개정일","제출시각"] if c in _my_jd.columns]
+            st.dataframe(_my_jd[_cols] if _cols else _my_jd, use_container_width=True, height=260)
+        except Exception:
+            st.caption("제출 현황을 불러오지 못했습니다.")
+
 # ══════════════════════════════════════════════════════════════════════════════
 # 직무능력평가 + JD 요약 스크롤
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1282,6 +1326,7 @@ COMP_SIMPLE_HEADERS = [
     "평가일자","주업무평가","기타업무평가","교육이수","자격유지","종합의견",
     "상태","제출시각","잠금"
 ]
+
 def _simp_sheet_name(year:int|str)->str: return f"{COMP_SIMPLE_PREFIX}{int(year)}"
 
 def _ensure_comp_simple_sheet(year:int):
