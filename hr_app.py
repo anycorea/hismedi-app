@@ -876,69 +876,58 @@ def upsert_jobdesc(rec:dict, as_new_version:bool=False)->dict:
         return {"action":"update","version":ver}
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 출력폼 HTML 생성기
+# 출력폼 HTML (심플 · 모든 섹션 포함 · 첫 페이지부터 연속 인쇄)
 # ─────────────────────────────────────────────────────────────────────────────
-def _jd_print_html(jd: dict, meta: dict, sections: list[str], template: str="상세") -> str:
-    """직무기술서 인쇄용 HTML (첫 페이지부터 연속 인쇄)."""
+def _jd_print_html(jd: dict, meta: dict) -> str:
+    """직무기술서 인쇄용 HTML (템플릿/체크박스 없이 전체 출력, 첫 페이지부터 연속 인쇄)."""
     def g(k): return (str(jd.get(k,"")) or "—").strip()
     def m(k): return (str(meta.get(k,"")) or "—").strip()
+
     def block(title, body):
         return f"""
         <section class="blk">
           <h3>{title}</h3>
-          <div class="body">{body if (body or '').strip() else "—"}</div>
+          <div class="body">{(body or '').strip() if (body or '').strip() else "—"}</div>
         </section>
         """
-    cls = "tpl-simple" if template=="간단" else ("tpl-custom" if template=="커스텀" else "tpl-detailed")
 
-    body_html = ""
-    if "직무개요" in sections:   body_html += block("직무개요", g("직무개요"))
-    if "주업무" in sections:     body_html += block("주요 업무", g("주업무"))
-    if "기타업무" in sections:   body_html += block("기타 업무", g("기타업무"))
-    if "요건" in sections:
-        req_html = f"""
-        <div class="grid">
-          <div><b>필요학력</b><div>{g("필요학력")}</div></div>
-          <div><b>전공계열</b><div>{g("전공계열")}</div></div>
-          <div><b>면허</b><div>{g("면허")}</div></div>
-          <div><b>경력(자격요건)</b><div>{g("경력(자격요건)")}</div></div>
-          <div><b>직원공통필수교육</b><div>{g("직원공통필수교육")}</div></div>
-          <div><b>보수/기타/특성화교육</b><div>{g("보수교육")} / {g("기타교육")} / {g("특성화교육")}</div></div>
-        </div>
-        """
-        body_html += block("자격·교육 요건", req_html)
+    body_html = (
+        block("직무개요", g("직무개요")) +
+        block("주요 업무", g("주업무")) +
+        block("기타 업무", g("기타업무")) +
+        block("자격·교육 요건", f"""
+            <div class="grid">
+              <div><b>필요학력</b><div>{g("필요학력")}</div></div>
+              <div><b>전공계열</b><div>{g("전공계열")}</div></div>
+              <div><b>면허</b><div>{g("면허")}</div></div>
+              <div><b>경력(자격요건)</b><div>{g("경력(자격요건)")}</div></div>
+              <div><b>직원공통필수교육</b><div>{g("직원공통필수교육")}</div></div>
+              <div><b>보수/기타/특성화교육</b><div>{g("보수교육")} / {g("기타교육")} / {g("특성화교육")}</div></div>
+            </div>
+        """)
+    )
 
+    # body onload="window.print()" → 새 창 열릴 때 자동 인쇄 미리보기
     html = f"""
     <html>
     <head>
       <meta charset="utf-8" />
-      <title>직무기술서 출력폼</title>
+      <title>직무기술서 출력</title>
       <style>
         :root {{ --fg:#111; --muted:#666; --line:#e5e7eb; }}
         body {{
           color:var(--fg);
           font-family: "Noto Sans KR", Pretendard, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-          orphans: 2; widows: 2; /* 인쇄시 고아/미망 줄 방지 */
+          orphans: 2; widows: 2;
         }}
         .print-wrap {{ max-width: 900px; margin: 0 auto; padding: 28px 24px; }}
         header {{ border-bottom:1px solid var(--line); padding-bottom:10px; margin-bottom:18px; }}
         header h1 {{ margin:0; font-size: 22px; }}
         header .meta {{ margin-top:6px; font-size: 13px; color:var(--muted); display:flex; gap:16px; flex-wrap:wrap; }}
 
-        /* ✅ 핵심 변경: 섹션은 '분할 허용'으로 바꿔 첫 페이지에서 끊김 최소화 */
-        .blk {{
-          /* page-break-inside: avoid;   ← 제거 */
-          break-inside: auto;
-          page-break-inside: auto;
-          margin: 14px 0 18px;
-        }}
-        /* 제목은 다음 내용과 최대한 붙여주되, 강제 페이지 분리는 막음 */
-        .blk h3 {{
-          margin:0 0 8px;
-          font-size: 16px;
-          break-after: avoid-page;
-          page-break-after: avoid;
-        }}
+        /* 첫 페이지부터 쭉 이어지도록 분할 허용 */
+        .blk {{ break-inside: auto; page-break-inside: auto; margin: 14px 0 18px; }}
+        .blk h3 {{ margin:0 0 8px; font-size: 16px; break-after: avoid-page; page-break-after: avoid; }}
         .blk .body {{
           white-space: pre-wrap; line-height: 1.6;
           border:1px solid var(--line); padding:12px; border-radius:8px; min-height:60px;
@@ -946,32 +935,19 @@ def _jd_print_html(jd: dict, meta: dict, sections: list[str], template: str="상
         }}
 
         .grid {{ display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:10px; }}
-        /* 카드 하나는 짧으니 그대로 묶어두어도 페이지 낭비가 적음 */
-        .grid > div {{
-          border:1px solid var(--line); border-radius:8px; padding:10px;
-          break-inside: avoid; page-break-inside: avoid;
-        }}
+        .grid > div {{ border:1px solid var(--line); border-radius:8px; padding:10px; break-inside: avoid; page-break-inside: avoid; }}
 
         .sign {{ margin-top:24px; display:flex; gap:16px; }}
         .sign > div {{ flex:1; border:1px dashed var(--line); border-radius:8px; padding:12px; min-height:70px; }}
 
-        .actionbar {{ display:flex; justify-content:flex-end; gap:8px; margin-bottom:12px; }}
-        .actionbar button {{ padding:6px 10px; border:1px solid var(--line); background:#fff; border-radius:6px; cursor:pointer; }}
-
-        .{cls} header h1 {{ font-size:{'20px' if template=='간단' else '22px'}; }}
-
         @media print {{
-          .actionbar {{ display:none !important; }}
           @page {{ size: A4; margin: 18mm 14mm; }}
           body {{ -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
         }}
       </style>
     </head>
-    <body>
+    <body onload="window.print()">
       <div class="print-wrap">
-        <div class="actionbar">
-          <button onclick="window.print()">인쇄</button>
-        </div>
         <header>
           <h1>직무기술서 (Job Description)</h1>
           <div class="meta">
@@ -981,10 +957,12 @@ def _jd_print_html(jd: dict, meta: dict, sections: list[str], template: str="상
             <div><b>연도</b> {m('연도')}</div>
             <div><b>버전</b> {m('버전')}</div>
             <div><b>작성자</b> {m('작성자이름')}</div>
-            <div><b>제출시각</b> {m('제출시각')}</div>
+            <div><b>제정/개정</b> {m('제정일')} / {m('개정일')}</div>
           </div>
         </header>
+
         {body_html}
+
         <div class="sign">
           <div><b>직원 확인 서명</b></div>
           <div><b>부서장 확인 서명</b></div>
@@ -1139,44 +1117,44 @@ def tab_job_desc(emp_df: pd.DataFrame):
             except Exception as e:
                 st.exception(e)
 
-    # ===== 출력폼(인쇄/HTML) =====
-    st.markdown("### 출력폼")
-    tpl = st.radio("템플릿", ["상세","간단","커스텀"], horizontal=True, key="jd_print_tpl")
-    cols = st.columns(4)
-    with cols[0]: inc_summary = st.checkbox("직무개요", True, key="jd_p_inc_summary")
-    with cols[1]: inc_main    = st.checkbox("주업무",   True, key="jd_p_inc_main")
-    with cols[2]: inc_other   = st.checkbox("기타업무", True, key="jd_p_inc_other")
-    with cols[3]: inc_req     = st.checkbox("요건(학력/경력/교육/면허)", True, key="jd_p_inc_req")
-    sections = [s for s, on in [("직무개요",inc_summary),("주업무",inc_main),("기타업무",inc_other),("요건",inc_req)] if on]
+    # ===== 인쇄 (팝업으로 바로 미리보기) =====
+    st.markdown("### 인쇄")
+    if st.button("인쇄", key="jd_print_now", type="secondary"):
+        # 현재 화면 값 기준 메타 구성
+        meta = {
+            "사번": str(target_sabun), "이름": str(target_name),
+            "부서1": str(dept1), "부서2": str(dept2),
+            "연도": int(year), "버전": int(version or (jd_current.get("버전") or 1)),
+            "작성자이름": _emp_name_by_sabun(emp_df, me_sabun),
+            "제정일": str(d_create), "개정일": str(d_update),
+        }
 
-    meta = {
-        "사번": target_sabun, "이름": target_name,
-        "부서1": dept1, "부서2": dept2,
-        "연도": year, "버전": (version or (jd_current.get("버전") or 1)),
-        "작성자이름": _emp_name_by_sabun(emp_df, me_sabun),
-        "제출시각": kst_now_str(),
-    }
+        html = _jd_print_html(jd_current, meta)
 
-    cprev = st.columns([1,1,3])
-    with cprev[0]:
-        do_preview = st.button("인쇄용 보기 열기", key="jd_print_preview")
-    with cprev[1]:
-        do_dl = st.button("HTML 다운로드", key="jd_print_dl")
-
-    if do_preview or do_dl:
-        html = _jd_print_html(jd_current, meta, sections, template=tpl)
-
-        if do_preview:
-            import streamlit.components.v1 as components
-            components.html(html, height=900, scrolling=True)
-
-        if do_dl:
-            st.download_button(
-                label="직무기술서_출력폼.html 다운로드",
-                data=html.encode("utf-8"),
-                file_name=f"JD_{target_sabun}_{int(year)}_v{meta['버전']}.html",
-                mime="text/html"
-            )
+        # 새 창에 HTML을 써넣고 즉시 window.print() 실행 (팝업 차단 시 안내)
+        import base64, streamlit.components.v1 as components
+        b64 = base64.b64encode(html.encode("utf-8")).decode("ascii")
+        components.html(f"""
+            <script>
+            (function(){{
+              try {{
+                const html = atob("{b64}");
+                const w = window.open('', '_blank');
+                if(!w) {{
+                  alert('팝업이 차단되었습니다. 브라우저에서 이 사이트의 팝업을 허용한 뒤 다시 시도하세요.');
+                  return;
+                }}
+                w.document.open();
+                w.document.write(html);
+                w.document.close();
+                // body onload에서 window.print() 자동 실행
+              }} catch(e) {{
+                console.error(e);
+                alert('인쇄 미리보기를 여는 중 문제가 발생했습니다.');
+              }}
+            }})();
+            </script>
+        """, height=0, width=0)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 직무능력평가 + JD 요약 스크롤
