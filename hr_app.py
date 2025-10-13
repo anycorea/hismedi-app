@@ -840,41 +840,6 @@ def read_jobdesc_df() -> pd.DataFrame:
         df["사번"] = df["사번"].astype(str)
     return df
 
-@st.cache_data(ttl=300, show_spinner=False)
-def read_my_jobdesc_rows(year:int, sabun:str)->pd.DataFrame:
-    """
-    직무기술서 시트에서 내가 제출(작성)한 행만 필터링하여 반환.
-    - year: 연도
-    - sabun: 작성자 사번(본인)
-    """
-    try:
-        df = read_jobdesc_df()
-    except Exception:
-        return pd.DataFrame(columns=JOBDESC_HEADERS)
-    if df is None or len(df)==0:
-        return pd.DataFrame(columns=JOBDESC_HEADERS)
-    # 형 변환 및 필터
-    if "연도" in df.columns:
-        try:
-            df["연도"] = pd.to_numeric(df["연도"], errors="coerce").fillna(0).astype(int)
-        except Exception:
-            pass
-    for c in ["작성자사번", "사번"]:
-        if c in df.columns:
-            df[c] = df[c].astype(str)
-    q = df[(df.get("연도", 0) == int(year)) & (df.get("작성자사번", "") == str(sabun))].copy()
-    if q.empty:
-        return q
-    # 정렬: 사번 오름차순, 버전 내림차순, 제출시각 내림차순(있을 경우)
-    sort_cols = [c for c in ["사번","버전","제출시각"] if c in q.columns]
-    if sort_cols:
-        asc = [True] * len(sort_cols)
-        # 버전, 제출시각은 내림차순
-        if "버전" in sort_cols: asc[sort_cols.index("버전")] = False
-        if "제출시각" in sort_cols: asc[sort_cols.index("제출시각")] = False
-        q = q.sort_values(sort_cols, ascending=asc)
-    return q.reset_index(drop=True)
-
 def _jd_latest_for(sabun: str, year: int) -> dict | None:
     df = read_jobdesc_df()
     if df.empty:
@@ -1308,15 +1273,6 @@ def tab_job_desc(emp_df: pd.DataFrame):
         import streamlit.components.v1 as components
         components.html(html, height=1000, scrolling=True)
 
-        # =================== 내 제출 현황 ===================
-        st.markdown("#### 내 제출 현황")
-        try:
-            _my_jd = read_my_jobdesc_rows(int(year), me_sabun)
-            _cols = [c for c in ["사번","이름","직무명","버전","제정일","개정일","제출시각"] if c in _my_jd.columns]
-            st.dataframe(_my_jd[_cols] if _cols else _my_jd, use_container_width=True, height=260)
-        except Exception:
-            st.caption("제출 현황을 불러오지 못했습니다.")
-
 # ══════════════════════════════════════════════════════════════════════════════
 # 직무능력평가 + JD 요약 스크롤
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1325,7 +1281,11 @@ COMP_SIMPLE_HEADERS = [
     "연도","평가대상사번","평가대상이름","평가자사번","평가자이름",
     "평가일자","주업무평가","기타업무평가","교육이수","자격유지","종합의견",
     "상태","제출시각","잠금"
-]
+]    # [ADDED] 직무기술서: 초기 로드부터 '내 제출 현황' 표시
+    try:
+        render_jobdesc_my_status()
+    except Exception:
+        pass
 
 def _simp_sheet_name(year:int|str)->str: return f"{COMP_SIMPLE_PREFIX}{int(year)}"
 
@@ -1953,3 +1913,96 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
+# =================== [ADDED] JD "내 제출 현황" early-render helpers ===================
+from typing import Optional, List
+import pandas as pd
+import streamlit as st
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _jd_read_my_rows(_year: int, _sabun: str) -> pd.DataFrame:
+    """
+    Read '직무기술서' sheet and filter to my submissions (작성자사번 == me) for given year.
+    Expects host app to define `read_jobdesc_df()`.
+    """
+    reader = globals().get("read_jobdesc_df")
+    if reader is None:
+        return pd.DataFrame()
+    df = reader()
+    if df is None or len(df) == 0:
+        return pd.DataFrame()
+
+    # Normalize
+    if "연도" in df.columns:
+        df["연도"] = pd.to_numeric(df["연도"], errors="coerce").fillna(0).astype(int)
+    for col in ("작성자사번", "사번"):
+        if col in df.columns:
+            df[col] = df[col].astype(str)
+
+    mask_year = (df["연도"] == int(_year)) if "연도" in df.columns else True
+    mask_me = (df["작성자사번"] == str(_sabun)) if "작성자사번" in df.columns else (df.get("사번","") == str(_sabun))
+    q = df[mask_year & mask_me].copy()
+
+    sort_cols: List[str] = [c for c in ["사번","버전","제출시각"] if c in q.columns]
+    if sort_cols:
+        ascending = [True] * len(sort_cols)
+        if "버전" in sort_cols:
+            ascending[sort_cols.index("버전")] = False
+        if "제출시각" in sort_cols:
+            ascending[sort_cols.index("제출시각")] = False
+        q = q.sort_values(sort_cols, ascending=ascending)
+
+    return q.reset_index(drop=True)
+
+def _jd_auto_year(default: int = None):
+    if default is not None:
+        try:
+            return int(default)
+        except Exception:
+            pass
+    y = st.session_state.get("year") or st.session_state.get("연도")
+    if y is not None:
+        try:
+            return int(str(y).split(".")[0])
+        except Exception:
+            pass
+    try:
+        import datetime as _dt
+        return _dt.datetime.now().year
+    except Exception:
+        return None
+
+def _jd_auto_sabun(default: str = None):
+    if default:
+        return str(default)
+    me = st.session_state.get("me") or {}
+    sabun = me.get("sabun") or st.session_state.get("사번") or st.session_state.get("me_sabun")
+    return str(sabun) if sabun else None
+
+def render_jobdesc_my_status(year: int = None, me_sabun: str = None, *, header: bool = True, height: int = 260):
+    """
+    Render '내 제출 현황' for Job Description tab.
+    Call this at the TOP of tab_job_desc(), so it is visible on initial load.
+    """
+    _year = _jd_auto_year(year)
+    _sabun = _jd_auto_sabun(me_sabun)
+
+    if header:
+        st.markdown("#### 내 제출 현황")
+
+    if not _year or not _sabun:
+        st.caption("연도/사번이 아직 결정되지 않아 현황을 표시할 수 없습니다.")
+        return
+
+    try:
+        df = _jd_read_my_rows(_year, _sabun)
+        if df.empty:
+            st.caption("표시할 제출 내역이 없습니다.")
+            return
+        cols = [c for c in ["사번","이름","직무명","버전","제정일","개정일","제출시각"] if c in df.columns]
+        st.dataframe(df[cols] if cols else df, use_container_width=True, height=height)
+    except Exception as e:
+        st.caption(f"제출 현황을 불러오지 못했습니다: {e!s}")
+# =================== [/ADDED] ========================================================
