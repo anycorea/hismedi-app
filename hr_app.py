@@ -129,42 +129,57 @@ def _client_meta() -> str:
 
 def verify_pin(user_sabun: str, pin: str) -> bool:
     """
-    제출 직전 PIN 재인증용.
+    제출 직전 PIN 재인증용 (로그인 로직과 동일한 허용 범위 유지).
+    - PIN 저장 형태: SHA256(pin) 또는 SHA256(sabun:pin)
     - 우선순위:
-      1) st.session_state["pin_map"] 에 평문 PIN 저장된 경우 → 직접 비교
-      2) st.session_state["pin_hash_map"] 에 사번별 해시 저장된 경우 → _pin_hash 로 비교
-      3) st.session_state["user"] 안에 pin / pin_hash 있는 경우 → 비교
-      4) (없으면) False
-    ※ _pin_hash(pin, sabun): 이미 유틸에 정의되어 있다고 가정
+      1) st.session_state["pin_map"] → 평문 비교
+      2) st.session_state["pin_hash_map"] → 해시 비교 (단일 / salt 포함 둘 다 허용)
+      3) st.session_state["user"] → pin / pin_hash 필드 비교
+      4) 직원시트 데이터 기반 보조 검증
     """
     sabun = str(user_sabun).strip()
     val = str(pin).strip()
+    if not (sabun and val):
+        return False
 
-    # 1) 평문 맵: { "1001": "1234", ... }
+    # 1) 평문 맵
     pin_map = st.session_state.get("pin_map", {})
     if sabun in pin_map:
         return str(pin_map.get(sabun, "")) == val
 
-    # 2) 해시 맵: { "1001": "<hash>", ... }
+    # 2) 해시 맵
     pin_hash_map = st.session_state.get("pin_hash_map", {})
     if sabun in pin_hash_map:
+        stored_hash = str(pin_hash_map.get(sabun, "")).lower().strip()
         try:
-            return str(pin_hash_map.get(sabun, "")) == _pin_hash(val, sabun)
+            return stored_hash in (_sha256_hex(val), _pin_hash(val, sabun))
         except Exception:
             pass
 
-    # 3) 현재 사용자 세션 객체에 있는 경우
+    # 3) 세션 내 사용자 객체
     u = st.session_state.get("user", {}) or {}
     if str(u.get("사번", "")).strip() == sabun:
         if "pin" in u:
             return str(u.get("pin", "")) == val
         if "pin_hash" in u:
+            stored_hash = str(u.get("pin_hash", "")).lower().strip()
             try:
-                return str(u.get("pin_hash", "")) == _pin_hash(val, sabun)
+                return stored_hash in (_sha256_hex(val), _pin_hash(val, sabun))
             except Exception:
                 pass
 
-    # 4) 기타 미지원 저장소 → 실패
+    # 4) 직원 DF 기반 보조 검증 (직원시트 읽기)
+    try:
+        emp_df = st.session_state.get("emp_df")
+        if emp_df is not None and "사번" in emp_df.columns and "PIN_hash" in emp_df.columns:
+            row = emp_df.loc[emp_df["사번"].astype(str) == sabun]
+            if not row.empty:
+                stored_hash = str(row.iloc[0].get("PIN_hash", "")).lower().strip()
+                if stored_hash in (_sha256_hex(val), _pin_hash(val, sabun)):
+                    return True
+    except Exception:
+        pass
+
     return False
 
 # ══════════════════════════════════════════════════════════════════════════════
