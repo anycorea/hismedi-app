@@ -1073,7 +1073,7 @@ def _jd_print_html(jd: dict, meta: dict) -> str:
     return html
 
 def tab_job_desc(emp_df: pd.DataFrame):
-    """JD editor with 2-row (horizontal) header layout + print button order already handled by _jd_print_html()."""
+    """JD editor with 2-row header and 4-row education layout + print button order handled by _jd_print_html()."""
     try:
         this_year = datetime.now(tz=tz_kst()).year  # type: ignore
     except Exception:
@@ -1160,8 +1160,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
             st.markdown("**기타업무**")
             st.write((jd_saved or {}).get("기타업무", "") or "—")
 
-    # =================== 1행 (가로) ===================
-    # 비고가 넓게 보이도록 마지막 칸 배수 확장
+    # =================== Header Row 1 (가로) ===================
     r1 = st.columns([1, 1, 1, 1, 1.6])
     with r1[0]:
         version = st.number_input("버전(없으면 자동)", min_value=0, max_value=999,
@@ -1176,8 +1175,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
     with r1[4]:
         memo = st.text_input("비고", value=jd_current.get("비고",""), key="jd2_memo", disabled=not edit_mode)
 
-    # =================== 2행 (가로) ===================
-    # 직무명이 넓게 보이도록 마지막 칸 배수 확장
+    # =================== Header Row 2 (가로) ===================
     r2 = st.columns([1, 1, 1, 1, 1.6])
     with r2[0]:
         dept1  = st.text_input("부서1", value=jd_current.get("부서1",""), key="jd2_dept1", disabled=not edit_mode)
@@ -1195,18 +1193,24 @@ def tab_job_desc(emp_df: pd.DataFrame):
     job_main    = st.text_area("주업무",   value=jd_current.get("주업무",""),   height=120, key="jd2_main",    disabled=not edit_mode)
     job_other   = st.text_area("기타업무", value=jd_current.get("기타업무",""), height=80,  key="jd2_other",   disabled=not edit_mode)
 
-    # 교육/자격/경력 (가로 폭 분할)
-    c4 = st.columns([1,1,1,1,1,1])
-    with c4[0]: edu_req    = st.text_input("필요학력",        value=jd_current.get("필요학력",""),        key="jd2_edu",        disabled=not edit_mode)
-    with c4[1]: major_req  = st.text_input("전공계열",        value=jd_current.get("전공계열",""),        key="jd2_major",      disabled=not edit_mode)
-    with c4[2]: edu_common = st.text_input("직원공통필수교육", value=jd_current.get("직원공통필수교육",""), key="jd2_edu_common", disabled=not edit_mode)
-    with c4[3]: edu_cont   = st.text_input("보수교육",        value=jd_current.get("보수교육",""),        key="jd2_edu_cont",   disabled=not edit_mode)
-    with c4[4]: edu_etc    = st.text_input("기타교육",        value=jd_current.get("기타교육",""),        key="jd2_edu_etc",    disabled=not edit_mode)
-    with c4[5]: edu_spec   = st.text_input("특성화교육",      value=jd_current.get("특성화교육",""),      key="jd2_edu_spec",   disabled=not edit_mode)
+    # =================== Education/Qualification (4 rows) ===================
+    # R1: 필요학력 | 전공계열 | 면허 | 경력(자격요건)
+    e1 = st.columns([1,1,1,1])
+    with e1[0]: edu_req    = st.text_input("필요학력",        value=jd_current.get("필요학력",""),        key="jd2_edu",        disabled=not edit_mode)
+    with e1[1]: major_req  = st.text_input("전공계열",        value=jd_current.get("전공계열",""),        key="jd2_major",      disabled=not edit_mode)
+    with e1[2]: license_   = st.text_input("면허",            value=jd_current.get("면허",""),            key="jd2_license",    disabled=not edit_mode)
+    with e1[3]: career     = st.text_input("경력(자격요건)", value=jd_current.get("경력(자격요건)",""), key="jd2_career",     disabled=not edit_mode)
 
-    c5 = st.columns([1,1,2])
-    with c5[0]: license_ = st.text_input("면허",            value=jd_current.get("면허",""),            key="jd2_license", disabled=not edit_mode)
-    with c5[1]: career   = st.text_input("경력(자격요건)", value=jd_current.get("경력(자격요건)",""), key="jd2_career",  disabled=not edit_mode)
+    # R2: 직원공통필수교육 (full width)
+    edu_common = st.text_input("직원공통필수교육", value=jd_current.get("직원공통필수교육",""), key="jd2_edu_common", disabled=not edit_mode)
+
+    # R3: 특성화교육 (full width)
+    edu_spec   = st.text_input("특성화교육",       value=jd_current.get("특성화교육",""),       key="jd2_edu_spec",   disabled=not edit_mode)
+
+    # R4: 보수교육 | 기타교육
+    e4 = st.columns([1,1])
+    with e4[0]: edu_cont   = st.text_input("보수교육",        value=jd_current.get("보수교육",""),        key="jd2_edu_cont",   disabled=not edit_mode)
+    with e4[1]: edu_etc    = st.text_input("기타교육",        value=jd_current.get("기타교육",""),        key="jd2_edu_etc",    disabled=not edit_mode)
 
     # 제출 확인
     st.markdown("#### 제출 확인")
