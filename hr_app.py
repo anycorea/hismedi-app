@@ -977,17 +977,6 @@ def tab_job_desc(emp_df: pd.DataFrame):
     with c5[1]: career   = st.text_input("경력(자격요건)", value=jd_current.get("경력(자격요건)",""), key="jd2_career", disabled=not edit_mode)
     with c5[2]: pass
 
-    c6 = st.columns([1,2,1])
-    with c6[0]:
-        _opt = ["", "text", "image"]
-        _sv  = jd_current.get("서명방식","")
-        _idx = _opt.index(_sv) if _sv in _opt else 0
-        sign_type = st.selectbox("서명방식", _opt, index=_idx, key="jd2_sign_type", disabled=not edit_mode)
-    with c6[1]:
-        sign_data = st.text_input("서명데이터", value=jd_current.get("서명데이터",""), key="jd2_sign_data", disabled=not edit_mode)
-    with c6[2]:
-        pass  # 버튼은 아래 '제출 확인' 블럭으로 이동
-
     # ===== 제출 확인(PIN 재확인 + 동의 체크) =====
     st.markdown("#### 제출 확인")
     ca1, ca2 = st.columns([2, 1])
@@ -1004,7 +993,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
             key=f"jd_attest_pin_{year}_{target_sabun}_{me_sabun}",
         )
 
-    do_save = st.button("저장/업서트", type="primary", use_container_width=True, key="jd2_save", disabled=not edit_mode)
+    do_save = st.button("제출/저장", type="primary", use_container_width=True, key="jd2_save", disabled=not edit_mode)
 
     if do_save:
         # 1) 동의 체크
@@ -1022,7 +1011,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
                 "직무개요": job_summary, "주업무": job_main, "기타업무": job_other,
                 "필요학력": edu_req, "전공계열": major_req,
                 "직원공통필수교육": edu_common, "보수교육": edu_cont, "기타교육": edu_etc, "특성화교육": edu_spec,
-                "면허": license_, "경력(자격요건)": career, "비고": memo, "서명방식": sign_type, "서명데이터": sign_data,
+                "면허": license_, "경력(자격요건)": career, "비고": memo
             }
             try:
                 rep = upsert_jobdesc(rec, as_new_version=(version == 0))
