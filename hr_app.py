@@ -795,7 +795,7 @@ def tab_eval(emp_df: pd.DataFrame):
 # ══════════════════════════════════════════════════════════════════════════════
 JOBDESC_SHEET = "직무기술서"
 JOBDESC_HEADERS = [
-    "사번","연도","버전","부서1","부서2","작성자사번","작성자이름",
+    "사번","이름","연도","버전","부서1","부서2","작성자사번","작성자이름",
     "직군","직종","직무명","제정일","개정일","검토주기",
     "직무개요","주업무","기타업무",
     "필요학력","전공계열","직원공통필수교육","보수교육","기타교육","특성화교육",
@@ -872,6 +872,9 @@ def upsert_jobdesc(rec: dict, as_new_version: bool = False) -> dict:
     sabun = str(rec.get("사번", "")).strip()
     year = int(rec.get("연도", 0))
 
+    # 이름 자동 채움
+    rec["이름"] = _emp_name_by_sabun(read_emp_df(), sabun)
+
     # 버전 결정
     if as_new_version:
         ver = _jobdesc_next_version(sabun, year)
@@ -885,6 +888,7 @@ def upsert_jobdesc(rec: dict, as_new_version: bool = False) -> dict:
             ver = try_ver if exist else 1
     rec["버전"] = int(ver)
     rec["제출시각"] = kst_now_str()
+    rec["이름"] = _emp_name_by_sabun(read_emp_df(), sabun)
 
     values = _retry(ws.get_all_values)
     row_idx = 0
