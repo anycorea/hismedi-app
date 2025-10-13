@@ -925,8 +925,31 @@ def upsert_jobdesc(rec: dict, as_new_version: bool = False) -> dict:
 # - 한글 폰트 스택 강화, 줄바꿈 품질 향상
 # -----------------------------------------------------------------------------
 def _jd_print_html(jd: dict, meta: dict) -> str:
+    """Print HTML with requested header field order and combined 부서."""
     def g(k): return (str(jd.get(k, "")) or "—").strip()
     def m(k): return (str(meta.get(k, "")) or "—").strip()
+
+    # Combine 부서1 + 부서2 for display
+    dept = m('부서1')
+    if m('부서2') != '—' and m('부서2'):
+        dept = f"{dept} / {m('부서2')}" if dept and dept != '—' else m('부서2')
+
+    # Requested header order:
+    # 연도/버전/사번/이름/부서(부서1+부서2)/작성자/직종/직군/직무명/제정일/개정일/검토주기
+    header_rows = [
+        ("연도", m('연도')),
+        ("버전", m('버전')),
+        ("사번", m('사번')),
+        ("이름", m('이름')),
+        ("부서", dept or "—"),
+        ("작성자", m('작성자이름')),
+        ("직종", m('직종')),
+        ("직군", m('직군')),
+        ("직무명", m('직무명')),
+        ("제정일", m('제정일')),
+        ("개정일", m('개정일')),
+        ("검토주기", m('검토주기')),
+    ]
 
     def block(title, body):
         body_val = (body or "").strip()
@@ -955,7 +978,6 @@ def _jd_print_html(jd: dict, meta: dict) -> str:
         """)
     )
 
-    # 인라인 미리보기에서 내부 "인쇄" 버튼을 보여주기 위해 body onload=print는 제거(호출부에서 교체 가능)
     html = f"""
     <html>
     <head>
@@ -967,33 +989,23 @@ def _jd_print_html(jd: dict, meta: dict) -> str:
           color: var(--fg);
           font-family: 'Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic','Segoe UI',Roboto,system-ui,sans-serif;
           -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
-          orphans: 2; widows: 2;
-          word-break: keep-all; overflow-wrap: anywhere;
+          orphans: 2; widows: 2; word-break: keep-all; overflow-wrap: anywhere;
         }}
         .print-wrap {{ max-width: 900px; margin: 0 auto; padding: 28px 24px; background:#fff; }}
         .actionbar {{ display:flex; justify-content:flex-end; margin-bottom:12px; }}
-        .actionbar button {{
-          padding:6px 12px; border:1px solid var(--line); background:#fff; border-radius:6px; cursor:pointer;
-        }}
+        .actionbar button {{ padding:6px 12px; border:1px solid var(--line); background:#fff; border-radius:6px; cursor:pointer; }}
         header {{ border-bottom:1px solid var(--line); padding-bottom:10px; margin-bottom:18px; }}
         header h1 {{ margin:0; font-size: 22px; }}
-        header .meta {{ margin-top:6px; font-size: 13px; color:var(--muted); display:flex; gap:16px; flex-wrap:wrap; }}
-
-        /* 첫 페이지부터 쭉 이어지도록 분할 허용 */
+        .meta-table {{ width:100%; border-collapse: collapse; margin-top:8px; font-size:13px; color:var(--muted); }}
+        .meta-table td {{ padding:4px 6px; vertical-align:top; }}
+        .meta-table td.k {{ width:96px; color:#111; font-weight:700; }}
         .blk {{ break-inside: auto; page-break-inside: auto; margin: 14px 0 18px; }}
         .blk h3 {{ margin:0 0 8px; font-size: 16px; break-after: avoid-page; page-break-after: avoid; }}
-        .blk .body {{
-          white-space: pre-wrap; line-height: 1.65;
-          border:1px solid var(--line); padding:12px; border-radius:8px; min-height:60px;
-          break-inside: auto; page-break-inside: auto;
-        }}
-
+        .blk .body {{ white-space: pre-wrap; line-height: 1.65; border:1px solid var(--line); padding:12px; border-radius:8px; min-height:60px; }}
         .grid {{ display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:10px; }}
-        .grid > div {{ border:1px solid var(--line); border-radius:8px; padding:10px; break-inside: avoid; page-break-inside: avoid; }}
-
+        .grid > div {{ border:1px solid var(--line); border-radius:8px; padding:10px; }}
         .sign {{ margin-top:24px; display:flex; gap:16px; }}
         .sign > div {{ flex:1; border:1px dashed var(--line); border-radius:8px; padding:12px; min-height:70px; }}
-
         @media print {{
           @page {{ size: A4; margin: 18mm 14mm; }}
           body {{ -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
@@ -1006,15 +1018,9 @@ def _jd_print_html(jd: dict, meta: dict) -> str:
         <div class="actionbar"><button onclick="window.print()">인쇄</button></div>
         <header>
           <h1>직무기술서 (Job Description)</h1>
-          <div class="meta">
-            <div><b>사번</b> {m('사번')}</div>
-            <div><b>이름</b> {m('이름')}</div>
-            <div><b>부서</b> {m('부서1')}{(' / '+m('부서2')) if m('부서2')!='—' else ''}</div>
-            <div><b>연도</b> {m('연도')}</div>
-            <div><b>버전</b> {m('버전')}</div>
-            <div><b>작성자</b> {m('작성자이름')}</div>
-            <div><b>제정/개정</b> {m('제정일')} / {m('개정일')}</div>
-          </div>
+          <table class="meta-table">
+            {"".join([f"<tr><td class='k'>{k}</td><td>{v}</td></tr>" for k,v in header_rows])}
+          </table>
         </header>
         {body_html}
         <div class="sign">
@@ -1027,11 +1033,12 @@ def _jd_print_html(jd: dict, meta: dict) -> str:
     """
     return html
 
-# -----------------------------------------------------------------------------
-# 탭 엔트리
-# -----------------------------------------------------------------------------
 def tab_job_desc(emp_df: pd.DataFrame):
-    this_year = datetime.now(tz=tz_kst()).year
+    """JD editor with requested 2-column order/size and updated print button."""
+    try:
+        this_year = datetime.now(tz=tz_kst()).year
+    except Exception:
+        this_year = datetime.now().year
     year = st.number_input("연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="jd2_year")
 
     u = st.session_state["user"]
@@ -1045,6 +1052,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
     st.session_state.setdefault("jd2_target_name",  glob_name or me_name)
     st.session_state.setdefault("jd2_edit_mode",    False)
 
+    # 대상자 선택 UI
     if not am_admin_or_mgr:
         target_sabun = me_sabun; target_name = me_name
         st.info(f"대상자: {target_name} ({target_sabun})", icon="👤")
@@ -1072,6 +1080,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
         target_sabun = st.session_state["jd2_target_sabun"]; target_name = st.session_state["jd2_target_name"]
         st.success(f"대상자: {target_name} ({target_sabun})", icon="✅")
 
+    # 모드 토글
     col_mode = st.columns([1, 3])
     with col_mode[0]:
         if st.button(("수정모드로 전환" if not st.session_state["jd2_edit_mode"] else "보기모드로 전환"),
@@ -1084,6 +1093,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
 
     # 현재/초기 레코드
     jd_saved = _jd_latest_for(target_sabun, int(year))
+
     def _safe_get(col, default=""):
         try:
             return emp_df.loc[emp_df["사번"].astype(str) == str(target_sabun)].get(col, default).values[0] if col in emp_df.columns else default
@@ -1111,35 +1121,29 @@ def tab_job_desc(emp_df: pd.DataFrame):
             st.markdown("**기타업무**")
             st.write((jd_saved or {}).get("기타업무", "") or "—")
 
-    col = st.columns([1, 1, 2, 2])
-    with col[0]:
+    # ========== 레이아웃: 2열 구성 ==========
+    left, right = st.columns([1, 1.4])
+    with left:
         version = st.number_input("버전(없으면 자동)", min_value=0, max_value=999,
                                   value=int(str(jd_current.get("버전", 0)) or 0),
                                   step=1, key="jd2_ver", disabled=not edit_mode)
-    with col[1]:
-        jobname = st.text_input("직무명", value=jd_current.get("직무명", ""),
-                                key="jd2_jobname", disabled=not edit_mode)
-    with col[2]:
-        memo = st.text_input("비고", value=jd_current.get("비고", ""),
-                             key="jd2_memo", disabled=not edit_mode)
-    with col[3]:
-        pass
+        d_create = st.text_input("제정일",   value=jd_current.get("제정일",""),   key="jd2_d_create", disabled=not edit_mode)
+        d_update = st.text_input("개정일",   value=jd_current.get("개정일",""),   key="jd2_d_update", disabled=not edit_mode)
+        review   = st.text_input("검토주기", value=jd_current.get("검토주기",""), key="jd2_review",   disabled=not edit_mode)
+        memo     = st.text_input("비고",     value=jd_current.get("비고",""),     key="jd2_memo",     disabled=not edit_mode)
+    with right:
+        dept1  = st.text_input("부서1", value=jd_current.get("부서1",""), key="jd2_dept1",  disabled=not edit_mode)
+        dept2  = st.text_input("부서2", value=jd_current.get("부서2",""), key="jd2_dept2",  disabled=not edit_mode)
+        group  = st.text_input("직군",  value=jd_current.get("직군",""),  key="jd2_group",   disabled=not edit_mode)
+        series = st.text_input("직종",  value=jd_current.get("직종",""),  key="jd2_series",  disabled=not edit_mode)
+        jobname= st.text_input("직무명", value=jd_current.get("직무명",""), key="jd2_jobname", disabled=not edit_mode)
 
-    c2 = st.columns([1, 1, 1, 1])
-    with c2[0]: dept1  = st.text_input("부서1", value=jd_current.get("부서1",""), key="jd2_dept1",  disabled=not edit_mode)
-    with c2[1]: dept2  = st.text_input("부서2", value=jd_current.get("부서2",""), key="jd2_dept2",  disabled=not edit_mode)
-    with c2[2]: group  = st.text_input("직군",  value=jd_current.get("직군",""),  key="jd2_group",   disabled=not edit_mode)
-    with c2[3]: series = st.text_input("직종",  value=jd_current.get("직종",""),  key="jd2_series",  disabled=not edit_mode)
-
-    c3 = st.columns([1, 1, 1])
-    with c3[0]: d_create = st.text_input("제정일",   value=jd_current.get("제정일",""),   key="jd2_d_create", disabled=not edit_mode)
-    with c3[1]: d_update = st.text_input("개정일",   value=jd_current.get("개정일",""),   key="jd2_d_update", disabled=not edit_mode)
-    with c3[2]: review   = st.text_input("검토주기", value=jd_current.get("검토주기",""), key="jd2_review",   disabled=not edit_mode)
-
+    # 본문
     job_summary = st.text_area("직무개요", value=jd_current.get("직무개요",""), height=80,  key="jd2_summary", disabled=not edit_mode)
     job_main    = st.text_area("주업무",   value=jd_current.get("주업무",""),   height=120, key="jd2_main",    disabled=not edit_mode)
     job_other   = st.text_area("기타업무", value=jd_current.get("기타업무",""), height=80,  key="jd2_other",   disabled=not edit_mode)
 
+    # 교육/자격/경력
     c4 = st.columns([1,1,1,1,1,1])
     with c4[0]: edu_req    = st.text_input("필요학력",        value=jd_current.get("필요학력",""),        key="jd2_edu",        disabled=not edit_mode)
     with c4[1]: major_req  = st.text_input("전공계열",        value=jd_current.get("전공계열",""),        key="jd2_major",      disabled=not edit_mode)
@@ -1151,9 +1155,8 @@ def tab_job_desc(emp_df: pd.DataFrame):
     c5 = st.columns([1,1,2])
     with c5[0]: license_ = st.text_input("면허",            value=jd_current.get("면허",""),            key="jd2_license", disabled=not edit_mode)
     with c5[1]: career   = st.text_input("경력(자격요건)", value=jd_current.get("경력(자격요건)",""), key="jd2_career",  disabled=not edit_mode)
-    with c5[2]: pass
 
-    # ===== 제출 확인(PIN + 동의 체크) =====
+    # 제출 확인
     st.markdown("#### 제출 확인")
     ca1, ca2 = st.columns([2, 1])
     with ca1:
@@ -1169,7 +1172,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
             key=f"jd_attest_pin_{year}_{target_sabun}_{me_sabun}",
         )
 
-    # ===== 제출/저장 + 인쇄 버튼 (한 줄 반반) =====
+    # 버튼
     cbtn = st.columns([1, 1])
     with cbtn[0]:
         do_save = st.button("제출/저장", type="primary", use_container_width=True, key="jd2_save", disabled=not edit_mode)
@@ -1199,7 +1202,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
             except Exception as e:
                 st.exception(e)
 
-    # ===== 인쇄 미리보기 (내부 표시) =====
+    # 인쇄
     if do_print:
         meta = {
             "사번": str(target_sabun), "이름": str(target_name),
@@ -1207,11 +1210,11 @@ def tab_job_desc(emp_df: pd.DataFrame):
             "연도": int(year), "버전": int(version or (jd_current.get("버전") or 1)),
             "작성자이름": _emp_name_by_sabun(emp_df, me_sabun),
             "제정일": str(d_create), "개정일": str(d_update),
+            "검토주기": str(review),
+            "직종": str(series), "직군": str(group), "직무명": str(jobname),
         }
         html = _jd_print_html(jd_current, meta)
-
         import streamlit.components.v1 as components
-        # 내부 미리보기: body onload 자동 인쇄는 제거(내부 버튼으로만 인쇄)
         components.html(html, height=1000, scrolling=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
