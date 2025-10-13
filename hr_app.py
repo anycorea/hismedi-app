@@ -933,27 +933,23 @@ def _jd_print_html(jd: dict, meta: dict) -> str:
     if m('부서2') != '—' and m('부서2'):
         dept = f"{dept} / {m('부서2')}" if dept and dept != '—' else m('부서2')
 
-    # Prepare pairs for 2-row layout (6 pairs per row)
-    row1 = [
-        ("연도", m('연도')),
-        ("버전", m('버전')),
-        ("사번", m('사번')),
-        ("이름", m('이름')),
-        ("부서", dept or "—"),
-        ("작성자", m('작성자이름')),
-    ]
-    row2 = [
-        ("직종", m('직종')),
-        ("직군", m('직군')),
-        ("직무명", m('직무명')),
-        ("제정일", m('제정일')),
-        ("개정일", m('개정일')),
-        ("검토주기", m('검토주기')),
-    ]
+    # ----- Row definitions -----
+    row1 = [("사번", m('사번')), ("이름", m('이름')), ("부서", dept or "—")]
+    row2 = [("직종", m('직종')), ("직군", m('직군')), ("직무명", m('직무명'))]
+    row3 = [("연도", m('연도')), ("버전", m('버전')), ("제정일", m('제정일')), ("개정일", m('개정일')), ("검토주기", m('검토주기'))]
 
-    def trow(pairs):
+    # Helpers to render tables with desired widths
+    def trow_3cols_kvk(title_pairs, wide_last=True):
+        # Table with 6 cells: k v | k v | k v; last v is wider via CSS
         cells = []
-        for k, v in pairs:
+        for i, (k, v) in enumerate(title_pairs):
+            wide_cls = " wide" if (wide_last and i == 2) else ""
+            cells.append(f"<td class='k'>{k}</td><td class='v{wide_cls}'>{v}</td>")
+        return "<tr>" + "".join(cells) + "</tr>"
+
+    def trow_5cols_kvk(title_pairs):
+        cells = []
+        for (k, v) in title_pairs:
             cells.append(f"<td class='k'>{k}</td><td class='v'>{v}</td>")
         return "<tr>" + "".join(cells) + "</tr>"
 
@@ -1003,11 +999,17 @@ def _jd_print_html(jd: dict, meta: dict) -> str:
         header {{ border-bottom:1px solid var(--line); padding-bottom:10px; margin-bottom:18px; }}
         header h1 {{ margin:0; font-size: 22px; }}
 
-        /* === 2-row meta table === */
-        .meta-table {{ width:100%; border-collapse: collapse; margin-top:8px; font-size:13px; color:var(--muted); table-layout: fixed; }}
-        .meta-table td {{ padding:4px 6px; vertical-align:top; border-bottom: 1px dashed var(--line); }}
-        .meta-table td.k {{ width:8%; color:#111; font-weight:700; white-space:nowrap; }}
-        .meta-table td.v {{ width:8.6%; color:#333; overflow:hidden; text-overflow:ellipsis; }}
+        /* Row tables */
+        table.meta6 {{ width:100%; border-collapse:collapse; margin-top:4px; font-size:13px; color:var(--muted); table-layout:fixed; }}
+        table.meta6 td {{ padding:4px 6px; vertical-align:top; border-bottom:1px dashed var(--line); }}
+        table.meta6 td.k {{ width:10%; color:#111; font-weight:700; white-space:nowrap; }}
+        table.meta6 td.v {{ width:20%; color:#333; overflow:hidden; text-overflow:ellipsis; }}
+        table.meta6 td.v.wide {{ width:30%; }} /* 부서, 직무명 등 넓은 칸 */
+
+        table.meta10 {{ width:100%; border-collapse:collapse; margin-top:4px; font-size:13px; color:var(--muted); table-layout:fixed; }}
+        table.meta10 td {{ padding:4px 6px; vertical-align:top; border-bottom:1px dashed var(--line); }}
+        table.meta10 td.k {{ width:10%; color:#111; font-weight:700; white-space:nowrap; }}
+        table.meta10 td.v {{ width:10%; color:#333; overflow:hidden; text-overflow:ellipsis; }}
 
         .blk {{ break-inside: auto; page-break-inside: auto; margin: 14px 0 18px; }}
         .blk h3 {{ margin:0 0 8px; font-size: 16px; break-after: avoid-page; page-break-after: avoid; }}
@@ -1028,9 +1030,17 @@ def _jd_print_html(jd: dict, meta: dict) -> str:
         <div class="actionbar"><button onclick="window.print()">인쇄</button></div>
         <header>
           <h1>직무기술서 (Job Description)</h1>
-          <table class="meta-table">
-            {trow(row1)}
-            {trow(row2)}
+          <!-- Row 1 -->
+          <table class="meta6">
+            {trow_3cols_kvk(row1, wide_last=True)}
+          </table>
+          <!-- Row 2 -->
+          <table class="meta6">
+            {trow_3cols_kvk(row2, wide_last=True)}
+          </table>
+          <!-- Row 3 -->
+          <table class="meta10">
+            {trow_5cols_kvk(row3)}
           </table>
         </header>
         {body_html}
