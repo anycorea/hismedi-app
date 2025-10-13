@@ -879,7 +879,7 @@ def upsert_jobdesc(rec:dict, as_new_version:bool=False)->dict:
 # 출력폼 HTML 생성기
 # ─────────────────────────────────────────────────────────────────────────────
 def _jd_print_html(jd: dict, meta: dict, sections: list[str], template: str="상세") -> str:
-    """직무기술서 인쇄용 HTML."""
+    """직무기술서 인쇄용 HTML (첫 페이지부터 연속 인쇄)."""
     def g(k): return (str(jd.get(k,"")) or "—").strip()
     def m(k): return (str(meta.get(k,"")) or "—").strip()
     def block(title, body):
@@ -915,21 +915,51 @@ def _jd_print_html(jd: dict, meta: dict, sections: list[str], template: str="상
       <title>직무기술서 출력폼</title>
       <style>
         :root {{ --fg:#111; --muted:#666; --line:#e5e7eb; }}
-        body {{ color:var(--fg); font-family: "Noto Sans KR", Pretendard, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }}
+        body {{
+          color:var(--fg);
+          font-family: "Noto Sans KR", Pretendard, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+          orphans: 2; widows: 2; /* 인쇄시 고아/미망 줄 방지 */
+        }}
         .print-wrap {{ max-width: 900px; margin: 0 auto; padding: 28px 24px; }}
         header {{ border-bottom:1px solid var(--line); padding-bottom:10px; margin-bottom:18px; }}
         header h1 {{ margin:0; font-size: 22px; }}
         header .meta {{ margin-top:6px; font-size: 13px; color:var(--muted); display:flex; gap:16px; flex-wrap:wrap; }}
-        .blk {{ page-break-inside: avoid; margin: 14px 0 18px; }}
-        .blk h3 {{ margin:0 0 8px; font-size: 16px; }}
-        .blk .body {{ white-space: pre-wrap; line-height: 1.6; border:1px solid var(--line); padding:12px; border-radius:8px; min-height:60px; }}
+
+        /* ✅ 핵심 변경: 섹션은 '분할 허용'으로 바꿔 첫 페이지에서 끊김 최소화 */
+        .blk {{
+          /* page-break-inside: avoid;   ← 제거 */
+          break-inside: auto;
+          page-break-inside: auto;
+          margin: 14px 0 18px;
+        }}
+        /* 제목은 다음 내용과 최대한 붙여주되, 강제 페이지 분리는 막음 */
+        .blk h3 {{
+          margin:0 0 8px;
+          font-size: 16px;
+          break-after: avoid-page;
+          page-break-after: avoid;
+        }}
+        .blk .body {{
+          white-space: pre-wrap; line-height: 1.6;
+          border:1px solid var(--line); padding:12px; border-radius:8px; min-height:60px;
+          break-inside: auto; page-break-inside: auto;
+        }}
+
         .grid {{ display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:10px; }}
-        .grid > div {{ border:1px solid var(--line); border-radius:8px; padding:10px; }}
+        /* 카드 하나는 짧으니 그대로 묶어두어도 페이지 낭비가 적음 */
+        .grid > div {{
+          border:1px solid var(--line); border-radius:8px; padding:10px;
+          break-inside: avoid; page-break-inside: avoid;
+        }}
+
         .sign {{ margin-top:24px; display:flex; gap:16px; }}
         .sign > div {{ flex:1; border:1px dashed var(--line); border-radius:8px; padding:12px; min-height:70px; }}
+
         .actionbar {{ display:flex; justify-content:flex-end; gap:8px; margin-bottom:12px; }}
         .actionbar button {{ padding:6px 10px; border:1px solid var(--line); background:#fff; border-radius:6px; cursor:pointer; }}
+
         .{cls} header h1 {{ font-size:{'20px' if template=='간단' else '22px'}; }}
+
         @media print {{
           .actionbar {{ display:none !important; }}
           @page {{ size: A4; margin: 18mm 14mm; }}
