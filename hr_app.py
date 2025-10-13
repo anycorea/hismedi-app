@@ -966,13 +966,16 @@ def _jd_print_html(jd: dict, meta: dict) -> str:
         block("주요업무", g("주업무")) +
         block("기타업무", g("기타업무")) +
         block("자격교육요건", f"""
-            <div class="grid">
-              <div><b>필요학력</b><div>{g("필요학력")}</div></div>
-              <div><b>전공계열</b><div>{g("전공계열")}</div></div>
-              <div><b>면허</b><div>{g("면허")}</div></div>
-              <div><b>경력(자격요건)</b><div>{g("경력(자격요건)")}</div></div>
-              <div><b>직원공통필수교육</b><div>{g("직원공통필수교육")}</div></div>
-              <div><b>보수/기타/특성화교육</b><div>{g("보수교육")} / {g("기타교육")} / {g("특성화교육")}</div></div>
+            <div class="grid edu">
+              <div class="cell"><b>필요학력</b><div>{g("필요학력")}</div></div>
+              <div class="cell"><b>전공계열</b><div>{g("전공계열")}</div></div>
+              <div class="cell"><b>면허</b><div>{g("면허")}</div></div>
+              <div class="cell"><b>경력(자격요건)</b><div>{g("경력(자격요건)")}</div></div>
+
+              <div class="cell span2"><b>직원공통필수교육</b><div>{g("직원공통필수교육")}</div></div>
+              <div class="cell span2"><b>특성화교육</b><div>{g("특성화교육")}</div></div>
+              <div class="cell span2"><b>보수교육</b><div>{g("보수교육")}</div></div>
+              <div class="cell span2"><b>기타교육</b><div>{g("기타교육")}</div></div>
             </div>
         """)
     )
@@ -1008,18 +1011,20 @@ def _jd_print_html(jd: dict, meta: dict) -> str:
         table.meta10 td.k {{ width:10%; color:#111; font-weight:700; white-space:nowrap; }}
         table.meta10 td.v {{ width:10%; color:#333; overflow:hidden; text-overflow:ellipsis; }}
 
-        /* === Blocks with SMALL, BLACK captions and 11px body === */
+        /* === Blocks with SMALL captions and 11px body === */
         .blk {{ break-inside: auto; page-break-inside: auto; margin: 12px 0 16px; }}
         .blk .cap {{ font-size:13px; color:#111; font-weight:700; margin: 2px 0 6px; }}
         .blk .body {{ white-space: pre-wrap; font-size:11px; line-height: 1.55; border:1px solid var(--line); padding:10px; border-radius:8px; min-height:60px; }}
 
-        /* Education grid inside the body */
-        .grid {{ display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:8px; }}
-        .grid > div {{ border:1px solid var(--line); border-radius:8px; padding:8px; }}
+        /* Education grid */
+        .grid.edu {{ display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:8px; }}
+        .grid.edu .cell {{ border:1px solid var(--line); border-radius:8px; padding:8px; }}
         /* INNER field labels smaller than section caption (12px < 13px) */
-        .grid > div > b {{ font-size:12px; color:#111; }}
+        .grid.edu .cell > b {{ font-size:12px; color:#111; }}
+        .grid.edu .cell > div {{ font-size:11px; line-height:1.55; color:#333; }}
+        .grid.edu .cell.span2 {{ grid-column: 1 / -1; }} /* full-width lines for long fields */
 
-        /* Signature area with SMALL labels + 11px body */
+        /* Signature area */
         .sign {{ margin-top:20px; display:flex; gap:16px; }}
         .sign > div {{ flex:1; border:1px dashed var(--line); border-radius:8px; padding:10px; min-height:70px; }}
         .sign .cap {{ font-size:13px; color:#111; font-weight:700; margin-bottom:6px; }}
