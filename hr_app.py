@@ -313,10 +313,10 @@ def _css_top_controls():
         st.session_state["_css_top_controls"] = True
 
 def _css_left_rail_compact():
+
     if not st.session_state.get("_css_left_rail_compact", False):
         st.markdown("""
         <style>
-        .left-rail.compact .gap-tight { margin-top:-8px !important; }
         .left-rail.compact{ line-height:1.2; }
         .left-rail.compact [data-testid="stMarkdownContainer"] p{ margin:0 0 2px!important; }
         .left-rail.compact [data-testid="stCaptionContainer"]{ margin:0 0 1px!important; }
@@ -328,6 +328,9 @@ def _css_left_rail_compact():
         .left-rail.compact [data-testid="stForm"]{ padding:8px 12px!important; margin:6px 0 10px!important; }
         .left-rail.compact .target-title{ font-size:1.08rem; font-weight:700; margin:6px 0 2px; }
         .left-rail.compact [data-testid="stDataFrame"]{ margin-top:4px!important; margin-bottom:0!important; }
+
+        /* ✅ 세션연장 줄만 위로 당겨 간격 확 줄이기 */
+        .left-rail.compact .session-up { transform: translateY(-8px); }
         </style>
         """, unsafe_allow_html=True)
         st.session_state["_css_left_rail_compact"] = True
@@ -1960,7 +1963,7 @@ def main():
 
         # ── 2행: [세션연장(+30분) - 남은시간: 약 00분]
         # ✅ 행 간격 강제 축소(음수 마진으로 확실하게)
-        st.markdown('<div style="margin-top:-8px;">', unsafe_allow_html=True)
+        st.markdown('<div class="top-controls-row2 session-up">', unsafe_allow_html=True)
         render_session_controls_one_line()
         st.markdown('</div>', unsafe_allow_html=True)
 
