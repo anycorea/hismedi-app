@@ -283,12 +283,7 @@ def logout():
     except Exception: pass
     st.rerun()
 
-    left_min = max(0, int((st.session_state.get("auth_expires_at", 0) - time.time()) / 60))
-    label = f"세션연장(+30분) - 남은시간: 약 {left_min}분"
-    if st.button(label, key="btn_extend", use_container_width=True):
-        st.session_state["auth_expires_at"] = time.time() + SESSION_TTL_MIN * 60
-        st.toast("세션이 30분 연장되었습니다.", icon="⏱️")
-        st.rerun()
+
 
 # --- Enter Key Binder (사번→PIN, PIN→로그인) -------------------------------
 import streamlit.components.v1 as components
@@ -480,9 +475,6 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
         st.session_state["jd2_target_name"]=name
         st.session_state["cmpS_target_sabun"]=sab
         st.session_state["cmpS_target_name"]=name
-    st.markdown("**직원 목록**")
-
-
     cols=[c for c in ["사번","이름","부서1","부서2","직급"] if c in view.columns]
     st.dataframe(view[cols], use_container_width=True, height=300, hide_index=True)
 
@@ -1878,23 +1870,13 @@ def main():
     left, right = st.columns([1.35, 3.65], gap="large")
 
     
-    
     with left:
         u = st.session_state.get("user", {})
         st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=True)
         st.caption(f"DB연결 {kst_now_str()}")
+        st.markdown(f"- 사용자: **{u.get('이름','')} ({u.get('사번','')})**")
 
-        # 왼쪽 레일 전체 컴팩트 모드
-        _css_left_rail_compact()
-        st.markdown('<div class="left-rail compact">', unsafe_allow_html=True)
-
-        # 사용자 줄
-        st.markdown(
-            f"<div class='app-userline'>• 사용자: <b>{u.get('이름','')}</b> ({u.get('사번','')})</div>",
-            unsafe_allow_html=True
-        )
-
-        # 1행: [로그아웃] | [동기화]
+        # 상단 컨트롤: [로그아웃] | [동기화]
         c1, c2 = st.columns([1, 1], gap="small")
         with c1:
             if st.button("로그아웃", key="btn_logout", use_container_width=True):
@@ -1904,13 +1886,22 @@ def main():
                          help="캐시를 비우고 구글시트에서 다시 불러옵니다."):
                 force_sync()
 
-        # 아래 컨텐츠
+        # 좌측 메뉴
         render_staff_picker_left(emp_df)
-        st.markdown('</div>', unsafe_allow_html=True)  # /left-rail.compact
 
 
     with right:
         st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+        _spacer, _sync_col = st.columns([1, 0.18], gap="small")
+        with _sync_col:
+            if st.button(
+                "🔄 동기화",
+                key="sync_top",
+                help="캐시를 비우고 구글시트에서 다시 불러옵니다.",
+                use_container_width=True,
+            ):
+                force_sync()
+
         tabs = st.tabs(["인사평가","직무기술서","직무능력평가","관리자","도움말"])
         with tabs[0]: tab_eval(emp_df)
         with tabs[1]: tab_job_desc(emp_df)
