@@ -539,7 +539,7 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
         try: idx0 = 1 + sabuns.index(pre_sel_sab)
         except ValueError: idx0 = 0
 
-    picked=st.selectbox("대상 선택", ["(선택)"]+opts, index=idx0, key="left_pick")
+    picked=st.selectbox("**대상 선택**", ["(선택)"]+opts, index=idx0, key="left_pick")
     if picked and picked!="(선택)":
         sab=picked.split(" - ",1)[0].strip()
         name=picked.split(" - ",1)[1].strip() if " - " in picked else ""
