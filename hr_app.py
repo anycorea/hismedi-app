@@ -430,9 +430,27 @@ def get_global_target()->Tuple[str,str]:
 def render_staff_picker_left(emp_df: pd.DataFrame):
     # ▼ 필터 초기화 플래그 처리(위젯 생성 전에 초기화해야 오류 없음)
     if st.session_state.get("_left_reset", False):
+        u0 = st.session_state.get("user", {})
+        me0 = str(u0.get("사번", ""))
+        nm0 = str(u0.get("이름", ""))
+
+        # 검색/대상선택 UI 리셋
         st.session_state["pick_q"] = ""
         st.session_state["left_pick"] = "(선택)"
         st.session_state["left_preselect_sabun"] = ""
+
+        # 탭별 대상자도 로그인 사용자로 통일
+        try:
+            set_global_target(me0, nm0)
+        except Exception:
+            pass
+        st.session_state["eval2_target_sabun"] = me0
+        st.session_state["eval2_target_name"]  = nm0
+        st.session_state["jd2_target_sabun"]   = me0
+        st.session_state["jd2_target_name"]    = nm0
+        st.session_state["cmpS_target_sabun"]  = me0
+        st.session_state["cmpS_target_name"]   = nm0
+
         st.session_state["_left_reset"] = False
 
     u = st.session_state.get("user", {})
