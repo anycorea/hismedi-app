@@ -313,40 +313,21 @@ def _css_top_controls():
         st.session_state["_css_top_controls"] = True
 
 def _css_left_rail_compact():
-    """왼쪽 레일(검색/대상/직원목록)만 컴팩트 간격으로 조정"""
+    """왼쪽 레일(검색/대상/표) 간격을 더 타이트하게"""
     if not st.session_state.get("_css_left_rail_compact", False):
         st.markdown("""
         <style>
-        .left-rail.compact { line-height: 1.25; }
-        .left-rail.compact [data-testid="stMarkdownContainer"] p {
-            margin-top: 0 !important;
-            margin-bottom: 4px !important;
-        }
-        .left-rail.compact [data-testid="stCaptionContainer"] {
-            margin-top: 0 !important;
-            margin-bottom: 2px !important;
-        }
-        .left-rail.compact .stButton { margin-bottom: 4px !important; }
-        .left-rail.compact [data-testid="stTextInput"],
-        .left-rail.compact [data-testid="stTextInputRoot"],
-        .left-rail.compact [data-testid="stSelectbox"],
-        .left-rail.compact [data-baseweb="select"] {
-            margin-bottom: 4px !important;
-        }
-        .left-rail.compact [data-testid="stRadio"],
-        .left-rail.compact [data-testid="stCheckbox"] {
-            margin-bottom: 4px !important;
-        }
-        .left-rail.compact [data-testid="stVerticalBlock"] {
-            row-gap: 0.25rem !important;
-        }
-        .left-rail.compact [data-testid="stDataFrame"] {
-            margin-top: 4px !important;
-            margin-bottom: 0 !important;
-        }
-        /* 사용자 줄과 상단 컨트롤 간격 */
-        .left-rail.compact .app-userline { margin: 0 0 2px !important; display:block; }
-        .left-rail.compact .top-controls { margin: 2px 0 6px !important; }
+        .left-rail.compact{ line-height:1.2; }
+        .left-rail.compact [data-testid="stMarkdownContainer"] p{ margin:0 0 2px!important; }
+        .left-rail.compact [data-testid="stCaptionContainer"]{ margin:0 0 1px!important; }
+        .left-rail.compact .stButton{ margin-bottom:2px!important; }
+        .left-rail.compact [data-testid="stVerticalBlock"]{ row-gap:.15rem!important; }
+        .left-rail.compact .app-userline{ margin:0 0 0!important; display:block; }
+        .left-rail.compact .top-controls-row1{ margin:1px 0 2px!important; }
+        .left-rail.compact .top-controls-row2{ margin:0 0 4px!important; }
+        .left-rail.compact [data-testid="stForm"]{ padding:8px 12px!important; margin:6px 0 10px!important; }
+        .left-rail.compact .target-title{ font-size:1.08rem; font-weight:700; margin:6px 0 2px; }
+        .left-rail.compact [data-testid="stDataFrame"]{ margin-top:4px!important; margin-bottom:0!important; }
         </style>
         """, unsafe_allow_html=True)
         st.session_state["_css_left_rail_compact"] = True
@@ -539,21 +520,22 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
         try: idx0 = 1 + sabuns.index(pre_sel_sab)
         except ValueError: idx0 = 0
 
-    picked=st.selectbox("**대상 선택**", ["(선택)"]+opts, index=idx0, key="left_pick")
-    if picked and picked!="(선택)":
-        sab=picked.split(" - ",1)[0].strip()
-        name=picked.split(" - ",1)[1].strip() if " - " in picked else ""
+    st.markdown("<div class='target-title'>대상 선택</div>", unsafe_allow_html=True)
+    picked = st.selectbox("대상 선택", ["(선택)"] + opts, index=idx0, key="left_pick",
+                          label_visibility="collapsed")
+
+    if picked and picked != "(선택)":
+        sab = picked.split(" - ", 1)[0].strip()
+        name = picked.split(" - ", 1)[1].strip() if " - " in picked else ""
         set_global_target(sab, name)
-        st.session_state["eval2_target_sabun"]=sab
-        st.session_state["eval2_target_name"]=name
-        st.session_state["jd2_target_sabun"]=sab
-        st.session_state["jd2_target_name"]=name
-        st.session_state["cmpS_target_sabun"]=sab
-        st.session_state["cmpS_target_name"]=name
-    st.markdown("**직원 목록**")
-
-
-    cols=[c for c in ["사번","이름","부서1","부서2","직급"] if c in view.columns]
+        st.session_state["eval2_target_sabun"] = sab
+        st.session_state["eval2_target_name"]  = name
+        st.session_state["jd2_target_sabun"]   = sab
+        st.session_state["jd2_target_name"]    = name
+        st.session_state["cmpS_target_sabun"]  = sab
+        st.session_state["cmpS_target_name"]   = name
+    
+    cols = [c for c in ["사번","이름","부서1","부서2","직급"] if c in view.columns]
     st.dataframe(view[cols], use_container_width=True, height=300, hide_index=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
