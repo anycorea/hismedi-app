@@ -475,6 +475,10 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
         st.session_state["jd2_target_name"]=name
         st.session_state["cmpS_target_sabun"]=sab
         st.session_state["cmpS_target_name"]=name
+
+        # ▼ 표도 '대상선택'에 맞춰 1명만 필터
+        if "사번" in view.columns:
+            view = view[view["사번"].astype(str) == sab]
     cols=[c for c in ["사번","이름","부서1","부서2","직급"] if c in view.columns]
     st.caption(f"총 {len(view)}명")
     st.dataframe(view[cols], use_container_width=True, height=420, hide_index=True)
