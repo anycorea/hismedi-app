@@ -1907,7 +1907,7 @@ def main():
                 logout()
         with col_session:
             render_session_controls()
-        st.divider()
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
         render_staff_picker_left(emp_df)
 
     with right:
