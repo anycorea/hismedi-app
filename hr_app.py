@@ -1891,17 +1891,6 @@ def main():
 
 
     with right:
-        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-        _spacer, _sync_col = st.columns([1, 0.18], gap="small")
-        with _sync_col:
-            if st.button(
-                "🔄 동기화",
-                key="sync_top",
-                help="캐시를 비우고 구글시트에서 다시 불러옵니다.",
-                use_container_width=True,
-            ):
-                force_sync()
-
         tabs = st.tabs(["인사평가","직무기술서","직무능력평가","관리자","도움말"])
         with tabs[0]: tab_eval(emp_df)
         with tabs[1]: tab_job_desc(emp_df)
