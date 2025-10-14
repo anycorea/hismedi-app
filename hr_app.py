@@ -287,10 +287,11 @@ def _css_top_controls():
     if not st.session_state.get("_css_top_controls", False):
         st.markdown("""
         <style>
+        /* 상단 컨트롤 래퍼 내부 버튼은 항상 같은 높이 */
         .top-controls .stButton > button {
-            white-space: pre-line;
+            white-space: pre-line;    /* \n 줄바꿈 유지 */
             line-height: 1.15;
-            min-height: 56px;
+            height: 60px;             /* ← 고정 높이(권장: 56~64px에서 취향대로) */
             padding-top: 0.6rem;
             padding-bottom: 0.6rem;
         }
@@ -1913,9 +1914,7 @@ def main():
         st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=True)
         st.caption(f"DB연결 {kst_now_str()}")
         st.markdown(f"- 사용자: **{u.get('이름','')} ({u.get('사번','')})**")
-
-        # 한 줄: [로그아웃] | [세션연장(+30분)+남은세션]
-        # 높이/줄바꿈을 강제하기 위해 top-controls 래퍼로 감쌉니다.
+        _css_top_controls()
         st.markdown('<div class="top-controls">', unsafe_allow_html=True)
         col_logout, col_session = st.columns([1, 1.2], gap="small")
         with col_logout:
