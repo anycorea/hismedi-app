@@ -732,7 +732,7 @@ def tab_eval(emp_df: pd.DataFrame):
 
     st.markdown("#### 점수 입력 (각 1~5)")
     with st.form(f"eval_form_{kbase}"):
-        c_head, c_slider, c_btn = st.columns([5,2,1])
+        c_head, c_slider, c_btn = st.columns([5, 2, 1])
         with c_head:
             st.caption("라디오로 개별 점수를 고르거나, 슬라이더 ‘일괄 적용’을 사용하세요.")
         slider_key = f"{kbase}_slider"
@@ -746,6 +746,8 @@ def tab_eval(emp_df: pd.DataFrame):
             bulk_score = st.slider("일괄 점수", 1, 5, step=1, key=slider_key, disabled=not edit_mode)
         with c_btn:
             apply_bulk = st.form_submit_button("일괄 적용", disabled=not edit_mode)
+
+        # 일괄 적용 신호 → 위젯 값 일괄 세팅
         if apply_bulk and edit_mode:
             st.session_state[f"__apply_bulk_{kbase}"] = int(bulk_score)
             st.toast(f"모든 항목에 {bulk_score}점 적용", icon="✅")
@@ -755,24 +757,42 @@ def tab_eval(emp_df: pd.DataFrame):
                 st.session_state[f"eval2_seg_{_iid}_{kbase}"] = str(_v)
             del st.session_state[f"__apply_bulk_{kbase}"]
 
+        # ── 2열(세로) 자동 반분 배치 ─────────────────────────────────────────
         scores = {}
-        for r in items_sorted.itertuples(index=False):
+        n_items = len(items_sorted)
+        half = (n_items + 1) // 2  # 20개면 좌10/우10 자동
+        colL, colR = st.columns(2, gap="small")
+
+        for i, r in enumerate(items_sorted.itertuples(index=False)):
             iid = str(getattr(r, "항목ID"))
             name = getattr(r, "항목") or ""
             desc = getattr(r, "내용") or ""
             rkey = f"eval2_seg_{iid}_{kbase}"
+
+            # 최초 기본값(저장값 있으면 사용, 없으면 '3')
             if rkey not in st.session_state:
                 st.session_state[rkey] = str(int(saved_scores[iid])) if iid in saved_scores else "3"
-            col = st.columns([2, 6, 3])
-            with col[0]:
-                st.markdown(f"**{name}**")
-            with col[1]:
-                if str(desc).strip():
-                    st.caption(str(desc))
-            with col[2]:
-                st.radio(" ", ["1", "2", "3", "4", "5"], horizontal=True, key=rkey, label_visibility="collapsed", disabled=not edit_mode)
-            scores[iid] = int(st.session_state[rkey])
 
+            target_col = colL if i < half else colR
+            with target_col:
+                # 한 줄에: 좌(항목명) / 우(라디오) — 설명은 라디오 help로 넣어 여백 최소화
+                _c1, _c2 = st.columns([1.1, 1], gap="small")
+                with _c1:
+                    st.markdown(f"**{name}**")
+                with _c2:
+                    st.radio(
+                        " ", ["1", "2", "3", "4", "5"],
+                        horizontal=True,
+                        key=rkey,
+                        label_visibility="collapsed",
+                        disabled=not edit_mode,
+                        help=(str(desc).strip() or None)
+                    )
+
+                # 현재 값 반영
+                scores[iid] = int(st.session_state[rkey])
+
+        # 합계/프로그레스
         total_100 = round(sum(scores.values()) * (100.0 / max(1, len(items_sorted) * 5)), 1)
         st.markdown("---")
         cM1, cM2 = st.columns([1, 3])
