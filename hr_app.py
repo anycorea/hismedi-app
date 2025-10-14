@@ -773,22 +773,18 @@ def tab_eval(emp_df: pd.DataFrame):
             if rkey not in st.session_state:
                 st.session_state[rkey] = str(int(saved_scores[iid])) if iid in saved_scores else "3"
 
+            # 좌/우 컬럼 중 선택
             target_col = colL if i < half else colR
             with target_col:
-                # 한 줄에: 좌(항목명) / 우(라디오) — 설명은 라디오 help로 넣어 여백 최소화
-                _c1, _c2 = st.columns([1.1, 1], gap="small")
-                with _c1:
-                    st.markdown(f"**{name}**")
-                with _c2:
-                    st.radio(
-                        " ", ["1", "2", "3", "4", "5"],
-                        horizontal=True,
-                        key=rkey,
-                        label_visibility="collapsed",
-                        disabled=not edit_mode,
-                        help=(str(desc).strip() or None)
-                    )
-
+                # 중첩 컬럼 없이: 라디오 한 줄만 (라벨=항목명, 설명은 help)
+                st.radio(
+                    name,
+                    ["1", "2", "3", "4", "5"],
+                    horizontal=True,
+                    key=rkey,
+                    disabled=not edit_mode,
+                    help=(str(desc).strip() or None),
+                )
                 # 현재 값 반영
                 scores[iid] = int(st.session_state[rkey])
 
