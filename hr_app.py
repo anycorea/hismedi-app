@@ -776,15 +776,20 @@ def tab_eval(emp_df: pd.DataFrame):
             # 좌/우 컬럼 중 선택
             target_col = colL if i < half else colR
             with target_col:
-                # 중첩 컬럼 없이: 라디오 한 줄만 (라벨=항목명, 설명은 help)
+                # 항목명 진하게 + 설명은 바로 아래에 전체 표시
+                st.markdown(f"**{name}**")
+                if str(desc).strip():
+                    st.caption(str(desc))
+
+                # 라디오(가로) — 라벨 숨김
                 st.radio(
-                    name,
-                    ["1", "2", "3", "4", "5"],
+                    " ", ["1", "2", "3", "4", "5"],
                     horizontal=True,
                     key=rkey,
+                    label_visibility="collapsed",
                     disabled=not edit_mode,
-                    help=(str(desc).strip() or None),
                 )
+
                 # 현재 값 반영
                 scores[iid] = int(st.session_state[rkey])
 
