@@ -330,7 +330,7 @@ def _css_left_rail_compact():
         .left-rail.compact [data-testid="stDataFrame"]{ margin-top:4px!important; margin-bottom:0!important; }
 
         /* ✅ 세션연장 줄만 위로 당겨 간격 확 줄이기 */
-        .left-rail.compact .session-up { transform: translateY(-10px); }
+        .left-rail.compact .session-up { transform: translateY(-12px); }
         </style>
         """, unsafe_allow_html=True)
         st.session_state["_css_left_rail_compact"] = True
