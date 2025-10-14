@@ -645,7 +645,7 @@ def read_my_eval_rows(year: int, sabun: str) -> pd.DataFrame:
     return df
 
 def tab_eval(emp_df: pd.DataFrame):
-    # --- 공통 기본값/대상자 선택 -------------------------------------------------
+    # --- 기본값/대상자 선택 -------------------------------------------------
     this_year = datetime.now(tz=tz_kst()).year
     year = st.number_input("연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="eval2_year")
 
@@ -730,17 +730,13 @@ def tab_eval(emp_df: pd.DataFrame):
             for iid in item_ids:
                 col = hmap.get(f"점수_{iid}")
                 if col:
-                    try:
-                        v = int(str(row[col-1]).strip() or "0")
-                    except:
-                        v = 0
-                    if v:
-                        scores[iid] = v
+                    try: v = int(str(row[col-1]).strip() or "0")
+                    except: v = 0
+                    if v: scores[iid] = v
             meta = {}
             for k in ["상태","잠금","제출시각","총점"]:
                 c = hmap.get(k)
-                if c:
-                    meta[k] = row[c-1]
+                if c: meta[k] = row[c-1]
             return scores, meta
         except Exception:
             return {}, {}
@@ -751,130 +747,90 @@ def tab_eval(emp_df: pd.DataFrame):
     if (not am_admin_or_mgr) and (not saved_scores) and (not edit_mode):
         st.session_state["eval2_edit_mode"] = True; edit_mode = True
 
-    # --- 점수 입력 UI (표 입력 기본 / 라디오 보조) ---------------------------------
+    # --- 점수 입력 UI: 표 입력만 --------------------------------------------------
     st.markdown("#### 점수 입력 (각 1~5) — 표에서 직접 수정하세요.")
 
-    # 라디오(보조모드) 간격 축소 CSS + 데이터에디터 '항목' 굵게 보이게 CSS
+    # CSS: 항목ID 컬럼 숨김, '항목' 컬럼 볼드
     st.markdown("""
     <style>
-    /* 라디오 간격 */
-    [data-testid="stRadio"] div[role='radiogroup'] { gap: 6px !important; }
-    [data-testid="stRadio"] label { margin: 0 !important; padding: 0 6px !important; }
-    /* 데이터에디터 첫 번째 표시 컬럼(항목) 굵게 */
-    [data-testid="stDataEditor"] thead tr th:nth-child(1) div { font-weight: 700 !important; }
-    [data-testid="stDataEditor"] tbody tr td:nth-child(1) div { font-weight: 700 !important; }
+    /* 1열(항목ID) 숨김 */
+    [data-testid="stDataEditor"] thead tr th:nth-child(1),
+    [data-testid="stDataEditor"] tbody tr td:nth-child(1) { display: none; }
+    /* 2열(항목) 굵게 */
+    [data-testid="stDataEditor"] thead tr th:nth-child(2) div { font-weight: 700 !important; }
+    [data-testid="stDataEditor"] tbody tr td:nth-child(2) div { font-weight: 700 !important; }
     </style>
     """, unsafe_allow_html=True)
 
-    with st.form(f"eval_form_{kbase}"):
-        # 상단: 안내 + 일괄 적용
-        c_head, c_slider, c_btn = st.columns([5, 2, 1])
-        with c_head:
-            st.caption("표에서 점수를 직접 수정하세요. 슬라이더 ‘일괄 적용’으로 기본값을 빠르게 맞출 수 있습니다.")
-        slider_key = f"{kbase}_slider"
-        if slider_key not in st.session_state:
-            if saved_scores:
-                avg = round(sum(saved_scores.values()) / max(1, len(saved_scores)))
-                st.session_state[slider_key] = int(min(5, max(1, avg)))
-            else:
-                st.session_state[slider_key] = 3
-        with c_slider:
-            bulk_score = st.slider("일괄 점수", 1, 5, step=1, key=slider_key, disabled=not edit_mode)
-        with c_btn:
-            apply_bulk = st.form_submit_button("일괄 적용", disabled=not edit_mode)
-
-        # 일괄 적용: 세션 상태에 반영
-        if apply_bulk and edit_mode:
-            st.session_state[f"__apply_bulk_{kbase}"] = int(bulk_score)
-            st.toast(f"모든 항목에 {bulk_score}점 적용", icon="✅")
-        if st.session_state.get(f"__apply_bulk_{kbase}") is not None:
-            _v = int(st.session_state[f"__apply_bulk_{kbase}"])
-            for _iid in item_ids:
-                st.session_state[f"eval2_seg_{_iid}_{kbase}"] = str(_v)
-            del st.session_state[f"__apply_bulk_{kbase}"]
-
-        # --- 표 입력 모드 (기본) -------------------------------------------------
-        def _seed(iid: str) -> int:
-            rkey = f"eval2_seg_{iid}_{kbase}"
-            if rkey in st.session_state:
-                try: return int(st.session_state[rkey])
-                except: return 3
-            if iid in saved_scores:
-                return int(saved_scores[iid])
-            return 3
-
-        df_tbl = pd.DataFrame({
-            "항목ID": item_ids,  # 숨김용(매핑 유지)
-            "항목":   [getattr(r, "항목") or "" for r in items_sorted.itertuples(index=False)],
-            "내용":   [getattr(r, "내용") or "" for r in items_sorted.itertuples(index=False)],
-            "점수":   [_seed(iid) for iid in item_ids],
-        })
-
-        edited = st.data_editor(
-            df_tbl,
-            hide_index=True,
-            use_container_width=True,
-            disabled=not edit_mode,
-            num_rows="fixed",
-            column_config={
-                "항목ID": st.column_config.TextColumn("항목ID", disabled=True),  # 표시 안 함 (column_order로 숨김)
-                "항목":   st.column_config.TextColumn("항목", disabled=True),
-                "내용":   st.column_config.TextColumn("내용", disabled=True),
-                "점수":   st.column_config.NumberColumn("점수", min_value=1, max_value=5, step=1,
-                                                     help="1~5점 정수만 입력"),
-            },
-            column_order=["항목","내용","점수"],  # 항목ID 숨김
-            height=min(560, 64 + 36 * len(df_tbl))
-        )
-
-        # 표 결과 → 세션 상태/점수 dict 반영 (항목ID는 숨겨져 있어도 반환 DF에는 유지됨)
-        scores: Dict[str, int] = {}
-        if "항목ID" in edited.columns:
-            ids = edited["항목ID"].astype(str).tolist()
-            vals = edited["점수"].tolist()
-            for iid, v in zip(ids, vals):
-                val = int(v) if pd.notna(v) else _seed(iid)
-                st.session_state[f"eval2_seg_{iid}_{kbase}"] = str(val)
-                scores[iid] = val
+    # 일괄 적용 슬라이더(작게)
+    c_head, c_slider, c_btn = st.columns([5, 2, 1])
+    with c_head:
+        st.caption("필요하면 ‘일괄 점수’를 먼저 적용한 뒤 세부 조정하세요.")
+    slider_key = f"{kbase}_slider"
+    if slider_key not in st.session_state:
+        if saved_scores:
+            avg = round(sum(saved_scores.values()) / max(1, len(saved_scores)))
+            st.session_state[slider_key] = int(min(5, max(1, avg)))
         else:
-            # 안전 장치: 만약 반환 DF에 항목ID가 없다면, 원래 순서로 매핑
-            vals = edited["점수"].tolist()
-            for iid, v in zip(item_ids, vals):
-                val = int(v) if pd.notna(v) else _seed(iid)
-                st.session_state[f"eval2_seg_{iid}_{kbase}"] = str(val)
-                scores[iid] = val
+            st.session_state[slider_key] = 3
+    with c_slider:
+        bulk_score = st.slider("일괄 점수", 1, 5, step=1, key=slider_key, disabled=not edit_mode)
+    with c_btn:
+        if st.button("일괄 적용", use_container_width=True, disabled=not edit_mode, key=f"bulk_{kbase}"):
+            for _iid in item_ids:
+                st.session_state[f"eval2_seg_{_iid}_{kbase}"] = str(int(bulk_score))
+            st.toast(f"모든 항목에 {bulk_score}점 적용", icon="✅")
 
-        # --- (옵션) 기존 라디오 모드: 필요시 토글로 사용할 수 있도록 남겨두기 -------------
-        with st.expander("라디오로 보기/입력 (선택사항)", expanded=False):
-            for r in items_sorted.itertuples(index=False):
-                iid  = str(getattr(r, "항목ID"))
-                name = getattr(r, "항목") or ""
-                desc = getattr(r, "내용") or ""
-                rkey = f"eval2_seg_{iid}_{kbase}"
-                if rkey not in st.session_state:
-                    st.session_state[rkey] = str(scores.get(iid, _seed(iid)))
-                col = st.columns([2, 6, 3])
-                with col[0]:
-                    st.markdown(f"**{name}**")
-                with col[1]:
-                    if str(desc).strip():
-                        st.caption(str(desc))
-                with col[2]:
-                    st.radio(" ", ["1", "2", "3", "4", "5"], horizontal=True, key=rkey,
-                             label_visibility="collapsed", disabled=not edit_mode)
-                try:
-                    scores[iid] = int(st.session_state[rkey])
-                except:
-                    pass
+    # 표 데이터 시드 (세션 → 저장값 → 3)
+    def _seed(iid: str) -> int:
+        rkey = f"eval2_seg_{iid}_{kbase}"
+        if rkey in st.session_state:
+            try: return int(st.session_state[rkey])
+            except: return 3
+        if iid in saved_scores:
+            return int(saved_scores[iid])
+        return 3
 
-        # --- 합계/진행률 ---------------------------------------------------------
-        total_100 = round(sum(scores.values()) * (100.0 / max(1, len(items_sorted) * 5)), 1)
-        st.markdown("---")
-        cM1, cM2 = st.columns([1, 3])
-        with cM1:
-            st.metric("합계(100점 만점)", total_100)
-        with cM2:
-            st.progress(min(1.0, total_100 / 100.0), text=f"총점 {total_100}점")
+    df_tbl = pd.DataFrame({
+        "항목ID": item_ids,  # 반환 데이터에 남겨 두되 화면에서는 CSS로 숨김
+        "항목":   [getattr(r, "항목") or "" for r in items_sorted.itertuples(index=False)],
+        "내용":   [getattr(r, "내용") or "" for r in items_sorted.itertuples(index=False)],
+        "점수":   [_seed(iid) for iid in item_ids],
+    })
+
+    edited = st.data_editor(
+        df_tbl,
+        hide_index=True,
+        use_container_width=True,
+        disabled=not edit_mode,
+        num_rows="fixed",
+        column_config={
+            "항목ID": st.column_config.TextColumn("항목ID", disabled=True),
+            "항목":   st.column_config.TextColumn("항목", disabled=True),
+            "내용":   st.column_config.TextColumn("내용", disabled=True),
+            "점수":   st.column_config.NumberColumn("점수", min_value=1, max_value=5, step=1, help="1~5점 정수만 입력"),
+        },
+        column_order=["항목ID","항목","내용","점수"],  # 항목ID는 CSS로 숨김
+        height=min(560, 64 + 36 * len(df_tbl))
+    )
+
+    # 편집 결과 → 세션 반영 & 점수 집계
+    scores: Dict[str, int] = {}
+    ids = (edited["항목ID"].astype(str).tolist() if "항목ID" in edited.columns else item_ids)
+    vals = edited["점수"].tolist()
+    for iid, v in zip(ids, vals):
+        val = int(v) if pd.notna(v) else _seed(iid)
+        st.session_state[f"eval2_seg_{iid}_{kbase}"] = str(val)
+        scores[iid] = val
+
+    # --- 합계/진행률 -------------------------------------------------------------
+    total_100 = round(sum(scores.values()) * (100.0 / max(1, len(items_sorted) * 5)), 1)
+    st.markdown("---")
+    cM1, cM2 = st.columns([1, 3])
+    with cM1:
+        st.metric("합계(100점 만점)", total_100)
+    with cM2:
+        st.progress(min(1.0, total_100 / 100.0), text=f"총점 {total_100}점")
 
         # ===== 제출 확인(PIN 재확인 + 동의 체크) =====
         st.markdown("#### 제출 확인")
