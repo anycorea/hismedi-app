@@ -428,33 +428,42 @@ def get_global_target()->Tuple[str,str]:
 # Left: 직원선택 (Enter 동기화)
 # ══════════════════════════════════════════════════════════════════════════════
 def render_staff_picker_left(emp_df: pd.DataFrame):
-    u=st.session_state.get("user",{}); me=str(u.get("사번",""))
-    df=emp_df.copy()
+    # ▼ 필터 초기화 플래그 처리(위젯 생성 전에 초기화해야 오류 없음)
+    if st.session_state.get("_left_reset", False):
+        st.session_state["pick_q"] = ""
+        st.session_state["left_pick"] = "(선택)"
+        st.session_state["left_preselect_sabun"] = ""
+        st.session_state["_left_reset"] = False
+
+    u = st.session_state.get("user", {})
+    me = str(u.get("사번", ""))
+    df = emp_df.copy()
     if not is_admin(me):
-        allowed=get_allowed_sabuns(emp_df, me, include_self=True)
-        df=df[df["사번"].astype(str).isin(allowed)].copy()
+        allowed = get_allowed_sabuns(emp_df, me, include_self=True)
+        df = df[df["사번"].astype(str).isin(allowed)].copy()
 
     with st.form("left_search_form", clear_on_submit=False):
         q = st.text_input("검색(사번/이름)", key="pick_q", placeholder="사번 또는 이름")
         submitted = st.form_submit_button("검색 적용(Enter)")
 
-    view=df.copy()
+    view = df.copy()
     if q.strip():
-        k=q.strip().lower()
-        view=view[view.apply(lambda r: any(k in str(r[c]).lower() for c in ["사번","이름"] if c in r), axis=1)]
+        k = q.strip().lower()
+        view = view[view.apply(lambda r: any(k in str(r[c]).lower() for c in ["사번", "이름"] if c in r), axis=1)]
 
-    view=view.sort_values("사번") if "사번" in view.columns else view
+    view = view.sort_values("사번") if "사번" in view.columns else view
     sabuns = view["사번"].astype(str).tolist()
-    names  = view.get("이름", pd.Series(['']*len(view))).astype(str).tolist()
-    opts   = [f"{s} - {n}" for s,n in zip(sabuns, names)]
+    names = view.get("이름", pd.Series([""] * len(view))).astype(str).tolist()
+    opts = [f"{s} - {n}" for s, n in zip(sabuns, names)]
 
     pre_sel_sab = st.session_state.get("left_preselect_sabun", "")
     if submitted:
         exact_idx = -1
         if q.strip():
-            for i,(s,n) in enumerate(zip(sabuns,names)):
-                if q.strip()==s or q.strip()==n:
-                    exact_idx = i; break
+            for i, (s, n) in enumerate(zip(sabuns, names)):
+                if q.strip() == s or q.strip() == n:
+                    exact_idx = i
+                    break
         target_idx = exact_idx if exact_idx >= 0 else (0 if sabuns else -1)
         if target_idx >= 0:
             pre_sel_sab = sabuns[target_idx]
@@ -462,34 +471,34 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
 
     idx0 = 0
     if pre_sel_sab:
-        try: idx0 = 1 + sabuns.index(pre_sel_sab)
-        except ValueError: idx0 = 0
+        try:
+            idx0 = 1 + sabuns.index(pre_sel_sab)
+        except ValueError:
+            idx0 = 0
 
-    picked=st.selectbox("**대상 선택**", ["(선택)"]+opts, index=idx0, key="left_pick")
+    picked = st.selectbox("**대상 선택**", ["(선택)"] + opts, index=idx0, key="left_pick")
 
-    # ▼ 필터 초기화 (검색어/대상선택 동시 리셋)
+    # ▼ 필터 초기화: 플래그만 세우고 즉시 rerun (다음 런 시작 시 초기화됨)
     if st.button("필터 초기화", use_container_width=True):
-        st.session_state["pick_q"] = ""
-        st.session_state["left_pick"] = "(선택)"
-        st.session_state["left_preselect_sabun"] = ""
+        st.session_state["_left_reset"] = True
         st.rerun()
 
-    if picked and picked!="(선택)":
-        sab=picked.split(" - ",1)[0].strip()
-        name=picked.split(" - ",1)[1].strip() if " - " in picked else ""
+    if picked and picked != "(선택)":
+        sab = picked.split(" - ", 1)[0].strip()
+        name = picked.split(" - ", 1)[1].strip() if " - " in picked else ""
         set_global_target(sab, name)
-        st.session_state["eval2_target_sabun"]=sab
-        st.session_state["eval2_target_name"]=name
-        st.session_state["jd2_target_sabun"]=sab
-        st.session_state["jd2_target_name"]=name
-        st.session_state["cmpS_target_sabun"]=sab
-        st.session_state["cmpS_target_name"]=name
+        st.session_state["eval2_target_sabun"] = sab
+        st.session_state["eval2_target_name"] = name
+        st.session_state["jd2_target_sabun"] = sab
+        st.session_state["jd2_target_name"] = name
+        st.session_state["cmpS_target_sabun"] = sab
+        st.session_state["cmpS_target_name"] = name
 
         # ▼ 표도 '대상선택'에 맞춰 1명만 필터
         if "사번" in view.columns:
             view = view[view["사번"].astype(str) == sab]
 
-    cols=[c for c in ["사번","이름","부서1","부서2","직급"] if c in view.columns]
+    cols = [c for c in ["사번", "이름", "부서1", "부서2", "직급"] if c in view.columns]
     st.caption(f"총 {len(view)}명")
     st.dataframe(view[cols], use_container_width=True, height=420, hide_index=True)
 
