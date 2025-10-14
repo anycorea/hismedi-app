@@ -283,9 +283,23 @@ def logout():
     except Exception: pass
     st.rerun()
 
+def _css_top_controls():
+    if not st.session_state.get("_css_top_controls", False):
+        st.markdown("""
+        <style>
+        .top-controls .stButton > button {
+            white-space: pre-line;
+            line-height: 1.15;
+            min-height: 56px;
+            padding-top: 0.6rem;
+            padding-bottom: 0.6rem;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+        st.session_state["_css_top_controls"] = True
+
 def render_session_controls():
-    """세션 연장 버튼 내부에 남은 시간 표시 (2줄 라벨)"""
-    _css_enable_multiline_button()
+    _css_top_controls()
     left_min = max(0, int((st.session_state.get("auth_expires_at", 0) - time.time()) / 60))
     label = f"세션연장\n(남은시간:약{left_min}분)"
     if st.button(label, key="btn_extend", use_container_width=True):
@@ -1901,12 +1915,15 @@ def main():
         st.markdown(f"- 사용자: **{u.get('이름','')} ({u.get('사번','')})**")
 
         # 한 줄: [로그아웃] | [세션연장(+30분)+남은세션]
+        # 높이/줄바꿈을 강제하기 위해 top-controls 래퍼로 감쌉니다.
+        st.markdown('<div class="top-controls">', unsafe_allow_html=True)
         col_logout, col_session = st.columns([1, 1.2], gap="small")
         with col_logout:
-            if st.button("로그아웃", use_container_width=True):
+            if st.button("로그아웃\n\u200B", key="btn_logout", use_container_width=True):
                 logout()
         with col_session:
             render_session_controls()
+        st.markdown('</div>', unsafe_allow_html=True)
         st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
         render_staff_picker_left(emp_df)
 
