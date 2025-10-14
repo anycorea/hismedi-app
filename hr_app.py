@@ -437,6 +437,7 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
     with st.form("left_search_form", clear_on_submit=False):
         q = st.text_input("검색(사번/이름)", key="pick_q", placeholder="사번 또는 이름")
         submitted = st.form_submit_button("검색 적용(Enter)")
+
     view=df.copy()
     if q.strip():
         k=q.strip().lower()
@@ -465,6 +466,14 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
         except ValueError: idx0 = 0
 
     picked=st.selectbox("**대상 선택**", ["(선택)"]+opts, index=idx0, key="left_pick")
+
+    # ▼ 필터 초기화 (검색어/대상선택 동시 리셋)
+    if st.button("필터 초기화", use_container_width=True):
+        st.session_state["pick_q"] = ""
+        st.session_state["left_pick"] = "(선택)"
+        st.session_state["left_preselect_sabun"] = ""
+        st.rerun()
+
     if picked and picked!="(선택)":
         sab=picked.split(" - ",1)[0].strip()
         name=picked.split(" - ",1)[1].strip() if " - " in picked else ""
@@ -479,6 +488,7 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
         # ▼ 표도 '대상선택'에 맞춰 1명만 필터
         if "사번" in view.columns:
             view = view[view["사번"].astype(str) == sab]
+
     cols=[c for c in ["사번","이름","부서1","부서2","직급"] if c in view.columns]
     st.caption(f"총 {len(view)}명")
     st.dataframe(view[cols], use_container_width=True, height=420, hide_index=True)
