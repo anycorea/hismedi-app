@@ -283,15 +283,18 @@ def logout():
     except Exception: pass
     st.rerun()
 
+
+
+# --- Top Controls CSS & Session Button ---------------------------------------
 def _css_top_controls():
     if not st.session_state.get("_css_top_controls", False):
         st.markdown("""
         <style>
         /* 상단 컨트롤 래퍼 내부 버튼은 항상 같은 높이 */
         .top-controls .stButton > button {
-            white-space: pre-line;    /* \n 줄바꿈 유지 */
+            white-space: pre-line;
             line-height: 1.15;
-            height: 60px;             /* ← 고정 높이(권장: 56~64px에서 취향대로) */
+            height: 60px;             /* 고정 높이 (필요 시 56~64px 조정) */
             padding-top: 0.6rem;
             padding-bottom: 0.6rem;
         }
@@ -304,73 +307,49 @@ def _css_left_rail_compact():
     if not st.session_state.get("_css_left_rail_compact", False):
         st.markdown("""
         <style>
-        /* 왼쪽 레일 래퍼 */
-        .left-rail.compact {
-            /* 필요 시 전체 글줄 간격도 살짝 타이트하게 */
-            line-height: 1.25;
-        }
-        /* 마크다운 문단 간격 축소 */
+        .left-rail.compact { line-height: 1.25; }
         .left-rail.compact [data-testid="stMarkdownContainer"] p {
             margin-top: 0 !important;
-            margin-bottom: 4px !important; /* 기본 12px→4~6px 권장 */
+            margin-bottom: 4px !important;
         }
-        /* 캡션/보조 텍스트 간격 축소 */
         .left-rail.compact [data-testid="stCaptionContainer"] {
             margin-top: 0 !important;
             margin-bottom: 2px !important;
         }
-        /* 버튼 블록 간 아래 여백 축소 */
-        .left-rail.compact .stButton { 
-            margin-bottom: 4px !important;
-        }
-        /* 입력/셀렉트 같은 폼 컴포넌트 블록 간격 축소 */
-        .left-rail.compact [data-testid="stTextInput"], 
+        .left-rail.compact .stButton { margin-bottom: 4px !important; }
+        .left-rail.compact [data-testid="stTextInput"],
         .left-rail.compact [data-testid="stTextInputRoot"],
         .left-rail.compact [data-testid="stSelectbox"],
         .left-rail.compact [data-baseweb="select"] {
             margin-bottom: 4px !important;
         }
-        /* 라디오/체크박스 그룹 간격 축소 */
-        .left-rail.compact [data-testid="stRadio"], 
+        .left-rail.compact [data-testid="stRadio"],
         .left-rail.compact [data-testid="stCheckbox"] {
             margin-bottom: 4px !important;
         }
-        /* 컬럼 내 수직 블록 기본 row-gap 축소 (버전별로 다를 수 있어서 보정용) */
         .left-rail.compact [data-testid="stVerticalBlock"] {
-            row-gap: 0.25rem !important; /* 기본 ~0.5~0.75rem → 0.25rem */
+            row-gap: 0.25rem !important;
         }
-        /* 데이터프레임 위/아래 여백 살짝만 */
         .left-rail.compact [data-testid="stDataFrame"] {
             margin-top: 4px !important;
             margin-bottom: 0 !important;
         }
+        /* 사용자 줄과 상단 컨트롤 간격 */
+        .left-rail.compact .app-userline { margin: 0 0 2px !important; display:block; }
+        .left-rail.compact .top-controls { margin: 2px 0 6px !important; }
         </style>
         """, unsafe_allow_html=True)
         st.session_state["_css_left_rail_compact"] = True
 
 def render_session_controls():
+    """세션 연장 버튼 내부에 남은 시간 표시 (2줄 라벨)"""
     _css_top_controls()
     left_min = max(0, int((st.session_state.get("auth_expires_at", 0) - time.time()) / 60))
-    label = f"세션연장\n(남은시간:약{left_min}분)"
+    label = f"세션연장(+30분)\n남은시간: 약 {left_min}분"
     if st.button(label, key="btn_extend", use_container_width=True):
         st.session_state["auth_expires_at"] = time.time() + SESSION_TTL_MIN * 60
         st.toast("세션이 30분 연장되었습니다.", icon="⏱️")
-        st.rerun()  # 버튼 라벨의 남은 시간도 즉시 갱신
-
-def _css_enable_multiline_button():
-    # 동일 세션에서 한 번만 주입
-    if not st.session_state.get("_css_multiline_btn", False):
-        st.markdown("""
-        <style>
-        .stButton > button {
-            white-space: pre-line;   /* \\n 줄바꿈 표시 */
-            line-height: 1.15;       /* 줄 간격 살짝 압축 */
-            padding-top: 0.6rem;     /* 위아래 패딩 보정(선택) */
-            padding-bottom: 0.6rem;
-        }
-        </style>
-        """, unsafe_allow_html=True)
-        st.session_state["_css_multiline_btn"] = True
+        st.rerun()
 
 # --- Enter Key Binder (사번→PIN, PIN→로그인) -------------------------------
 import streamlit.components.v1 as components
@@ -551,7 +530,7 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
         try: idx0 = 1 + sabuns.index(pre_sel_sab)
         except ValueError: idx0 = 0
 
-    picked=st.selectbox("**대상 선택**", ["(선택)"]+opts, index=idx0, key="left_pick")
+    picked=st.selectbox("대상 선택", ["(선택)"]+opts, index=idx0, key="left_pick")
     if picked and picked!="(선택)":
         sab=picked.split(" - ",1)[0].strip()
         name=picked.split(" - ",1)[1].strip() if " - " in picked else ""
@@ -562,8 +541,9 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
         st.session_state["jd2_target_name"]=name
         st.session_state["cmpS_target_sabun"]=sab
         st.session_state["cmpS_target_name"]=name
+    st.markdown("#### 직원 목록")
 
-    st.markdown("**직원 목록**")
+
     cols=[c for c in ["사번","이름","부서1","부서2","직급"] if c in view.columns]
     st.dataframe(view[cols], use_container_width=True, height=300, hide_index=True)
 
@@ -1958,34 +1938,45 @@ def main():
 
     left, right = st.columns([1.35, 3.65], gap="large")
 
+    
     with left:
         u = st.session_state.get("user", {})
         st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=True)
         st.caption(f"DB연결 {kst_now_str()}")
-        st.markdown(f"- 사용자: **{u.get('이름','')} ({u.get('사번','')})**")
 
-        # 왼쪽 레일 전체 컴팩트 모드 적용
+        # 왼쪽 레일 전체 컴팩트 모드 (사용자 줄까지 포함)
         _css_left_rail_compact()
         st.markdown('<div class="left-rail compact">', unsafe_allow_html=True)
 
-        # ── 상단 컨트롤(로그아웃 | 세션연장)
+        # 사용자 줄(목록 '-' 대신 div로)
+        st.markdown(
+            f"<div class='app-userline'>• 사용자: <b>{u.get('이름','')}</b> ({u.get('사번','')})</div>",
+            unsafe_allow_html=True
+        )
+
+        # ── 상단 컨트롤: [로그아웃] | [세션연장] | [동기화]
         _css_top_controls()
         st.markdown('<div class="top-controls">', unsafe_allow_html=True)
-        col_logout, col_session = st.columns([1, 1.2], gap="small")
+        col_logout, col_session, col_sync = st.columns([1, 1.2, 0.7], gap="small")
         with col_logout:
             if st.button("로그아웃\n\u200B", key="btn_logout", use_container_width=True):
                 logout()
         with col_session:
             render_session_controls()
+        with col_sync:
+            if st.button("🔄 동기화", key="sync_left", use_container_width=True,
+                         help="캐시를 비우고 구글시트에서 다시 불러옵니다."):
+                force_sync()
         st.markdown('</div>', unsafe_allow_html=True)  # /top-controls
 
         # 간격(컴팩트)
-        st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+        st.markdown("<div style='height:2px'></div>", unsafe_allow_html=True)
 
         # 검색/대상/직원 목록
         render_staff_picker_left(emp_df)
 
         st.markdown('</div>', unsafe_allow_html=True)  # /left-rail.compact
+
 
     with right:
         st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
