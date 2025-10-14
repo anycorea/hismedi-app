@@ -698,18 +698,15 @@ def tab_eval(emp_df: pd.DataFrame):
                              key=f"eval2_type_{year}_{me_sabun}_{target_sabun}")
 
     # --- 보기/수정 모드 ----------------------------------------------------------
-    col_mode = st.columns([1, 3])
-    with col_mode[0]:
-        if st.button(("수정모드로 전환" if not st.session_state["eval2_edit_mode"] else "보기모드로 전환"),
-                     use_container_width=True, key="eval2_toggle"):
-            st.session_state["eval2_edit_mode"] = not st.session_state["eval2_edit_mode"]
-            st.rerun()
-    with col_mode[1]:
-        st.caption(f"현재: **{'수정모드' if st.session_state['eval2_edit_mode'] else '보기모드'}**")
+    if st.button(("수정모드로 전환" if not st.session_state["eval2_edit_mode"] else "보기모드로 전환"),
+                 use_container_width=True, key="eval2_toggle"):
+        st.session_state["eval2_edit_mode"] = not st.session_state["eval2_edit_mode"]
+        st.rerun()
+    st.caption(f"현재: **{'수정모드' if st.session_state['eval2_edit_mode'] else '보기모드'}**")
     edit_mode = bool(st.session_state["eval2_edit_mode"])
 
     # --- 저장된 점수 읽기 ---------------------------------------------------------
-    def read_eval_saved_scores(year: int, eval_type: str, target_sabun: str, evaluator_sabun: str) -> Tuple[dict, dict]:
+    def read_eval_saved_scores(year: int, eval_type: str, target_sabun: str, evaluator_sabun: str):
         try:
             ws = _ensure_eval_resp_sheet(int(year), item_ids)
             header = _retry(ws.row_values, 1) or []; hmap = {n: i+1 for i, n in enumerate(header)}
@@ -750,22 +747,16 @@ def tab_eval(emp_df: pd.DataFrame):
     # --- 점수 입력 UI: 표 입력만 --------------------------------------------------
     st.markdown("#### 점수 입력 (각 1~5) — 표에서 직접 수정하세요.")
 
-    # CSS: 항목ID 컬럼 숨김, '항목' 컬럼 볼드
+    # CSS: '항목' 컬럼 굵게
     st.markdown("""
     <style>
-    /* 1열(항목ID) 숨김 */
-    [data-testid="stDataEditor"] thead tr th:nth-child(1),
-    [data-testid="stDataEditor"] tbody tr td:nth-child(1) { display: none; }
-    /* 2열(항목) 굵게 */
-    [data-testid="stDataEditor"] thead tr th:nth-child(2) div { font-weight: 700 !important; }
-    [data-testid="stDataEditor"] tbody tr td:nth-child(2) div { font-weight: 700 !important; }
+    [data-testid="stDataEditor"] thead tr th:nth-child(1) div { font-weight: 700 !important; }
+    [data-testid="stDataEditor"] tbody tr td:nth-child(1) div { font-weight: 700 !important; }
     </style>
     """, unsafe_allow_html=True)
 
-    # 일괄 적용 슬라이더(작게)
-    c_head, c_slider, c_btn = st.columns([5, 2, 1])
-    with c_head:
-        st.caption("필요하면 ‘일괄 점수’를 먼저 적용한 뒤 세부 조정하세요.")
+    # 일괄 적용 슬라이더
+    st.caption("필요하면 ‘일괄 점수’를 먼저 적용한 뒤 세부 조정하세요.")
     slider_key = f"{kbase}_slider"
     if slider_key not in st.session_state:
         if saved_scores:
@@ -773,15 +764,13 @@ def tab_eval(emp_df: pd.DataFrame):
             st.session_state[slider_key] = int(min(5, max(1, avg)))
         else:
             st.session_state[slider_key] = 3
-    with c_slider:
-        bulk_score = st.slider("일괄 점수", 1, 5, step=1, key=slider_key, disabled=not edit_mode)
-    with c_btn:
-        if st.button("일괄 적용", use_container_width=True, disabled=not edit_mode, key=f"bulk_{kbase}"):
-            for _iid in item_ids:
-                st.session_state[f"eval2_seg_{_iid}_{kbase}"] = str(int(bulk_score))
-            st.toast(f"모든 항목에 {bulk_score}점 적용", icon="✅")
+    bulk_score = st.slider("일괄 점수", 1, 5, step=1, key=slider_key, disabled=not edit_mode)
+    if st.button("일괄 적용", use_container_width=True, disabled=not edit_mode, key=f"bulk_{kbase}"):
+        for _iid in item_ids:
+            st.session_state[f"eval2_seg_{_iid}_{kbase}"] = str(int(bulk_score))
+        st.toast(f"모든 항목에 {bulk_score}점 적용", icon="✅")
 
-    # 표 데이터 시드 (세션 → 저장값 → 3)
+    # 표 데이터: '항목ID'는 인덱스로 숨김(매핑용)
     def _seed(iid: str) -> int:
         rkey = f"eval2_seg_{iid}_{kbase}"
         if rkey in st.session_state:
@@ -792,31 +781,28 @@ def tab_eval(emp_df: pd.DataFrame):
         return 3
 
     df_tbl = pd.DataFrame({
-        "항목ID": item_ids,  # 반환 데이터에 남겨 두되 화면에서는 CSS로 숨김
-        "항목":   [getattr(r, "항목") or "" for r in items_sorted.itertuples(index=False)],
-        "내용":   [getattr(r, "내용") or "" for r in items_sorted.itertuples(index=False)],
-        "점수":   [_seed(iid) for iid in item_ids],
-    })
+        "항목": [getattr(r, "항목") or "" for r in items_sorted.itertuples(index=False)],
+        "내용": [getattr(r, "내용") or "" for r in items_sorted.itertuples(index=False)],
+        "점수": [_seed(iid) for iid in item_ids],
+    }, index=item_ids)  # index=항목ID (숨김)
 
     edited = st.data_editor(
         df_tbl,
-        hide_index=True,
+        hide_index=True,            # 항목ID(인덱스) 완전 숨김
         use_container_width=True,
         disabled=not edit_mode,
         num_rows="fixed",
         column_config={
-            "항목ID": st.column_config.TextColumn("항목ID", disabled=True),
-            "항목":   st.column_config.TextColumn("항목", disabled=True),
-            "내용":   st.column_config.TextColumn("내용", disabled=True),
-            "점수":   st.column_config.NumberColumn("점수", min_value=1, max_value=5, step=1, help="1~5점 정수만 입력"),
+            "항목": st.column_config.TextColumn("항목", disabled=True),
+            "내용": st.column_config.TextColumn("내용", disabled=True),
+            "점수": st.column_config.NumberColumn("점수", min_value=1, max_value=5, step=1, help="1~5점 정수만 입력"),
         },
-        column_order=["항목ID","항목","내용","점수"],  # 항목ID는 CSS로 숨김
         height=min(560, 64 + 36 * len(df_tbl))
     )
 
-    # 편집 결과 → 세션 반영 & 점수 집계
-    scores: Dict[str, int] = {}
-    ids = (edited["항목ID"].astype(str).tolist() if "항목ID" in edited.columns else item_ids)
+    # 편집 결과 → 세션 반영 & 점수 집계 (인덱스가 항목ID)
+    scores = {}
+    ids = [str(x) for x in edited.index.tolist()]
     vals = edited["점수"].tolist()
     for iid, v in zip(ids, vals):
         val = int(v) if pd.notna(v) else _seed(iid)
@@ -826,11 +812,8 @@ def tab_eval(emp_df: pd.DataFrame):
     # --- 합계/진행률 -------------------------------------------------------------
     total_100 = round(sum(scores.values()) * (100.0 / max(1, len(items_sorted) * 5)), 1)
     st.markdown("---")
-    cM1, cM2 = st.columns([1, 3])
-    with cM1:
-        st.metric("합계(100점 만점)", total_100)
-    with cM2:
-        st.progress(min(1.0, total_100 / 100.0), text=f"총점 {total_100}점")
+    st.metric("합계(100점 만점)", total_100)
+    st.progress(min(1.0, total_100 / 100.0), text=f"총점 {total_100}점")
 
         # ===== 제출 확인(PIN 재확인 + 동의 체크) =====
         st.markdown("#### 제출 확인")
