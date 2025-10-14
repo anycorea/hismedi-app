@@ -751,14 +751,18 @@ def tab_eval(emp_df: pd.DataFrame):
     if (not am_admin_or_mgr) and (not saved_scores) and (not edit_mode):
         st.session_state["eval2_edit_mode"] = True; edit_mode = True
 
-    # --- 점수 입력 UI (컴팩트 표 / 라디오 토글) -----------------------------------
-    st.markdown("#### 점수 입력 (각 1~5)")
+    # --- 점수 입력 UI (표 입력 기본 / 라디오 보조) ---------------------------------
+    st.markdown("#### 점수 입력 (각 1~5) — 표에서 직접 수정하세요.")
 
-    # 라디오 간격을 줄이는 경량 CSS (라디오 모드일 때 효과)
+    # 라디오(보조모드) 간격 축소 CSS + 데이터에디터 '항목' 굵게 보이게 CSS
     st.markdown("""
     <style>
+    /* 라디오 간격 */
     [data-testid="stRadio"] div[role='radiogroup'] { gap: 6px !important; }
     [data-testid="stRadio"] label { margin: 0 !important; padding: 0 6px !important; }
+    /* 데이터에디터 첫 번째 표시 컬럼(항목) 굵게 */
+    [data-testid="stDataEditor"] thead tr th:nth-child(1) div { font-weight: 700 !important; }
+    [data-testid="stDataEditor"] tbody tr td:nth-child(1) div { font-weight: 700 !important; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -766,7 +770,7 @@ def tab_eval(emp_df: pd.DataFrame):
         # 상단: 안내 + 일괄 적용
         c_head, c_slider, c_btn = st.columns([5, 2, 1])
         with c_head:
-            st.caption("컴팩트 표 또는 라디오 중 하나로 점수를 입력하세요. 슬라이더 ‘일괄 적용’으로 기본값을 빠르게 맞출 수 있습니다.")
+            st.caption("표에서 점수를 직접 수정하세요. 슬라이더 ‘일괄 적용’으로 기본값을 빠르게 맞출 수 있습니다.")
         slider_key = f"{kbase}_slider"
         if slider_key not in st.session_state:
             if saved_scores:
@@ -779,7 +783,7 @@ def tab_eval(emp_df: pd.DataFrame):
         with c_btn:
             apply_bulk = st.form_submit_button("일괄 적용", disabled=not edit_mode)
 
-        # 일괄 적용: 세션 상태에 반영 (양 모드 공통)
+        # 일괄 적용: 세션 상태에 반영
         if apply_bulk and edit_mode:
             st.session_state[f"__apply_bulk_{kbase}"] = int(bulk_score)
             st.toast(f"모든 항목에 {bulk_score}점 적용", icon="✅")
@@ -789,60 +793,66 @@ def tab_eval(emp_df: pd.DataFrame):
                 st.session_state[f"eval2_seg_{_iid}_{kbase}"] = str(_v)
             del st.session_state[f"__apply_bulk_{kbase}"]
 
-        # 모드 토글
-        dense_mode = st.checkbox("컴팩트 모드(표로 입력)", value=True, key=f"{kbase}_dense")
+        # --- 표 입력 모드 (기본) -------------------------------------------------
+        def _seed(iid: str) -> int:
+            rkey = f"eval2_seg_{iid}_{kbase}"
+            if rkey in st.session_state:
+                try: return int(st.session_state[rkey])
+                except: return 3
+            if iid in saved_scores:
+                return int(saved_scores[iid])
+            return 3
 
+        df_tbl = pd.DataFrame({
+            "항목ID": item_ids,  # 숨김용(매핑 유지)
+            "항목":   [getattr(r, "항목") or "" for r in items_sorted.itertuples(index=False)],
+            "내용":   [getattr(r, "내용") or "" for r in items_sorted.itertuples(index=False)],
+            "점수":   [_seed(iid) for iid in item_ids],
+        })
+
+        edited = st.data_editor(
+            df_tbl,
+            hide_index=True,
+            use_container_width=True,
+            disabled=not edit_mode,
+            num_rows="fixed",
+            column_config={
+                "항목ID": st.column_config.TextColumn("항목ID", disabled=True),  # 표시 안 함 (column_order로 숨김)
+                "항목":   st.column_config.TextColumn("항목", disabled=True),
+                "내용":   st.column_config.TextColumn("내용", disabled=True),
+                "점수":   st.column_config.NumberColumn("점수", min_value=1, max_value=5, step=1,
+                                                     help="1~5점 정수만 입력"),
+            },
+            column_order=["항목","내용","점수"],  # 항목ID 숨김
+            height=min(560, 64 + 36 * len(df_tbl))
+        )
+
+        # 표 결과 → 세션 상태/점수 dict 반영 (항목ID는 숨겨져 있어도 반환 DF에는 유지됨)
         scores: Dict[str, int] = {}
-
-        if dense_mode:
-            # --- 컴팩트 표 입력 모드 ---------------------------------------------
-            # 표 기본값 준비 (세션 → 저장값 → 3점)
-            def _seed(iid: str) -> int:
-                rkey = f"eval2_seg_{iid}_{kbase}"
-                if rkey in st.session_state:
-                    try: return int(st.session_state[rkey])
-                    except: return 3
-                if iid in saved_scores:
-                    return int(saved_scores[iid])
-                return 3
-
-            df_tbl = pd.DataFrame({
-                "항목ID": item_ids,
-                "항목": [getattr(r, "항목") for r in items_sorted.itertuples(index=False)],
-                "점수": [ _seed(iid) for iid in item_ids ],
-            })
-
-            edited = st.data_editor(
-                df_tbl,
-                hide_index=True,
-                use_container_width=True,
-                disabled=not edit_mode,
-                column_config={
-                    "항목ID": st.column_config.TextColumn("항목ID", disabled=True),
-                    "항목":   st.column_config.TextColumn("항목",   disabled=True),
-                    "점수":   st.column_config.NumberColumn("점수", min_value=1, max_value=5, step=1,
-                                                         help="1~5점 정수만 입력"),
-                },
-                height=min(520, 48 + 32 * len(df_tbl))  # 항목 수에 따른 높이
-            )
-
-            # 표 결과 → 세션 상태/점수 dict 반영
-            for _, row in edited.iterrows():
-                iid = str(row["항목ID"])
-                val = int(row["점수"]) if pd.notna(row["점수"]) else _seed(iid)
+        if "항목ID" in edited.columns:
+            ids = edited["항목ID"].astype(str).tolist()
+            vals = edited["점수"].tolist()
+            for iid, v in zip(ids, vals):
+                val = int(v) if pd.notna(v) else _seed(iid)
+                st.session_state[f"eval2_seg_{iid}_{kbase}"] = str(val)
+                scores[iid] = val
+        else:
+            # 안전 장치: 만약 반환 DF에 항목ID가 없다면, 원래 순서로 매핑
+            vals = edited["점수"].tolist()
+            for iid, v in zip(item_ids, vals):
+                val = int(v) if pd.notna(v) else _seed(iid)
                 st.session_state[f"eval2_seg_{iid}_{kbase}"] = str(val)
                 scores[iid] = val
 
-        else:
-            # --- 기존 라디오 모드 -------------------------------------------------
+        # --- (옵션) 기존 라디오 모드: 필요시 토글로 사용할 수 있도록 남겨두기 -------------
+        with st.expander("라디오로 보기/입력 (선택사항)", expanded=False):
             for r in items_sorted.itertuples(index=False):
                 iid  = str(getattr(r, "항목ID"))
                 name = getattr(r, "항목") or ""
                 desc = getattr(r, "내용") or ""
                 rkey = f"eval2_seg_{iid}_{kbase}"
                 if rkey not in st.session_state:
-                    st.session_state[rkey] = str(int(saved_scores[iid])) if iid in saved_scores else "3"
-
+                    st.session_state[rkey] = str(scores.get(iid, _seed(iid)))
                 col = st.columns([2, 6, 3])
                 with col[0]:
                     st.markdown(f"**{name}**")
@@ -855,7 +865,7 @@ def tab_eval(emp_df: pd.DataFrame):
                 try:
                     scores[iid] = int(st.session_state[rkey])
                 except:
-                    scores[iid] = 3
+                    pass
 
         # --- 합계/진행률 ---------------------------------------------------------
         total_100 = round(sum(scores.values()) * (100.0 / max(1, len(items_sorted) * 5)), 1)
