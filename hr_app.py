@@ -283,60 +283,6 @@ def logout():
     except Exception: pass
     st.rerun()
 
-# --- Top Controls CSS & Session Button ---------------------------------------
-def _css_top_controls():
-    if not st.session_state.get("_css_top_controls", False):
-        st.markdown("""
-        <style>
-        /* (이전 호환) 단일행용 클래스 */
-        .top-controls .stButton > button {
-            white-space: pre-line;
-            line-height: 1.15;
-            height: 60px;
-            padding-top: 0.6rem;
-            padding-bottom: 0.6rem;
-        }
-        /* 새 2줄 배치: 1행(로그아웃/동기화), 2행(세션연장) */
-        .top-controls-row1 .stButton > button,
-        .top-controls-row2 .stButton > button {
-            white-space: nowrap;      /* 한 줄 유지 */
-            height: 44px;             /* 필요 시 44~48px로 조정 */
-            padding-top: 0.4rem;
-            padding-bottom: 0.4rem;
-        }
-        /* 간격 (왼쪽 레일 컴팩트 모드와 어울리게) */
-        .left-rail.compact .app-userline { margin: 0 0 2px !important; display:block; }
-        .left-rail.compact .top-controls-row1 { margin: 2px 0 4px !important; }
-        .left-rail.compact .top-controls-row2 { margin: 0 0 8px !important; }
-        </style>
-        """, unsafe_allow_html=True)
-        st.session_state["_css_top_controls"] = True
-
-def _css_left_rail_compact():
-
-    if not st.session_state.get("_css_left_rail_compact", False):
-        st.markdown("""
-        <style>
-        .left-rail.compact{ line-height:1.2; }
-        .left-rail.compact [data-testid="stMarkdownContainer"] p{ margin:0 0 2px!important; }
-        .left-rail.compact [data-testid="stCaptionContainer"]{ margin:0 0 1px!important; }
-        .left-rail.compact .stButton{ margin-bottom:2px!important; }
-        .left-rail.compact [data-testid="stVerticalBlock"]{ row-gap:.15rem!important; }
-        .left-rail.compact .app-userline{ margin:0 0 0!important; display:block; }
-        .left-rail.compact .top-controls-row1{ margin:1px 0 2px!important; }
-        .left-rail.compact .top-controls-row2{ margin:0 0 4px!important; }
-        .left-rail.compact [data-testid="stForm"]{ padding:8px 12px!important; margin:6px 0 10px!important; }
-        .left-rail.compact .target-title{ font-size:1.08rem; font-weight:700; margin:6px 0 2px; }
-        .left-rail.compact [data-testid="stDataFrame"]{ margin-top:4px!important; margin-bottom:0!important; }
-
-        /* ✅ 세션연장 줄만 위로 당겨 간격 확 줄이기 */
-        .left-rail.compact .session-up { transform: translateY(-10px); }
-        </style>
-        """, unsafe_allow_html=True)
-        st.session_state["_css_left_rail_compact"] = True
-
-def render_session_controls_one_line():
-    _css_top_controls()
     left_min = max(0, int((st.session_state.get("auth_expires_at", 0) - time.time()) / 60))
     label = f"세션연장(+30분) - 남은시간: 약 {left_min}분"
     if st.button(label, key="btn_extend", use_container_width=True):
@@ -523,22 +469,21 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
         try: idx0 = 1 + sabuns.index(pre_sel_sab)
         except ValueError: idx0 = 0
 
-    st.markdown("<div class='target-title'>대상 선택</div>", unsafe_allow_html=True)
-    picked = st.selectbox("대상 선택", ["(선택)"] + opts, index=idx0, key="left_pick",
-                          label_visibility="collapsed")
-
-    if picked and picked != "(선택)":
-        sab = picked.split(" - ", 1)[0].strip()
-        name = picked.split(" - ", 1)[1].strip() if " - " in picked else ""
+    picked=st.selectbox("**대상 선택**", ["(선택)"]+opts, index=idx0, key="left_pick")
+    if picked and picked!="(선택)":
+        sab=picked.split(" - ",1)[0].strip()
+        name=picked.split(" - ",1)[1].strip() if " - " in picked else ""
         set_global_target(sab, name)
-        st.session_state["eval2_target_sabun"] = sab
-        st.session_state["eval2_target_name"]  = name
-        st.session_state["jd2_target_sabun"]   = sab
-        st.session_state["jd2_target_name"]    = name
-        st.session_state["cmpS_target_sabun"]  = sab
-        st.session_state["cmpS_target_name"]   = name
-    
-    cols = [c for c in ["사번","이름","부서1","부서2","직급"] if c in view.columns]
+        st.session_state["eval2_target_sabun"]=sab
+        st.session_state["eval2_target_name"]=name
+        st.session_state["jd2_target_sabun"]=sab
+        st.session_state["jd2_target_name"]=name
+        st.session_state["cmpS_target_sabun"]=sab
+        st.session_state["cmpS_target_name"]=name
+    st.markdown("**직원 목록**")
+
+
+    cols=[c for c in ["사번","이름","부서1","부서2","직급"] if c in view.columns]
     st.dataframe(view[cols], use_container_width=True, height=300, hide_index=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1933,6 +1878,7 @@ def main():
     left, right = st.columns([1.35, 3.65], gap="large")
 
     
+    
     with left:
         u = st.session_state.get("user", {})
         st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=True)
@@ -1940,7 +1886,6 @@ def main():
 
         # 왼쪽 레일 전체 컴팩트 모드
         _css_left_rail_compact()
-        _css_top_controls()
         st.markdown('<div class="left-rail compact">', unsafe_allow_html=True)
 
         # 사용자 줄
@@ -1949,8 +1894,7 @@ def main():
             unsafe_allow_html=True
         )
 
-        # ── 1행: [로그아웃] | [동기화]
-        st.markdown('<div class="top-controls-row1">', unsafe_allow_html=True)
+        # 1행: [로그아웃] | [동기화]
         c1, c2 = st.columns([1, 1], gap="small")
         with c1:
             if st.button("로그아웃", key="btn_logout", use_container_width=True):
@@ -1959,17 +1903,11 @@ def main():
             if st.button("🔄 동기화", key="sync_left", use_container_width=True,
                          help="캐시를 비우고 구글시트에서 다시 불러옵니다."):
                 force_sync()
-        st.markdown('</div>', unsafe_allow_html=True)  # /row1
-
-        # ── 2행: [세션연장(+30분) - 남은시간: 약 00분]
-        # ✅ 행 간격 강제 축소(음수 마진으로 확실하게)
-        st.markdown('<div class="top-controls-row2 session-up">', unsafe_allow_html=True)
-        render_session_controls_one_line()
-        st.markdown('</div>', unsafe_allow_html=True)
 
         # 아래 컨텐츠
         render_staff_picker_left(emp_df)
         st.markdown('</div>', unsafe_allow_html=True)  # /left-rail.compact
+
 
     with right:
         st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
