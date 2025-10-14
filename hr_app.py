@@ -284,15 +284,12 @@ def logout():
     st.rerun()
 
 def render_session_controls():
-    """좌측 상단: 세션 연장(+30분) 버튼과 남은 시간 표시"""
-    cA, cB = st.columns([1, 1])
-    with cA:
-        if st.button("세션 연장(+30분)", key="btn_extend", use_container_width=True):
-            st.session_state["auth_expires_at"] = time.time() + SESSION_TTL_MIN * 60
-            st.toast("세션이 30분 연장되었습니다.", icon="⏱️")
-    with cB:
-        left_min = max(0, int((st.session_state.get("auth_expires_at", 0) - time.time()) / 60))
-        st.caption(f"남은 세션: 약 {left_min}분")
+    """세션 연장(+30분) 버튼(위) + 남은 시간(아래) — 좁은 폭용"""
+    if st.button("세션 연장(+30분)", key="btn_extend", use_container_width=True):
+        st.session_state["auth_expires_at"] = time.time() + SESSION_TTL_MIN * 60
+        st.toast("세션이 30분 연장되었습니다.", icon="⏱️")
+    left_min = max(0, int((st.session_state.get("auth_expires_at", 0) - time.time()) / 60))
+    st.caption(f"남은 세션: 약 {left_min}분")
 
 # --- Enter Key Binder (사번→PIN, PIN→로그인) -------------------------------
 import streamlit.components.v1 as components
@@ -1885,9 +1882,15 @@ def main():
         st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=True)
         st.caption(f"DB연결 {kst_now_str()}")
         st.markdown(f"- 사용자: **{u.get('이름','')} ({u.get('사번','')})**")
-        if st.button("로그아웃", use_container_width=True):
-            logout()
-        render_session_controls()
+
+        # 한 줄: [로그아웃] | [세션연장(+30분)+남은세션]
+        col_logout, col_session = st.columns([1, 1.2], gap="small")
+        with col_logout:
+            if st.button("로그아웃", use_container_width=True):
+                logout()
+        with col_session:
+            render_session_controls()
+
         st.divider()
         render_staff_picker_left(emp_df)
 
