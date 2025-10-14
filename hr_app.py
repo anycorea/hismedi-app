@@ -313,7 +313,6 @@ def _css_top_controls():
         st.session_state["_css_top_controls"] = True
 
 def _css_left_rail_compact():
-    """왼쪽 레일(검색/대상/표) 간격을 더 타이트하게"""
     if not st.session_state.get("_css_left_rail_compact", False):
         st.markdown("""
         <style>
@@ -322,27 +321,9 @@ def _css_left_rail_compact():
         .left-rail.compact [data-testid="stCaptionContainer"]{ margin:0 0 1px!important; }
         .left-rail.compact .stButton{ margin-bottom:2px!important; }
         .left-rail.compact [data-testid="stVerticalBlock"]{ row-gap:.15rem!important; }
-        .left-rail.compact .app-userline{ margin:0!important; display:block; }
-
-        /* ✅ 두 줄(행) 사이 여백을 강제로 최소화 */
-        .left-rail.compact .top-controls-row1,
-        .left-rail.compact .top-controls-row2{
-            margin: 0 0 4px !important;  /* 행 자체의 바깥 여백 */
-        }
-        .left-rail.compact .top-controls-row1 [data-testid="stVerticalBlock"],
-        .left-rail.compact .top-controls-row2 [data-testid="stVerticalBlock"]{
-            margin: 0 !important;       /* 컬럼 래퍼의 바깥 여백 제거 */
-            row-gap: 0 !important;      /* 컬럼 아래로 생기는 간격 제거 */
-        }
-        .left-rail.compact .top-controls-row1 [data-testid="column"],
-        .left-rail.compact .top-controls-row2 [data-testid="column"]{
-            padding-top: 0 !important;
-            padding-bottom: 0 !important;
-            margin-bottom: 0 !important; /* 버튼과 다음 블록 간 여백 제거 */
-        }
-
-        /* 폼/타이틀/표 간 여백(이미 적용돼 있으면 값만 작게) */
-        .left-rail.compact .top-controls-row2{ margin-bottom: 6px !important; }
+        .left-rail.compact .app-userline{ margin:0 0 0!important; display:block; }
+        .left-rail.compact .top-controls-row1{ margin:1px 0 2px!important; }
+        .left-rail.compact .top-controls-row2{ margin:0 0 4px!important; }
         .left-rail.compact [data-testid="stForm"]{ padding:8px 12px!important; margin:6px 0 10px!important; }
         .left-rail.compact .target-title{ font-size:1.08rem; font-weight:700; margin:6px 0 2px; }
         .left-rail.compact [data-testid="stDataFrame"]{ margin-top:4px!important; margin-bottom:0!important; }
