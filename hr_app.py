@@ -476,7 +476,7 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
         st.session_state["cmpS_target_sabun"]=sab
         st.session_state["cmpS_target_name"]=name
     cols=[c for c in ["사번","이름","부서1","부서2","직급"] if c in view.columns]
-    st.dataframe(view[cols], use_container_width=True, height=300, hide_index=True)
+    st.dataframe(view[cols], use_container_width=True, height=420, hide_index=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 인사평가
