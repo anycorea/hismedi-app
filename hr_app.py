@@ -1886,8 +1886,8 @@ def main():
         st.caption(f"DB연결 {kst_now_str()}")
         st.markdown(f"- 사용자: **{u.get('이름','')} ({u.get('사번','')})**")
         if st.button("로그아웃", use_container_width=True):
-            render_session_controls()
             logout()
+        render_session_controls()
         st.divider()
         render_staff_picker_left(emp_df)
 
