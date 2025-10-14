@@ -283,21 +283,31 @@ def logout():
     except Exception: pass
     st.rerun()
 
-
-
 # --- Top Controls CSS & Session Button ---------------------------------------
 def _css_top_controls():
     if not st.session_state.get("_css_top_controls", False):
         st.markdown("""
         <style>
-        /* 상단 컨트롤 래퍼 내부 버튼은 항상 같은 높이 */
+        /* (이전 호환) 단일행용 클래스 */
         .top-controls .stButton > button {
             white-space: pre-line;
             line-height: 1.15;
-            height: 60px;             /* 고정 높이 (필요 시 56~64px 조정) */
+            height: 60px;
             padding-top: 0.6rem;
             padding-bottom: 0.6rem;
         }
+        /* 새 2줄 배치: 1행(로그아웃/동기화), 2행(세션연장) */
+        .top-controls-row1 .stButton > button,
+        .top-controls-row2 .stButton > button {
+            white-space: nowrap;      /* 한 줄 유지 */
+            height: 44px;             /* 필요 시 44~48px로 조정 */
+            padding-top: 0.4rem;
+            padding-bottom: 0.4rem;
+        }
+        /* 간격 (왼쪽 레일 컴팩트 모드와 어울리게) */
+        .left-rail.compact .app-userline { margin: 0 0 2px !important; display:block; }
+        .left-rail.compact .top-controls-row1 { margin: 2px 0 4px !important; }
+        .left-rail.compact .top-controls-row2 { margin: 0 0 8px !important; }
         </style>
         """, unsafe_allow_html=True)
         st.session_state["_css_top_controls"] = True
@@ -341,11 +351,10 @@ def _css_left_rail_compact():
         """, unsafe_allow_html=True)
         st.session_state["_css_left_rail_compact"] = True
 
-def render_session_controls():
-    """세션 연장 버튼 내부에 남은 시간 표시 (2줄 라벨)"""
+def render_session_controls_one_line():
     _css_top_controls()
     left_min = max(0, int((st.session_state.get("auth_expires_at", 0) - time.time()) / 60))
-    label = f"세션연장(+30분)\n남은시간: 약 {left_min}분"
+    label = f"세션연장(+30분) - 남은시간: 약 {left_min}분"
     if st.button(label, key="btn_extend", use_container_width=True):
         st.session_state["auth_expires_at"] = time.time() + SESSION_TTL_MIN * 60
         st.toast("세션이 30분 연장되었습니다.", icon="⏱️")
@@ -1944,38 +1953,38 @@ def main():
         st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=True)
         st.caption(f"DB연결 {kst_now_str()}")
 
-        # 왼쪽 레일 전체 컴팩트 모드 (사용자 줄까지 포함)
+        # 왼쪽 레일 전체 컴팩트 모드
         _css_left_rail_compact()
+        _css_top_controls()
         st.markdown('<div class="left-rail compact">', unsafe_allow_html=True)
 
-        # 사용자 줄(목록 '-' 대신 div로)
+        # 사용자 줄
         st.markdown(
             f"<div class='app-userline'>• 사용자: <b>{u.get('이름','')}</b> ({u.get('사번','')})</div>",
             unsafe_allow_html=True
         )
 
-        # ── 상단 컨트롤: [로그아웃] | [세션연장] | [동기화]
-        _css_top_controls()
-        st.markdown('<div class="top-controls">', unsafe_allow_html=True)
-        col_logout, col_session, col_sync = st.columns([1, 1.2, 0.7], gap="small")
-        with col_logout:
-            if st.button("로그아웃\n\u200B", key="btn_logout", use_container_width=True):
+        # ── 1행: [로그아웃] | [동기화]
+        st.markdown('<div class="top-controls-row1">', unsafe_allow_html=True)
+        c1, c2 = st.columns([1, 1], gap="small")
+        with c1:
+            if st.button("로그아웃", key="btn_logout", use_container_width=True):
                 logout()
-        with col_session:
-            render_session_controls()
-        with col_sync:
-            if st.button("🔄 동기화", key="sync_left", use_container_width=True,
+        with c2:
+            if st.button("동기화", key="sync_left", use_container_width=True,
                          help="캐시를 비우고 구글시트에서 다시 불러옵니다."):
                 force_sync()
-        st.markdown('</div>', unsafe_allow_html=True)  # /top-controls
+        st.markdown('</div>', unsafe_allow_html=True)  # /row1
 
-        # 간격(컴팩트)
-        st.markdown("<div style='height:2px'></div>", unsafe_allow_html=True)
+        # ── 2행: [세션연장(+30분) - 남은시간: 약 00분] (풀폭)
+        st.markdown('<div class="top-controls-row2">', unsafe_allow_html=True)
+        render_session_controls_one_line()
+        st.markdown('</div>', unsafe_allow_html=True)  # /row2
 
-        # 검색/대상/직원 목록
+        # 아래 컨텐츠
         render_staff_picker_left(emp_df)
-
         st.markdown('</div>', unsafe_allow_html=True)  # /left-rail.compact
+
     with right:
         st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
         tabs = st.tabs(["인사평가","직무기술서","직무능력평가","관리자","도움말"])
