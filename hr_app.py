@@ -284,12 +284,29 @@ def logout():
     st.rerun()
 
 def render_session_controls():
-    """세션 연장(+30분) 버튼(위) + 남은 시간(아래) — 좁은 폭용"""
-    if st.button("세션 연장(+30분)", key="btn_extend", use_container_width=True):
+    """세션 연장 버튼 내부에 남은 시간 표시 (2줄 라벨)"""
+    _css_enable_multiline_button()
+    left_min = max(0, int((st.session_state.get("auth_expires_at", 0) - time.time()) / 60))
+    label = f"세션연장(+30분)\n남은시간: 약 {left_min}분"
+    if st.button(label, key="btn_extend", use_container_width=True):
         st.session_state["auth_expires_at"] = time.time() + SESSION_TTL_MIN * 60
         st.toast("세션이 30분 연장되었습니다.", icon="⏱️")
-    left_min = max(0, int((st.session_state.get("auth_expires_at", 0) - time.time()) / 60))
-    st.caption(f"남은 세션: 약 {left_min}분")
+        st.rerun()  # 버튼 라벨의 남은 시간도 즉시 갱신
+
+def _css_enable_multiline_button():
+    # 동일 세션에서 한 번만 주입
+    if not st.session_state.get("_css_multiline_btn", False):
+        st.markdown("""
+        <style>
+        .stButton > button {
+            white-space: pre-line;   /* \\n 줄바꿈 표시 */
+            line-height: 1.15;       /* 줄 간격 살짝 압축 */
+            padding-top: 0.6rem;     /* 위아래 패딩 보정(선택) */
+            padding-bottom: 0.6rem;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+        st.session_state["_css_multiline_btn"] = True
 
 # --- Enter Key Binder (사번→PIN, PIN→로그인) -------------------------------
 import streamlit.components.v1 as components
@@ -1890,7 +1907,6 @@ def main():
                 logout()
         with col_session:
             render_session_controls()
-
         st.divider()
         render_staff_picker_left(emp_df)
 
