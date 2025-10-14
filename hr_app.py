@@ -854,20 +854,24 @@ def tab_eval(emp_df: pd.DataFrame):
                 key=f"eval_attest_pin_{kbase}_v2",
             )
 
-        # ▼ 제출/저장 (심플 검증: 동의 체크 + 로그인 사용자 PIN만 확인)
-        submitted = st.button("제출/저장", key=f"eval_submit_{kbase}", type="primary", use_container_width=True, disabled=not edit_mode)
+        # ✅ 폼 내부에서는 st.button 대신 st.form_submit_button 을 써야 합니다.
+        submitted = st.form_submit_button(
+            "제출/저장",
+            key=f"eval_submit_{kbase}",
+            disabled=not edit_mode,
+        )
         if submitted:
             if not attest_ok:
                 st.error("제출 확인(체크박스)에 동의해 주세요.", icon="⚠️")
                 st.stop()
+
             pin_val = st.session_state.get(f"eval_attest_pin_{kbase}_v2", "")
             if not _pin_ok_for_logged_in(pin_val):
                 st.error("PIN이 올바르지 않습니다. (로그인 사용자 기준)", icon="🚫")
                 st.stop()
 
-            # ✅ 여기서 기존 저장/제출 로직을 호출하세요.
-            # 예: save_eval_payload(...), persist_scores(...), 등등
-            # save_eval_payload(kbase, scores, ...)
+            # ✅ 여기서 기존 저장/제출 로직 호출
+            # save_eval_payload(...)
 
             st.success("제출이 완료되었습니다.")
 
