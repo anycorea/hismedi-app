@@ -815,33 +815,30 @@ def tab_eval(emp_df: pd.DataFrame):
     st.metric("합계(100점 만점)", total_100)
     st.progress(min(1.0, total_100 / 100.0), text=f"총점 {total_100}점")
 
-        # ===== 제출 확인(PIN 재확인 + 동의 체크) =====
-        st.markdown("#### 제출 확인")
-        c1, c2 = st.columns([2, 1])
-        with c1:
-            attest_ok = st.checkbox(
-                "본인은 입력한 내용이 사실이며, 회사의 인사평가 정책에 따라 제출함을 확인합니다.",
-                key=f"eval_attest_ok_{kbase}_v2",
-            )
-        with c2:
-            pin_input = st.text_input(
-                "PIN 재입력",
-                value="",
-                type="password",
-                key=f"eval_attest_pin_{kbase}_v2",
-            )
+    # ===== 제출 확인(PIN 재확인 + 동의 체크) =====
+    st.markdown("#### 제출 확인")
+    with st.form(f"eval_submit_{kbase}"):
+        attest_ok = st.checkbox(
+            "본인은 입력한 내용이 사실이며, 회사의 인사평가 정책에 따라 제출함을 확인합니다.",
+            key=f"eval_attest_ok_{kbase}_v2",
+        )
+        pin_input = st.text_input(
+            "PIN 재입력",
+            value="",
+            type="password",
+            key=f"eval_attest_pin_{kbase}_v2",
+        )
 
-        # 🔐 PIN 검증 대상 결정:
-        # - 자기평가  : 직원본인(= target_sabun)
-        # - 1차/2차   : 평가자(= me_sabun)
+        # 🔐 PIN 검증 대상:
+        # - 자기평가 : 대상자 사번
+        # - 1차/2차  : 평가자(본인) 사번
         sabun_for_pin = str(target_sabun) if str(eval_type) == "자기" else str(me_sabun)
 
         submitted = st.form_submit_button("제출/저장", type="primary", disabled=not edit_mode)
+
         if submitted and edit_mode:
-            # 1) 동의 체크
             if not attest_ok:
                 st.error("제출 전에 확인란에 체크해주세요.")
-            # 2) PIN 검증 (규칙에 따른 대상 사번)
             elif not verify_pin(sabun_for_pin, pin_input):
                 st.error("PIN이 올바르지 않습니다.")
             else:
