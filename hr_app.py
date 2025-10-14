@@ -287,7 +287,7 @@ def render_session_controls():
     """세션 연장 버튼 내부에 남은 시간 표시 (2줄 라벨)"""
     _css_enable_multiline_button()
     left_min = max(0, int((st.session_state.get("auth_expires_at", 0) - time.time()) / 60))
-    label = f"세션연장(+30분)\n남은시간: 약 {left_min}분"
+    label = f"세션연장  \n (남은시간:약{left_min}분)"
     if st.button(label, key="btn_extend", use_container_width=True):
         st.session_state["auth_expires_at"] = time.time() + SESSION_TTL_MIN * 60
         st.toast("세션이 30분 연장되었습니다.", icon="⏱️")
