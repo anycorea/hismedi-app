@@ -814,50 +814,64 @@ def tab_eval(emp_df: pd.DataFrame):
     st.markdown("---")
     st.metric("합계(100점 만점)", total_100)
     st.progress(min(1.0, total_100 / 100.0), text=f"총점 {total_100}점")
+    # ===== 제출 확인(PIN 재확인 + 동의 체크) =====
+    st.markdown("#### 제출 확인")
+    cb1, cb2 = st.columns([2, 1])
+    with cb1:
+        attest_ok = st.checkbox(
+            "본인은 입력한 내용이 사실이며, 회사의 인사평가 정책에 따라 제출함을 확인합니다.",
+            key=f"eval_attest_ok_{kbase}_v3",
+        )
+    with cb2:
+        pin_input = st.text_input(
+            "PIN 재입력",
+            value="",
+            type="password",
+            key=f"eval_attest_pin_{kbase}_v3",
+        )
+    
+    # 🔐 PIN 검증 대상 결정:
+    # - 자기평가  : 직원본인(= target_sabun)
+    # - 1차/2차   : 평가자(= me_sabun)
+    sabun_for_pin = str(target_sabun) if str(eval_type) == "자기" else str(me_sabun)
+    
+    # 버튼 (직무능력평가와 동일 레이아웃)
+    cbtn = st.columns([1, 1, 3])
+    with cbtn[0]:
+        do_save = st.button("제출/저장", type="primary", use_container_width=True, key=f"eval_save_{kbase}", disabled=not edit_mode)
+    with cbtn[1]:
+        do_reset = st.button("초기화", use_container_width=True, key=f"eval_reset_{kbase}")
+    
+    if do_reset:
+        # 점수 입력값 초기화
+        for _iid in item_ids:
+            _k = f"eval2_seg_{_iid}_{kbase}"
+            if _k in st.session_state:
+                del st.session_state[_k]
+        st.rerun()
+    
+    if do_save:
+        # 1) 동의 체크
+        if not attest_ok:
+            st.error("제출 전에 확인란에 체크해주세요.")
+        # 2) PIN 검증
+        elif not verify_pin(sabun_for_pin, pin_input):
+            st.error("PIN이 올바르지 않습니다.")
+        else:
+            try:
+                rep = upsert_eval_response(
+                    emp_df, int(year), eval_type, str(target_sabun), str(me_sabun), scores, "제출"
+                )
+                st.success(
+                    ("제출 완료" if rep.get("action") == "insert" else "업데이트 완료")
+                    + f" (총점 {rep.get('total','?')}점)",
+                    icon="✅",
+                )
+                st.session_state["eval2_edit_mode"] = False
+                st.rerun()
+            except Exception as e:
+                st.exception(e)
 
-        # ===== 제출 확인(PIN 재확인 + 동의 체크) =====
-        st.markdown("#### 제출 확인")
-        c1, c2 = st.columns([2, 1])
-        with c1:
-            attest_ok = st.checkbox(
-                "본인은 입력한 내용이 사실이며, 회사의 인사평가 정책에 따라 제출함을 확인합니다.",
-                key=f"eval_attest_ok_{kbase}_v2",
-            )
-        with c2:
-            pin_input = st.text_input(
-                "PIN 재입력",
-                value="",
-                type="password",
-                key=f"eval_attest_pin_{kbase}_v2",
-            )
-
-        # 🔐 PIN 검증 대상 결정:
-        # - 자기평가  : 직원본인(= target_sabun)
-        # - 1차/2차   : 평가자(= me_sabun)
-        sabun_for_pin = str(target_sabun) if str(eval_type) == "자기" else str(me_sabun)
-
-        submitted = st.form_submit_button("제출/저장", type="primary", disabled=not edit_mode)
-        if submitted and edit_mode:
-            # 1) 동의 체크
-            if not attest_ok:
-                st.error("제출 전에 확인란에 체크해주세요.")
-            # 2) PIN 검증 (규칙에 따른 대상 사번)
-            elif not verify_pin(sabun_for_pin, pin_input):
-                st.error("PIN이 올바르지 않습니다.")
-            else:
-                try:
-                    rep = upsert_eval_response(
-                        emp_df, int(year), eval_type, str(target_sabun), str(me_sabun), scores, "제출"
-                    )
-                    st.success(
-                        ("제출 완료" if rep.get("action") == "insert" else "업데이트 완료")
-                        + f" (총점 {rep.get('total','?')}점)",
-                        icon="✅",
-                    )
-                    st.session_state["eval2_edit_mode"] = False
-                    st.rerun()
-                except Exception as e:
-                    st.exception(e)
 
     st.markdown("#### 내 제출 현황")
     try:
@@ -1290,23 +1304,29 @@ def tab_job_desc(emp_df: pd.DataFrame):
     with e4[1]: edu_etc    = st.text_input("기타교육",        value=jd_current.get("기타교육",""),        key="jd2_edu_etc",    disabled=not edit_mode)
 
     # 제출 확인
-        # ===== 제출 확인 (통일 레이아웃) =====
     st.markdown("#### 제출 확인")
-    with st.form(f"jd_submit_{year}_{target_sabun}_{me_sabun}"):
+    ca1, ca2 = st.columns([2, 1])
+    with ca1:
         jd_attest_ok = st.checkbox(
             "본인은 입력한 직무기술서 내용이 사실이며, 회사 정책에 따라 제출함을 확인합니다.",
             key=f"jd_attest_ok_{year}_{target_sabun}_{me_sabun}",
         )
+    with ca2:
         jd_pin_input = st.text_input(
             "PIN 재입력",
             value="",
             type="password",
             key=f"jd_attest_pin_{year}_{target_sabun}_{me_sabun}",
         )
-        jd_submitted = st.form_submit_button("제출/저장", type="primary", disabled=not edit_mode)
 
-    # 제출 처리
-    if jd_submitted and edit_mode:
+    # 버튼
+    cbtn = st.columns([1, 1])
+    with cbtn[0]:
+        do_save = st.button("제출/저장", type="primary", use_container_width=True, key="jd2_save", disabled=not edit_mode)
+    with cbtn[1]:
+        do_print = st.button("인쇄", type="secondary", use_container_width=True, key="jd2_print", disabled=False)
+
+    if do_save:
         if not jd_attest_ok:
             st.error("제출 전에 확인란에 체크해주세요.")
         elif not verify_pin(me_sabun, jd_pin_input):
@@ -1315,9 +1335,11 @@ def tab_job_desc(emp_df: pd.DataFrame):
             rec = {
                 "사번": str(target_sabun), "연도": int(year), "버전": int(version or 0),
                 "부서1": dept1, "부서2": dept2, "작성자사번": me_sabun, "작성자이름": _emp_name_by_sabun(emp_df, me_sabun),
-                "직군": group, "직종": series, "직무명": jobname, "제정일": d_create, "개정일": d_update, "검토주기": review,
-                "직무개요": overview, "주업무": main_job, "기타업무": extra_job,
-                "필요학력": edu_degree, "전공계열": edu_major, "직원공통필수교육": edu_common, "보수교육": edu_cont, "기타교육": edu_etc, "특성화교육": edu_spec,
+                "직군": group, "직종": series, "직무명": jobname,
+                "제정일": d_create, "개정일": d_update, "검토주기": review,
+                "직무개요": job_summary, "주업무": job_main, "기타업무": job_other,
+                "필요학력": edu_req, "전공계열": major_req,
+                "직원공통필수교육": edu_common, "보수교육": edu_cont, "기타교육": edu_etc, "특성화교육": edu_spec,
                 "면허": license_, "경력(자격요건)": career, "비고": memo
             }
             try:
@@ -1509,25 +1531,37 @@ def tab_competency(emp_df: pd.DataFrame):
     opinion=st.text_area("종합평가 의견", value="", height=150, key="cmpS_opinion")
 
     # ===== 제출 확인(PIN 재확인 + 동의 체크) =====
-        # ===== 제출 확인 (통일 레이아웃) =====
     st.markdown("#### 제출 확인")
-    with st.form(f"comp_submit_{year}_{sel_sab}_{me_sabun}"):
+    cb1, cb2 = st.columns([2, 1])
+    with cb1:
         comp_attest_ok = st.checkbox(
             "본인은 입력한 직무능력평가 내용이 사실이며, 회사 정책에 따라 제출함을 확인합니다.",
             key=f"comp_attest_ok_{year}_{sel_sab}_{me_sabun}",
         )
+    with cb2:
         comp_pin_input = st.text_input(
             "PIN 재입력",
             value="",
             type="password",
             key=f"comp_attest_pin_{year}_{sel_sab}_{me_sabun}",
         )
-        comp_submitted = st.form_submit_button("제출/저장", type="primary")
 
-    # 제출 처리
-    if comp_submitted:
+    cbtn = st.columns([1, 1, 3])
+    with cbtn[0]:
+        do_save = st.button("제출/저장", type="primary", use_container_width=True, key="cmpS_save")
+    with cbtn[1]:
+        do_reset = st.button("초기화", use_container_width=True, key="cmpS_reset")
+
+    if do_reset:
+        for k in ["cmpS_main","cmpS_extra","cmpS_qual","cmpS_opinion"]:
+            if k in st.session_state: del st.session_state[k]
+        st.rerun()
+
+    if do_save:
+        # 1) 동의 체크
         if not comp_attest_ok:
             st.error("제출 전에 확인란에 체크해주세요.")
+        # 2) PIN 검증
         elif not verify_pin(me_sabun, comp_pin_input):
             st.error("PIN이 올바르지 않습니다.")
         else:
