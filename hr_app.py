@@ -283,6 +283,8 @@ def logout():
     except Exception: pass
     st.rerun()
 
+
+
 # --- Enter Key Binder (사번→PIN, PIN→로그인) -------------------------------
 import streamlit.components.v1 as components
 def _inject_login_keybinder():
@@ -364,44 +366,6 @@ def require_login(emp_df: pd.DataFrame):
         show_login(emp_df); st.stop()
     else:
         _ensure_state_owner()
-
-# --- 로그인 사용자 PIN 검사 헬퍼 --------------------------------------------
-def _normalize_digits(s: str) -> str:
-    """전각 숫자를 반각으로 치환하고 공백을 제거."""
-    trans = str.maketrans("０１２３４５６７８９", "0123456789")
-    return str(s or "").strip().translate(trans)
-
-def _pin_ok_for_logged_in(input_pin: str) -> bool:
-    """
-    제출/저장 시 항상 '로그인 사용자'의 PIN으로만 검사.
-    (사번 선택/대상자와 무관)
-    로그인 로직과 동일하게 저장된 PIN_hash(plain sha256 또는 salted)를 비교합니다.
-    """
-    me = str(st.session_state.get("user", {}).get("사번", ""))
-    if not me:
-        return False
-
-    # 사원 데이터프레임 확보
-    emp_df = st.session_state.get("emp_df")
-    if emp_df is None:
-        try:
-            emp_df = read_emp_df()
-        except Exception:
-            return False
-
-    row = emp_df.loc[emp_df["사번"].astype(str) == me]
-    if row.empty:
-        return False
-
-    stored = str(row.iloc[0].get("PIN_hash", "")).strip().lower()
-    if not stored:
-        return False
-
-    pin_norm = _normalize_digits(input_pin)
-    entered_plain  = _sha256_hex(pin_norm)          # 순수 sha256
-    entered_salted = _pin_hash(pin_norm, me)        # 사번 salt 포함
-
-    return stored in (entered_plain, entered_salted)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # ACL (권한) + Staff Filters (TTL↑)
@@ -768,7 +732,7 @@ def tab_eval(emp_df: pd.DataFrame):
 
     st.markdown("#### 점수 입력 (각 1~5)")
     with st.form(f"eval_form_{kbase}"):
-        c_head, c_slider, c_btn = st.columns([5, 2, 1])
+        c_head, c_slider, c_btn = st.columns([5,2,1])
         with c_head:
             st.caption("라디오로 개별 점수를 고르거나, 슬라이더 ‘일괄 적용’을 사용하세요.")
         slider_key = f"{kbase}_slider"
@@ -782,8 +746,6 @@ def tab_eval(emp_df: pd.DataFrame):
             bulk_score = st.slider("일괄 점수", 1, 5, step=1, key=slider_key, disabled=not edit_mode)
         with c_btn:
             apply_bulk = st.form_submit_button("일괄 적용", disabled=not edit_mode)
-
-        # 일괄 적용 신호 → 위젯 값 일괄 세팅
         if apply_bulk and edit_mode:
             st.session_state[f"__apply_bulk_{kbase}"] = int(bulk_score)
             st.toast(f"모든 항목에 {bulk_score}점 적용", icon="✅")
@@ -793,43 +755,24 @@ def tab_eval(emp_df: pd.DataFrame):
                 st.session_state[f"eval2_seg_{_iid}_{kbase}"] = str(_v)
             del st.session_state[f"__apply_bulk_{kbase}"]
 
-        # ── 2열(세로) 자동 반분 배치 ─────────────────────────────────────────
         scores = {}
-        n_items = len(items_sorted)
-        half = (n_items + 1) // 2  # 20개면 좌10/우10 자동
-        colL, colR = st.columns(2, gap="small")
-
-        for i, r in enumerate(items_sorted.itertuples(index=False)):
+        for r in items_sorted.itertuples(index=False):
             iid = str(getattr(r, "항목ID"))
             name = getattr(r, "항목") or ""
             desc = getattr(r, "내용") or ""
             rkey = f"eval2_seg_{iid}_{kbase}"
-
-            # 최초 기본값(저장값 있으면 사용, 없으면 '3')
             if rkey not in st.session_state:
                 st.session_state[rkey] = str(int(saved_scores[iid])) if iid in saved_scores else "3"
-
-            # 좌/우 컬럼 중 선택
-            target_col = colL if i < half else colR
-            with target_col:
-                # 항목명 진하게 + 설명은 바로 아래에 전체 표시
+            col = st.columns([2, 6, 3])
+            with col[0]:
                 st.markdown(f"**{name}**")
+            with col[1]:
                 if str(desc).strip():
                     st.caption(str(desc))
+            with col[2]:
+                st.radio(" ", ["1", "2", "3", "4", "5"], horizontal=True, key=rkey, label_visibility="collapsed", disabled=not edit_mode)
+            scores[iid] = int(st.session_state[rkey])
 
-                # 라디오(가로) — 라벨 숨김
-                st.radio(
-                    " ", ["1", "2", "3", "4", "5"],
-                    horizontal=True,
-                    key=rkey,
-                    label_visibility="collapsed",
-                    disabled=not edit_mode,
-                )
-
-                # 현재 값 반영
-                scores[iid] = int(st.session_state[rkey])
-
-        # 합계/프로그레스
         total_100 = round(sum(scores.values()) * (100.0 / max(1, len(items_sorted) * 5)), 1)
         st.markdown("---")
         cM1, cM2 = st.columns([1, 3])
@@ -853,27 +796,6 @@ def tab_eval(emp_df: pd.DataFrame):
                 type="password",
                 key=f"eval_attest_pin_{kbase}_v2",
             )
-
-        # ✅ 폼 내부에서는 st.button 대신 st.form_submit_button 을 써야 합니다.
-        submitted = st.form_submit_button(
-            "제출/저장",
-            key=f"eval_submit_{kbase}",
-            disabled=not edit_mode,
-        )
-        if submitted:
-            if not attest_ok:
-                st.error("제출 확인(체크박스)에 동의해 주세요.", icon="⚠️")
-                st.stop()
-
-            pin_val = st.session_state.get(f"eval_attest_pin_{kbase}_v2", "")
-            if not _pin_ok_for_logged_in(pin_val):
-                st.error("PIN이 올바르지 않습니다. (로그인 사용자 기준)", icon="🚫")
-                st.stop()
-
-            # ✅ 여기서 기존 저장/제출 로직 호출
-            # save_eval_payload(...)
-
-            st.success("제출이 완료되었습니다.")
 
         # 🔐 PIN 검증 대상 결정:
         # - 자기평가  : 직원본인(= target_sabun)
