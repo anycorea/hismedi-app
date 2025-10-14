@@ -316,6 +316,7 @@ def _css_left_rail_compact():
     if not st.session_state.get("_css_left_rail_compact", False):
         st.markdown("""
         <style>
+        .left-rail.compact .gap-tight { margin-top:-8px !important; }
         .left-rail.compact{ line-height:1.2; }
         .left-rail.compact [data-testid="stMarkdownContainer"] p{ margin:0 0 2px!important; }
         .left-rail.compact [data-testid="stCaptionContainer"]{ margin:0 0 1px!important; }
@@ -1952,15 +1953,16 @@ def main():
             if st.button("로그아웃", key="btn_logout", use_container_width=True):
                 logout()
         with c2:
-            if st.button("동기화", key="sync_left", use_container_width=True,
+            if st.button("🔄 동기화", key="sync_left", use_container_width=True,
                          help="캐시를 비우고 구글시트에서 다시 불러옵니다."):
                 force_sync()
         st.markdown('</div>', unsafe_allow_html=True)  # /row1
 
-        # ── 2행: [세션연장(+30분) - 남은시간: 약 00분] (풀폭)
-        st.markdown('<div class="top-controls-row2">', unsafe_allow_html=True)
+        # ── 2행: [세션연장(+30분) - 남은시간: 약 00분]
+        # ✅ 행 간격 강제 축소(음수 마진으로 확실하게)
+        st.markdown('<div style="margin-top:-8px;">', unsafe_allow_html=True)
         render_session_controls_one_line()
-        st.markdown('</div>', unsafe_allow_html=True)  # /row2
+        st.markdown('</div>', unsafe_allow_html=True)
 
         # 아래 컨텐츠
         render_staff_picker_left(emp_df)
