@@ -283,8 +283,6 @@ def logout():
     except Exception: pass
     st.rerun()
 
-
-
 # --- Enter Key Binder (사번→PIN, PIN→로그인) -------------------------------
 import streamlit.components.v1 as components
 def _inject_login_keybinder():
@@ -366,6 +364,44 @@ def require_login(emp_df: pd.DataFrame):
         show_login(emp_df); st.stop()
     else:
         _ensure_state_owner()
+
+# --- 로그인 사용자 PIN 검사 헬퍼 --------------------------------------------
+def _normalize_digits(s: str) -> str:
+    """전각 숫자를 반각으로 치환하고 공백을 제거."""
+    trans = str.maketrans("０１２３４５６７８９", "0123456789")
+    return str(s or "").strip().translate(trans)
+
+def _pin_ok_for_logged_in(input_pin: str) -> bool:
+    """
+    제출/저장 시 항상 '로그인 사용자'의 PIN으로만 검사.
+    (사번 선택/대상자와 무관)
+    로그인 로직과 동일하게 저장된 PIN_hash(plain sha256 또는 salted)를 비교합니다.
+    """
+    me = str(st.session_state.get("user", {}).get("사번", ""))
+    if not me:
+        return False
+
+    # 사원 데이터프레임 확보
+    emp_df = st.session_state.get("emp_df")
+    if emp_df is None:
+        try:
+            emp_df = read_emp_df()
+        except Exception:
+            return False
+
+    row = emp_df.loc[emp_df["사번"].astype(str) == me]
+    if row.empty:
+        return False
+
+    stored = str(row.iloc[0].get("PIN_hash", "")).strip().lower()
+    if not stored:
+        return False
+
+    pin_norm = _normalize_digits(input_pin)
+    entered_plain  = _sha256_hex(pin_norm)          # 순수 sha256
+    entered_salted = _pin_hash(pin_norm, me)        # 사번 salt 포함
+
+    return stored in (entered_plain, entered_salted)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # ACL (권한) + Staff Filters (TTL↑)
@@ -817,6 +853,23 @@ def tab_eval(emp_df: pd.DataFrame):
                 type="password",
                 key=f"eval_attest_pin_{kbase}_v2",
             )
+
+        # ▼ 제출/저장 (심플 검증: 동의 체크 + 로그인 사용자 PIN만 확인)
+        submitted = st.button("제출/저장", key=f"eval_submit_{kbase}", type="primary", use_container_width=True, disabled=not edit_mode)
+        if submitted:
+            if not attest_ok:
+                st.error("제출 확인(체크박스)에 동의해 주세요.", icon="⚠️")
+                st.stop()
+            pin_val = st.session_state.get(f"eval_attest_pin_{kbase}_v2", "")
+            if not _pin_ok_for_logged_in(pin_val):
+                st.error("PIN이 올바르지 않습니다. (로그인 사용자 기준)", icon="🚫")
+                st.stop()
+
+            # ✅ 여기서 기존 저장/제출 로직을 호출하세요.
+            # 예: save_eval_payload(...), persist_scores(...), 등등
+            # save_eval_payload(kbase, scores, ...)
+
+            st.success("제출이 완료되었습니다.")
 
         # 🔐 PIN 검증 대상 결정:
         # - 자기평가  : 직원본인(= target_sabun)
