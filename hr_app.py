@@ -299,6 +299,55 @@ def _css_top_controls():
         """, unsafe_allow_html=True)
         st.session_state["_css_top_controls"] = True
 
+def _css_left_rail_compact():
+    """왼쪽 레일(검색/대상/직원목록)만 컴팩트 간격으로 조정"""
+    if not st.session_state.get("_css_left_rail_compact", False):
+        st.markdown("""
+        <style>
+        /* 왼쪽 레일 래퍼 */
+        .left-rail.compact {
+            /* 필요 시 전체 글줄 간격도 살짝 타이트하게 */
+            line-height: 1.25;
+        }
+        /* 마크다운 문단 간격 축소 */
+        .left-rail.compact [data-testid="stMarkdownContainer"] p {
+            margin-top: 0 !important;
+            margin-bottom: 4px !important; /* 기본 12px→4~6px 권장 */
+        }
+        /* 캡션/보조 텍스트 간격 축소 */
+        .left-rail.compact [data-testid="stCaptionContainer"] {
+            margin-top: 0 !important;
+            margin-bottom: 2px !important;
+        }
+        /* 버튼 블록 간 아래 여백 축소 */
+        .left-rail.compact .stButton { 
+            margin-bottom: 4px !important;
+        }
+        /* 입력/셀렉트 같은 폼 컴포넌트 블록 간격 축소 */
+        .left-rail.compact [data-testid="stTextInput"], 
+        .left-rail.compact [data-testid="stTextInputRoot"],
+        .left-rail.compact [data-testid="stSelectbox"],
+        .left-rail.compact [data-baseweb="select"] {
+            margin-bottom: 4px !important;
+        }
+        /* 라디오/체크박스 그룹 간격 축소 */
+        .left-rail.compact [data-testid="stRadio"], 
+        .left-rail.compact [data-testid="stCheckbox"] {
+            margin-bottom: 4px !important;
+        }
+        /* 컬럼 내 수직 블록 기본 row-gap 축소 (버전별로 다를 수 있어서 보정용) */
+        .left-rail.compact [data-testid="stVerticalBlock"] {
+            row-gap: 0.25rem !important; /* 기본 ~0.5~0.75rem → 0.25rem */
+        }
+        /* 데이터프레임 위/아래 여백 살짝만 */
+        .left-rail.compact [data-testid="stDataFrame"] {
+            margin-top: 4px !important;
+            margin-bottom: 0 !important;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+        st.session_state["_css_left_rail_compact"] = True
+
 def render_session_controls():
     _css_top_controls()
     left_min = max(0, int((st.session_state.get("auth_expires_at", 0) - time.time()) / 60))
@@ -1914,6 +1963,12 @@ def main():
         st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=True)
         st.caption(f"DB연결 {kst_now_str()}")
         st.markdown(f"- 사용자: **{u.get('이름','')} ({u.get('사번','')})**")
+
+        # 왼쪽 레일 전체 컴팩트 모드 적용
+        _css_left_rail_compact()
+        st.markdown('<div class="left-rail compact">', unsafe_allow_html=True)
+
+        # ── 상단 컨트롤(로그아웃 | 세션연장)
         _css_top_controls()
         st.markdown('<div class="top-controls">', unsafe_allow_html=True)
         col_logout, col_session = st.columns([1, 1.2], gap="small")
@@ -1922,9 +1977,15 @@ def main():
                 logout()
         with col_session:
             render_session_controls()
-        st.markdown('</div>', unsafe_allow_html=True)
-        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)  # /top-controls
+
+        # 간격(컴팩트)
+        st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+
+        # 검색/대상/직원 목록
         render_staff_picker_left(emp_df)
+
+        st.markdown('</div>', unsafe_allow_html=True)  # /left-rail.compact
 
     with right:
         st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
