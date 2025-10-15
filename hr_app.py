@@ -1240,16 +1240,6 @@ def tab_eval(emp_df: pd.DataFrame):
                 st.rerun()
             except Exception as e:
                 st.exception(e)
-
-    # --- 내 제출 현황 -----------------------------------------------------------
-    st.markdown("#### 내 제출 현황")
-    try:
-        my = read_my_eval_rows(int(year), me_sabun)
-        cols = [c for c in ["평가유형","평가대상사번","평가대상이름","총점","상태","제출시각"] if c in my.columns]
-        st.dataframe(my[cols] if cols else my, use_container_width=True, height=260)
-    except Exception:
-        st.caption("제출 현황을 불러오지 못했습니다.")
-
 # ══════════════════════════════════════════════════════════════════════════════
 # 직무기술서
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2120,13 +2110,7 @@ def tab_competency(emp_df: pd.DataFrame):
             st.success(("제출 완료" if rep.get("action")=="insert" else "업데이트 완료"), icon="✅")
         st.session_state['comp_rev'] = st.session_state.get('comp_rev', 0) + 1
 
-    st.markdown("### 내 제출 현황")
-    try:
-        my=read_my_comp_simple_rows(int(year), me_sabun)
-        cols=[c for c in ["평가대상사번","평가대상이름","평가일자","주업무평가","기타업무평가","교육이수","자격유지","상태","제출시각"] if c in my.columns]
-        st.dataframe(my[cols] if cols else my, use_container_width=True, height=260)
-    except Exception:
-        st.caption("제출 현황을 불러오지 못했습니다.")
+    
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 관리자: 직원/ PIN 관리 / 인사평가 항목 관리 / 권한 관리
