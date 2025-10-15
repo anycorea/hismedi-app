@@ -48,7 +48,7 @@ def force_sync():
         pass
 
     # 3) 즉시 리런
-    st.rerun()
+    appr_df = read_jd_approval_df()  # 즉시 재조회
 
 # ══════════════════════════════════════════════════════════════════════════════
 # App Config / Style
@@ -281,7 +281,7 @@ def logout():
         except Exception: pass
     try: st.cache_data.clear()
     except Exception: pass
-    st.rerun()
+    appr_df = read_jd_approval_df()  # 즉시 재조회
 
 
 
@@ -358,7 +358,7 @@ def show_login(emp_df: pd.DataFrame):
         if stored not in (entered_plain, entered_salted):
             st.error("PIN이 올바르지 않습니다."); st.stop()
         _start_session({"사번":str(r.get("사번","")), "이름":str(r.get("이름",""))})
-        st.success("환영합니다!"); st.rerun()
+        st.success("환영합니다!"); appr_df = read_jd_approval_df()  # 즉시 재조회
 
 def require_login(emp_df: pd.DataFrame):
     if not _session_valid():
@@ -509,7 +509,7 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
     # ▼ 필터 초기화: 플래그만 세우고 즉시 rerun (다음 런 시작 시 초기화됨)
     if st.button("필터 초기화", use_container_width=True):
         st.session_state["_left_reset"] = True
-        st.rerun()
+        appr_df = read_jd_approval_df()  # 즉시 재조회
 
     if picked and picked != "(선택)":
         sab = picked.split(" - ", 1)[0].strip()
@@ -818,7 +818,7 @@ def tab_eval(emp_df: pd.DataFrame):
     if st.button(("수정모드로 전환" if not st.session_state["eval2_edit_mode"] else "보기모드로 전환"),
                  use_container_width=True, key="eval2_toggle"):
         st.session_state["eval2_edit_mode"] = not st.session_state["eval2_edit_mode"]
-        st.rerun()
+        appr_df = read_jd_approval_df()  # 즉시 재조회
     # '실제' 편집 가능 여부는 선행조건/잠금도 반영
     requested_edit = bool(st.session_state["eval2_edit_mode"])
     edit_mode = requested_edit and prereq_ok and (not is_locked)
@@ -1019,7 +1019,7 @@ def tab_eval(emp_df: pd.DataFrame):
         for _iid in item_ids:
             _k = f"eval2_seg_{_iid}_{kbase}"
             if _k in st.session_state: del st.session_state[_k]
-        st.rerun()
+        appr_df = read_jd_approval_df()  # 즉시 재조회
 
     if do_save:
         if not attest_ok:
@@ -1037,7 +1037,7 @@ def tab_eval(emp_df: pd.DataFrame):
                     icon="✅",
                 )
                 st.session_state["eval2_edit_mode"] = False
-                st.rerun()
+                appr_df = read_jd_approval_df()  # 즉시 재조회
             except Exception as e:
                 st.exception(e)
 
@@ -1489,7 +1489,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
         if st.button(("수정모드로 전환" if not st.session_state["jd2_edit_mode"] else "보기모드로 전환"),
                      use_container_width=True, key="jd2_toggle"):
             st.session_state["jd2_edit_mode"] = not st.session_state["jd2_edit_mode"]
-            st.rerun()
+            appr_df = read_jd_approval_df()  # 즉시 재조회
     with col_mode[1]:
         st.caption(f"현재: **{'수정모드' if st.session_state['jd2_edit_mode'] else '보기모드'}**")
     edit_mode = bool(st.session_state["jd2_edit_mode"])
@@ -1618,7 +1618,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
             try:
                 rep = upsert_jobdesc(rec, as_new_version=(version == 0))
                 st.success(f"저장 완료 (버전 {rep['version']})", icon="✅")
-                st.rerun()
+                appr_df = read_jd_approval_df()  # 즉시 재조회
             except Exception as e:
                 st.exception(e)
 
@@ -1667,9 +1667,9 @@ def tab_job_desc(emp_df: pd.DataFrame):
                 cur_who = str(srow.get("승인자이름",""))
         st.write(f"대상자 최신버전: **{latest_ver if latest_ver else '-'}** / 현재상태: **{cur_status or '-'}** {('(' + cur_when + ', ' + cur_who + ')') if cur_status else ''}")
     
-        c1, c2, c3, c4 = st.columns([1,1,2,2])
+        c1, c2, c3, c4 = st.columns([1,1,4,1])
         with c3:
-            appr_remark = st.text_input("비고(선택)", key=f"jd_appr_remark_{year}_{target_sabun}")
+            appr_remark = st.text_input("부서장 의견", key=f"jd_appr_remark_{year}_{target_sabun}")
         with c4:
             appr_pin = st.text_input("부서장 PIN 재입력", type="password", key=f"jd_appr_pin_{year}_{target_sabun}")
     
@@ -1697,7 +1697,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
                 st.success(f"{status} 처리되었습니다. ({res.get('action')})", icon="✅")
                 try: st.cache_data.clear()
                 except Exception: pass
-                st.rerun()
+                appr_df = read_jd_approval_df()  # 즉시 재조회
     
     with st.expander("부서 제출현황 (요약)", expanded=False):
         base = emp_df.copy()
@@ -1718,7 +1718,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
                     stt = str(row0.get("상태","")); when = str(row0.get("승인시각","")); whoN = str(row0.get("승인자이름",""))
             rows.append({"사번":sab,"이름":nm,"연도":int(year),"버전":ver,"승인상태":stt,"승인시각":when,"승인자":whoN})
         dfv = pd.DataFrame(rows)
-        st.dataframe(dfv, use_container_width=True, hide_index=True, height=260)
+        st.dataframe(dfv, use_container_width=True, hide_index=True, height=260, column_config={"연도": st.column_config.NumberColumn(format="%d")})
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 직무능력평가 + JD 요약 스크롤
@@ -1916,7 +1916,7 @@ def tab_competency(emp_df: pd.DataFrame):
     if do_reset:
         for k in ["cmpS_main","cmpS_extra","cmpS_qual","cmpS_opinion"]:
             if k in st.session_state: del st.session_state[k]
-        st.rerun()
+        appr_df = read_jd_approval_df()  # 즉시 재조회
 
     if do_save:
         # 1) 동의 체크
@@ -2051,7 +2051,7 @@ def tab_admin_eval_items():
                     if iid in pos:
                         a1=gspread.utils.rowcol_to_a1(pos[iid], col_ord)
                         _retry(ws.update, a1, [[new]]); changed+=1
-                st.cache_data.clear(); st.success(f"순서 저장 완료: {changed}건 반영", icon="✅"); st.rerun()
+                st.cache_data.clear(); st.success(f"순서 저장 완료: {changed}건 반영", icon="✅"); appr_df = read_jd_approval_df()  # 즉시 재조회
             except Exception as e:
                 st.exception(e)
 
@@ -2075,7 +2075,7 @@ def tab_admin_eval_items():
     with c1:
         name = st.text_input("항목명", value=name, key="adm_eval_name")
         desc = st.text_area("설명(문항 내용)", value=desc, height=100, key="adm_eval_desc")
-        memo = st.text_input("비고(선택)", value=memo, key="adm_eval_memo")
+        memo = st.text_input("부서장 의견", value=memo, key="adm_eval_memo")
     with c2:
         order = st.number_input("순서", min_value=0, step=1, value=int(order), key="adm_eval_order")
         active = st.checkbox("활성", value=bool(active), key="adm_eval_active")
@@ -2104,7 +2104,7 @@ def tab_admin_eval_items():
                         put("순서",int(order)); put("활성",bool(active)); 
                         if "비고" in hmap: put("비고", memo.strip())
                         _retry(ws.append_row, rowbuf, value_input_option="USER_ENTERED")
-                        st.cache_data.clear(); st.success(f"저장 완료 (항목ID: {new_id})"); st.rerun()
+                        st.cache_data.clear(); st.success(f"저장 완료 (항목ID: {new_id})"); appr_df = read_jd_approval_df()  # 즉시 재조회
                     else:
                         col_id=hmap.get("항목ID"); idx=0
                         if col_id:
@@ -2118,7 +2118,7 @@ def tab_admin_eval_items():
                             ws.update_cell(idx, hmap["순서"], int(order))
                             ws.update_cell(idx, hmap["활성"], bool(active))
                             if "비고" in hmap: ws.update_cell(idx, hmap["비고"], memo.strip())
-                            st.cache_data.clear(); st.success("업데이트 완료"); st.rerun()
+                            st.cache_data.clear(); st.success("업데이트 완료"); appr_df = read_jd_approval_df()  # 즉시 재조회
                 except Exception as e:
                     st.exception(e)
 
@@ -2279,7 +2279,7 @@ def tab_admin_acl(emp_df: pd.DataFrame):
 
             st.cache_data.clear()
             st.success("권한이 전체 반영되었습니다.", icon="✅")
-            st.rerun()
+            appr_df = read_jd_approval_df()  # 즉시 재조회
         except Exception as e:
             st.exception(e)
 
