@@ -1059,7 +1059,9 @@ def tab_eval(emp_df: pd.DataFrame):
             return {}
 
     # ◇◇ 일괄 적용(현재 사용자의 '편집 대상' 컬럼에만 적용)
-    kbase = f"E2_{year}_{eval_type}_{me_sabun}_{target_sabun}"
+    _year_safe = int(st.session_state.get("eval2_year", datetime.now(tz=tz_kst()).year))
+    _eval_type_safe = str(st.session_state.get("eval_type") or st.session_state.get("eval2_type") or ("자기"))
+    kbase = f"E2_{_year_safe}_{_eval_type_safe}_{me_sabun}_{target_sabun}"
     slider_key = f"{kbase}_slider_multi"
     if slider_key not in st.session_state:
         if saved_scores:
