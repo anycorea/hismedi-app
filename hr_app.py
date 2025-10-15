@@ -1779,7 +1779,6 @@ def tab_job_desc(emp_df: pd.DataFrame):
     with e4[1]: edu_etc    = st.text_input("기타교육",        value=jd_current.get("기타교육",""),        key="jd2_edu_etc",    disabled=not edit_mode)
 
     # 제출 확인
-    st.markdown("#### 제출 확인")
     ca1, ca2 = st.columns([2, 1])
     with ca1:
         jd_attest_ok = st.checkbox(
@@ -2088,7 +2087,6 @@ def tab_competency(emp_df: pd.DataFrame):
     opinion=st.text_area("종합평가 의견", value="", height=150, key="cmpS_opinion")
 
     # ===== 제출 확인(PIN 재확인 + 동의 체크) =====
-    st.markdown("#### 제출 확인")
     cb1, cb2 = st.columns([2, 1])
     with cb1:
         comp_attest_ok = st.checkbox(
