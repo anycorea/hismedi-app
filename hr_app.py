@@ -645,6 +645,20 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
     st.caption(f"총 {len(view)}명")
     
 # ── 관리자/부서장: 현황 컬럼을 왼쪽 표에 합쳐서 표시 ───────────────────────────
+    def _latest_ts_str(*args):
+        vals = [str(x).strip() for x in args if str(x).strip()]
+        if not vals:
+            return ""
+        try:
+            ts = pd.to_datetime(vals, errors='coerce')
+            ts = ts.dropna()
+            if len(ts)==0:
+                return ""
+            return str(ts.max()).split('.')[0]
+        except Exception:
+            # fallback: lexical max
+            return max(vals)
+
     # 빠른 화면을 원하면 '현황 컬럼 보기'를 끄세요.
     show_dashboard_cols = st.checkbox("현황 컬럼 보기(빠름)", value=False, help="끄면 기본 직원표만 빠르게 표시됩니다.")
     try:
@@ -1837,18 +1851,6 @@ def tab_job_desc(emp_df: pd.DataFrame):
         import streamlit.components.v1 as components
         components.html(html, height=1000, scrolling=True)
 
-
-# ===== 내 제출현황 (직무기술서 승인) =====
-    st.markdown("### 내 제출현황 (직무기술서 승인)")
-    appr_df = read_jd_approval_df(st.session_state.get("appr_rev", 0))
-    my_appr = appr_df[appr_df["사번"].astype(str) == str(me_sabun)].copy()
-    if not my_appr.empty:
-        my_appr = my_appr.sort_values(["연도","버전","승인시각"], ascending=[False, False, False]).reset_index(drop=True)
-        cols_show = [c for c in ["연도","버전","상태","승인시각","승인자이름","승인자사번","비고"] if c in my_appr.columns]
-        st.dataframe(my_appr[cols_show], use_container_width=True, hide_index=True, height=220)
-    else:
-        st.caption("내 승인 기록이 없습니다.")
-
     # ===== (관리자/부서장) 승인 처리 =====
     if am_admin_or_mgr:
         st.markdown("### 부서장 승인")
@@ -1898,9 +1900,6 @@ def tab_job_desc(emp_df: pd.DataFrame):
                     st.session_state["appr_rev"] = st.session_state.get("appr_rev", 0) + 1
                 st.success(f"{status} 처리되었습니다. ({res.get('action')})", icon="✅")
                 appr_df = read_jd_approval_df(st.session_state.get("appr_rev", 0))
-
-        with st.expander("부서 제출현황 (요약)", expanded=False):
-            base = emp_df.copy()
             base["사번"] = base["사번"].astype(str)
             base = base[base["사번"].isin({str(s) for s in allowed})]
             if "재직여부" in base.columns:
