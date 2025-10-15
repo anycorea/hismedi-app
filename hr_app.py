@@ -1022,6 +1022,12 @@ def tab_eval(emp_df: pd.DataFrame):
     requested_edit = bool(st.session_state["eval2_edit_mode"])
     edit_mode = requested_edit and prereq_ok and (not is_locked)
     st.caption(f"현재: **{'수정모드' if edit_mode else '보기모드'}**")
+    try:
+        _emap = get_eval_summary_map_cached(int(year), st.session_state.get('eval_rev', 0))
+        _ts = (_emap.get((str(target_sabun), str(eval_type)), ("",""))[1] or '').strip()
+        st.caption(f"제출시각: {_ts + ' (KST)' if _ts else '-'}")
+    except Exception:
+        pass
 
     
 
@@ -1184,7 +1190,7 @@ def tab_eval(emp_df: pd.DataFrame):
                 continue
             st.session_state[f"eval2_seg_{iid}_{kbase}"] = str(val)
             scores[iid] = val
-#### 제출 확인")
+#### 제출 확인")st.markdown("#### 제출 확인")
     cb1, cb2 = st.columns([2, 1])
     with cb1:
         attest_ok = st.checkbox(
@@ -1682,6 +1688,12 @@ def tab_job_desc(emp_df: pd.DataFrame):
             st.rerun()
     with col_mode[1]:
         st.caption(f"현재: **{'수정모드' if st.session_state['jd2_edit_mode'] else '보기모드'}**")
+        try:
+            _latest = _jd_latest_for(str(target_sabun), int(year))
+            _jts = (str(_latest.get('제출시각','')).strip() if _latest else '')
+            st.caption(f"작성 제출시각: {_jts + ' (KST)' if _jts else '-'}")
+        except Exception:
+            pass
     edit_mode = bool(st.session_state["jd2_edit_mode"])
 
     # 현재/초기 레코드
@@ -2055,6 +2067,12 @@ def tab_competency(emp_df: pd.DataFrame):
             st.caption("직무기술서가 없습니다. JD 없이도 평가를 진행할 수 있습니다.")
 
     st.markdown("### 평가 입력")
+    try:
+        _cmap = get_comp_summary_map_cached(int(year), st.session_state.get('comp_rev', 0))
+        _cts = (str(_cmap.get(str(sel_sab), ("","","",""))[3]).strip())
+        st.caption(f"제출시각: {_cts + ' (KST)' if _cts else '-'}")
+    except Exception:
+        pass
     grade_options=["우수","양호","보통","미흡"]
     colG=st.columns(4)
     with colG[0]: g_main = st.radio("주업무 평가", grade_options, index=2, key="cmpS_main", horizontal=False)
