@@ -1638,67 +1638,67 @@ def tab_job_desc(emp_df: pd.DataFrame):
         components.html(html, height=1000, scrolling=True)
 
 
-# ===== 내 제출현황 (JD 승인) =====
-st.markdown("### 내 제출현황 (직무기술서 승인)")
-appr_df = read_jd_approval_df()
-me = st.session_state.get("user", {})
-me_sabun = str(me.get("사번","")); me_name = str(me.get("이름",""))
-my_appr = appr_df[appr_df["사번"].astype(str) == me_sabun].copy()
-if not my_appr.empty:
-    my_appr = my_appr.sort_values(["연도","버전","승인시각"], ascending=[False, False, False]).reset_index(drop=True)
-    cols = [c for c in ["연도","버전","상태","승인시각","승인자이름","승인자사번","비고"] if c in my_appr.columns]
-    st.dataframe(my_appr[cols], use_container_width=True, hide_index=True, height=220)
-else:
-    st.caption("내 승인 기록이 없습니다.")
-
-# ===== (관리자/부서장) 승인 처리 =====
-if am_admin_or_mgr:
-    st.markdown("### 부서장 승인")
-    latest_ver = _jd_latest_version_for(target_sabun, int(year))
-    cur_status = ""
-    cur_when = ""
-    cur_who = ""
-    if latest_ver > 0 and not appr_df.empty:
-        sub = appr_df[(appr_df["연도"]==int(year)) & (appr_df["사번"].astype(str)==str(target_sabun)) & (appr_df["버전"]==int(latest_ver))]
-        if not sub.empty:
-            srow = sub.sort_values(["승인시각"], ascending=[False]).iloc[0].to_dict()
-            cur_status = str(srow.get("상태",""))
-            cur_when = str(srow.get("승인시각",""))
-            cur_who = str(srow.get("승인자이름",""))
-    st.write(f"대상자 최신버전: **{latest_ver if latest_ver else '-'}** / 현재상태: **{cur_status or '-'}** {('(' + cur_when + ', ' + cur_who + ')') if cur_status else ''}")
-
-    c1, c2, c3, c4 = st.columns([1,1,2,2])
-    with c3:
-        appr_remark = st.text_input("비고(선택)", key=f"jd_appr_remark_{year}_{target_sabun}")
-    with c4:
-        appr_pin = st.text_input("부서장 PIN 재입력", type="password", key=f"jd_appr_pin_{year}_{target_sabun}")
-
-    b1, b2 = st.columns([1,1])
-    with b1:
-        do_ok = st.button("승인", type="primary", use_container_width=True, disabled=not (latest_ver>0))
-    with b2:
-        do_rej = st.button("반려", use_container_width=True, disabled=not (latest_ver>0))
-
-    if do_ok or do_rej:
-        if not verify_pin(me_sabun, appr_pin):
-            st.error("PIN이 올바르지 않습니다.")
-        else:
-            status = "승인" if do_ok else "반려"
-            res = set_jd_approval(
-                year=int(year),
-                sabun=str(target_sabun),
-                name=str(target_name),
-                version=int(latest_ver),
-                approver_sabun=str(me_sabun),
-                approver_name=str(me_name),
-                status=status,
-                remark=appr_remark
-            )
-            st.success(f"{status} 처리되었습니다. ({res.get('action')})", icon="✅")
-            try: st.cache_data.clear()
-            except Exception: pass
-            st.rerun()
-
+    # ===== 내 제출현황 (JD 승인) =====
+    st.markdown("### 내 제출현황 (직무기술서 승인)")
+    appr_df = read_jd_approval_df()
+    me = st.session_state.get("user", {})
+    me_sabun = str(me.get("사번","")); me_name = str(me.get("이름",""))
+    my_appr = appr_df[appr_df["사번"].astype(str) == me_sabun].copy()
+    if not my_appr.empty:
+        my_appr = my_appr.sort_values(["연도","버전","승인시각"], ascending=[False, False, False]).reset_index(drop=True)
+        cols = [c for c in ["연도","버전","상태","승인시각","승인자이름","승인자사번","비고"] if c in my_appr.columns]
+        st.dataframe(my_appr[cols], use_container_width=True, hide_index=True, height=220)
+    else:
+        st.caption("내 승인 기록이 없습니다.")
+    
+    # ===== (관리자/부서장) 승인 처리 =====
+    if am_admin_or_mgr:
+        st.markdown("### 부서장 승인")
+        latest_ver = _jd_latest_version_for(target_sabun, int(year))
+        cur_status = ""
+        cur_when = ""
+        cur_who = ""
+        if latest_ver > 0 and not appr_df.empty:
+            sub = appr_df[(appr_df["연도"]==int(year)) & (appr_df["사번"].astype(str)==str(target_sabun)) & (appr_df["버전"]==int(latest_ver))]
+            if not sub.empty:
+                srow = sub.sort_values(["승인시각"], ascending=[False]).iloc[0].to_dict()
+                cur_status = str(srow.get("상태",""))
+                cur_when = str(srow.get("승인시각",""))
+                cur_who = str(srow.get("승인자이름",""))
+        st.write(f"대상자 최신버전: **{latest_ver if latest_ver else '-'}** / 현재상태: **{cur_status or '-'}** {('(' + cur_when + ', ' + cur_who + ')') if cur_status else ''}")
+    
+        c1, c2, c3, c4 = st.columns([1,1,2,2])
+        with c3:
+            appr_remark = st.text_input("비고(선택)", key=f"jd_appr_remark_{year}_{target_sabun}")
+        with c4:
+            appr_pin = st.text_input("부서장 PIN 재입력", type="password", key=f"jd_appr_pin_{year}_{target_sabun}")
+    
+        b1, b2 = st.columns([1,1])
+        with b1:
+            do_ok = st.button("승인", type="primary", use_container_width=True, disabled=not (latest_ver>0))
+        with b2:
+            do_rej = st.button("반려", use_container_width=True, disabled=not (latest_ver>0))
+    
+        if do_ok or do_rej:
+            if not verify_pin(me_sabun, appr_pin):
+                st.error("PIN이 올바르지 않습니다.")
+            else:
+                status = "승인" if do_ok else "반려"
+                res = set_jd_approval(
+                    year=int(year),
+                    sabun=str(target_sabun),
+                    name=str(target_name),
+                    version=int(latest_ver),
+                    approver_sabun=str(me_sabun),
+                    approver_name=str(me_name),
+                    status=status,
+                    remark=appr_remark
+                )
+                st.success(f"{status} 처리되었습니다. ({res.get('action')})", icon="✅")
+                try: st.cache_data.clear()
+                except Exception: pass
+                st.rerun()
+    
     with st.expander("부서 제출현황 (요약)", expanded=False):
         base = emp_df.copy()
         base["사번"] = base["사번"].astype(str)
