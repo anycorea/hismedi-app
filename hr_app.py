@@ -645,19 +645,6 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
     st.caption(f"총 {len(view)}명")
     
 # ── 관리자/부서장: 현황 컬럼을 왼쪽 표에 합쳐서 표시 ───────────────────────────
-    def _latest_ts_str(*args):
-        vals = [str(x).strip() for x in args if str(x).strip()]
-        if not vals:
-            return ""
-        try:
-            ts = pd.to_datetime(vals, errors='coerce')
-            ts = ts.dropna()
-            if len(ts)==0:
-                return ""
-            return str(ts.max()).split('.')[0]
-        except Exception:
-            # fallback: lexical max
-            return max(vals)
 
     # 빠른 화면을 원하면 '현황 컬럼 보기'를 끄세요.
     show_dashboard_cols = st.checkbox("현황 컬럼 보기(빠름)", value=False, help="끄면 기본 직원표만 빠르게 표시됩니다.")
@@ -1854,6 +1841,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
     # ===== (관리자/부서장) 승인 처리 =====
     if am_admin_or_mgr:
         st.markdown("### 부서장 승인")
+        appr_df = read_jd_approval_df(st.session_state.get("appr_rev", 0))
         latest_ver = _jd_latest_version_for(target_sabun, int(year))
         cur_status = ""
         cur_when = ""
