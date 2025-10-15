@@ -240,13 +240,29 @@ def verify_pin(user_sabun: str, pin: str) -> bool:
 # Google Auth / Sheets
 # ══════════════════════════════════════════════════════════════════════════════
 API_BACKOFF_SEC = [0.0, 0.8, 1.6, 3.2, 6.4, 9.6]
+
 def _retry(fn, *args, **kwargs):
     last=None
     for b in API_BACKOFF_SEC:
-        try: return fn(*args, **kwargs)
+        try:
+            return fn(*args, **kwargs)
         except APIError as e:
-            last=e; time.sleep(b+random.uniform(0,0.25))
-    if last: raise last
+            status = None; ra = None
+            try:
+                status = getattr(e, "response", None).status_code
+                ra = getattr(e, "response", None).headers.get("Retry-After")
+            except Exception:
+                pass
+            if status in (400, 401, 403, 404):
+                raise
+            wait = float(ra) if ra else (b + random.uniform(0, 0.5))
+            time.sleep(max(0.2, wait))
+            last = e
+        except Exception as e:
+            last = e
+            time.sleep(b + random.uniform(0, 0.5))
+    if last:
+        raise last
     return fn(*args, **kwargs)
 
 @st.cache_resource(show_spinner=False)
@@ -291,18 +307,50 @@ def _hdr(ws, key: str) -> Tuple[list[str], dict]:
     header=_retry(ws.row_values, 1) or []; hmap={n:i+1 for i,n in enumerate(header)}
     _HDR_CACHE[key]=(now, header, hmap); return header, hmap
 
+
 def _ws_get_all_records(ws):
-    try: return _retry(ws.get_all_records, numericise_ignore=["all"])
-    except TypeError: return _retry(ws.get_all_records)
+    try:
+        title = getattr(ws, "title", None) or ""
+        vals = _ws_values(ws, title)
+        if not vals: 
+            return []
+        header = [str(x).strip() for x in (vals[0] if vals else [])]
+        out = []
+        for i in range(1, len(vals)):
+            row = vals[i] if i < len(vals) else []
+            rec = {}
+            for j, h in enumerate(header):
+                rec[h] = row[j] if j < len(row) else ""
+            out.append(rec)
+        return out
+    except Exception:
+        try:
+            return _retry(ws.get_all_records, numericise_ignore=["all"])
+        except TypeError:
+            return _retry(ws.get_all_records)
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Sheet Readers (TTL↑)
 # ══════════════════════════════════════════════════════════════════════════════
+LAST_GOOD: dict[str, pd.DataFrame] = {}
 @st.cache_data(ttl=600, show_spinner=False)
 def read_sheet_df(sheet_name: str) -> pd.DataFrame:
-    ws=_ws(sheet_name)
-    df=pd.DataFrame(_ws_get_all_records(ws))
-    if df.empty: return df
+    try:
+        ws=_ws(sheet_name)
+        df=pd.DataFrame(_ws_get_all_records(ws))
+        if df.empty:
+            return df
+        if "사번" in df.columns: df["사번"]=df["사번"].astype(str)
+        if "재직여부" in df.columns: 
+            df["재직여부"]=df["재직여부"].astype(str).str.strip().map({"True": True, "true": True, "1": True, "": True}).fillna(True)
+        LAST_GOOD[sheet_name] = df.copy()
+        return df
+    except APIError as e:
+        if sheet_name in LAST_GOOD:
+            st.info(f"네트워크 혼잡으로 캐시 데이터를 표시합니다: {sheet_name}")
+            return LAST_GOOD[sheet_name]
+        raise
     if "사번" in df.columns: df["사번"]=df["사번"].astype(str)
     if "재직여부" in df.columns: df["재직여부"]=df["재직여부"].map(_to_bool)
     return df
