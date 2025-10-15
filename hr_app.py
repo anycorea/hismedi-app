@@ -20,7 +20,7 @@ def get_eval_summary_map_cached(_year: int) -> dict:
         ws = _ensure_eval_resp_sheet(int(_year), item_ids)
         header = _retry(ws.row_values, 1) or []
         hmap = {n:i+1 for i,n in enumerate(header)}
-        values = _retry(ws.get_all_values)
+        values = _ws_values(ws, _eval_sheet_name(int(_year)) if "_year" in locals() else _eval_sheet_name(int(year)))
     except Exception:
         return {}
     cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cTot=hmap.get("총점"); cSub=hmap.get("제출시각")
@@ -45,7 +45,7 @@ def get_comp_summary_map_cached(_year: int) -> dict:
         ws = _ensure_comp_simple_sheet(int(_year))
         header = _retry(ws.row_values,1) or []
         hmap = {n:i+1 for i,n in enumerate(header)}
-        values = _retry(ws.get_all_values)
+        values = _ws_values(ws, _eval_sheet_name(int(_year)) if "_year" in locals() else _eval_sheet_name(int(year)))
     except Exception:
         return {}
     cY=hmap.get("연도"); cTS=hmap.get("평가대상사번"); cMain=hmap.get("주업무평가")
@@ -178,34 +178,8 @@ def _pin_hash(pin: str, sabun: str) -> str:
     return hashlib.sha256(f"{str(sabun).strip()}:{str(pin).strip()}".encode()).hexdigest()
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Attestation / PIN Utilities
+# PIN Utilities (clean)
 # ─────────────────────────────────────────────────────────────────────────────
-import json as _json  # (추가) 제출 데이터 해시 직렬화용
-
-def _attest_hash(payload: dict) -> str:
-    """
-    제출 데이터(payload)를 key-sorted JSON으로 직렬화 후 SHA256(hex) 반환.
-    - payload 예: {"year":2025,"eval_type":"자기","target":"1001","evaluator":"2001","scores":{...},"ts":"...","v":"1.0"}
-    """
-    s = _json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(s.encode("utf-8")).hexdigest()
-
-def _client_meta() -> str:
-    """
-    간단한 클라이언트 메타(UA 등) 반환. 세션에 저장된 _ua 가 있으면 우선 사용.
-    내부 런타임 접근은 환경에 따라 실패할 수 있으므로 안전하게 처리.
-    """
-    ua = st.session_state.get("_ua", "")
-    if not ua:
-        try:
-            # 환경에 따라 None 일 수 있음 → 예외 무시
-            ctx = st.runtime.scriptrunner.script_run_context.get_script_run_ctx()
-            if ctx and getattr(ctx, "request", None):
-                ua = ctx.request.headers.get("User-Agent", "")
-        except Exception:
-            ua = ""
-        st.session_state["_ua"] = ua
-    return (ua or "")[:180]  # 너무 길면 잘라서 저장
 
 def verify_pin(user_sabun: str, pin: str) -> bool:
     """
@@ -292,6 +266,19 @@ EMP_SHEET = st.secrets.get("sheets", {}).get("EMP_SHEET", "직원")
 _WS_CACHE: dict[str, Tuple[float, Any]] = {}
 _HDR_CACHE: dict[str, Tuple[float, list[str], dict]] = {}
 _WS_TTL, _HDR_TTL = 120, 120
+
+_VAL_CACHE: dict[str, Tuple[float, list]] = {}
+_VAL_TTL = 90
+
+def _ws_values(ws, key: str):
+    now = time.time()
+    hit = _VAL_CACHE.get(key)
+    if hit and (now - hit[0] < _VAL_TTL):
+        return hit[1]
+    vals = _retry(ws.get_all_values)
+    _VAL_CACHE[key] = (now, vals)
+    return vals
+
 
 def _ws(title: str):
     now=time.time(); hit=_WS_CACHE.get(title)
@@ -610,12 +597,15 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
     st.caption(f"총 {len(view)}명")
     
 # ── 관리자/부서장: 현황 컬럼을 왼쪽 표에 합쳐서 표시 ───────────────────────────
+    # 빠른 화면을 원하면 '현황 컬럼 보기'를 끄세요.
+    show_dashboard_cols = st.checkbox("현황 컬럼 보기(빠름)", value=True, help="끄면 기본 직원표만 빠르게 표시됩니다.")
     try:
+
         am_admin_or_mgr = (is_admin(me) or len(get_allowed_sabuns(emp_df, me, include_self=False)) > 0)
     except Exception:
         am_admin_or_mgr = False
     
-    if am_admin_or_mgr and not view.empty:
+    if am_admin_or_mgr and not view.empty and show_dashboard_cols:
         # 연도 선택 (기본=올해)
         try:
             this_year = datetime.now(tz=tz_kst()).year
@@ -687,7 +677,7 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
     }
 )
     else:
-        st.dataframe(view[cols], use_container_width=True, height=420, hide_index=True)
+        st.dataframe(view[cols], use_container_width=True, height=(360 if not show_dashboard_cols else 420), hide_index=True)
 
 def _eval_sheet_name(year: int | str) -> str: return f"{EVAL_RESP_SHEET_PREFIX}{int(year)}"
 
@@ -756,7 +746,7 @@ def upsert_eval_response(emp_df: pd.DataFrame, year: int, eval_type: str,
     total=round(sum(scores_list)*(100.0/max(1,len(item_ids)*5)),1)
     tname=_emp_name_by_sabun(emp_df, target_sabun); ename=_emp_name_by_sabun(emp_df, evaluator_sabun)
     now=kst_now_str()
-    values=_retry(ws.get_all_values); cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
+    values = _ws_values(ws, _eval_sheet_name(int(_year)) if "_year" in locals() else _eval_sheet_name(int(year))); cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
     row_idx=0
     for i in range(2, len(values)+1):
         r=values[i-1]
@@ -866,7 +856,7 @@ def tab_eval(emp_df: pd.DataFrame):
         try:
             ws = _ensure_eval_resp_sheet(int(_year), item_ids)
             header = _retry(ws.row_values, 1) or []; hmap = {n: i+1 for i, n in enumerate(header)}
-            values = _retry(ws.get_all_values)
+            values = _ws_values(ws, _eval_sheet_name(int(_year)) if "_year" in locals() else _eval_sheet_name(int(year)))
             cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cS=hmap.get("상태")
             if not all([cY, cT, cTS, cS]): return False
             for r in values[1:]:
@@ -884,7 +874,7 @@ def tab_eval(emp_df: pd.DataFrame):
         try:
             ws = _ensure_eval_resp_sheet(int(year), item_ids)
             header = _retry(ws.row_values, 1) or []; hmap = {n: i+1 for i, n in enumerate(header)}
-            values = _retry(ws.get_all_values)
+            values = _ws_values(ws, _eval_sheet_name(int(_year)) if "_year" in locals() else _eval_sheet_name(int(year)))
             cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
             row_idx = 0
             for i in range(2, len(values)+1):
@@ -994,7 +984,7 @@ def tab_eval(emp_df: pd.DataFrame):
         try:
             ws = _ensure_eval_resp_sheet(int(_year), item_ids)
             header = _retry(ws.row_values, 1) or []; hmap = {n: i+1 for i, n in enumerate(header)}
-            values = _retry(ws.get_all_values)
+            values = _ws_values(ws, _eval_sheet_name(int(_year)) if "_year" in locals() else _eval_sheet_name(int(year)))
             cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cDT=hmap.get("제출시각")
             # 최신 제출시각 우선
             picked = None; picked_dt = ""
@@ -1310,7 +1300,7 @@ def upsert_jobdesc(rec: dict, as_new_version: bool = False) -> dict:
     rec["제출시각"] = kst_now_str()
     rec["이름"] = _emp_name_by_sabun(read_emp_df(), sabun)
 
-    values = _retry(ws.get_all_values)
+    values = _ws_values(ws, _eval_sheet_name(int(_year)) if "_year" in locals() else _eval_sheet_name(int(year)))
     row_idx = 0
     cS, cY, cV = hmap.get("사번"), hmap.get("연도"), hmap.get("버전")
     for i in range(2, len(values) + 1):
@@ -1551,7 +1541,7 @@ def set_jd_approval(year: int, sabun: str, name: str, version: int,
     ws = _ws(JD_APPROVAL_SHEET)
     header = _retry(ws.row_values, 1) or JD_APPROVAL_HEADERS
     hmap = {n: i+1 for i, n in enumerate(header)}
-    values = _retry(ws.get_all_values)
+    values = _ws_values(ws, _eval_sheet_name(int(_year)) if "_year" in locals() else _eval_sheet_name(int(year)))
     cY = hmap.get("연도"); cS = hmap.get("사번"); cV = hmap.get("버전")
     target_row = 0
     for i in range(2, len(values)+1):
@@ -1931,7 +1921,7 @@ def upsert_comp_simple_response(emp_df: pd.DataFrame, year:int, target_sabun:str
     jd=_jd_latest_for_comp(target_sabun, int(year)); edu_status=_edu_completion_from_jd(jd)
     t_name=_emp_name_by_sabun(emp_df, target_sabun); e_name=_emp_name_by_sabun(emp_df, evaluator_sabun)
     now=kst_now_str()
-    values=_retry(ws.get_all_values); cY=hmap.get("연도"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
+    values = _ws_values(ws, _eval_sheet_name(int(_year)) if "_year" in locals() else _eval_sheet_name(int(year))); cY=hmap.get("연도"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
     row_idx=0
     for i in range(2, len(values)+1):
         r=values[i-1]
