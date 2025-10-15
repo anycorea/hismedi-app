@@ -12,7 +12,7 @@ import streamlit as st
 
 # ===== Cached summary helpers (performance) =====
 @st.cache_data(ttl=300, show_spinner=False)
-def get_eval_summary_map_cached(_year: int) -> dict:
+def get_eval_summary_map_cached(_year: int, _rev: int = 0) -> dict:
     """Return {(사번, 평가유형)->(총점, 제출시각)} for the year."""
     items = read_eval_items_df(True)
     item_ids = [str(x) for x in items["항목ID"].tolist()] if not items.empty else []
@@ -39,7 +39,7 @@ def get_eval_summary_map_cached(_year: int) -> dict:
     return out
 
 @st.cache_data(ttl=300, show_spinner=False)
-def get_comp_summary_map_cached(_year: int) -> dict:
+def get_comp_summary_map_cached(_year: int, _rev: int = 0) -> dict:
     """Return {사번->(주업무, 기타업무, 자격유지, 제출시각)} for the year."""
     try:
         ws = _ensure_comp_simple_sheet(int(_year))
@@ -67,7 +67,7 @@ def get_comp_summary_map_cached(_year: int) -> dict:
     return out
 
 @st.cache_data(ttl=120, show_spinner=False)
-def get_jd_approval_map_cached(_year: int) -> dict:
+def get_jd_approval_map_cached(_year: int, _rev: int = 0) -> dict:
     """Return {(사번, 최신버전)->(상태, 승인시각)} for the year from 직무기술서_승인."""
     try:
         ws = _ws("직무기술서_승인")
@@ -613,9 +613,9 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
             this_year = datetime.now().year
         dash_year = st.number_input("연도(현황판)", min_value=2000, max_value=2100, value=int(this_year), step=1, key="left_dash_year")
     
-        eval_map = get_eval_summary_map_cached(int(dash_year))
-        comp_map = get_comp_summary_map_cached(int(dash_year))
-        appr_map = get_jd_approval_map_cached(int(dash_year))
+        eval_map = get_eval_summary_map_cached(int(dash_year), st.session_state.get("eval_rev", 0))
+        comp_map = get_comp_summary_map_cached(int(dash_year), st.session_state.get("comp_rev", 0))
+        appr_map = get_jd_approval_map_cached(int(dash_year), st.session_state.get("appr_rev", 0))
     
         # view에 컬럼 합치기
         ext_rows = []
@@ -1187,6 +1187,7 @@ def tab_eval(emp_df: pd.DataFrame):
                     icon="✅",
                 )
                 st.session_state["eval2_edit_mode"] = False
+                st.session_state['eval_rev'] = st.session_state.get('eval_rev', 0) + 1
                 st.rerun()
             except Exception as e:
                 st.exception(e)
@@ -1228,7 +1229,7 @@ def ensure_jobdesc_sheet():
         return ws
 
 @st.cache_data(ttl=600, show_spinner=False)
-def read_jobdesc_df() -> pd.DataFrame:
+def read_jobdesc_df(_rev: int = 0) -> pd.DataFrame:
     ensure_jobdesc_sheet()
     ws = _ws(JOBDESC_SHEET)
     df = pd.DataFrame(_ws_get_all_records(ws))
@@ -1251,7 +1252,7 @@ def read_jobdesc_df() -> pd.DataFrame:
     return df
 
 def _jd_latest_for(sabun: str, year: int) -> dict | None:
-    df = read_jobdesc_df()
+    df = read_jobdesc_df(st.session_state.get("jobdesc_rev", 0))
     if df.empty:
         return None
     sub = df[(df["사번"].astype(str) == str(sabun)) & (df["연도"].astype(int) == int(year))].copy()
@@ -1268,7 +1269,7 @@ def _jd_latest_for(sabun: str, year: int) -> dict | None:
     return row
 
 def _jobdesc_next_version(sabun: str, year: int) -> int:
-    df = read_jobdesc_df()
+    df = read_jobdesc_df(st.session_state.get("jobdesc_rev", 0))
     if df.empty:
         return 1
     sub = df[(df["사번"] == str(sabun)) & (df["연도"].astype(int) == int(year))]
@@ -1293,7 +1294,7 @@ def upsert_jobdesc(rec: dict, as_new_version: bool = False) -> dict:
         if try_ver <= 0:
             ver = _jobdesc_next_version(sabun, year)
         else:
-            df = read_jobdesc_df()
+            df = read_jobdesc_df(st.session_state.get("jobdesc_rev", 0))
             exist = not df[(df["사번"] == sabun) & (df["연도"].astype(int) == year) & (df["버전"].astype(int) == try_ver)].empty
             ver = try_ver if exist else 1
     rec["버전"] = int(ver)
@@ -1768,6 +1769,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
             try:
                 rep = upsert_jobdesc(rec, as_new_version=(version == 0))
                 st.success(f"저장 완료 (버전 {rep['version']})", icon="✅")
+                st.session_state['jobdesc_rev'] = st.session_state.get('jobdesc_rev', 0) + 1
                 st.rerun()
             except Exception as e:
                 st.exception(e)
@@ -2081,6 +2083,7 @@ def tab_competency(emp_df: pd.DataFrame):
                 emp_df, int(year), str(sel_sab), str(me_sabun), g_main, g_extra, qual, opinion, eval_date
             )
             st.success(("제출 완료" if rep.get("action")=="insert" else "업데이트 완료"), icon="✅")
+        st.session_state['comp_rev'] = st.session_state.get('comp_rev', 0) + 1
 
     st.markdown("### 내 제출 현황")
     try:
