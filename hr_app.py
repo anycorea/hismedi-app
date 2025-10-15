@@ -598,7 +598,7 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
     
 # ── 관리자/부서장: 현황 컬럼을 왼쪽 표에 합쳐서 표시 ───────────────────────────
     # 빠른 화면을 원하면 '현황 컬럼 보기'를 끄세요.
-    show_dashboard_cols = st.checkbox("현황 컬럼 보기(빠름)", value=True, help="끄면 기본 직원표만 빠르게 표시됩니다.")
+    show_dashboard_cols = st.checkbox("현황 컬럼 보기(빠름)", value=False, help="끄면 기본 직원표만 빠르게 표시됩니다.")
     try:
 
         am_admin_or_mgr = (is_admin(me) or len(get_allowed_sabuns(emp_df, me, include_self=False)) > 0)
