@@ -9,7 +9,6 @@ from datetime import datetime, timedelta
 from typing import Any, Tuple
 import pandas as pd
 import streamlit as st
-from jd_status_block_v1 import *
 from html import escape as _html_escape
 
 # Optional zoneinfo (KST)
@@ -2166,7 +2165,7 @@ def main():
         with tabs[0]: tab_eval(emp_df)
         with tabs[1]: tab_job_desc(emp_df)
         with tabs[2]: tab_jd_status(emp_df)
-        with tabs[3]: tab_competency(emp_df)
+        with tabs[5]: tab_competency(emp_df)
         with tabs[3]:
             me = str(st.session_state.get("user", {}).get("사번", ""))
             if not is_admin(me):
@@ -2177,14 +2176,14 @@ def main():
                 with a2: tab_admin_pin(emp_df)
                 with a3: tab_admin_eval_items()
                 with a4: tab_admin_acl(emp_df)
-        with tabs[4]: tab_help()
+        with tabs[5]: tab_help()
 
 if __name__ == "__main__":
     main()
 
 
 
-# ===== JD Approval helpers & Status Tab (appended) =====
+# ===== JD Approval helpers & Status Tab =====
 def ensure_jd_approval_sheet():
     wb = get_book()
     try:
@@ -2241,7 +2240,7 @@ def set_jd_approval(year: int, sabun: str, name: str, version: int,
         except Exception:
             pass
 
-    now = kst_now_str()
+    now = kst_now_str() if "kst_now_str" in globals() else str(pd.Timestamp.now()).split(".")[0]
     payload = {
         "연도": int(year),
         "사번": str(sabun),
@@ -2265,11 +2264,7 @@ def set_jd_approval(year: int, sabun: str, name: str, version: int,
         return {"action":"insert","row":row_idx}
 
 def tab_jd_status(emp_df: pd.DataFrame):
-    try:
-        this_year = datetime.now(tz=tz_kst()).year  # type: ignore
-    except Exception:
-        this_year = datetime.now().year
-    year = st.number_input("연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="jdstat_year")
+    year = st.number_input("연도", min_value=2000, max_value=2100, value=int(pd.Timestamp.now().year), step=1, key="jdstat_year")
 
     u = st.session_state.get("user", {})
     me_sabun = str(u.get("사번", "")); me_name = str(u.get("이름", ""))
