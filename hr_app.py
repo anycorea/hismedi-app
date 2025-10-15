@@ -371,6 +371,12 @@ def require_login(emp_df: pd.DataFrame):
 # ACL (권한) + Staff Filters (TTL↑)
 # ══════════════════════════════════════════════════════════════════════════════
 AUTH_SHEET="권한"
+
+EVAL_ITEMS_SHEET = st.secrets.get("sheets", {}).get("EVAL_ITEMS_SHEET", "평가_항목")
+EVAL_ITEM_HEADERS = ["활성","순서","항목ID","항목","설명","유형","구분"]
+EVAL_RESP_SHEET_PREFIX = st.secrets.get("sheets", {}).get("EVAL_RESP_SHEET_PREFIX", "평가_응답_")
+EVAL_BASE_HEADERS = ["연도","평가유형","평가대상사번","평가대상자이름","평가자사번","평가자이름","상태","제출시각","총점"]
+
 AUTH_HEADERS=["사번","이름","역할","범위유형","부서1","부서2","대상사번","활성","비고"]
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -396,10 +402,12 @@ def is_admin(sabun:str)->bool:
 
 def get_allowed_sabuns(emp_df:pd.DataFrame, sabun:str, include_self:bool=True)->set[str]:
     sabun=str(sabun); allowed=set([sabun]) if include_self else set()
-    if is_admin(sabun): return set(emp_df["사번"].astype(str).tolist())
     df=read_auth_df()
     if not df.empty:
         mine=df[(df["사번"].astype(str)==sabun) & (df["활성"]==True)]
+        # 공란 범위유형이 하나라도 있으면 전체 허용
+        if not mine.empty and any(str(x).strip()=="" for x in mine.get("범위유형", [])):
+            return set(emp_df["사번"].astype(str).tolist())
         for _,r in mine.iterrows():
             t=str(r.get("범위유형","")).strip()
             if t=="부서":
