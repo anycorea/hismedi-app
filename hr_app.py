@@ -45,7 +45,7 @@ def get_comp_summary_map_cached(_year: int, _rev: int = 0) -> dict:
         ws = _ensure_comp_simple_sheet(int(_year))
         header = _retry(ws.row_values,1) or []
         hmap = {n:i+1 for i,n in enumerate(header)}
-        values = _ws_values(ws, _eval_sheet_name(int(_year)) if "_year" in locals() else _eval_sheet_name(int(year)))
+        values = _ws_values(ws, _simp_sheet_name(int(_year)))
     except Exception:
         return {}
     cY=hmap.get("연도"); cTS=hmap.get("평가대상사번"); cMain=hmap.get("주업무평가")
