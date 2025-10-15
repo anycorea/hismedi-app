@@ -1022,6 +1022,19 @@ def tab_eval(emp_df: pd.DataFrame):
     requested_edit = bool(st.session_state["eval2_edit_mode"])
     edit_mode = requested_edit and prereq_ok and (not is_locked)
     st.caption(f"현재: **{'수정모드' if edit_mode else '보기모드'}**")
+
+try:
+    _emap = get_eval_summary_map_cached(int(year), st.session_state.get('eval_rev', 0))
+    _ts_self = (str(_emap.get((str(target_sabun), '자기'), ('',''))[1]).strip())
+    _ts_mgr  = (str(_emap.get((str(target_sabun), '1차'), ('',''))[1]).strip())
+    _ts_adm  = (str(_emap.get((str(target_sabun), '2차'), ('',''))[1]).strip())
+    def _fmt(ts):
+        ts = (ts or '').strip()
+        return '-' if not ts else (ts if '(KST)' in ts else ts + ' (KST)')
+    st.info(f"🕒 제출시각 | 자기: {_fmt(_ts_self)}  ·  1차: {_fmt(_ts_mgr)}  ·  2차: {_fmt(_ts_adm)}")
+except Exception:
+    pass
+
 # --- 점수 입력 UI: 표만 -----------------------------------------------------
     st.markdown("#### 점수 입력 (자기/1차/2차) — 표에서 직접 수정하세요.")
 
