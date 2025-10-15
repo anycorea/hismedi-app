@@ -528,144 +528,147 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
 
     cols = [c for c in ["사번", "이름", "부서1", "부서2", "직급"] if c in view.columns]
     st.caption(f"총 {len(view)}명")
+    
+# ── 관리자/부서장: 현황 컬럼을 왼쪽 표에 합쳐서 표시 ───────────────────────────
+try:
+    am_admin_or_mgr = (is_admin(me) or len(get_allowed_sabuns(emp_df, me, include_self=False)) > 0)
+except Exception:
+    am_admin_or_mgr = False
+
+if am_admin_or_mgr and not view.empty:
+    # 연도 선택 (기본=올해)
+    try:
+        this_year = datetime.now(tz=tz_kst()).year
+    except Exception:
+        this_year = datetime.now().year
+    dash_year = st.number_input("연도(현황판)", min_value=2000, max_value=2100, value=int(this_year), step=1, key="left_dash_year")
+
+    # --- 인사평가 요약 {(사번,유형)->(총점,제출시각)} ---
+    def _eval_summary_map(_year:int):
+        items = read_eval_items_df(True)
+        item_ids = [str(x) for x in items["항목ID"].tolist()] if not items.empty else []
+        try:
+            ws = _ensure_eval_resp_sheet(int(_year), item_ids)
+            header = _retry(ws.row_values, 1) or []
+            hmap = {n:i+1 for i,n in enumerate(header)}
+            values = _retry(ws.get_all_values)
+        except Exception:
+            return {}
+        cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cTot=hmap.get("총점"); cSub=hmap.get("제출시각")
+        out = {}
+        for i in range(2, len(values)+1):
+            r = values[i-1]
+            try:
+                if str(r[cY-1]).strip() != str(_year): continue
+                k = (str(r[cTS-1]).strip(), str(r[cT-1]).strip())
+                tot = r[cTot-1] if (cTot and cTot-1 < len(r)) else ""
+                sub = r[cSub-1] if (cSub and cSub-1 < len(r)) else ""
+                if k not in out or str(out[k][1]) < str(sub):
+                    out[k] = (tot, sub)
+            except Exception:
+                pass
+        return out
+
+    # --- JD 승인 요약 {(사번,버전)->(상태,승인시각)} ---
+    def _jd_approval_map(_year:int):
+        try:
+            ws = _ws("직무기술서_승인")
+            df = pd.DataFrame(_ws_get_all_records(ws))
+        except Exception:
+            df = pd.DataFrame(columns=["연도","사번","버전","상태","승인시각"])
+        for c in ["연도","버전"]:
+            if c in df.columns:
+                df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0).astype(int)
+        for c in ["사번","상태","승인시각"]:
+            if c in df.columns:
+                df[c] = df[c].astype(str)
+        df = df[df.get("연도",0).astype(int) == int(_year)]
+        out = {}
+        if not df.empty:
+            df = df.sort_values(["사번","버전","승인시각"], ascending=[True, True, True]).reset_index(drop=True)
+            for _, rr in df.iterrows():
+                k = (str(rr.get("사번","")), int(rr.get("버전",0)))
+                out[k] = (str(rr.get("상태","")), str(rr.get("승인시각","")))
+        return out
+
+    # --- 직무능력평가 요약 {사번->(주업무,기타업무,자격유지)} ---
+    def _comp_summary_map(_year:int):
+        try:
+            ws = _ensure_comp_simple_sheet(int(_year))
+            header = _retry(ws.row_values,1) or []
+            hmap = {n:i+1 for i,n in enumerate(header)}
+            values = _retry(ws.get_all_values)
+        except Exception:
+            return {}
+        cY=hmap.get("연도"); cTS=hmap.get("평가대상사번"); cMain=hmap.get("주업무평가")
+        cExtra=hmap.get("기타업무평가"); cQual=hmap.get("자격유지"); cSub=hmap.get("제출시각")
+        out = {}
+        for i in range(2, len(values)+1):
+            r = values[i-1]
+            try:
+                if cY and str(r[cY-1]).strip()!=str(_year): continue
+                sab = str(r[cTS-1]).strip()
+                main = r[cMain-1] if cMain else ""
+                extra = r[cExtra-1] if cExtra else ""
+                qual = r[cQual-1] if cQual else ""
+                sub = r[cSub-1] if cSub else ""
+                if sab not in out or str(out[sab][3]) < str(sub):
+                    out[sab] = (main, extra, qual, sub)
+            except Exception:
+                pass
+        return out
+
+    eval_map = _eval_summary_map(int(dash_year))
+    comp_map = _comp_summary_map(int(dash_year))
+    appr_map = _jd_approval_map(int(dash_year))
+
+    # view에 컬럼 합치기
+    ext_rows = []
+    for _, r in view.iterrows():
+        sab = str(r.get("사번","")).strip()
+
+        # 인사평가 점수
+        s_self = eval_map.get((sab, "자기"), ("", ""))[0]
+        s_mgr  = eval_map.get((sab, "1차"), ("", ""))[0]
+        s_adm  = eval_map.get((sab, "2차"), ("", ""))[0]
+
+        # JD 작성/승인
+        latest = _jd_latest_for(sab, int(dash_year))
+        jd_write = "완료" if latest else "미완료"
+        jd_appr  = "-"
+        if latest:
+            try:
+                ver = int(str(latest.get("버전", 0)).strip() or "0")
+            except Exception:
+                ver = 0
+            st_ap = appr_map.get((sab, ver), ("",""))[0] if ver else ""
+            jd_appr = (st_ap if st_ap else "-")
+
+        # 직무능력평가 항목명
+        main, extra, qual = "", "", ""
+        if sab in comp_map:
+            main, extra, qual, _ = comp_map[sab]
+
+        ext_rows.append({
+            "사번": sab,
+            "인사평가(자기)": s_self, "인사평가(1차)": s_mgr, "인사평가(2차)": s_adm,
+            "직무기술서(작성)": jd_write, "직무기술서(승인)": jd_appr,
+            "직무능력평가(주업무)": main, "직무능력평가(기타업무)": extra, "직무능력평가(자격유지)": qual
+        })
+
+    add_df = pd.DataFrame(ext_rows)
+    add_df["사번"] = add_df["사번"].astype(str)
+    view2 = view.copy()
+    view2["사번"] = view2["사번"].astype(str)
+    view2 = view2.merge(add_df, on="사번", how="left")
+
+    ext_cols = cols + ["인사평가(자기)","인사평가(1차)","인사평가(2차)",
+                       "직무기술서(작성)","직무기술서(승인)",
+                       "직무능력평가(주업무)","직무능력평가(기타업무)","직무능력평가(자격유지)"]
+    st.dataframe(view2[ext_cols], use_container_width=True, height=420, hide_index=True)
+else:
     st.dataframe(view[cols], use_container_width=True, height=420, hide_index=True)
 
-    # ── 현황판(간단) : 관리자/부서장 전용 ─────────────────────────────────────────────
-    try:
-        am_admin_or_mgr = (is_admin(me) or len(get_allowed_sabuns(emp_df, me, include_self=False)) > 0)
-    except Exception:
-        am_admin_or_mgr = False
-
-    if am_admin_or_mgr and not view.empty:
-        st.markdown("#### 현황판 (간단)")
-
-        # 연도 선택 (기본=올해)
-        try:
-            this_year = datetime.now(tz=tz_kst()).year
-        except Exception:
-            this_year = datetime.now().year
-        dash_year = st.number_input("연도(현황판)", min_value=2000, max_value=2100, value=int(this_year), step=1, key="left_dash_year")
-
-        # --- 인사평가 요약 맵 {(사번,유형)->(총점,제출시각)} --------------------------
-        def _eval_summary_map(_year:int):
-            items = read_eval_items_df(True)
-            item_ids = [str(x) for x in items["항목ID"].tolist()] if not items.empty else []
-            try:
-                ws = _ensure_eval_resp_sheet(int(_year), item_ids)
-                header = _retry(ws.row_values, 1) or []
-                hmap = {n:i+1 for i,n in enumerate(header)}
-                values = _retry(ws.get_all_values)
-            except Exception:
-                return {}
-            cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cTot=hmap.get("총점"); cSub=hmap.get("제출시각")
-            out = {}
-            for i in range(2, len(values)+1):
-                r = values[i-1]
-                try:
-                    if str(r[cY-1]).strip() != str(_year): continue
-                    k = (str(r[cTS-1]).strip(), str(r[cT-1]).strip())
-                    tot = r[cTot-1] if (cTot and cTot-1 < len(r)) else ""
-                    sub = r[cSub-1] if (cSub and cSub-1 < len(r)) else ""
-                    # 최신 제출/저장 우선
-                    if k not in out or str(out[k][1]) < str(sub):
-                        out[k] = (tot, sub)
-                except Exception:
-                    pass
-            return out
-
-        # --- JD 승인 요약 맵 {(사번,버전)->(상태,승인시각)} -------------------------
-        def _jd_approval_map(_year:int):
-            try:
-                ws = _ws("직무기술서_승인")
-                df = pd.DataFrame(_ws_get_all_records(ws))
-            except Exception:
-                df = pd.DataFrame(columns=["연도","사번","버전","상태","승인시각"])
-            for c in ["연도","버전"]:
-                if c in df.columns:
-                    df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0).astype(int)
-            for c in ["사번","상태","승인시각"]:
-                if c in df.columns:
-                    df[c] = df[c].astype(str)
-            df = df[df.get("연도",0).astype(int) == int(_year)]
-            out = {}
-            if not df.empty:
-                df = df.sort_values(["사번","버전","승인시각"], ascending=[True, True, True]).reset_index(drop=True)
-                for _, rr in df.iterrows():
-                    k = (str(rr.get("사번","")), int(rr.get("버전",0)))
-                    out[k] = (str(rr.get("상태","")), str(rr.get("승인시각","")))
-            return out
-
-        # --- 직무능력평가 요약 맵 {사번->(주업무,기타업무,자격유지)} -----------------
-        def _comp_summary_map(_year:int):
-            try:
-                ws = _ensure_comp_simple_sheet(int(_year))
-                header = _retry(ws.row_values,1) or []
-                hmap = {n:i+1 for i,n in enumerate(header)}
-                values = _retry(ws.get_all_values)
-            except Exception:
-                return {}
-            cY=hmap.get("연도"); cTS=hmap.get("평가대상사번"); cMain=hmap.get("주업무평가")
-            cExtra=hmap.get("기타업무평가"); cQual=hmap.get("자격유지"); cSub=hmap.get("제출시각")
-            out = {}
-            for i in range(2, len(values)+1):
-                r = values[i-1]
-                try:
-                    if cY and str(r[cY-1]).strip()!=str(_year): continue
-                    sab = str(r[cTS-1]).strip()
-                    main = r[cMain-1] if cMain else ""
-                    extra = r[cExtra-1] if cExtra else ""
-                    qual = r[cQual-1] if cQual else ""
-                    sub = r[cSub-1] if cSub else ""
-                    if sab not in out or str(out[sab][3]) < str(sub):
-                        out[sab] = (main, extra, qual, sub)
-                except Exception:
-                    pass
-            return out
-
-        eval_map = _eval_summary_map(int(dash_year))
-        comp_map = _comp_summary_map(int(dash_year))
-        appr_map = _jd_approval_map(int(dash_year))
-
-        # 대상을 현재 view(검색/선택 반영) 기준으로 루프
-        rows = []
-        for _, r in view.iterrows():
-            sab = str(r.get("사번","")).strip()
-            nm  = str(r.get("이름","")).strip()
-            d1  = str(r.get("부서1","")).strip() if "부서1" in r else ""
-            d2  = str(r.get("부서2","")).strip() if "부서2" in r else ""
-            pos = str(r.get("직급","")).strip()  if "직급" in r else ""
-
-            # 인사평가 점수
-            s_self = eval_map.get((sab, "자기"), ("", ""))[0]
-            s_mgr  = eval_map.get((sab, "1차"), ("", ""))[0]
-            s_adm  = eval_map.get((sab, "2차"), ("", ""))[0]
-
-            # JD 작성/승인
-            latest = _jd_latest_for(sab, int(dash_year))
-            jd_write = "완료" if latest else "미완료"
-            jd_appr  = "-"
-            if latest:
-                try:
-                    ver = int(str(latest.get("버전", 0)).strip() or "0")
-                except Exception:
-                    ver = 0
-                st_ap = appr_map.get((sab, ver), ("",""))[0] if ver else ""
-                jd_appr = (st_ap if st_ap else "-")
-
-            # 직무능력평가 항목명
-            main, extra, qual = "", "", ""
-            if sab in comp_map:
-                main, extra, qual, _ = comp_map[sab]
-
-            rows.append({
-                "사번": sab, "이름": nm, "부서1": d1, "부서2": d2, "직급": pos,
-                "인사평가(자기)": s_self, "인사평가(1차)": s_mgr, "인사평가(2차)": s_adm,
-                "직무기술서(작성)": jd_write, "직무기술서(승인)": jd_appr,
-                "직무능력평가(주업무)": main, "직무능력평가(기타업무)": extra, "직무능력평가(자격유지)": qual
-            })
-
-        dash_df = pd.DataFrame(rows)
-        st.dataframe(dash_df, use_container_width=True, hide_index=True, height=320)
 def _eval_sheet_name(year: int | str) -> str: return f"{EVAL_RESP_SHEET_PREFIX}{int(year)}"
 
 def ensure_eval_items_sheet():
