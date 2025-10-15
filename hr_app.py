@@ -639,15 +639,15 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
     
             # JD 작성/승인
             latest = _jd_latest_for(sab, int(dash_year))
-            jd_write = "완료" if latest else "미완료"
-            jd_appr  = "-"
+            jd_write = "완료" if latest else ""
+            jd_appr  = ""
             if latest:
                 try:
                     ver = int(str(latest.get("버전", 0)).strip() or "0")
                 except Exception:
                     ver = 0
                 st_ap = appr_map.get((sab, ver), ("",""))[0] if ver else ""
-                jd_appr = (st_ap if st_ap else "-")
+                jd_appr = (st_ap if st_ap else "")
     
             # 직무능력평가 항목명
             main, extra, qual = "", "", ""
