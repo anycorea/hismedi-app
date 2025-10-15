@@ -815,6 +815,7 @@ def tab_eval(emp_df: pd.DataFrame):
     st.caption(f"현재: **{'수정모드' if edit_mode else '보기모드'}**")
 
     
+
 # --- 점수 입력 UI: 표만 -----------------------------------------------------
     st.markdown("#### 점수 입력 (자기/1차/2차) — 표에서 직접 수정하세요.")
 
@@ -872,8 +873,8 @@ def tab_eval(emp_df: pd.DataFrame):
         visible_cols = ["자기평가"]
     elif eval_type == "1차":
         visible_cols = ["자기평가","1차평가"]
-    else:  # eval_type == "2차" (admin 흐름)
-        visible_cols = ["1차평가","2차평가"]
+    else:  # eval_type == "2차": 자기평가도 함께 보여줌
+        visible_cols = ["자기평가","1차평가","2차평가"]
 
     # ◇◇ 시드 데이터 구성
     # - 편집 컬럼: 세션상태 or 현재 저장된 점수(saved_scores)
@@ -881,15 +882,21 @@ def tab_eval(emp_df: pd.DataFrame):
     stage_self = _stage_scores_any_evaluator(int(year), "자기", str(target_sabun)) if "자기평가" in visible_cols else {}
     stage_1st  = _stage_scores_any_evaluator(int(year), "1차", str(target_sabun))  if "1차평가" in visible_cols else {}
 
-    def _seed_for_editable(iid: str) -> int:
+    def _seed_for_editable(iid: str):
+        # 기본값 공란(None)
         rkey = f"eval2_seg_{iid}_{kbase}"
         if rkey in st.session_state:
-            try: return int(st.session_state[rkey])
-            except Exception: return 3
+            try:
+                v = st.session_state[rkey]
+                return int(v) if (v is not None and str(v).strip()!="") else None
+            except Exception:
+                return None
         if iid in saved_scores:
-            try: return int(saved_scores[iid])
-            except Exception: return 3
-        return 3
+            try:
+                return int(saved_scores[iid])
+            except Exception:
+                return None
+        return None
 
     rows = []
     for r in items_sorted.itertuples(index=False):
@@ -901,17 +908,19 @@ def tab_eval(emp_df: pd.DataFrame):
             "1차평가": None,
             "2차평가": None
         }
-        # 참조 점수
+        # 참조 점수(읽기 컬럼)
         if "자기평가" in visible_cols:
             if editable_col_name=="자기평가":
                 row["자기평가"] = _seed_for_editable(iid)
             else:
-                row["자기평가"] = int(stage_self.get(iid, 0)) or None
+                v = stage_self.get(iid, None)
+                row["자기평가"] = int(v) if v is not None else None
         if "1차평가" in visible_cols:
             if editable_col_name=="1차평가":
                 row["1차평가"] = _seed_for_editable(iid)
             else:
-                row["1차평가"] = int(stage_1st.get(iid, 0)) or None
+                v = stage_1st.get(iid, None)
+                row["1차평가"] = int(v) if v is not None else None
         if "2차평가" in visible_cols and editable_col_name=="2차평가":
             row["2차평가"] = _seed_for_editable(iid)
 
@@ -919,7 +928,7 @@ def tab_eval(emp_df: pd.DataFrame):
 
     df_tbl = pd.DataFrame(rows, index=item_ids)
 
-    # ◇◇ 합계 행(표 안에 표시)
+    # ◇◇ 합계 행(표 안에 표시) — 각 컬럼별 합계(빈칸은 0으로 간주)
     def _col_sum(col: str) -> int:
         if col not in df_tbl.columns: return 0
         s = (pd.to_numeric(df_tbl[col], errors="coerce")).fillna(0).astype(int).sum()
@@ -953,28 +962,19 @@ def tab_eval(emp_df: pd.DataFrame):
         height=min(560, 64 + 36 * len(df_tbl_with_sum))
     )
 
-    # ◇◇ 점수 dict 구성(합계 행 제외, 편집 컬럼만 저장)
+    # ◇◇ 점수 dict 구성(합계 행 제외, 편집 컬럼만 저장) — 공란은 저장하지 않음
     scores = {}
     if editable_col_name in edited.columns:
         values = list(edited[editable_col_name].tolist())[:-1]  # 마지막 행은 합계
         for iid, v in zip(item_ids, values):
-            val = int(v) if (v is not None and str(v).strip()!="") else _seed_for_editable(iid)
+            if v is None or str(v).strip()=="":
+                continue
+            try:
+                val = int(v)
+            except Exception:
+                continue
             st.session_state[f"eval2_seg_{iid}_{kbase}"] = str(val)
             scores[iid] = val
-
-    # ◇◇ 합계(100점 만점) — 편집 컬럼 기준
-    if "가중치" in items_sorted.columns:
-        w = items_sorted["가중치"].fillna(1).astype(float).tolist()
-        denom = sum(5.0 * wi for wi in w) if w else 1.0
-        num   = sum(scores.get(iid, 0) * wi for iid, wi in zip(item_ids, w))
-        total_100 = round((num / max(denom, 1.0)) * 100.0, 1)
-        st.caption("가중치가 적용된 총점입니다. (현재 편집 컬럼 기준)")
-    else:
-        total_100 = round(sum(scores.values()) * (100.0 / max(1, len(items_sorted) * 5)), 1)
-
-    st.markdown("---")
-    st.metric("현재 편집 컬럼 합계(100점 만점)", total_100)
-    st.progress(min(1.0, total_100 / 100.0), text=f"총점 {total_100}점")
 #### 제출 확인")
     cb1, cb2 = st.columns([2, 1])
     with cb1:
