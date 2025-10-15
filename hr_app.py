@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from typing import Any, Tuple
 import pandas as pd
 import streamlit as st
+from jd_status_block_v1 import *
 from html import escape as _html_escape
 
 # Optional zoneinfo (KST)
