@@ -9,6 +9,86 @@ from datetime import datetime, timedelta
 from typing import Any, Tuple
 import pandas as pd
 import streamlit as st
+
+# ===== Cached summary helpers (performance) =====
+@st.cache_data(ttl=300, show_spinner=False)
+def get_eval_summary_map_cached(_year: int) -> dict:
+    """Return {(사번, 평가유형)->(총점, 제출시각)} for the year."""
+    items = read_eval_items_df(True)
+    item_ids = [str(x) for x in items["항목ID"].tolist()] if not items.empty else []
+    try:
+        ws = _ensure_eval_resp_sheet(int(_year), item_ids)
+        header = _retry(ws.row_values, 1) or []
+        hmap = {n:i+1 for i,n in enumerate(header)}
+        values = _retry(ws.get_all_values)
+    except Exception:
+        return {}
+    cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cTot=hmap.get("총점"); cSub=hmap.get("제출시각")
+    out = {}
+    for i in range(2, len(values)+1):
+        r = values[i-1]
+        try:
+            if str(r[cY-1]).strip() != str(_year): continue
+            k = (str(r[cTS-1]).strip(), str(r[cT-1]).strip())
+            tot = r[cTot-1] if (cTot and cTot-1 < len(r)) else ""
+            sub = r[cSub-1] if (cSub and cSub-1 < len(r)) else ""
+            if k not in out or str(out[k][1]) < str(sub):
+                out[k] = (tot, sub)
+        except Exception:
+            pass
+    return out
+
+@st.cache_data(ttl=300, show_spinner=False)
+def get_comp_summary_map_cached(_year: int) -> dict:
+    """Return {사번->(주업무, 기타업무, 자격유지, 제출시각)} for the year."""
+    try:
+        ws = _ensure_comp_simple_sheet(int(_year))
+        header = _retry(ws.row_values,1) or []
+        hmap = {n:i+1 for i,n in enumerate(header)}
+        values = _retry(ws.get_all_values)
+    except Exception:
+        return {}
+    cY=hmap.get("연도"); cTS=hmap.get("평가대상사번"); cMain=hmap.get("주업무평가")
+    cExtra=hmap.get("기타업무평가"); cQual=hmap.get("자격유지"); cSub=hmap.get("제출시각")
+    out = {}
+    for i in range(2, len(values)+1):
+        r = values[i-1]
+        try:
+            if cY and str(r[cY-1]).strip()!=str(_year): continue
+            sab = str(r[cTS-1]).strip()
+            main = r[cMain-1] if cMain else ""
+            extra = r[cExtra-1] if cExtra else ""
+            qual = r[cQual-1] if cQual else ""
+            sub = r[cSub-1] if cSub else ""
+            if sab not in out or str(out[sab][3]) < str(sub):
+                out[sab] = (main, extra, qual, sub)
+        except Exception:
+            pass
+    return out
+
+@st.cache_data(ttl=120, show_spinner=False)
+def get_jd_approval_map_cached(_year: int) -> dict:
+    """Return {(사번, 최신버전)->(상태, 승인시각)} for the year from 직무기술서_승인."""
+    try:
+        ws = _ws("직무기술서_승인")
+        df = pd.DataFrame(_ws_get_all_records(ws))
+    except Exception:
+        df = pd.DataFrame(columns=["연도","사번","버전","상태","승인시각"])
+    for c in ["연도","버전"]:
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0).astype(int)
+    for c in ["사번","상태","승인시각"]:
+        if c in df.columns:
+            df[c] = df[c].astype(str)
+    df = df[df.get("연도",0).astype(int) == int(_year)]
+    out = {}
+    if not df.empty:
+        df = df.sort_values(["사번","버전","승인시각"], ascending=[True, True, True]).reset_index(drop=True)
+        for _, rr in df.iterrows():
+            k = (str(rr.get("사번","")), int(rr.get("버전",0)))
+            out[k] = (str(rr.get("상태","")), str(rr.get("승인시각","")))
+    return out
+
 from html import escape as _html_escape
 
 # Optional zoneinfo (KST)
@@ -543,84 +623,9 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
             this_year = datetime.now().year
         dash_year = st.number_input("연도(현황판)", min_value=2000, max_value=2100, value=int(this_year), step=1, key="left_dash_year")
     
-        # --- 인사평가 요약 {(사번,유형)->(총점,제출시각)} ---
-        def _eval_summary_map(_year:int):
-            items = read_eval_items_df(True)
-            item_ids = [str(x) for x in items["항목ID"].tolist()] if not items.empty else []
-            try:
-                ws = _ensure_eval_resp_sheet(int(_year), item_ids)
-                header = _retry(ws.row_values, 1) or []
-                hmap = {n:i+1 for i,n in enumerate(header)}
-                values = _retry(ws.get_all_values)
-            except Exception:
-                return {}
-            cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cTot=hmap.get("총점"); cSub=hmap.get("제출시각")
-            out = {}
-            for i in range(2, len(values)+1):
-                r = values[i-1]
-                try:
-                    if str(r[cY-1]).strip() != str(_year): continue
-                    k = (str(r[cTS-1]).strip(), str(r[cT-1]).strip())
-                    tot = r[cTot-1] if (cTot and cTot-1 < len(r)) else ""
-                    sub = r[cSub-1] if (cSub and cSub-1 < len(r)) else ""
-                    if k not in out or str(out[k][1]) < str(sub):
-                        out[k] = (tot, sub)
-                except Exception:
-                    pass
-            return out
-    
-        # --- JD 승인 요약 {(사번,버전)->(상태,승인시각)} ---
-        def _jd_approval_map(_year:int):
-            try:
-                ws = _ws("직무기술서_승인")
-                df = pd.DataFrame(_ws_get_all_records(ws))
-            except Exception:
-                df = pd.DataFrame(columns=["연도","사번","버전","상태","승인시각"])
-            for c in ["연도","버전"]:
-                if c in df.columns:
-                    df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0).astype(int)
-            for c in ["사번","상태","승인시각"]:
-                if c in df.columns:
-                    df[c] = df[c].astype(str)
-            df = df[df.get("연도",0).astype(int) == int(_year)]
-            out = {}
-            if not df.empty:
-                df = df.sort_values(["사번","버전","승인시각"], ascending=[True, True, True]).reset_index(drop=True)
-                for _, rr in df.iterrows():
-                    k = (str(rr.get("사번","")), int(rr.get("버전",0)))
-                    out[k] = (str(rr.get("상태","")), str(rr.get("승인시각","")))
-            return out
-    
-        # --- 직무능력평가 요약 {사번->(주업무,기타업무,자격유지)} ---
-        def _comp_summary_map(_year:int):
-            try:
-                ws = _ensure_comp_simple_sheet(int(_year))
-                header = _retry(ws.row_values,1) or []
-                hmap = {n:i+1 for i,n in enumerate(header)}
-                values = _retry(ws.get_all_values)
-            except Exception:
-                return {}
-            cY=hmap.get("연도"); cTS=hmap.get("평가대상사번"); cMain=hmap.get("주업무평가")
-            cExtra=hmap.get("기타업무평가"); cQual=hmap.get("자격유지"); cSub=hmap.get("제출시각")
-            out = {}
-            for i in range(2, len(values)+1):
-                r = values[i-1]
-                try:
-                    if cY and str(r[cY-1]).strip()!=str(_year): continue
-                    sab = str(r[cTS-1]).strip()
-                    main = r[cMain-1] if cMain else ""
-                    extra = r[cExtra-1] if cExtra else ""
-                    qual = r[cQual-1] if cQual else ""
-                    sub = r[cSub-1] if cSub else ""
-                    if sab not in out or str(out[sab][3]) < str(sub):
-                        out[sab] = (main, extra, qual, sub)
-                except Exception:
-                    pass
-            return out
-    
-        eval_map = _eval_summary_map(int(dash_year))
-        comp_map = _comp_summary_map(int(dash_year))
-        appr_map = _jd_approval_map(int(dash_year))
+        eval_map = get_eval_summary_map_cached(int(dash_year))
+        comp_map = get_comp_summary_map_cached(int(dash_year))
+        appr_map = get_jd_approval_map_cached(int(dash_year))
     
         # view에 컬럼 합치기
         ext_rows = []
@@ -1486,7 +1491,7 @@ def ensure_jd_approval_sheet():
         _retry(ws.update, "1:1", [JD_APPROVAL_HEADERS])
 
 @st.cache_data(ttl=300, show_spinner=False)
-def read_jd_approval_df() -> pd.DataFrame:
+def read_jd_approval_df(_rev: int = 0) -> pd.DataFrame:
     ensure_jd_approval_sheet()
     try:
         ws = _ws(JD_APPROVAL_SHEET)
@@ -1780,7 +1785,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
 
 # ===== 내 제출현황 (직무기술서 승인) =====
     st.markdown("### 내 제출현황 (직무기술서 승인)")
-    appr_df = read_jd_approval_df()
+    appr_df = read_jd_approval_df(st.session_state.get("appr_rev", 0))
     my_appr = appr_df[appr_df["사번"].astype(str) == str(me_sabun)].copy()
     if not my_appr.empty:
         my_appr = my_appr.sort_values(["연도","버전","승인시각"], ascending=[False, False, False]).reset_index(drop=True)
@@ -1835,10 +1840,9 @@ def tab_job_desc(emp_df: pd.DataFrame):
                         status=status,
                         remark=appr_remark
                     )
-                    try: st.cache_data.clear()
-                    except Exception: pass
+                    st.session_state["appr_rev"] = st.session_state.get("appr_rev", 0) + 1
                 st.success(f"{status} 처리되었습니다. ({res.get('action')})", icon="✅")
-                appr_df = read_jd_approval_df()
+                appr_df = read_jd_approval_df(st.session_state.get("appr_rev", 0))
 
         with st.expander("부서 제출현황 (요약)", expanded=False):
             base = emp_df.copy()
