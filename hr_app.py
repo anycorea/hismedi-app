@@ -3,8 +3,6 @@
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Imports
-# --- UI compact header style ---
-
 # ══════════════════════════════════════════════════════════════════════════════
 import re, time, random, hashlib, secrets as pysecrets
 from datetime import datetime, timedelta
@@ -57,16 +55,6 @@ def force_sync():
 # ══════════════════════════════════════════════════════════════════════════════
 APP_TITLE = st.secrets.get("app", {}).get("TITLE", "HISMEDI - 인사/HR")
 st.set_page_config(page_title=APP_TITLE, layout="wide")
-st.markdown('''<style>
-.inline-row{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
-.inline-row [data-testid="stNumberInput"],
-.inline-row [data-testid="stSelectbox"],
-.inline-row [data-testid="stButton"],
-.inline-row [data-testid="stMarkdown"]{margin:0}
-.inline-row [data-testid="stNumberInput"]{width:120px}
-.inline-row [data-testid="stSelectbox"]{min-width:260px}
-.inline-row .stAlert{margin:0;padding:0 .25rem}
-</style>''', unsafe_allow_html=True)
 
 # Disable st.help "No docs available"
 if not getattr(st, "_help_disabled", False):
@@ -669,8 +657,6 @@ def tab_eval(emp_df: pd.DataFrame):
 
     # --- 기본값/데이터 로드 -------------------------------------------------
     this_year = datetime.now(tz=tz_kst()).year
-    st.markdown('<div class="inline-row">', unsafe_allow_html=True)
-    st.markdown('<div class="inline-row">', unsafe_allow_html=True)
     year = st.number_input("연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="eval2_year")
 
     u = st.session_state["user"]; me_sabun = str(u["사번"]); me_name = str(u["이름"])
@@ -792,7 +778,7 @@ def tab_eval(emp_df: pd.DataFrame):
         target_sabun = st.session_state["eval2_target_sabun"]
         target_name  = st.session_state["eval2_target_name"]
 
-    st.markdown(f"대상자: **{target_name} ({target_sabun})**")
+    st.success(f"대상자: {target_name} ({target_sabun})", icon="✅")
 
     target_role = role_of(target_sabun)
     if my_role == "employee":
@@ -833,7 +819,6 @@ def tab_eval(emp_df: pd.DataFrame):
     requested_edit = bool(st.session_state["eval2_edit_mode"])
     edit_mode = requested_edit and prereq_ok and (not is_locked)
     st.caption(f"현재: **{'수정모드' if edit_mode else '보기모드'}**")
-    st.markdown("</div>", unsafe_allow_html=True)
 
     
 
@@ -1349,8 +1334,6 @@ def tab_job_desc(emp_df: pd.DataFrame):
         this_year = datetime.now(tz=tz_kst()).year  # type: ignore
     except Exception:
         this_year = datetime.now().year
-    st.markdown('<div class="inline-row">', unsafe_allow_html=True)
-    st.markdown('<div class="inline-row">', unsafe_allow_html=True)
     year = st.number_input("연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="jd2_year")
 
     u = st.session_state["user"]
@@ -1396,8 +1379,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
         except Exception:
             st.session_state["jd2_target_name"] = ""
         target_sabun = st.session_state["jd2_target_sabun"]; target_name = st.session_state["jd2_target_name"]
-        st.markdown(f"대상자: **{target_name} ({target_sabun})**")
-    st.markdown("</div>", unsafe_allow_html=True)
+        st.success(f"대상자: {target_name} ({target_sabun})", icon="✅")
 
     # 모드 토글
     col_mode = st.columns([1, 3])
@@ -1408,7 +1390,6 @@ def tab_job_desc(emp_df: pd.DataFrame):
             st.rerun()
     with col_mode[1]:
         st.caption(f"현재: **{'수정모드' if st.session_state['jd2_edit_mode'] else '보기모드'}**")
-    st.markdown("</div>", unsafe_allow_html=True)
     edit_mode = bool(st.session_state["jd2_edit_mode"])
 
     # 현재/초기 레코드
@@ -1658,8 +1639,6 @@ def tab_competency(emp_df: pd.DataFrame):
 
     try: this_year = datetime.now(tz=tz_kst()).year
     except Exception: this_year = datetime.now().year
-    st.markdown('<div class="inline-row">', unsafe_allow_html=True)
-    st.markdown('<div class="inline-row">', unsafe_allow_html=True)
     year = st.number_input("연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="cmpS_year")
 
     u=st.session_state.get("user",{}); me_sabun=str(u.get("사번","")); me_name=str(u.get("이름",""))
@@ -1692,9 +1671,7 @@ def tab_competency(emp_df: pd.DataFrame):
     st.session_state["cmpS_target_sabun"]=str(sel_sab)
     st.session_state["cmpS_target_name"]=_emp_name_by_sabun(emp_df, str(sel_sab))
 
-    st.markdown(f"대상자: **{_emp_name_by_sabun(emp_df, sel_sab)} ({sel_sab})**")
-    st.markdown("</div>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+    st.success(f"대상자: {_emp_name_by_sabun(emp_df, sel_sab)} ({sel_sab})", icon="✅")
 
     with st.expander("직무기술서 요약", expanded=True):
         jd=_jd_latest_for_comp(sel_sab, int(year))
