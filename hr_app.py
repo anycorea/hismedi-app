@@ -814,108 +814,168 @@ def tab_eval(emp_df: pd.DataFrame):
     edit_mode = requested_edit and prereq_ok and (not is_locked)
     st.caption(f"현재: **{'수정모드' if edit_mode else '보기모드'}**")
 
-    # --- 점수 입력 UI: 표만 -----------------------------------------------------
-    st.markdown("#### 점수 입력 (각 1~5) — 표에서 직접 수정하세요.")
-    st.markdown("""
-    <style>
-    [data-testid="stDataEditor"] thead tr th:nth-child(1) div { font-weight: 700 !important; }
-    [data-testid="stDataEditor"] tbody tr td:nth-child(1) div { font-weight: 700 !important; }
-    </style>
-    """, unsafe_allow_html=True)
+    
+# --- 점수 입력 UI: 표만 -----------------------------------------------------
+    st.markdown("#### 점수 입력 (자기/1차/2차) — 표에서 직접 수정하세요.")
 
-    # 일괄 적용
+    # ◇◇ Helper: 특정 평가유형(자기/1차/2차)의 '대상자 기준' 최신 점수(평가자 무관) 로드
+    def _stage_scores_any_evaluator(_year: int, _etype: str, _target_sabun: str) -> dict[str, int]:
+        try:
+            ws = _ensure_eval_resp_sheet(int(_year), item_ids)
+            header = _retry(ws.row_values, 1) or []; hmap = {n: i+1 for i, n in enumerate(header)}
+            values = _retry(ws.get_all_values)
+            cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cDT=hmap.get("제출시각")
+            # 최신 제출시각 우선
+            picked = None; picked_dt = ""
+            for r in values[1:]:
+                try:
+                    if (str(r[cY-1]).strip()==str(_year)
+                        and str(r[cT-1]).strip()==str(_etype)
+                        and str(r[cTS-1]).strip()==str(_target_sabun)):
+                        ts = str(r[cDT-1]) if (cDT and cDT-1 < len(r)) else ""
+                        if ts >= (picked_dt or ""):
+                            picked = r; picked_dt = ts or ""
+                except Exception:
+                    pass
+            if not picked: return {}
+            out: dict[str,int] = {}
+            for iid in item_ids:
+                col = hmap.get(f"점수_{iid}")
+                if col and col-1 < len(picked):
+                    try:
+                        v = int(str(picked[col-1]).strip() or "0")
+                        if v: out[iid] = v
+                    except Exception:
+                        pass
+            return out
+        except Exception:
+            return {}
+
+    # ◇◇ 일괄 적용(현재 사용자의 '편집 대상' 컬럼에만 적용)
     kbase = f"E2_{year}_{eval_type}_{me_sabun}_{target_sabun}"
-    slider_key = f"{kbase}_slider"
+    slider_key = f"{kbase}_slider_multi"
     if slider_key not in st.session_state:
         if saved_scores:
             avg = round(sum(saved_scores.values()) / max(1, len(saved_scores)))
             st.session_state[slider_key] = int(min(5, max(1, avg)))
         else:
             st.session_state[slider_key] = 3
-    bulk_score = st.slider("일괄 점수", 1, 5, step=1, key=slider_key, disabled=not edit_mode)
-    if st.button("일괄 적용", use_container_width=True, disabled=not edit_mode, key=f"bulk_{kbase}"):
+    bulk_score = st.slider("일괄 점수(현재 편집 컬럼)", 1, 5, step=1, key=slider_key, disabled=not edit_mode)
+    if st.button("일괄 적용", use_container_width=True, disabled=not edit_mode, key=f"bulk_multi_{kbase}"):
         for _iid in item_ids:
             st.session_state[f"eval2_seg_{_iid}_{kbase}"] = str(int(bulk_score))
         st.toast(f"모든 항목에 {bulk_score}점 적용", icon="✅")
 
-    # 표 시드
-    def _seed(iid: str) -> int:
+    # ◇◇ 현재 편집 대상 컬럼/표시 컬럼 결정
+    editable_col_name = {"자기":"자기평가","1차":"1차평가","2차":"2차평가"}.get(str(eval_type), "자기평가")
+    if my_role == "employee":
+        visible_cols = ["자기평가"]
+    elif eval_type == "1차":
+        visible_cols = ["자기평가","1차평가"]
+    else:  # eval_type == "2차" (admin 흐름)
+        visible_cols = ["1차평가","2차평가"]
+
+    # ◇◇ 시드 데이터 구성
+    # - 편집 컬럼: 세션상태 or 현재 저장된 점수(saved_scores)
+    # - 참조 컬럼: 가장 최근 제출된 이전 단계 점수
+    stage_self = _stage_scores_any_evaluator(int(year), "자기", str(target_sabun)) if "자기평가" in visible_cols else {}
+    stage_1st  = _stage_scores_any_evaluator(int(year), "1차", str(target_sabun))  if "1차평가" in visible_cols else {}
+
+    def _seed_for_editable(iid: str) -> int:
         rkey = f"eval2_seg_{iid}_{kbase}"
         if rkey in st.session_state:
             try: return int(st.session_state[rkey])
-            except: return 3
-        if iid in saved_scores: return int(saved_scores[iid])
+            except Exception: return 3
+        if iid in saved_scores:
+            try: return int(saved_scores[iid])
+            except Exception: return 3
         return 3
 
-    df_tbl = pd.DataFrame({
-        "항목": [getattr(r, "항목") or "" for r in items_sorted.itertuples(index=False)],
-        "내용": [getattr(r, "내용") or "" for r in items_sorted.itertuples(index=False)],
-        "점수": [_seed(iid) for iid in item_ids],
-    }, index=item_ids)  # index=항목ID (숨김)
+    rows = []
+    for r in items_sorted.itertuples(index=False):
+        iid = str(getattr(r, "항목ID"))
+        row = {
+            "항목": getattr(r, "항목") or "",
+            "내용": getattr(r, "내용") or "",
+            "자기평가": None,
+            "1차평가": None,
+            "2차평가": None
+        }
+        # 참조 점수
+        if "자기평가" in visible_cols:
+            if editable_col_name=="자기평가":
+                row["자기평가"] = _seed_for_editable(iid)
+            else:
+                row["자기평가"] = int(stage_self.get(iid, 0)) or None
+        if "1차평가" in visible_cols:
+            if editable_col_name=="1차평가":
+                row["1차평가"] = _seed_for_editable(iid)
+            else:
+                row["1차평가"] = int(stage_1st.get(iid, 0)) or None
+        if "2차평가" in visible_cols and editable_col_name=="2차평가":
+            row["2차평가"] = _seed_for_editable(iid)
+
+        rows.append(row)
+
+    df_tbl = pd.DataFrame(rows, index=item_ids)
+
+    # ◇◇ 합계 행(표 안에 표시)
+    def _col_sum(col: str) -> int:
+        if col not in df_tbl.columns: return 0
+        s = (pd.to_numeric(df_tbl[col], errors="coerce")).fillna(0).astype(int).sum()
+        return int(s)
+
+    sum_row = {"항목": "합계", "내용": ""}
+    for c in ["자기평가","1차평가","2차평가"]:
+        if c in visible_cols:
+            sum_row[c] = _col_sum(c)
+    df_tbl_with_sum = pd.concat([df_tbl, pd.DataFrame([sum_row], columns=["항목","내용"]+visible_cols)], ignore_index=True)
+
+    # ◇◇ 데이터 에디터 렌더링
+    col_cfg = {
+        "항목": st.column_config.TextColumn("항목", disabled=True),
+        "내용": st.column_config.TextColumn("내용", disabled=True),
+    }
+    if "자기평가" in visible_cols:
+        col_cfg["자기평가"] = st.column_config.NumberColumn("자기평가", min_value=1, max_value=5, step=1, help="자기평가 1~5점", disabled=(editable_col_name!="자기평가" or not edit_mode))
+    if "1차평가" in visible_cols:
+        col_cfg["1차평가"] = st.column_config.NumberColumn("1차평가", min_value=1, max_value=5, step=1, help="1차평가 1~5점", disabled=(editable_col_name!="1차평가" or not edit_mode))
+    if "2차평가" in visible_cols:
+        col_cfg["2차평가"] = st.column_config.NumberColumn("2차평가", min_value=1, max_value=5, step=1, help="2차평가 1~5점", disabled=(editable_col_name!="2차평가" or not edit_mode))
 
     edited = st.data_editor(
-        df_tbl,
+        df_tbl_with_sum[["항목","내용"] + visible_cols],
         hide_index=True,
         use_container_width=True,
-        disabled=not edit_mode,
+        disabled=False,  # 일부 컬럼만 disabled
         num_rows="fixed",
-        column_config={
-            "항목": st.column_config.TextColumn("항목", disabled=True),
-            "내용": st.column_config.TextColumn("내용", disabled=True),
-            "점수": st.column_config.NumberColumn("점수", min_value=1, max_value=5, step=1, help="1~5점 정수만 입력"),
-        },
-        height=min(560, 64 + 36 * len(df_tbl))
+        column_config=col_cfg,
+        height=min(560, 64 + 36 * len(df_tbl_with_sum))
     )
 
-    # 점수 dict 구성
-    scores: Dict[str, int] = {}
-    ids = [str(x) for x in edited.index.tolist()]
-    vals = edited["점수"].tolist()
-    for iid, v in zip(ids, vals):
-        val = int(v) if pd.notna(v) else _seed(iid)
-        st.session_state[f"eval2_seg_{iid}_{kbase}"] = str(val)
-        scores[iid] = val
+    # ◇◇ 점수 dict 구성(합계 행 제외, 편집 컬럼만 저장)
+    scores = {}
+    if editable_col_name in edited.columns:
+        values = list(edited[editable_col_name].tolist())[:-1]  # 마지막 행은 합계
+        for iid, v in zip(item_ids, values):
+            val = int(v) if (v is not None and str(v).strip()!="") else _seed_for_editable(iid)
+            st.session_state[f"eval2_seg_{iid}_{kbase}"] = str(val)
+            scores[iid] = val
 
-    # 합계(가중치 지원)
+    # ◇◇ 합계(100점 만점) — 편집 컬럼 기준
     if "가중치" in items_sorted.columns:
         w = items_sorted["가중치"].fillna(1).astype(float).tolist()
         denom = sum(5.0 * wi for wi in w) if w else 1.0
-        num   = sum(scores[iid] * wi for iid, wi in zip(item_ids, w))
+        num   = sum(scores.get(iid, 0) * wi for iid, wi in zip(item_ids, w))
         total_100 = round((num / max(denom, 1.0)) * 100.0, 1)
-        st.caption("가중치가 적용된 총점입니다.")
+        st.caption("가중치가 적용된 총점입니다. (현재 편집 컬럼 기준)")
     else:
         total_100 = round(sum(scores.values()) * (100.0 / max(1, len(items_sorted) * 5)), 1)
 
     st.markdown("---")
-    st.metric("합계(100점 만점)", total_100)
+    st.metric("현재 편집 컬럼 합계(100점 만점)", total_100)
     st.progress(min(1.0, total_100 / 100.0), text=f"총점 {total_100}점")
-
-    # (참고) 대상자의 선행 점수 요약
-    if eval_type in {"1차","2차"}:
-        ref_type = "자기" if eval_type=="1차" else "1차"
-        # ref_type 총점 표시(없으면 '미제출')
-        try:
-            # 평가자 무관 조회: has_submitted이 True면 총점도 있을 확률이 큼
-            ws = _ensure_eval_resp_sheet(int(year), item_ids)
-            header = _retry(ws.row_values, 1) or []; hmap = {n: i+1 for i, n in enumerate(header)}
-            values = _retry(ws.get_all_values)
-            cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cTot=hmap.get("총점"); cS=hmap.get("상태")
-            ref_total, ref_state = None, None
-            for r in values[1:]:
-                try:
-                    if (str(r[cY-1]).strip()==str(year)
-                        and str(r[cT-1]).strip()==ref_type
-                        and str(r[cTS-1]).strip()==str(target_sabun)):
-                        ref_total = r[cTot-1] if cTot else None
-                        ref_state = r[cS-1] if cS else None
-                        break
-                except: pass
-            ref_text = f"{ref_type}평가 상태: {ref_state or '미제출'}" + (f", 총점 {ref_total}" if ref_total else "")
-            st.caption("참고 · " + ref_text)
-        except: pass
-
-    # --- 제출 확인 (체크·PIN·버튼) -------------------------------------------
-    st.markdown("#### 제출 확인")
+#### 제출 확인")
     cb1, cb2 = st.columns([2, 1])
     with cb1:
         attest_ok = st.checkbox(
