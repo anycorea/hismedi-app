@@ -1343,7 +1343,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
     allowed = get_allowed_sabuns(emp_df, me_sabun, include_self=True)
 
     glob_sab, glob_name = get_global_target()
-    st.session_state.setdefault("jd2_target_sabun", glob_sab or me_sabun)
+    st.session_state.setdefault("jd2_target_sabun", glob_sab or "")
     st.session_state.setdefault("jd2_target_name",  glob_name or me_name)
     st.session_state.setdefault("jd2_edit_mode",    False)
 
