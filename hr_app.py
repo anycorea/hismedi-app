@@ -670,7 +670,22 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
         ext_cols = cols + ["인사평가(자기)","인사평가(1차)","인사평가(2차)",
                            "직무기술서(작성)","직무기술서(승인)",
                            "직무능력평가(주업무)","직무능력평가(기타업무)","직무능력평가(자격유지)"]
-        st.dataframe(view2[ext_cols], use_container_width=True, height=420, hide_index=True)
+        st.dataframe(
+    view2[ext_cols],
+    use_container_width=True,
+    height=420,
+    hide_index=True,
+    column_config={
+        "인사평가(자기)": st.column_config.TextColumn("자기"),
+        "인사평가(1차)": st.column_config.TextColumn("1차"),
+        "인사평가(2차)": st.column_config.TextColumn("2차"),
+        "직무기술서(작성)": st.column_config.TextColumn("JD작성"),
+        "직무기술서(승인)": st.column_config.TextColumn("JD승인"),
+        "직무능력평가(주업무)": st.column_config.TextColumn("주업무"),
+        "직무능력평가(기타업무)": st.column_config.TextColumn("기타업무"),
+        "직무능력평가(자격유지)": st.column_config.TextColumn("자격유지"),
+    }
+)
     else:
         st.dataframe(view[cols], use_container_width=True, height=420, hide_index=True)
 
