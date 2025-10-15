@@ -427,6 +427,7 @@ def get_global_target()->Tuple[str,str]:
 # ══════════════════════════════════════════════════════════════════════════════
 # Left: 직원선택 (Enter 동기화)
 # ══════════════════════════════════════════════════════════════════════════════
+
 def render_staff_picker_left(emp_df: pd.DataFrame):
     # ▼ 필터 초기화 플래그 처리(위젯 생성 전에 초기화해야 오류 없음)
     if st.session_state.get("_left_reset", False):
@@ -456,9 +457,10 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
     u = st.session_state.get("user", {})
     me = str(u.get("사번", ""))
     df = emp_df.copy()
-    if not is_admin(me):
-        allowed = get_allowed_sabuns(emp_df, me, include_self=True)
-        df = df[df["사번"].astype(str).isin(allowed)].copy()
+
+    # ✅ 관리자라도 범위유형이 '부서/개별'이면 해당 범위만 보이도록 통일
+    allowed = get_allowed_sabuns(emp_df, me, include_self=True)
+    df = df[df["사번"].astype(str).isin(allowed)].copy()
 
     with st.form("left_search_form", clear_on_submit=False):
         q = st.text_input("검색(사번/이름)", key="pick_q", placeholder="사번 또는 이름")
@@ -519,15 +521,6 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
     cols = [c for c in ["사번", "이름", "부서1", "부서2", "직급"] if c in view.columns]
     st.caption(f"총 {len(view)}명")
     st.dataframe(view[cols], use_container_width=True, height=420, hide_index=True)
-
-# ══════════════════════════════════════════════════════════════════════════════
-# 인사평가
-# ══════════════════════════════════════════════════════════════════════════════
-EVAL_ITEMS_SHEET = "평가_항목"
-EVAL_ITEM_HEADERS = ["항목ID", "항목", "내용", "순서", "활성", "비고"]
-EVAL_RESP_SHEET_PREFIX = "인사평가_"
-EVAL_BASE_HEADERS = ["연도","평가유형","평가대상사번","평가대상이름","평가자사번","평가자이름","총점","상태","제출시각","서명_대상","서명시각_대상","서명_평가자","서명시각_평가자","잠금"]
-
 def _eval_sheet_name(year: int | str) -> str: return f"{EVAL_RESP_SHEET_PREFIX}{int(year)}"
 
 def ensure_eval_items_sheet():
@@ -690,9 +683,12 @@ def tab_eval(emp_df: pd.DataFrame):
         elif me_role == "manager":
             allowed = set(str(x) for x in get_allowed_sabuns(emp_df, me_sabun, include_self=True))
             return base[base["사번"].isin(allowed)]
-        else:  # admin
-            # 관리자는 자기 자신은 대상에서 제외(자기평가 안 함)
-            return base[base["사번"] != me_sabun]
+        
+else:  # admin
+        # ✅ 관리자라도 범위 규칙을 따르되, 자기 자신은 제외(자기평가 없음)
+        allowed = set(str(x) for x in get_allowed_sabuns(emp_df, me_sabun, include_self=True))
+        return base[base["사번"].isin(allowed - {me_sabun})]
+
 
     view = list_targets_for(my_role)[["사번","이름","부서1","부서2","직급"]].copy().sort_values(["사번"]).reset_index(drop=True)
 
@@ -2113,7 +2109,7 @@ def tab_help():
     - PIN/평가항목/권한관리: 관리자 탭에서 처리합니다.
     - 구글시트 구조
         - 직원: `직원` 시트
-        - 권한: `권한` 시트 (admin/범위유형: 부서|개별)
+        - 권한: `권한` 시트 (역할=admin/manager, 범위유형: 공란=전체 · 부서 · 개별)
         - 평가 항목: `평가_항목`
         - 인사평가: `인사평가_YYYY`
         - 직무기술서: `직무기술서`
