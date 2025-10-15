@@ -439,17 +439,17 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
         st.session_state["left_pick"] = "(선택)"
         st.session_state["left_preselect_sabun"] = ""
 
-        # 탭별 대상자도 로그인 사용자로 통일
+        # 탭별 대상자도 "미선택"으로 초기화
         try:
-            set_global_target(me0, nm0)
+            set_global_target("", "")
         except Exception:
             pass
-        st.session_state["eval2_target_sabun"] = me0
-        st.session_state["eval2_target_name"]  = nm0
-        st.session_state["jd2_target_sabun"]   = me0
-        st.session_state["jd2_target_name"]    = nm0
-        st.session_state["cmpS_target_sabun"]  = me0
-        st.session_state["cmpS_target_name"]   = nm0
+        st.session_state["eval2_target_sabun"] = ""
+        st.session_state["eval2_target_name"]  = ""
+        st.session_state["jd2_target_sabun"]   = ""
+        st.session_state["jd2_target_name"]    = ""
+        st.session_state["cmpS_target_sabun"]  = ""
+        st.session_state["cmpS_target_name"]   = ""
 
         st.session_state["_left_reset"] = False
 
@@ -762,7 +762,13 @@ def tab_eval(emp_df: pd.DataFrame):
         _opts   = [f"{s} - {n} - {d2}" for s, n, d2 in zip(_sabuns, _names, _d2)]
         _target = st.session_state.get("eval2_target_sabun", (_sabuns[_sabuns.index(me_sabun)] if (my_role=="manager" and me_sabun in _sabuns) else (_sabuns[0] if _sabuns else "")))
         _idx    = _sabuns.index(_target) if _target in _sabuns else 0
-        _sel    = st.selectbox("대상자 선택", _opts, index=_idx, key="eval2_pick_editor_select")
+        _idx2 = (1 + _sabuns.index(_target)) if (_target in _sabuns) else 0
+        _sel = st.selectbox("대상자 선택", ["(선택)"] + _opts, index=_idx2, key="eval2_pick_editor_select")
+        if _sel == "(선택)":
+            st.session_state["eval2_target_sabun"] = ""
+            st.session_state["eval2_target_name"]  = ""
+            st.info("대상자를 선택하세요.", icon="👈")
+            return
         _sel_sab = _sel.split(" - ",1)[0] if isinstance(_sel,str) and " - " in _sel else (_sabuns[_idx] if _sabuns else "")
         st.session_state["eval2_target_sabun"] = str(_sel_sab)
         try:
@@ -1359,7 +1365,13 @@ def tab_job_desc(emp_df: pd.DataFrame):
         _opts = [f"{s} - {n} - {d2}" for s, n, d2 in zip(_sabuns, _names, _d2)]
         _target = st.session_state.get("jd2_target_sabun", glob_sab or "")
         _idx = _sabuns.index(_target) if _target in _sabuns else 0
-        _sel = st.selectbox("대상자 선택", _opts, index=_idx, key="jd2_pick_editor_select")
+        _idx2 = (1 + _sabuns.index(_target)) if (_target in _sabuns) else 0
+        _sel = st.selectbox("대상자 선택", ["(선택)"] + _opts, index=_idx2, key="jd2_pick_editor_select")
+        if _sel == "(선택)":
+            st.session_state["jd2_target_sabun"] = ""
+            st.session_state["jd2_target_name"]  = ""
+            st.info("대상자를 선택하세요.", icon="👈")
+            return
         _sel_sab = _sel.split(" - ", 1)[0] if isinstance(_sel, str) and " - " in _sel else (_sabuns[_idx] if _sabuns else "")
         st.session_state["jd2_target_sabun"] = str(_sel_sab)
         try:
@@ -1649,7 +1661,12 @@ def tab_competency(emp_df: pd.DataFrame):
     d2s=df["부서2"].astype(str).tolist() if "부서2" in df.columns else [""]*len(sabuns)
     opts=[f"{s} - {n} - {d2}" for s,n,d2 in zip(sabuns,names,d2s)]
     sel_idx=sabuns.index(default) if default in sabuns else 0
-    sel_label=st.selectbox("대상자 선택", opts, index=sel_idx, key="cmpS_pick_select")
+    sel_label = st.selectbox("대상자 선택", ["(선택)"] + opts, index=0 if not st.session_state.get("cmpS_target_sabun") else (1 + sabuns.index(st.session_state.get("cmpS_target_sabun"))) if st.session_state.get("cmpS_target_sabun") in sabuns else 0, key="cmpS_pick_select")
+    if sel_label == "(선택)":
+        st.session_state["cmpS_target_sabun"] = ""
+        st.session_state["cmpS_target_name"] = ""
+        st.info("대상자를 선택하세요.", icon="👈")
+        return
     sel_sab=sel_label.split(" - ",1)[0] if isinstance(sel_label,str) else sabuns[sel_idx]
     st.session_state["cmpS_target_sabun"]=str(sel_sab)
     st.session_state["cmpS_target_name"]=_emp_name_by_sabun(emp_df, str(sel_sab))
