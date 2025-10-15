@@ -1029,7 +1029,7 @@ def tab_eval(emp_df: pd.DataFrame):
         _ts_adm  = (str(_emap.get((str(target_sabun), '2차'), ('',''))[1]).strip())
         def _fmt(ts):
             ts = (ts or '').strip()
-            return '-' if not ts else (ts if ts.endswith('KST') else ts + ' (KST)')
+            return '-' if not ts else (ts if '(KST)' in ts else ts + ' (KST)')
         st.caption(f"제출시각 | 자기: {_fmt(_ts_self)}  ·  1차: {_fmt(_ts_mgr)}  ·  2차: {_fmt(_ts_adm)}")
     except Exception:
         pass
@@ -1708,7 +1708,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
                 cur_when = str(_row.get('승인시각',''))
         def _fmt(ts):
             ts = (ts or '').strip()
-            return '-' if not ts else (ts if ts.endswith('KST') else ts + ' (KST)')
+            return '-' if not ts else (ts if '(KST)' in ts else ts + ' (KST)')
         st.caption(f"제출시각: {_fmt(_sub_ts)}  ·  승인시각: {_fmt(cur_when)}")
     except Exception:
         pass
@@ -2089,7 +2089,7 @@ def tab_competency(emp_df: pd.DataFrame):
         _cts = (str(_cmap.get(str(sel_sab), ("","","",""))[3]).strip())
         def _fmt(ts):
             ts = (ts or '').strip()
-            return '-' if not ts else (ts if ts.endswith('KST') else ts + ' (KST)')
+            return '-' if not ts else (ts if '(KST)' in ts else ts + ' (KST)')
         st.caption(f"제출시각: {_fmt(_cts)}")
         comp_locked = bool(_cts)
     except Exception:
