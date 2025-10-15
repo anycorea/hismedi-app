@@ -372,8 +372,10 @@ def require_login(emp_df: pd.DataFrame):
 # ══════════════════════════════════════════════════════════════════════════════
 AUTH_SHEET="권한"
 
-JD_APPROVAL_SHEET = "직무기술서_승인"
-JD_APPROVAL_HEADERS = ["연도","사번","이름","버전","승인자사번","승인자이름","상태","승인시각","비고"]
+EVAL_ITEMS_SHEET = st.secrets.get("sheets", {}).get("EVAL_ITEMS_SHEET", "평가_항목")
+EVAL_ITEM_HEADERS = ["항목ID","항목","내용","순서","활성","비고","설명","유형","구분"]
+EVAL_RESP_SHEET_PREFIX = "인사평가_"
+EVAL_BASE_HEADERS = ["연도","평가유형","평가대상사번","평가대상이름","평가자사번","평가자이름","총점","상태","제출시각","잠금"]
 
 AUTH_HEADERS=["사번","이름","역할","범위유형","부서1","부서2","대상사번","활성","비고"]
 
@@ -400,10 +402,12 @@ def is_admin(sabun:str)->bool:
 
 def get_allowed_sabuns(emp_df:pd.DataFrame, sabun:str, include_self:bool=True)->set[str]:
     sabun=str(sabun); allowed=set([sabun]) if include_self else set()
-    if is_admin(sabun): return set(emp_df["사번"].astype(str).tolist())
     df=read_auth_df()
     if not df.empty:
         mine=df[(df["사번"].astype(str)==sabun) & (df["활성"]==True)]
+        # 공란 범위유형이 하나라도 있으면 전체 허용
+        if not mine.empty and any(str(x).strip()=="" for x in mine.get("범위유형", [])):
+            return set(emp_df["사번"].astype(str).tolist())
         for _,r in mine.iterrows():
             t=str(r.get("범위유형","")).strip()
             if t=="부서":
@@ -431,6 +435,7 @@ def get_global_target()->Tuple[str,str]:
 # ══════════════════════════════════════════════════════════════════════════════
 # Left: 직원선택 (Enter 동기화)
 # ══════════════════════════════════════════════════════════════════════════════
+
 def render_staff_picker_left(emp_df: pd.DataFrame):
     # ▼ 필터 초기화 플래그 처리(위젯 생성 전에 초기화해야 오류 없음)
     if st.session_state.get("_left_reset", False):
@@ -460,9 +465,10 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
     u = st.session_state.get("user", {})
     me = str(u.get("사번", ""))
     df = emp_df.copy()
-    if not is_admin(me):
-        allowed = get_allowed_sabuns(emp_df, me, include_self=True)
-        df = df[df["사번"].astype(str).isin(allowed)].copy()
+
+    # ✅ 관리자라도 범위유형이 '부서/개별'이면 해당 범위만 보이도록 통일
+    allowed = get_allowed_sabuns(emp_df, me, include_self=True)
+    df = df[df["사번"].astype(str).isin(allowed)].copy()
 
     with st.form("left_search_form", clear_on_submit=False):
         q = st.text_input("검색(사번/이름)", key="pick_q", placeholder="사번 또는 이름")
@@ -523,15 +529,6 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
     cols = [c for c in ["사번", "이름", "부서1", "부서2", "직급"] if c in view.columns]
     st.caption(f"총 {len(view)}명")
     st.dataframe(view[cols], use_container_width=True, height=420, hide_index=True)
-
-# ══════════════════════════════════════════════════════════════════════════════
-# 인사평가
-# ══════════════════════════════════════════════════════════════════════════════
-EVAL_ITEMS_SHEET = "평가_항목"
-EVAL_ITEM_HEADERS = ["항목ID", "항목", "내용", "순서", "활성", "비고"]
-EVAL_RESP_SHEET_PREFIX = "인사평가_"
-EVAL_BASE_HEADERS = ["연도","평가유형","평가대상사번","평가대상이름","평가자사번","평가자이름","총점","상태","제출시각","서명_대상","서명시각_대상","서명_평가자","서명시각_평가자","잠금"]
-
 def _eval_sheet_name(year: int | str) -> str: return f"{EVAL_RESP_SHEET_PREFIX}{int(year)}"
 
 def ensure_eval_items_sheet():
@@ -694,9 +691,12 @@ def tab_eval(emp_df: pd.DataFrame):
         elif me_role == "manager":
             allowed = set(str(x) for x in get_allowed_sabuns(emp_df, me_sabun, include_self=True))
             return base[base["사번"].isin(allowed)]
+        
         else:  # admin
-            # 관리자는 자기 자신은 대상에서 제외(자기평가 안 함)
-            return base[base["사번"] != me_sabun]
+            # ✅ 관리자라도 범위 규칙을 따르되, 자기 자신은 제외(자기평가 없음)
+            allowed = set(str(x) for x in get_allowed_sabuns(emp_df, me_sabun, include_self=True))
+            return base[base["사번"].isin(allowed - {me_sabun})]
+
 
     view = list_targets_for(my_role)[["사번","이름","부서1","부서2","직급"]].copy().sort_values(["사번"]).reset_index(drop=True)
 
@@ -2117,7 +2117,7 @@ def tab_help():
     - PIN/평가항목/권한관리: 관리자 탭에서 처리합니다.
     - 구글시트 구조
         - 직원: `직원` 시트
-        - 권한: `권한` 시트 (admin/범위유형: 부서|개별)
+        - 권한: `권한` 시트 (역할=admin/manager, 범위유형: 공란=전체 · 부서 · 개별)
         - 평가 항목: `평가_항목`
         - 인사평가: `인사평가_YYYY`
         - 직무기술서: `직무기술서`
@@ -2161,11 +2161,10 @@ def main():
 
 
     with right:
-        tabs = st.tabs(["인사평가","직무기술서","JD 현황","직무능력평가","관리자","도움말"])
+        tabs = st.tabs(["인사평가","직무기술서","직무능력평가","관리자","도움말"])
         with tabs[0]: tab_eval(emp_df)
         with tabs[1]: tab_job_desc(emp_df)
-        with tabs[2]: tab_jd_status(emp_df)
-        with tabs[5]: tab_competency(emp_df)
+        with tabs[2]: tab_competency(emp_df)
         with tabs[3]:
             me = str(st.session_state.get("user", {}).get("사번", ""))
             if not is_admin(me):
@@ -2176,165 +2175,7 @@ def main():
                 with a2: tab_admin_pin(emp_df)
                 with a3: tab_admin_eval_items()
                 with a4: tab_admin_acl(emp_df)
-        with tabs[5]: tab_help()
+        with tabs[4]: tab_help()
 
 if __name__ == "__main__":
     main()
-
-
-
-# ===== JD Approval helpers & Status Tab =====
-def ensure_jd_approval_sheet():
-    wb = get_book()
-    try:
-        _ = wb.worksheet(JD_APPROVAL_SHEET)
-    except WorksheetNotFound:
-        ws = _retry(wb.add_worksheet, title=JD_APPROVAL_SHEET, rows=5000, cols=20)
-        _retry(ws.update, "1:1", [JD_APPROVAL_HEADERS])
-
-@st.cache_data(ttl=300, show_spinner=False)
-def read_jd_approval_df() -> pd.DataFrame:
-    ensure_jd_approval_sheet()
-    try:
-        ws = _ws(JD_APPROVAL_SHEET)
-        df = pd.DataFrame(_ws_get_all_records(ws))
-    except Exception:
-        df = pd.DataFrame(columns=JD_APPROVAL_HEADERS)
-    for c in JD_APPROVAL_HEADERS:
-        if c not in df.columns:
-            df[c] = ""
-    if "연도" in df.columns:
-        df["연도"] = pd.to_numeric(df["연도"], errors="coerce").fillna(0).astype(int)
-    if "버전" in df.columns:
-        df["버전"] = pd.to_numeric(df["버전"], errors="coerce").fillna(0).astype(int)
-    return df
-
-def _jd_latest_version(emp_df: pd.DataFrame, sabun: str, year: int) -> int:
-    df = read_jobdesc_df()
-    if df.empty:
-        return 0
-    sub = df[(df["사번"].astype(str) == str(sabun)) & (pd.to_numeric(df["연도"], errors="coerce").fillna(0).astype(int) == int(year))]
-    if sub.empty:
-        return 0
-    try:
-        return int(pd.to_numeric(sub["버전"], errors="coerce").fillna(0).astype(int).max())
-    except Exception:
-        return 0
-
-def set_jd_approval(year: int, sabun: str, name: str, version: int,
-                    approver_sabun: str, approver_name: str, status: str, remark: str=""):
-    ensure_jd_approval_sheet()
-    ws = _ws(JD_APPROVAL_SHEET)
-    header = _retry(ws.row_values, 1) or []
-    hmap = {n: i+1 for i, n in enumerate(header)}
-
-    values = _retry(ws.get_all_values)
-    target_row = 0
-    cY = hmap.get("연도"); cS = hmap.get("사번"); cV = hmap.get("버전")
-    for i in range(2, len(values)+1):
-        r = values[i-1] if i-1 < len(values) else []
-        try:
-            if (str(r[cY-1]).strip()==str(year) and str(r[cS-1]).strip()==str(sabun) and str(r[cV-1]).strip()==str(version)):
-                target_row = i
-                break
-        except Exception:
-            pass
-
-    now = kst_now_str() if "kst_now_str" in globals() else str(pd.Timestamp.now()).split(".")[0]
-    payload = {
-        "연도": int(year),
-        "사번": str(sabun),
-        "이름": str(name),
-        "버전": int(version),
-        "승인자사번": str(approver_sabun),
-        "승인자이름": str(approver_name),
-        "상태": str(status),
-        "승인시각": now,
-        "비고": str(remark or ""),
-    }
-
-    if target_row > 0:
-        _batch_row(ws, target_row, hmap, payload)
-        st.cache_data.clear()
-        return {"action":"update","row":target_row}
-    else:
-        row_idx = len(values) + 1
-        _batch_row(ws, row_idx, hmap, payload)
-        st.cache_data.clear()
-        return {"action":"insert","row":row_idx}
-
-def tab_jd_status(emp_df: pd.DataFrame):
-    year = st.number_input("연도", min_value=2000, max_value=2100, value=int(pd.Timestamp.now().year), step=1, key="jdstat_year")
-
-    u = st.session_state.get("user", {})
-    me_sabun = str(u.get("사번", "")); me_name = str(u.get("이름", ""))
-
-    allowed = get_allowed_sabuns(emp_df, me_sabun, include_self=True)
-    am_admin_or_mgr = (is_admin(me_sabun) or len(get_allowed_sabuns(emp_df, me_sabun, include_self=False)) > 0)
-
-    st.markdown("### 내 제출현황")
-    appr = read_jd_approval_df()
-    mine = appr[appr["사번"].astype(str) == me_sabun].copy()
-    if not mine.empty:
-        mine = mine.sort_values(["연도","버전"], ascending=[False, False]).reset_index(drop=True)
-        cols = [c for c in ["연도","버전","상태","승인시각","승인자이름","승인자사번","비고"] if c in mine.columns]
-        st.dataframe(mine[cols], use_container_width=True, hide_index=True, height=240)
-    else:
-        st.info("아직 승인 기록이 없습니다.", icon="ℹ️")
-
-    if am_admin_or_mgr:
-        st.markdown("### 부서 승인")
-        base = emp_df.copy()
-        base["사번"] = base["사번"].astype(str)
-        base = base[base["사번"].isin({str(s) for s in allowed})]
-        if "재직여부" in base.columns:
-            base = base[base["재직여부"] == True]
-        base = base.sort_values(["사번"]).reset_index(drop=True)
-
-        year_sel = st.number_input("연도(승인 대상)", min_value=2000, max_value=2100, value=int(year), step=1, key="jd_appr_year2")
-
-        rows = []
-        for _, r in base.iterrows():
-            sab = str(r.get("사번","")); nm = str(r.get("이름",""))
-            ver = _jd_latest_version(emp_df, sab, int(year_sel))
-            stt = ""; when = ""; whoN = ""
-            if ver > 0 and not appr.empty:
-                sub = appr[(appr["연도"]==int(year_sel)) & (appr["사번"].astype(str)==sab) & (appr["버전"]==int(ver))]
-                if not sub.empty:
-                    row0 = sub.sort_values(["승인시각"], ascending=[False]).iloc[0].to_dict()
-                    stt = str(row0.get("상태","")); when = str(row0.get("승인시각","")); whoN = str(row0.get("승인자이름",""))
-            rows.append({"사번":sab,"이름":nm,"연도":int(year_sel),"버전":ver,"승인상태":stt,"승인시각":when,"승인자":whoN})
-
-        dfv = pd.DataFrame(rows)
-        st.dataframe(dfv, use_container_width=True, hide_index=True, height=300)
-
-        st.caption("아래에서 대상자를 입력하고 승인/반려를 진행하세요. (최신 버전 기준)")
-        target_sab = st.text_input("대상 사번", key="jd_appr_target2")
-        target_name = _emp_name_by_sabun(emp_df, target_sab) if target_sab else ""
-        latest_ver = _jd_latest_version(emp_df, target_sab, int(year_sel)) if target_sab else 0
-        st.write(f"대상: {target_name} ({target_sab}), 최신버전: {latest_ver if latest_ver else '-'}")
-
-        c1, c2, c3 = st.columns([1,1,3])
-        with c1:
-            do_ok = st.button("승인", type="primary", use_container_width=True, disabled=not(target_sab and latest_ver>0))
-        with c2:
-            do_rej = st.button("반려", use_container_width=True, disabled=not(target_sab and latest_ver>0))
-        with c3:
-            remark = st.text_input("비고(선택)", key="jd_appr_remark2")
-
-        if do_ok or do_rej:
-            status = "승인" if do_ok else "반려"
-            res = set_jd_approval(
-                year=int(year_sel),
-                sabun=str(target_sab),
-                name=str(target_name),
-                version=int(latest_ver),
-                approver_sabun=str(me_sabun),
-                approver_name=str(me_name),
-                status=status,
-                remark=remark
-            )
-            st.success(f"{status} 처리되었습니다. ({res.get('action')})", icon="✅")
-            st.cache_data.clear()
-            st.rerun()
-
