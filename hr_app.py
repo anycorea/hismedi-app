@@ -657,7 +657,7 @@ def tab_eval(emp_df: pd.DataFrame):
 
     # --- 기본값/데이터 로드 -------------------------------------------------
     this_year = datetime.now(tz=tz_kst()).year
-    year = st.number_input("연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="eval2_year")
+    # 연도 입력은 헤더 행에서 렌더링합니다.
 
     u = st.session_state["user"]; me_sabun = str(u["사번"]); me_name = str(u["이름"])
 
@@ -763,6 +763,24 @@ def tab_eval(emp_df: pd.DataFrame):
         _target = st.session_state.get("eval2_target_sabun", (_sabuns[_sabuns.index(me_sabun)] if (my_role=="manager" and me_sabun in _sabuns) else (_sabuns[0] if _sabuns else "")))
         _idx    = _sabuns.index(_target) if _target in _sabuns else 0
         _idx2 = (1 + _sabuns.index(_target)) if (_target in _sabuns) else 0
+
+        # ---- 헤더 1줄: [연도] [대상자선택] [토글버튼] [상태캡션]
+        h1, h2, h3, h4 = st.columns([1, 3, 1.2, 1.2])
+        with h1:
+            try:
+                this_year = datetime.now(tz=tz_kst()).year
+            except Exception:
+                this_year = datetime.now().year
+            year = st.number_input("연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="eval2_year")
+        with h2:
+            pass  # 아래 selectbox가 이 자리에 렌더됩니다.
+        with h3:
+            if st.button(("입력(수정)하기" if not st.session_state["eval2_edit_mode"] else "읽기모드로 전환"),
+                         use_container_width=True, key="eval2_toggle_hdr"):
+                st.session_state["eval2_edit_mode"] = not st.session_state["eval2_edit_mode"]
+                st.rerun()
+        with h4:
+            st.caption(f"현재: **{'입력(수정)모드' if st.session_state['eval2_edit_mode'] else '읽기모드'}**")
         _sel = st.selectbox("대상자 선택", ["(선택)"] + _opts, index=_idx2, key="eval2_pick_editor_select")
         if _sel == "(선택)":
             st.session_state["eval2_target_sabun"] = ""
@@ -810,17 +828,7 @@ def tab_eval(emp_df: pd.DataFrame):
     if not prereq_ok:
         st.warning(prereq_msg, icon="🧩")
 
-    # --- 보기/수정 모드 --------------------------------------------------------
-    if st.button(("수정모드로 전환" if not st.session_state["eval2_edit_mode"] else "보기모드로 전환"),
-                 use_container_width=True, key="eval2_toggle"):
-        st.session_state["eval2_edit_mode"] = not st.session_state["eval2_edit_mode"]
-        st.rerun()
-    # '실제' 편집 가능 여부는 선행조건/잠금도 반영
-    requested_edit = bool(st.session_state["eval2_edit_mode"])
-    edit_mode = requested_edit and prereq_ok and (not is_locked)
-    st.caption(f"현재: **{'수정모드' if edit_mode else '보기모드'}**")
-
-    
+    # (헤더로 이동)
 
 # --- 점수 입력 UI: 표만 -----------------------------------------------------
     st.markdown("#### 점수 입력 (자기/1차/2차) — 표에서 직접 수정하세요.")
@@ -1334,7 +1342,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
         this_year = datetime.now(tz=tz_kst()).year  # type: ignore
     except Exception:
         this_year = datetime.now().year
-    year = st.number_input("연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="jd2_year")
+    # 연도 입력은 헤더에서 렌더링합니다.
 
     u = st.session_state["user"]
     me_sabun = str(u["사번"]); me_name = str(u["이름"])
@@ -1366,6 +1374,24 @@ def tab_job_desc(emp_df: pd.DataFrame):
         _target = st.session_state.get("jd2_target_sabun", glob_sab or "")
         _idx = _sabuns.index(_target) if _target in _sabuns else 0
         _idx2 = (1 + _sabuns.index(_target)) if (_target in _sabuns) else 0
+
+        # ---- 헤더 1줄: [연도] [대상자선택] [토글버튼] [상태캡션]
+        h1, h2, h3, h4 = st.columns([1, 3, 1.2, 1.2])
+        with h1:
+            try:
+                this_year = datetime.now(tz=tz_kst()).year
+            except Exception:
+                this_year = datetime.now().year
+            year = st.number_input("연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="jd2_year")
+        with h2:
+            pass
+        with h3:
+            if st.button(("입력(수정)하기" if not st.session_state["jd2_edit_mode"] else "읽기모드로 전환"),
+                         use_container_width=True, key="jd2_toggle_hdr"):
+                st.session_state["jd2_edit_mode"] = not st.session_state["jd2_edit_mode"]
+                st.rerun()
+        with h4:
+            st.caption(f"현재: **{'입력(수정)모드' if st.session_state['jd2_edit_mode'] else '읽기모드'}**")
         _sel = st.selectbox("대상자 선택", ["(선택)"] + _opts, index=_idx2, key="jd2_pick_editor_select")
         if _sel == "(선택)":
             st.session_state["jd2_target_sabun"] = ""
@@ -1382,14 +1408,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
         st.success(f"대상자: {target_name} ({target_sabun})", icon="✅")
 
     # 모드 토글
-    col_mode = st.columns([1, 3])
-    with col_mode[0]:
-        if st.button(("수정모드로 전환" if not st.session_state["jd2_edit_mode"] else "보기모드로 전환"),
-                     use_container_width=True, key="jd2_toggle"):
-            st.session_state["jd2_edit_mode"] = not st.session_state["jd2_edit_mode"]
-            st.rerun()
-    with col_mode[1]:
-        st.caption(f"현재: **{'수정모드' if st.session_state['jd2_edit_mode'] else '보기모드'}**")
+    # (헤더로 이동)
     edit_mode = bool(st.session_state["jd2_edit_mode"])
 
     # 현재/초기 레코드
@@ -1639,7 +1658,7 @@ def tab_competency(emp_df: pd.DataFrame):
 
     try: this_year = datetime.now(tz=tz_kst()).year
     except Exception: this_year = datetime.now().year
-    year = st.number_input("연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="cmpS_year")
+    # 연도 입력은 헤더에서 렌더링합니다.
 
     u=st.session_state.get("user",{}); me_sabun=str(u.get("사번","")); me_name=str(u.get("이름",""))
     allowed=set(map(str, get_allowed_sabuns(emp_df, me_sabun, include_self=True)))
@@ -1661,6 +1680,25 @@ def tab_competency(emp_df: pd.DataFrame):
     d2s=df["부서2"].astype(str).tolist() if "부서2" in df.columns else [""]*len(sabuns)
     opts=[f"{s} - {n} - {d2}" for s,n,d2 in zip(sabuns,names,d2s)]
     sel_idx=sabuns.index(default) if default in sabuns else 0
+
+    # ---- 헤더 1줄: [연도] [대상자선택] [토글버튼] [상태캡션]
+    h1, h2, h3, h4 = st.columns([1, 3, 1.2, 1.2])
+    with h1:
+        try:
+            this_year = datetime.now(tz=tz_kst()).year
+        except Exception:
+            this_year = datetime.now().year
+        year = st.number_input("연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="cmpS_year")
+    with h2:
+        pass
+    with h3:
+        st.session_state.setdefault("cmpS_edit_mode", False)
+        if st.button(("입력(수정)하기" if not st.session_state["cmpS_edit_mode"] else "읽기모드로 전환"),
+                     use_container_width=True, key="cmpS_toggle_hdr"):
+            st.session_state["cmpS_edit_mode"] = not st.session_state["cmpS_edit_mode"]
+            st.rerun()
+    with h4:
+        st.caption(f"현재: **{'입력(수정)모드' if st.session_state.get('cmpS_edit_mode') else '읽기모드'}**")
     sel_label = st.selectbox("대상자 선택", ["(선택)"] + opts, index=0 if not st.session_state.get("cmpS_target_sabun") else (1 + sabuns.index(st.session_state.get("cmpS_target_sabun"))) if st.session_state.get("cmpS_target_sabun") in sabuns else 0, key="cmpS_pick_select")
     if sel_label == "(선택)":
         st.session_state["cmpS_target_sabun"] = ""
