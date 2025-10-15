@@ -48,7 +48,7 @@ def force_sync():
         pass
 
     # 3) 즉시 리런
-    appr_df = read_jd_approval_df()  # 즉시 재조회
+    st.rerun()
 
 # ══════════════════════════════════════════════════════════════════════════════
 # App Config / Style
@@ -281,7 +281,7 @@ def logout():
         except Exception: pass
     try: st.cache_data.clear()
     except Exception: pass
-    appr_df = read_jd_approval_df()  # 즉시 재조회
+    st.rerun()
 
 
 
@@ -358,7 +358,7 @@ def show_login(emp_df: pd.DataFrame):
         if stored not in (entered_plain, entered_salted):
             st.error("PIN이 올바르지 않습니다."); st.stop()
         _start_session({"사번":str(r.get("사번","")), "이름":str(r.get("이름",""))})
-        st.success("환영합니다!"); appr_df = read_jd_approval_df()  # 즉시 재조회
+        st.success("환영합니다!"); st.rerun()
 
 def require_login(emp_df: pd.DataFrame):
     if not _session_valid():
@@ -509,7 +509,7 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
     # ▼ 필터 초기화: 플래그만 세우고 즉시 rerun (다음 런 시작 시 초기화됨)
     if st.button("필터 초기화", use_container_width=True):
         st.session_state["_left_reset"] = True
-        appr_df = read_jd_approval_df()  # 즉시 재조회
+        st.rerun()
 
     if picked and picked != "(선택)":
         sab = picked.split(" - ", 1)[0].strip()
@@ -529,6 +529,143 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
     cols = [c for c in ["사번", "이름", "부서1", "부서2", "직급"] if c in view.columns]
     st.caption(f"총 {len(view)}명")
     st.dataframe(view[cols], use_container_width=True, height=420, hide_index=True)
+
+    # ── 현황판(간단) : 관리자/부서장 전용 ─────────────────────────────────────────────
+    try:
+        am_admin_or_mgr = (is_admin(me) or len(get_allowed_sabuns(emp_df, me, include_self=False)) > 0)
+    except Exception:
+        am_admin_or_mgr = False
+
+    if am_admin_or_mgr and not view.empty:
+        st.markdown("#### 현황판 (간단)")
+
+        # 연도 선택 (기본=올해)
+        try:
+            this_year = datetime.now(tz=tz_kst()).year
+        except Exception:
+            this_year = datetime.now().year
+        dash_year = st.number_input("연도(현황판)", min_value=2000, max_value=2100, value=int(this_year), step=1, key="left_dash_year")
+
+        # --- 인사평가 요약 맵 {(사번,유형)->(총점,제출시각)} --------------------------
+        def _eval_summary_map(_year:int):
+            items = read_eval_items_df(True)
+            item_ids = [str(x) for x in items["항목ID"].tolist()] if not items.empty else []
+            try:
+                ws = _ensure_eval_resp_sheet(int(_year), item_ids)
+                header = _retry(ws.row_values, 1) or []
+                hmap = {n:i+1 for i,n in enumerate(header)}
+                values = _retry(ws.get_all_values)
+            except Exception:
+                return {}
+            cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cTot=hmap.get("총점"); cSub=hmap.get("제출시각")
+            out = {}
+            for i in range(2, len(values)+1):
+                r = values[i-1]
+                try:
+                    if str(r[cY-1]).strip() != str(_year): continue
+                    k = (str(r[cTS-1]).strip(), str(r[cT-1]).strip())
+                    tot = r[cTot-1] if (cTot and cTot-1 < len(r)) else ""
+                    sub = r[cSub-1] if (cSub and cSub-1 < len(r)) else ""
+                    # 최신 제출/저장 우선
+                    if k not in out or str(out[k][1]) < str(sub):
+                        out[k] = (tot, sub)
+                except Exception:
+                    pass
+            return out
+
+        # --- JD 승인 요약 맵 {(사번,버전)->(상태,승인시각)} -------------------------
+        def _jd_approval_map(_year:int):
+            try:
+                ws = _ws("직무기술서_승인")
+                df = pd.DataFrame(_ws_get_all_records(ws))
+            except Exception:
+                df = pd.DataFrame(columns=["연도","사번","버전","상태","승인시각"])
+            for c in ["연도","버전"]:
+                if c in df.columns:
+                    df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0).astype(int)
+            for c in ["사번","상태","승인시각"]:
+                if c in df.columns:
+                    df[c] = df[c].astype(str)
+            df = df[df.get("연도",0).astype(int) == int(_year)]
+            out = {}
+            if not df.empty:
+                df = df.sort_values(["사번","버전","승인시각"], ascending=[True, True, True]).reset_index(drop=True)
+                for _, rr in df.iterrows():
+                    k = (str(rr.get("사번","")), int(rr.get("버전",0)))
+                    out[k] = (str(rr.get("상태","")), str(rr.get("승인시각","")))
+            return out
+
+        # --- 직무능력평가 요약 맵 {사번->(주업무,기타업무,자격유지)} -----------------
+        def _comp_summary_map(_year:int):
+            try:
+                ws = _ensure_comp_simple_sheet(int(_year))
+                header = _retry(ws.row_values,1) or []
+                hmap = {n:i+1 for i,n in enumerate(header)}
+                values = _retry(ws.get_all_values)
+            except Exception:
+                return {}
+            cY=hmap.get("연도"); cTS=hmap.get("평가대상사번"); cMain=hmap.get("주업무평가")
+            cExtra=hmap.get("기타업무평가"); cQual=hmap.get("자격유지"); cSub=hmap.get("제출시각")
+            out = {}
+            for i in range(2, len(values)+1):
+                r = values[i-1]
+                try:
+                    if cY and str(r[cY-1]).strip()!=str(_year): continue
+                    sab = str(r[cTS-1]).strip()
+                    main = r[cMain-1] if cMain else ""
+                    extra = r[cExtra-1] if cExtra else ""
+                    qual = r[cQual-1] if cQual else ""
+                    sub = r[cSub-1] if cSub else ""
+                    if sab not in out or str(out[sab][3]) < str(sub):
+                        out[sab] = (main, extra, qual, sub)
+                except Exception:
+                    pass
+            return out
+
+        eval_map = _eval_summary_map(int(dash_year))
+        comp_map = _comp_summary_map(int(dash_year))
+        appr_map = _jd_approval_map(int(dash_year))
+
+        # 대상을 현재 view(검색/선택 반영) 기준으로 루프
+        rows = []
+        for _, r in view.iterrows():
+            sab = str(r.get("사번","")).strip()
+            nm  = str(r.get("이름","")).strip()
+            d1  = str(r.get("부서1","")).strip() if "부서1" in r else ""
+            d2  = str(r.get("부서2","")).strip() if "부서2" in r else ""
+            pos = str(r.get("직급","")).strip()  if "직급" in r else ""
+
+            # 인사평가 점수
+            s_self = eval_map.get((sab, "자기"), ("", ""))[0]
+            s_mgr  = eval_map.get((sab, "1차"), ("", ""))[0]
+            s_adm  = eval_map.get((sab, "2차"), ("", ""))[0]
+
+            # JD 작성/승인
+            latest = _jd_latest_for(sab, int(dash_year))
+            jd_write = "완료" if latest else "미완료"
+            jd_appr  = "-"
+            if latest:
+                try:
+                    ver = int(str(latest.get("버전", 0)).strip() or "0")
+                except Exception:
+                    ver = 0
+                st_ap = appr_map.get((sab, ver), ("",""))[0] if ver else ""
+                jd_appr = (st_ap if st_ap else "-")
+
+            # 직무능력평가 항목명
+            main, extra, qual = "", "", ""
+            if sab in comp_map:
+                main, extra, qual, _ = comp_map[sab]
+
+            rows.append({
+                "사번": sab, "이름": nm, "부서1": d1, "부서2": d2, "직급": pos,
+                "인사평가(자기)": s_self, "인사평가(1차)": s_mgr, "인사평가(2차)": s_adm,
+                "직무기술서(작성)": jd_write, "직무기술서(승인)": jd_appr,
+                "직무능력평가(주업무)": main, "직무능력평가(기타업무)": extra, "직무능력평가(자격유지)": qual
+            })
+
+        dash_df = pd.DataFrame(rows)
+        st.dataframe(dash_df, use_container_width=True, hide_index=True, height=320)
 def _eval_sheet_name(year: int | str) -> str: return f"{EVAL_RESP_SHEET_PREFIX}{int(year)}"
 
 def ensure_eval_items_sheet():
@@ -818,7 +955,7 @@ def tab_eval(emp_df: pd.DataFrame):
     if st.button(("수정모드로 전환" if not st.session_state["eval2_edit_mode"] else "보기모드로 전환"),
                  use_container_width=True, key="eval2_toggle"):
         st.session_state["eval2_edit_mode"] = not st.session_state["eval2_edit_mode"]
-        appr_df = read_jd_approval_df()  # 즉시 재조회
+        st.rerun()
     # '실제' 편집 가능 여부는 선행조건/잠금도 반영
     requested_edit = bool(st.session_state["eval2_edit_mode"])
     edit_mode = requested_edit and prereq_ok and (not is_locked)
@@ -1019,7 +1156,7 @@ def tab_eval(emp_df: pd.DataFrame):
         for _iid in item_ids:
             _k = f"eval2_seg_{_iid}_{kbase}"
             if _k in st.session_state: del st.session_state[_k]
-        appr_df = read_jd_approval_df()  # 즉시 재조회
+        st.rerun()
 
     if do_save:
         if not attest_ok:
@@ -1037,7 +1174,7 @@ def tab_eval(emp_df: pd.DataFrame):
                     icon="✅",
                 )
                 st.session_state["eval2_edit_mode"] = False
-                appr_df = read_jd_approval_df()  # 즉시 재조회
+                st.rerun()
             except Exception as e:
                 st.exception(e)
 
@@ -1332,104 +1469,6 @@ def _jd_print_html(jd: dict, meta: dict) -> str:
     """
     return html
 
-
-# ===== JD Approval (within JD tab) =====
-JD_APPROVAL_SHEET = "직무기술서_승인"
-JD_APPROVAL_HEADERS = ["연도","사번","이름","버전","승인자사번","승인자이름","상태","승인시각","비고"]
-
-def ensure_jd_approval_sheet():
-    wb = get_book()
-    try:
-        _ = wb.worksheet(JD_APPROVAL_SHEET)
-    except WorksheetNotFound:
-        ws = _retry(wb.add_worksheet, title=JD_APPROVAL_SHEET, rows=3000, cols=20)
-        _retry(ws.update, "1:1", [JD_APPROVAL_HEADERS])
-
-@st.cache_data(ttl=300, show_spinner=False)
-def read_jd_approval_df() -> pd.DataFrame:
-    ensure_jd_approval_sheet()
-    try:
-        ws = _ws(JD_APPROVAL_SHEET)
-        df = pd.DataFrame(_ws_get_all_records(ws))
-    except Exception:
-        df = pd.DataFrame(columns=JD_APPROVAL_HEADERS)
-    for c in JD_APPROVAL_HEADERS:
-        if c not in df.columns:
-            df[c] = ""
-    if "연도" in df.columns:
-        df["연도"] = pd.to_numeric(df["연도"], errors="coerce").fillna(0).astype(int)
-    if "버전" in df.columns:
-        df["버전"] = pd.to_numeric(df["버전"], errors="coerce").fillna(0).astype(int)
-    if "사번" in df.columns:
-        df["사번"] = df["사번"].astype(str)
-    return df
-
-def _ws_batch_row(ws, idx, hmap, kv: dict):
-    upd = []
-    for k, v in kv.items():
-        c = hmap.get(k)
-        if not c: 
-            continue
-        a1 = gspread.utils.rowcol_to_a1(int(idx), int(c))
-        upd.append({"range": a1, "values": [[v]]})
-    if upd:
-        _retry(ws.batch_update, upd)
-
-def _jd_latest_version_for(sabun: str, year: int) -> int:
-    row = _jd_latest_for(sabun, int(year)) or {}
-    try:
-        return int(row.get("버전", 0) or 0)
-    except Exception:
-        return 0
-
-def set_jd_approval(year: int, sabun: str, name: str, version: int,
-                    approver_sabun: str, approver_name: str, status: str, remark: str = "") -> dict:
-    """
-    (연도, 사번, 버전) 기준 upsert. status: '승인' | '반려'
-    """
-    ensure_jd_approval_sheet()
-    ws = _ws(JD_APPROVAL_SHEET)
-    header = _retry(ws.row_values, 1) or JD_APPROVAL_HEADERS
-    hmap = {n: i+1 for i, n in enumerate(header)}
-    values = _retry(ws.get_all_values)
-    cY = hmap.get("연도"); cS = hmap.get("사번"); cV = hmap.get("버전")
-    target_row = 0
-    for i in range(2, len(values)+1):
-        r = values[i-1] if i-1 < len(values) else []
-        try:
-            if (str(r[cY-1]).strip()==str(year) and str(r[cS-1]).strip()==str(sabun) and str(r[cV-1]).strip()==str(version)):
-                target_row = i
-                break
-        except Exception:
-            pass
-    now = kst_now_str()
-    payload = {
-        "연도": int(year),
-        "사번": str(sabun),
-        "이름": str(name or _emp_name_by_sabun(read_emp_df(), sabun)),
-        "버전": int(version),
-        "승인자사번": str(approver_sabun),
-        "승인자이름": str(approver_name),
-        "상태": str(status),
-        "승인시각": now,
-        "비고": str(remark or ""),
-    }
-    if target_row > 0:
-        _ws_batch_row(ws, target_row, hmap, payload)
-        try: st.cache_data.clear()
-        except Exception: pass
-        return {"action": "update", "row": target_row}
-    else:
-        rowbuf = [""] * len(header)
-        for k, v in payload.items():
-            c = hmap.get(k)
-            if c:
-                rowbuf[c-1] = v
-        _retry(ws.append_row, rowbuf, value_input_option="USER_ENTERED")
-        try: st.cache_data.clear()
-        except Exception: pass
-        return {"action": "insert", "row": len(values) + 1}
-
 def tab_job_desc(emp_df: pd.DataFrame):
     """JD editor with 2-row header and 4-row education layout + print button order handled by _jd_print_html()."""
     try:
@@ -1489,7 +1528,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
         if st.button(("수정모드로 전환" if not st.session_state["jd2_edit_mode"] else "보기모드로 전환"),
                      use_container_width=True, key="jd2_toggle"):
             st.session_state["jd2_edit_mode"] = not st.session_state["jd2_edit_mode"]
-            appr_df = read_jd_approval_df()  # 즉시 재조회
+            st.rerun()
     with col_mode[1]:
         st.caption(f"현재: **{'수정모드' if st.session_state['jd2_edit_mode'] else '보기모드'}**")
     edit_mode = bool(st.session_state["jd2_edit_mode"])
@@ -1618,7 +1657,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
             try:
                 rep = upsert_jobdesc(rec, as_new_version=(version == 0))
                 st.success(f"저장 완료 (버전 {rep['version']})", icon="✅")
-                appr_df = read_jd_approval_df()  # 즉시 재조회
+                st.rerun()
             except Exception as e:
                 st.exception(e)
 
@@ -1636,89 +1675,6 @@ def tab_job_desc(emp_df: pd.DataFrame):
         html = _jd_print_html(jd_current, meta)
         import streamlit.components.v1 as components
         components.html(html, height=1000, scrolling=True)
-
-
-    # ===== 내 제출현황 (JD 승인) =====
-    st.markdown("### 내 제출현황 (직무기술서 승인)")
-    appr_df = read_jd_approval_df()
-    me = st.session_state.get("user", {})
-    me_sabun = str(me.get("사번","")); me_name = str(me.get("이름",""))
-    my_appr = appr_df[appr_df["사번"].astype(str) == me_sabun].copy()
-    if not my_appr.empty:
-        my_appr = my_appr.sort_values(["연도","버전","승인시각"], ascending=[False, False, False]).reset_index(drop=True)
-        cols = [c for c in ["연도","버전","상태","승인시각","승인자이름","승인자사번","비고"] if c in my_appr.columns]
-        st.dataframe(my_appr[cols], use_container_width=True, hide_index=True, height=220)
-    else:
-        st.caption("내 승인 기록이 없습니다.")
-    
-    # ===== (관리자/부서장) 승인 처리 =====
-    if am_admin_or_mgr:
-        st.markdown("### 부서장 승인")
-        latest_ver = _jd_latest_version_for(target_sabun, int(year))
-        cur_status = ""
-        cur_when = ""
-        cur_who = ""
-        if latest_ver > 0 and not appr_df.empty:
-            sub = appr_df[(appr_df["연도"]==int(year)) & (appr_df["사번"].astype(str)==str(target_sabun)) & (appr_df["버전"]==int(latest_ver))]
-            if not sub.empty:
-                srow = sub.sort_values(["승인시각"], ascending=[False]).iloc[0].to_dict()
-                cur_status = str(srow.get("상태",""))
-                cur_when = str(srow.get("승인시각",""))
-                cur_who = str(srow.get("승인자이름",""))
-        st.write(f"대상자 최신버전: **{latest_ver if latest_ver else '-'}** / 현재상태: **{cur_status or '-'}** {('(' + cur_when + ', ' + cur_who + ')') if cur_status else ''}")
-    
-        c1, c2, c3, c4 = st.columns([1,1,4,1])
-        with c3:
-            appr_remark = st.text_input("부서장 의견", key=f"jd_appr_remark_{year}_{target_sabun}")
-        with c4:
-            appr_pin = st.text_input("부서장 PIN 재입력", type="password", key=f"jd_appr_pin_{year}_{target_sabun}")
-    
-        b1, b2 = st.columns([1,1])
-        with b1:
-            do_ok = st.button("승인", type="primary", use_container_width=True, disabled=not (latest_ver>0))
-        with b2:
-            do_rej = st.button("반려", use_container_width=True, disabled=not (latest_ver>0))
-    
-        if do_ok or do_rej:
-            if not verify_pin(me_sabun, appr_pin):
-                st.error("PIN이 올바르지 않습니다.")
-            else:
-                status = "승인" if do_ok else "반려"
-                res = set_jd_approval(
-                    year=int(year),
-                    sabun=str(target_sabun),
-                    name=str(target_name),
-                    version=int(latest_ver),
-                    approver_sabun=str(me_sabun),
-                    approver_name=str(me_name),
-                    status=status,
-                    remark=appr_remark
-                )
-                st.success(f"{status} 처리되었습니다. ({res.get('action')})", icon="✅")
-                try: st.cache_data.clear()
-                except Exception: pass
-                appr_df = read_jd_approval_df()  # 즉시 재조회
-    
-    with st.expander("부서 제출현황 (요약)", expanded=False):
-        base = emp_df.copy()
-        base["사번"] = base["사번"].astype(str)
-        base = base[base["사번"].isin({str(s) for s in allowed})]
-        if "재직여부" in base.columns:
-            base = base[base["재직여부"] == True]
-        base = base.sort_values(["사번"]).reset_index(drop=True)
-        rows = []
-        for _, r in base.iterrows():
-            sab = str(r.get("사번","")); nm = str(r.get("이름",""))
-            ver = _jd_latest_version_for(sab, int(year))
-            stt = ""; when = ""; whoN = ""
-            if ver > 0 and not appr_df.empty:
-                sub = appr_df[(appr_df["연도"]==int(year)) & (appr_df["사번"].astype(str)==sab) & (appr_df["버전"]==int(ver))]
-                if not sub.empty:
-                    row0 = sub.sort_values(["승인시각"], ascending=[False]).iloc[0].to_dict()
-                    stt = str(row0.get("상태","")); when = str(row0.get("승인시각","")); whoN = str(row0.get("승인자이름",""))
-            rows.append({"사번":sab,"이름":nm,"연도":int(year),"버전":ver,"승인상태":stt,"승인시각":when,"승인자":whoN})
-        dfv = pd.DataFrame(rows)
-        st.dataframe(dfv, use_container_width=True, hide_index=True, height=260, column_config={"연도": st.column_config.NumberColumn(format="%d")})
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 직무능력평가 + JD 요약 스크롤
@@ -1916,7 +1872,7 @@ def tab_competency(emp_df: pd.DataFrame):
     if do_reset:
         for k in ["cmpS_main","cmpS_extra","cmpS_qual","cmpS_opinion"]:
             if k in st.session_state: del st.session_state[k]
-        appr_df = read_jd_approval_df()  # 즉시 재조회
+        st.rerun()
 
     if do_save:
         # 1) 동의 체크
@@ -2051,7 +2007,7 @@ def tab_admin_eval_items():
                     if iid in pos:
                         a1=gspread.utils.rowcol_to_a1(pos[iid], col_ord)
                         _retry(ws.update, a1, [[new]]); changed+=1
-                st.cache_data.clear(); st.success(f"순서 저장 완료: {changed}건 반영", icon="✅"); appr_df = read_jd_approval_df()  # 즉시 재조회
+                st.cache_data.clear(); st.success(f"순서 저장 완료: {changed}건 반영", icon="✅"); st.rerun()
             except Exception as e:
                 st.exception(e)
 
@@ -2075,7 +2031,7 @@ def tab_admin_eval_items():
     with c1:
         name = st.text_input("항목명", value=name, key="adm_eval_name")
         desc = st.text_area("설명(문항 내용)", value=desc, height=100, key="adm_eval_desc")
-        memo = st.text_input("부서장 의견", value=memo, key="adm_eval_memo")
+        memo = st.text_input("비고(선택)", value=memo, key="adm_eval_memo")
     with c2:
         order = st.number_input("순서", min_value=0, step=1, value=int(order), key="adm_eval_order")
         active = st.checkbox("활성", value=bool(active), key="adm_eval_active")
@@ -2104,7 +2060,7 @@ def tab_admin_eval_items():
                         put("순서",int(order)); put("활성",bool(active)); 
                         if "비고" in hmap: put("비고", memo.strip())
                         _retry(ws.append_row, rowbuf, value_input_option="USER_ENTERED")
-                        st.cache_data.clear(); st.success(f"저장 완료 (항목ID: {new_id})"); appr_df = read_jd_approval_df()  # 즉시 재조회
+                        st.cache_data.clear(); st.success(f"저장 완료 (항목ID: {new_id})"); st.rerun()
                     else:
                         col_id=hmap.get("항목ID"); idx=0
                         if col_id:
@@ -2118,7 +2074,7 @@ def tab_admin_eval_items():
                             ws.update_cell(idx, hmap["순서"], int(order))
                             ws.update_cell(idx, hmap["활성"], bool(active))
                             if "비고" in hmap: ws.update_cell(idx, hmap["비고"], memo.strip())
-                            st.cache_data.clear(); st.success("업데이트 완료"); appr_df = read_jd_approval_df()  # 즉시 재조회
+                            st.cache_data.clear(); st.success("업데이트 완료"); st.rerun()
                 except Exception as e:
                     st.exception(e)
 
@@ -2279,7 +2235,7 @@ def tab_admin_acl(emp_df: pd.DataFrame):
 
             st.cache_data.clear()
             st.success("권한이 전체 반영되었습니다.", icon="✅")
-            appr_df = read_jd_approval_df()  # 즉시 재조회
+            st.rerun()
         except Exception as e:
             st.exception(e)
 
