@@ -684,10 +684,10 @@ def tab_eval(emp_df: pd.DataFrame):
             allowed = set(str(x) for x in get_allowed_sabuns(emp_df, me_sabun, include_self=True))
             return base[base["사번"].isin(allowed)]
         
-else:  # admin
-        # ✅ 관리자라도 범위 규칙을 따르되, 자기 자신은 제외(자기평가 없음)
-        allowed = set(str(x) for x in get_allowed_sabuns(emp_df, me_sabun, include_self=True))
-        return base[base["사번"].isin(allowed - {me_sabun})]
+        else:  # admin
+            # ✅ 관리자라도 범위 규칙을 따르되, 자기 자신은 제외(자기평가 없음)
+            allowed = set(str(x) for x in get_allowed_sabuns(emp_df, me_sabun, include_self=True))
+            return base[base["사번"].isin(allowed - {me_sabun})]
 
 
     view = list_targets_for(my_role)[["사번","이름","부서1","부서2","직급"]].copy().sort_values(["사번"]).reset_index(drop=True)
