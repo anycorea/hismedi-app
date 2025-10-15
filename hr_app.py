@@ -2341,3 +2341,4 @@ def tab_jd_status(emp_df: pd.DataFrame):
             st.success(f"{status} 처리되었습니다. ({res.get('action')})", icon="✅")
             st.cache_data.clear()
             st.rerun()
+
