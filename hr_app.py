@@ -172,20 +172,13 @@ st.markdown(
         display:block;
       }
 
-      /* ===== 좌우 스크롤 편의성 향상 (표 구조 변경 없음) ===== */
-      /* 굵고 눈에 띄는 스크롤바 (Firefox) */
-      :root{
-        scrollbar-color: #9CA3AF #E5E7EB;  /* thumb, track */
-        scrollbar-width: auto;
-      }
-      /* 굵은 스크롤바 (Chromium/WebKit) */
-      *::-webkit-scrollbar { height: 14px; width: 14px; }
-      *::-webkit-scrollbar-thumb { background:#9CA3AF; border-radius:8px; }
-      *::-webkit-scrollbar-thumb:hover { background:#6B7280; }
-      *::-webkit-scrollbar-track { background:#E5E7EB; }
-
-      /* DataFrame 컨테이너는 가로 스크롤을 항상 자연스럽게 노출 */
-      div[data-testid="stDataFrame"] > div { overflow-x: auto !important; }
+      /* ===== 좌우 스크롤 깔끔 모드 (표 구조 변경 없음) ===== */
+      /* 바깥 래퍼에서는 가로 스크롤 숨김 */
+      div[data-testid="stDataFrame"] > div { overflow-x: visible !important; }
+      /* 표 그리드(본체)에서만 가로 스크롤 */
+      div[data-testid="stDataFrame"] [role="grid"] { overflow-x: auto !important; }
+      /* 스크롤바 잡기 편하도록 표 아래쪽 여유 */
+      div[data-testid="stDataFrame"] { padding-bottom: 6px; }
     </style>
     """,
     unsafe_allow_html=True,
