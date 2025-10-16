@@ -161,16 +161,32 @@ st.markdown(
       .scrollbox .k{ font-weight: 700; margin-bottom: .2rem; }
       .scrollbox .v{ white-space: pre-wrap; word-break: break-word; }
     
-  .submit-banner{
-    background:#FEF3C7; /* amber-100 */
-    border:1px solid #FDE68A; /* amber-200 */
-    padding:.55rem .8rem;
-    border-radius:.5rem;
-    font-weight:600;
-    line-height:1.35;
-    margin: 4px 0 14px 0; /* add comfortable spacing below */
-    display:block;}
-</style>
+      .submit-banner{
+        background:#FEF3C7; /* amber-100 */
+        border:1px solid #FDE68A; /* amber-200 */
+        padding:.55rem .8rem;
+        border-radius:.5rem;
+        font-weight:600;
+        line-height:1.35;
+        margin: 4px 0 14px 0; /* comfortable spacing below */
+        display:block;
+      }
+
+      /* ===== 좌우 스크롤 편의성 향상 (표 구조 변경 없음) ===== */
+      /* 굵고 눈에 띄는 스크롤바 (Firefox) */
+      :root{
+        scrollbar-color: #9CA3AF #E5E7EB;  /* thumb, track */
+        scrollbar-width: auto;
+      }
+      /* 굵은 스크롤바 (Chromium/WebKit) */
+      *::-webkit-scrollbar { height: 14px; width: 14px; }
+      *::-webkit-scrollbar-thumb { background:#9CA3AF; border-radius:8px; }
+      *::-webkit-scrollbar-thumb:hover { background:#6B7280; }
+      *::-webkit-scrollbar-track { background:#E5E7EB; }
+
+      /* DataFrame 컨테이너는 가로 스크롤을 항상 자연스럽게 노출 */
+      div[data-testid="stDataFrame"] > div { overflow-x: auto !important; }
+    </style>
     """,
     unsafe_allow_html=True,
 )
