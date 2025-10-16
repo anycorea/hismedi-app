@@ -1681,20 +1681,19 @@ def tab_job_desc(emp_df: pd.DataFrame):
         target_sabun = me_sabun; target_name = me_name
         st.info(f"대상자: {target_name} ({target_sabun})", icon="👤")
     try:
-        _latest = _jd_latest_for(str(target_sabun), int(year))
-        _sub_ts = (str(_latest.get('제출시각','')).strip() if _latest else '')
-        appr_df = read_jd_approval_df(st.session_state.get('appr_rev', 0))
-        latest_ver = _jd_latest_version_for(target_sabun, int(year))
-        cur_when = ''
-        if latest_ver > 0 and not appr_df.empty:
-            _sub = appr_df[(appr_df['연도']==int(year)) & (appr_df['사번'].astype(str)==str(target_sabun)) & (appr_df['버전']==int(latest_ver))]
-            if not _sub.empty:
-                _row = _sub.sort_values(['승인시각'], ascending=[False]).iloc[0].to_dict()
-                cur_when = str(_row.get('승인시각','')).strip()
-        _banner_yellow(f"{(_fmt_kst(_sub_ts) if _sub_ts else '미제출')} / 부서장 승인: {(_fmt_kst(cur_when) if cur_when else '미제출')}")
+                _latest = _jd_latest_for(str(target_sabun), int(year))
+                _sub_ts = (str(_latest.get('제출시각','')).strip() if _latest else '')
+                appr_df = read_jd_approval_df(st.session_state.get('appr_rev', 0))
+                latest_ver = _jd_latest_version_for(target_sabun, int(year))
+                cur_when = ''
+                if latest_ver > 0 and not appr_df.empty:
+                    _sub = appr_df[(appr_df['연도']==int(year)) & (appr_df['사번'].astype(str)==str(target_sabun)) & (appr_df['버전']==int(latest_ver))]
+                    if not _sub.empty:
+                        _row = _sub.sort_values(['승인시각'], ascending=[False]).iloc[0].to_dict()
+                        cur_when = str(_row.get('승인시각','')).strip()
+                _banner_yellow(f"{(_fmt_kst(_sub_ts) if _sub_ts else '미제출')} / 부서장 승인: {(_fmt_kst(cur_when) if cur_when else '미제출')}")
     except Exception:
         pass
-
     else:
         base = emp_df.copy()
         base["사번"] = base["사번"].astype(str)
@@ -2107,6 +2106,15 @@ def tab_competency(emp_df: pd.DataFrame):
     except Exception:
         pass
 
+    try:
+        _emap = get_comp_simple_map_cached(int(year), st.session_state.get('comp_rev', 0))
+        _cts = ''
+        key = (str(target_sabun), str(me_sabun))
+        if key in _emap:
+            _cts = str(_emap[key].get('제출시각','')).strip()
+    except Exception:
+        pass
+
 
     with st.expander("직무기술서 요약", expanded=True):
         jd=_jd_latest_for_comp(sel_sab, int(year))
@@ -2133,7 +2141,6 @@ def tab_competency(emp_df: pd.DataFrame):
         def _fmt(ts):
             ts = (ts or '').strip()
             return '-' if not ts else (ts if '(KST)' in ts else ts + ' (KST)')
-        _banner_yellow(f"{('미제출' if not str(_cts or '').strip() else _fmt_kst(_cts))}")
         comp_locked = bool(_cts)
     except Exception:
         comp_locked = False
