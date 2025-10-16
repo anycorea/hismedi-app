@@ -994,6 +994,21 @@ def tab_eval(emp_df: pd.DataFrame):
         target_name  = st.session_state["eval2_target_name"]
 
     st.success(f"대상자: {target_name} ({target_sabun})", icon="✅")
+    try:
+        _latest = _jd_latest_for(str(target_sabun), int(year))
+        _sub_ts = (str(_latest.get('제출시각','')).strip() if _latest else '')
+        appr_df = read_jd_approval_df(st.session_state.get('appr_rev', 0))
+        latest_ver = _jd_latest_version_for(target_sabun, int(year))
+        cur_when = ''
+        if latest_ver > 0 and not appr_df.empty:
+            _sub = appr_df[(appr_df['연도']==int(year)) & (appr_df['사번'].astype(str)==str(target_sabun)) & (appr_df['버전']==int(latest_ver))]
+            if not _sub.empty:
+                _row = _sub.sort_values(['승인시각'], ascending=[False]).iloc[0].to_dict()
+                cur_when = str(_row.get('승인시각','')).strip()
+        _banner_yellow(f"{(_fmt_kst(_sub_ts) if _sub_ts else '미제출')} / 부서장 승인: {(_fmt_kst(cur_when) if cur_when else '미제출')}")
+    except Exception:
+        pass
+
 
     target_role = role_of(target_sabun)
     if my_role == "employee":
@@ -1665,6 +1680,21 @@ def tab_job_desc(emp_df: pd.DataFrame):
     if not am_admin_or_mgr:
         target_sabun = me_sabun; target_name = me_name
         st.info(f"대상자: {target_name} ({target_sabun})", icon="👤")
+    try:
+        _latest = _jd_latest_for(str(target_sabun), int(year))
+        _sub_ts = (str(_latest.get('제출시각','')).strip() if _latest else '')
+        appr_df = read_jd_approval_df(st.session_state.get('appr_rev', 0))
+        latest_ver = _jd_latest_version_for(target_sabun, int(year))
+        cur_when = ''
+        if latest_ver > 0 and not appr_df.empty:
+            _sub = appr_df[(appr_df['연도']==int(year)) & (appr_df['사번'].astype(str)==str(target_sabun)) & (appr_df['버전']==int(latest_ver))]
+            if not _sub.empty:
+                _row = _sub.sort_values(['승인시각'], ascending=[False]).iloc[0].to_dict()
+                cur_when = str(_row.get('승인시각','')).strip()
+        _banner_yellow(f"{(_fmt_kst(_sub_ts) if _sub_ts else '미제출')} / 부서장 승인: {(_fmt_kst(cur_when) if cur_when else '미제출')}")
+    except Exception:
+        pass
+
     else:
         base = emp_df.copy()
         base["사번"] = base["사번"].astype(str)
@@ -1862,9 +1892,9 @@ def tab_job_desc(emp_df: pd.DataFrame):
         import streamlit.components.v1 as components
         components.html(html, height=1000, scrolling=True)
 
-    # ===== (관리자/부서장) 승인 처리 (숨김) =====
-    if False and am_admin_or_mgr:
-        st.empty()  # (숨김 처리)
+    # ===== (관리자/부서장) 승인 처리 =====
+    if am_admin_or_mgr:
+        st.markdown("### 부서장 승인")
         appr_df = read_jd_approval_df(st.session_state.get("appr_rev", 0))
         latest_ver = _jd_latest_version_for(target_sabun, int(year))
         cur_status = ""
@@ -1877,8 +1907,6 @@ def tab_job_desc(emp_df: pd.DataFrame):
                 cur_status = str(srow.get("상태",""))
                 cur_when = str(srow.get("승인시각",""))
                 cur_who = str(srow.get("승인자이름",""))
-        st.write(f"대상자 최신버전: **{latest_ver if latest_ver else '-'}** / 현재상태: **{cur_status or '-'}** {('(' + cur_when + ', ' + cur_who + ')') if cur_status else ''}")
-
         # 의견/핀 입력 (의견을 좌측에 크게)
         c_remark, c_pin = st.columns([4,1])
         with c_remark:
@@ -2069,6 +2097,16 @@ def tab_competency(emp_df: pd.DataFrame):
     st.session_state["cmpS_target_name"]=_emp_name_by_sabun(emp_df, str(sel_sab))
 
     st.success(f"대상자: {_emp_name_by_sabun(emp_df, sel_sab)} ({sel_sab})", icon="✅")
+    try:
+        _emap = get_comp_simple_map_cached(int(year), st.session_state.get('comp_rev', 0))
+        _cts = ''
+        key = (str(target_sabun), str(me_sabun))
+        if key in _emap:
+            _cts = str(_emap[key].get('제출시각','')).strip()
+        _banner_yellow(f"{('미제출' if not _cts else _fmt_kst(_cts))}")
+    except Exception:
+        pass
+
 
     with st.expander("직무기술서 요약", expanded=True):
         jd=_jd_latest_for_comp(sel_sab, int(year))
