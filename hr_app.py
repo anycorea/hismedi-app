@@ -2159,6 +2159,8 @@ REQ_EMP_COLS = [
     "PIN_hash","PIN_No"
 ]
 
+
+
 def _get_ws_and_headers(sheet_name: str):
     ws=_ws(sheet_name)
     header,_h=_hdr(ws, sheet_name)
@@ -2230,6 +2232,13 @@ def tab_admin_pin(emp_df):
             _retry(ws.update_cell, r, hmap["PIN_hash"], "")
             _retry(ws.update_cell, r, hmap["PIN_No"], "")
             st.cache_data.clear(); st.success("PIN 초기화 완료", icon="✅")
+
+# --- 관리자 전용: DB 링크 탭 ---
+if my_role == "admin":
+    with tabs[-1]:
+        st.subheader("데이터베이스 (Google Sheets)")
+        st.markdown("🔒 관리자 전용 링크입니다.")
+        st.markdown('<a href="https://docs.google.com/spreadsheets/d/1Z4OrSwqVXsCBnCaa_eUPDGmNqMpgm6twR9o_D9Hnfzk/edit?usp=sharing" target="_blank" class="btn">Google Sheets 열기</a>', unsafe_allow_html=True)
 
 def tab_admin_eval_items():
     df = read_eval_items_df(only_active=False).copy()
@@ -2516,7 +2525,6 @@ def tab_help():
         - 직무기술서: `직무기술서` 시트
         - 직무기술서(부서장 승인): `직무기술서_승인` 시트
         - 직무능력평가: `직무능력평가_YYYY` 시트
-        - DB ☞ `https://docs.google.com/spreadsheets/d/1Z4OrSwqVXsCBnCaa_eUPDGmNqMpgm6twR9o_D9Hnfzk/edit?usp=sharing`
     """)
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2563,11 +2571,26 @@ def main():
             if not is_admin(me):
                 st.warning("관리자 전용 메뉴입니다.", icon="🔒")
             else:
-                a1, a2, a3, a4 = st.tabs(["직원","PIN 관리","평가 항목 관리","권한 관리"])
+                labels_admin = ['직원','PIN 관리','평가 항목 관리','권한 관리','DB 링크']
+
+                a1, a2, a3, a4, a5 = st.tabs(labels_admin)
+
                 with a1: tab_staff_admin(emp_df)
+
                 with a2: tab_admin_pin(emp_df)
+
                 with a3: tab_admin_eval_items()
+
                 with a4: tab_admin_acl(emp_df)
+
+                with a5:
+
+                    st.subheader('데이터베이스 (Google Sheets)')
+
+                    st.markdown('🔒 관리자 전용 링크입니다.')
+
+                    st.markdown('<a href="https://docs.google.com/spreadsheets/d/1Z4OrSwqVXsCBnCaa_eUPDGmNqMpgm6twR9o_D9Hnfzk/edit?usp=sharing" target="_blank" class="btn">Google Sheets 열기</a>', unsafe_allow_html=True)
+
         with tabs[4]: tab_help()
 
 if __name__ == "__main__":
