@@ -1006,9 +1006,9 @@ def tab_eval(emp_df: pd.DataFrame):
     st.info(f"평가유형: **{eval_type}** (자동 결정)", icon="ℹ️")
     try:
         _emap = get_eval_summary_map_cached(int(year), st.session_state.get('eval_rev', 0))
-        _t_self = _fmt_kst(_emap.get((str(target_sabun),'자기'), ('',''))[1]) if (str(target_sabun),'자기') in _emap else '진행중'
-        _t_1st  = _fmt_kst(_emap.get((str(target_sabun),'1차'), ('',''))[1])  if (str(target_sabun),'1차') in _emap else '진행중'
-        _t_2nd  = _fmt_kst(_emap.get((str(target_sabun),'2차'), ('',''))[1])  if (str(target_sabun),'2차') in _emap else '진행중'
+        _t_self = _fmt_kst(_emap.get((str(target_sabun),'자기'), ('',''))[1]) if (str(target_sabun),'자기') in _emap else '미제출'
+        _t_1st  = _fmt_kst(_emap.get((str(target_sabun),'1차'), ('',''))[1])  if (str(target_sabun),'1차') in _emap else '미제출'
+        _t_2nd  = _fmt_kst(_emap.get((str(target_sabun),'2차'), ('',''))[1])  if (str(target_sabun),'2차') in _emap else '미제출'
         _banner_yellow(f"자기: {_t_self} / 1차: {_t_1st} / 2차: {_t_2nd}")
     except Exception:
         pass
@@ -1714,7 +1714,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
         def _fmt(ts):
             ts = (ts or '').strip()
             return '-' if not ts else (ts if '(KST)' in ts else ts + ' (KST)')
-        _banner_yellow(f"자기: {_fmt(_sub_ts)} / 부서장 승인: {(_fmt(cur_when) if (cur_when and (cur_when != '-' )) else '진행중')}")
+        _banner_yellow(f"{_fmt(_sub_ts)} / 부서장 승인: {(_fmt(cur_when) if (cur_when and (cur_when != '-' )) else '미제출')}")
     except Exception:
         pass
     edit_mode = bool(st.session_state["jd2_edit_mode"])
@@ -2095,7 +2095,7 @@ def tab_competency(emp_df: pd.DataFrame):
         def _fmt(ts):
             ts = (ts or '').strip()
             return '-' if not ts else (ts if '(KST)' in ts else ts + ' (KST)')
-        _banner_yellow(f"자기: {_fmt(_cts)}")
+        _banner_yellow(f"{_fmt(_cts)}")
         comp_locked = bool(_cts)
     except Exception:
         comp_locked = False
@@ -2106,12 +2106,10 @@ def tab_competency(emp_df: pd.DataFrame):
     with colG[1]: g_extra= st.radio("기타업무 평가", grade_options, index=2, key="cmpS_extra", horizontal=False, disabled=comp_locked)
     with colG[2]: qual   = st.radio("직무 자격 유지 여부", ["직무 유지","직무 변경","직무비부여"], index=0, key="cmpS_qual", disabled=comp_locked)
     with colG[3]:
-        # 평가일자 입력 제거 (제출시각 사용)
         try: eval_date=datetime.now(tz=tz_kst()).strftime('%Y-%m-%d')
         except Exception: eval_date=datetime.now().strftime('%Y-%m-%d')
         st.write('')
-
-    try: edu_status=_edu_completion_from_jd(_jd_latest_for_comp(sel_sab, int(year)))
+try: edu_status=_edu_completion_from_jd(_jd_latest_for_comp(sel_sab, int(year)))
     except Exception: edu_status="미완료"
     st.metric("교육이수 (자동)", edu_status)
     opinion=st.text_area("종합평가 의견", value="", height=150, key="cmpS_opinion", disabled=comp_locked)
