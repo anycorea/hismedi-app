@@ -2122,8 +2122,7 @@ def tab_competency(emp_df: pd.DataFrame):
     with colG[1]: g_extra= st.radio("기타업무 평가", grade_options, index=2, key="cmpS_extra", horizontal=False, disabled=comp_locked)
     with colG[2]: qual   = st.radio("직무 자격 유지 여부", ["직무 유지","직무 변경","직무비부여"], index=0, key="cmpS_qual", disabled=comp_locked)
     with colG[3]:
-        try: eval_date=st.date_input("평가일자", datetime.now(tz=tz_kst()).date(), key="cmpS_date", disabled=comp_locked).strftime("%Y-%m-%d")
-        except Exception: eval_date=st.date_input("평가일자", datetime.now().date(), key="cmpS_date", disabled=comp_locked).strftime("%Y-%m-%d")
+        eval_date = ""  # 입력란 제거: 제출시각으로 대체 기록
 
     try: edu_status=_edu_completion_from_jd(_jd_latest_for_comp(sel_sab, int(year)))
     except Exception: edu_status="미완료"
