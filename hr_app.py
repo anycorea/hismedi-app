@@ -2181,8 +2181,89 @@ def _find_row_by_sabun(ws, hmap, sabun: str) -> int:
     return 0
 
 def tab_staff_admin(emp_df: pd.DataFrame):
-    st.write(f"결과: **{len(emp_df):,}명**")
-    st.dataframe(emp_df.drop(columns=["PIN_hash"], errors="ignore"), use_container_width=True, height=560, hide_index=True)
+    # 1) 시트/헤더 확보 (+ 필수 컬럼 보장)
+    ws, header, hmap = ensure_emp_sheet_columns()  # '직원' 시트 1행에 누락 헤더 있으면 채움
+    view = emp_df.copy()
+
+    # 2) 민감 컬럼 숨기기
+    for c in ["PIN_hash", "PIN_No"]:
+        view = view.drop(columns=[c], errors="ignore")
+
+    st.write(f"결과: **{len(view):,}명**")
+
+    # 3) 편집 UI (사번=잠금, 재직여부=체크박스)
+    colcfg = {
+        "사번": st.column_config.TextColumn("사번", disabled=True),
+        "이름": st.column_config.TextColumn("이름"),
+        "부서1": st.column_config.TextColumn("부서1"),
+        "부서2": st.column_config.TextColumn("부서2"),
+        "직급": st.column_config.TextColumn("직급"),
+        "직무": st.column_config.TextColumn("직무"),
+        "직군": st.column_config.TextColumn("직군"),
+        "입사일": st.column_config.TextColumn("입사일"),
+        "퇴사일": st.column_config.TextColumn("퇴사일"),
+        "기타1": st.column_config.TextColumn("기타1"),
+        "기타2": st.column_config.TextColumn("기타2"),
+        "재직여부": st.column_config.CheckboxColumn("재직여부"),
+    }
+
+    edited = st.data_editor(
+        view,
+        use_container_width=True,
+        height=560,
+        hide_index=True,
+        num_rows="fixed",            # 행 추가/삭제는 막고 '수정'만
+        column_config=colcfg,
+    )
+
+    # 4) 저장 버튼 (변경된 칼럼만 배치 업데이트)
+    if st.button("변경사항 저장", type="primary", use_container_width=True):
+        try:
+            before = view.set_index("사번")
+            after  = edited.set_index("사번")
+
+            # 사번 없는 행들 제거(안전장치)
+            before = before[before.index.astype(str) != ""]
+            after  = after[after.index.astype(str) != ""]
+
+            change_cnt = 0
+            for sabun in after.index:
+                if sabun not in before.index:
+                    continue  # (num_rows="fixed"라서 거의 없음)
+                diff_cols = []
+                payload = {}
+
+                for c in after.columns:
+                    if c not in before.columns:
+                        continue
+                    v0 = str(before.loc[sabun, c])
+                    v1 = str(after.loc[sabun, c])
+                    if v0 != v1:
+                        diff_cols.append(c)
+                        # 불린 컬럼은 True/False로 유지
+                        if c == "재직여부":
+                            payload[c] = bool(after.loc[sabun, c])
+                        else:
+                            payload[c] = after.loc[sabun, c]
+
+                if not diff_cols:
+                    continue
+
+                # 시트에서 대상 행 찾기 → 변경 칼럼만 배치 업데이트
+                row_idx = _find_row_by_sabun(ws, hmap, str(sabun))
+                if row_idx > 0:
+                    _ws_batch_row(ws, row_idx, hmap, payload)
+                    change_cnt += 1
+
+            # 캐시 비우고 새로고침
+            try:
+                st.cache_data.clear()
+            except Exception:
+                pass
+            st.success(f"저장 완료: {change_cnt}명 반영", icon="✅")
+            st.rerun()
+        except Exception as e:
+            st.exception(e)
 
 def reissue_pin_inline(sabun: str, length: int = 4):
     ws, header, hmap = ensure_emp_sheet_columns()
