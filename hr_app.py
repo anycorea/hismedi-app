@@ -1931,20 +1931,6 @@ def tab_job_desc(emp_df: pd.DataFrame):
             if "재직여부" in base.columns:
                 base = base[base["재직여부"] == True]
             base = base.sort_values(["사번"]).reset_index(drop=True)
-            rows = []
-            for _, r in base.iterrows():
-                sab = str(r.get("사번","")); nm = str(r.get("이름",""))
-                ver = _jd_latest_version_for(sab, int(year))
-                stt = ""; when = ""; whoN = ""
-                if ver > 0 and not appr_df.empty:
-                    sub = appr_df[(appr_df["연도"]==int(year)) & (appr_df["사번"].astype(str)==sab) & (appr_df["버전"]==int(ver))]
-                    if not sub.empty:
-                        row0 = sub.sort_values(["승인시각"], ascending=[False]).iloc[0].to_dict()
-                        stt = str(row0.get("상태","")); when = str(row0.get("승인시각","")); whoN = str(row0.get("승인자이름",""))
-                rows.append({"사번":sab,"이름":nm,"연도":int(year),"버전":ver,"승인상태":stt,"승인시각":when,"승인자":whoN})
-            dfv = pd.DataFrame(rows)
-            st.dataframe(dfv, use_container_width=True, hide_index=True, height=260,
-                         column_config={"연도": st.column_config.NumberColumn(format="%d")})
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 직무능력평가 + JD 요약 스크롤
