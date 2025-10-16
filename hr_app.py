@@ -1875,6 +1875,10 @@ def tab_job_desc(emp_df: pd.DataFrame):
         st.markdown("### 부서장 승인")
         appr_df = read_jd_approval_df(st.session_state.get("appr_rev", 0))
         latest_ver = _jd_latest_version_for(target_sabun, int(year))
+        _approved = False
+        if latest_ver > 0 and not appr_df.empty:
+            _ok = appr_df[(appr_df['연도'] == int(year)) & (appr_df['사번'].astype(str) == str(target_sabun)) & (appr_df['버전'] == int(latest_ver)) & (appr_df['상태'].astype(str) == '승인')]
+            _approved = not _ok.empty
         cur_status = ""
         cur_when = ""
         cur_who = ""
@@ -1888,37 +1892,40 @@ def tab_job_desc(emp_df: pd.DataFrame):
         # 의견/핀 입력 (의견을 좌측에 크게)
         c_remark, c_pin = st.columns([4,1])
         with c_remark:
-            appr_remark = st.text_input("부서장 의견", key=f"jd_appr_remark_{year}_{target_sabun}")
-        with c_pin:
-            appr_pin = st.text_input("부서장 PIN 재입력", type="password", key=f"jd_appr_pin_{year}_{target_sabun}")
-
-        # 승인/반려 버튼
-        b1, b2 = st.columns([1,1])
-        with b1:
-            do_ok = st.button("승인", type="primary", use_container_width=True, disabled=not (latest_ver>0))
-        with b2:
-            do_rej = st.button("반려", use_container_width=True, disabled=not (latest_ver>0))
-
-        if do_ok or do_rej:
-            if not verify_pin(me_sabun, appr_pin):
-                st.error("PIN이 올바르지 않습니다.")
+            if _approved:
+                st.markdown("<div class='approval-dim'>부서장 승인이 완료된 대상자입니다. (수정/변경 불가)</div>", unsafe_allow_html=True)
             else:
-                status = "승인" if do_ok else "반려"
-                with st.spinner("처리 중..."):
-                    res = set_jd_approval(
-                        year=int(year),
-                        sabun=str(target_sabun),
-                        name=str(target_name),
-                        version=int(latest_ver),
-                        approver_sabun=str(me_sabun),
-                        approver_name=str(me_name),
-                        status=status,
-                        remark=appr_remark
-                    )
-                    st.session_state["appr_rev"] = st.session_state.get("appr_rev", 0) + 1
-                st.success(f"{status} 처리되었습니다. ({res.get('action')})", icon="✅")
-                appr_df = read_jd_approval_df(st.session_state.get("appr_rev", 0))
-            base["사번"] = base["사번"].astype(str)
+                appr_remark = st.text_input("부서장 의견", key=f"jd_appr_remark_{year}_{target_sabun}")
+            with c_pin:
+                appr_pin = st.text_input("부서장 PIN 재입력", type="password", key=f"jd_appr_pin_{year}_{target_sabun}")
+
+            # 승인/반려 버튼
+            b1, b2 = st.columns([1,1])
+            with b1:
+                do_ok = st.button("승인", type="primary", use_container_width=True, disabled=not (latest_ver>0))
+            with b2:
+                do_rej = st.button("반려", use_container_width=True, disabled=not (latest_ver>0))
+
+            if do_ok or do_rej:
+                if not verify_pin(me_sabun, appr_pin):
+                    st.error("PIN이 올바르지 않습니다.")
+                else:
+                    status = "승인" if do_ok else "반려"
+                    with st.spinner("처리 중..."):
+                        res = set_jd_approval(
+                            year=int(year),
+                            sabun=str(target_sabun),
+                            name=str(target_name),
+                            version=int(latest_ver),
+                            approver_sabun=str(me_sabun),
+                            approver_name=str(me_name),
+                            status=status,
+                            remark=appr_remark
+                        )
+                        st.session_state["appr_rev"] = st.session_state.get("appr_rev", 0) + 1
+                    st.success(f"{status} 처리되었습니다. ({res.get('action')})", icon="✅")
+                    appr_df = read_jd_approval_df(st.session_state.get("appr_rev", 0))
+                base["사번"] = base["사번"].astype(str)
             base = base[base["사번"].isin({str(s) for s in allowed})]
             if "재직여부" in base.columns:
                 base = base[base["재직여부"] == True]
