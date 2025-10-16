@@ -20,7 +20,7 @@ def get_eval_summary_map_cached(_year: int, _rev: int = 0) -> dict:
         ws = _ensure_eval_resp_sheet(int(_year), item_ids)
         header = _retry(ws.row_values, 1) or []
         hmap = {n:i+1 for i,n in enumerate(header)}
-        values = _ws_values(ws, _eval_sheet_name(int(_year)) if "_year" in locals() else _eval_sheet_name(int(year)))
+        values = _ws_values(ws)
     except Exception:
         return {}
     cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cTot=hmap.get("총점"); cSub=hmap.get("제출시각")
@@ -45,7 +45,7 @@ def get_comp_summary_map_cached(_year: int, _rev: int = 0) -> dict:
         ws = _ensure_comp_simple_sheet(int(_year))
         header = _retry(ws.row_values,1) or []
         hmap = {n:i+1 for i,n in enumerate(header)}
-        values = _ws_values(ws, _simp_sheet_name(int(_year)))
+        values = _ws_values(ws)
     except Exception:
         return {}
     cY=hmap.get("연도"); cTS=hmap.get("평가대상사번"); cMain=hmap.get("주업무평가")
@@ -186,6 +186,12 @@ st.markdown(
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Utils
+
+def current_year() -> int:
+    try:
+        return int(datetime.now(tz=tz_kst()).year)
+    except Exception:
+        return int(datetime.now().year)
 # ══════════════════════════════════════════════════════════════════════════════
 def kst_now_str(): return datetime.now(tz=tz_kst()).strftime("%Y-%m-%d %H:%M:%S (%Z)")
 def _sha256_hex(s: str) -> str: return hashlib.sha256(str(s).encode()).hexdigest()
@@ -311,7 +317,8 @@ _WS_TTL, _HDR_TTL = 120, 120
 _VAL_CACHE: dict[str, Tuple[float, list]] = {}
 _VAL_TTL = 90
 
-def _ws_values(ws, key: str):
+def _ws_values(ws, key: str | None = None):
+    key = key or getattr(ws, 'title', '') or 'ws_values'
     now = time.time()
     hit = _VAL_CACHE.get(key)
     if hit and (now - hit[0] < _VAL_TTL):
@@ -675,10 +682,7 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
     
     if am_admin_or_mgr and not view.empty and show_dashboard_cols:
         # 연도 선택 (기본=올해)
-        try:
-            this_year = datetime.now(tz=tz_kst()).year
-        except Exception:
-            this_year = datetime.now().year
+        this_year = current_year()
         dash_year = st.number_input("연도(현황판)", min_value=2000, max_value=2100, value=int(this_year), step=1, key="left_dash_year")
     
         eval_map = get_eval_summary_map_cached(int(dash_year), st.session_state.get("eval_rev", 0))
@@ -814,7 +818,7 @@ def upsert_eval_response(emp_df: pd.DataFrame, year: int, eval_type: str,
     total=round(sum(scores_list)*(100.0/max(1,len(item_ids)*5)),1)
     tname=_emp_name_by_sabun(emp_df, target_sabun); ename=_emp_name_by_sabun(emp_df, evaluator_sabun)
     now=kst_now_str()
-    values = _ws_values(ws, _eval_sheet_name(int(_year)) if "_year" in locals() else _eval_sheet_name(int(year))); cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
+    values = _ws_values(ws); cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
     row_idx=0
     for i in range(2, len(values)+1):
         r=values[i-1]
@@ -875,7 +879,7 @@ def tab_eval(emp_df: pd.DataFrame):
     from typing import Tuple, Dict
 
     # --- 기본값/데이터 로드 -------------------------------------------------
-    this_year = datetime.now(tz=tz_kst()).year
+    this_year = current_year()
     year = st.number_input("연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="eval2_year")
 
     u = st.session_state["user"]; me_sabun = str(u["사번"]); me_name = str(u["이름"])
@@ -923,7 +927,7 @@ def tab_eval(emp_df: pd.DataFrame):
         try:
             ws = _ensure_eval_resp_sheet(int(_year), item_ids)
             header = _retry(ws.row_values, 1) or []; hmap = {n: i+1 for i, n in enumerate(header)}
-            values = _ws_values(ws, _eval_sheet_name(int(_year)) if "_year" in locals() else _eval_sheet_name(int(year)))
+            values = _ws_values(ws)
             cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cS=hmap.get("상태")
             if not all([cY, cT, cTS, cS]): return False
             for r in values[1:]:
@@ -941,7 +945,7 @@ def tab_eval(emp_df: pd.DataFrame):
         try:
             ws = _ensure_eval_resp_sheet(int(year), item_ids)
             header = _retry(ws.row_values, 1) or []; hmap = {n: i+1 for i, n in enumerate(header)}
-            values = _ws_values(ws, _eval_sheet_name(int(_year)) if "_year" in locals() else _eval_sheet_name(int(year)))
+            values = _ws_values(ws)
             cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
             row_idx = 0
             for i in range(2, len(values)+1):
@@ -1062,7 +1066,7 @@ def tab_eval(emp_df: pd.DataFrame):
         try:
             ws = _ensure_eval_resp_sheet(int(_year), item_ids)
             header = _retry(ws.row_values, 1) or []; hmap = {n: i+1 for i, n in enumerate(header)}
-            values = _ws_values(ws, _eval_sheet_name(int(_year)) if "_year" in locals() else _eval_sheet_name(int(year)))
+            values = _ws_values(ws)
             cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cDT=hmap.get("제출시각")
             # 최신 제출시각 우선
             picked = None; picked_dt = ""
@@ -1372,7 +1376,7 @@ def upsert_jobdesc(rec: dict, as_new_version: bool = False) -> dict:
     rec["제출시각"] = kst_now_str()
     rec["이름"] = _emp_name_by_sabun(read_emp_df(), sabun)
 
-    values = _ws_values(ws, _eval_sheet_name(int(_year)) if "_year" in locals() else _eval_sheet_name(int(year)))
+    values = _ws_values(ws)
     row_idx = 0
     cS, cY, cV = hmap.get("사번"), hmap.get("연도"), hmap.get("버전")
     for i in range(2, len(values) + 1):
@@ -1394,10 +1398,7 @@ def upsert_jobdesc(rec: dict, as_new_version: bool = False) -> dict:
         st.cache_data.clear()
         return {"action": "insert", "version": ver}
     else:
-        for k, v in rec.items():
-            c = hmap.get(k)
-            if c:
-                _retry(ws.update_cell, row_idx, c, v)
+        _ws_batch_row(ws, row_idx, hmap, rec)
         st.cache_data.clear()
         return {"action": "update", "version": ver}
 
@@ -1612,7 +1613,7 @@ def set_jd_approval(year: int, sabun: str, name: str, version: int,
     ws = _ws(JD_APPROVAL_SHEET)
     header = _retry(ws.row_values, 1) or JD_APPROVAL_HEADERS
     hmap = {n: i+1 for i, n in enumerate(header)}
-    values = _ws_values(ws, _eval_sheet_name(int(_year)) if "_year" in locals() else _eval_sheet_name(int(year)))
+    values = _ws_values(ws)
     cY = hmap.get("연도"); cS = hmap.get("사번"); cV = hmap.get("버전")
     target_row = 0
     for i in range(2, len(values)+1):
@@ -1653,10 +1654,7 @@ def set_jd_approval(year: int, sabun: str, name: str, version: int,
 
 def tab_job_desc(emp_df: pd.DataFrame):
     """JD editor with 2-row header and 4-row education layout + print button order handled by _jd_print_html()."""
-    try:
-        this_year = datetime.now(tz=tz_kst()).year  # type: ignore
-    except Exception:
-        this_year = datetime.now().year
+    this_year = current_year()
     year = st.number_input("연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="jd2_year")
 
     u = st.session_state["user"]
@@ -1980,7 +1978,7 @@ def upsert_comp_simple_response(emp_df: pd.DataFrame, year:int, target_sabun:str
     jd=_jd_latest_for_comp(target_sabun, int(year)); edu_status=_edu_completion_from_jd(jd)
     t_name=_emp_name_by_sabun(emp_df, target_sabun); e_name=_emp_name_by_sabun(emp_df, evaluator_sabun)
     now=kst_now_str()
-    values = _ws_values(ws, _eval_sheet_name(int(_year)) if "_year" in locals() else _eval_sheet_name(int(year))); cY=hmap.get("연도"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
+    values = _ws_values(ws); cY=hmap.get("연도"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
     row_idx=0
     for i in range(2, len(values)+1):
         r=values[i-1]
@@ -2001,12 +1999,16 @@ def upsert_comp_simple_response(emp_df: pd.DataFrame, year:int, target_sabun:str
         except Exception: pass
         return {"action":"insert"}
     else:
-        def upd(k,v):
-            c=hmap.get(k)
-            if c: _retry(ws.update_cell, row_idx, c, v)
-        upd("평가일자",eval_date); upd("주업무평가",main_grade); upd("기타업무평가",extra_grade)
-        upd("교육이수",edu_status); upd("자격유지",qual_status); upd("종합의견",opinion)
-        upd("상태","제출"); upd("제출시각",now)
+        _ws_batch_row(ws, row_idx, hmap, {
+            "평가일자": eval_date,
+            "주업무평가": main_grade,
+            "기타업무평가": extra_grade,
+            "교육이수": edu_status,
+            "자격유지": qual_status,
+            "종합의견": opinion,
+            "상태": "제출",
+            "제출시각": now,
+        })
         try: read_my_comp_simple_rows.clear()
         except Exception: pass
         return {"action":"update"}
@@ -2032,8 +2034,7 @@ def tab_competency(emp_df: pd.DataFrame):
         st.warning('권한이 없습니다. 관리자/평가 권한자만 접근할 수 있습니다.', icon='🔒')
         return
 
-    try: this_year = datetime.now(tz=tz_kst()).year
-    except Exception: this_year = datetime.now().year
+    this_year = current_year()
     year = st.number_input("연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="cmpS_year")
 
     u=st.session_state.get("user",{}); me_sabun=str(u.get("사번","")); me_name=str(u.get("이름",""))
