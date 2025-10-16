@@ -1714,7 +1714,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
         def _fmt(ts):
             ts = (ts or '').strip()
             return '-' if not ts else (ts if '(KST)' in ts else ts + ' (KST)')
-        _banner_yellow(f"{_fmt_kst(_sub_ts)} / 부서장 승인: {(_fmt_kst(cur_when) if cur_when else '미제출')}")
+        _banner_yellow(f"{(_fmt_kst(_sub_ts) if _sub_ts else '미제출')} / 부서장 승인: {(_fmt_kst(cur_when) if cur_when else '미제출')}")
     except Exception:
         pass
     edit_mode = bool(st.session_state["jd2_edit_mode"])
@@ -1862,9 +1862,9 @@ def tab_job_desc(emp_df: pd.DataFrame):
         import streamlit.components.v1 as components
         components.html(html, height=1000, scrolling=True)
 
-    # ===== (관리자/부서장) 승인 처리 =====
-    if am_admin_or_mgr:
-        st.markdown("### 부서장 승인")
+    # ===== (관리자/부서장) 승인 처리 (숨김) =====
+    if False and am_admin_or_mgr:
+        st.empty()  # (숨김 처리)
         appr_df = read_jd_approval_df(st.session_state.get("appr_rev", 0))
         latest_ver = _jd_latest_version_for(target_sabun, int(year))
         cur_status = ""
@@ -2095,7 +2095,7 @@ def tab_competency(emp_df: pd.DataFrame):
         def _fmt(ts):
             ts = (ts or '').strip()
             return '-' if not ts else (ts if '(KST)' in ts else ts + ' (KST)')
-        _banner_yellow(f"{_fmt_kst(_cts)}")
+        _banner_yellow(f"{('미제출' if not str(_cts or '').strip() else _fmt_kst(_cts))}")
         comp_locked = bool(_cts)
     except Exception:
         comp_locked = False
