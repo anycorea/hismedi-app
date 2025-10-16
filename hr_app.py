@@ -2105,17 +2105,6 @@ def tab_competency(emp_df: pd.DataFrame):
             st.caption("직무기술서가 없습니다. JD 없이도 평가를 진행할 수 있습니다.")
 
     st.markdown("### 평가 입력")
-    try:
-        _cmap = get_comp_summary_map_cached(int(year), st.session_state.get('comp_rev', 0))
-        _cts = (str(_cmap.get(str(sel_sab), ("","","",""))[3]).strip())
-        def _fmt(ts):
-            ts = (ts or '').strip()
-            return '-' if not ts else (ts if '(KST)' in ts else ts + ' (KST)')
-        st.info(f"🕒 제출시각: {_fmt(_cts)}")
-        comp_locked = bool(_cts)
-    except Exception:
-        comp_locked = False
-        pass
     grade_options=["우수","양호","보통","미흡"]
     colG=st.columns(4)
     with colG[0]: g_main = st.radio("주업무 평가", grade_options, index=2, key="cmpS_main", horizontal=False, disabled=comp_locked)
