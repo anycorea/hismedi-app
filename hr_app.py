@@ -203,11 +203,9 @@ def show_submit_banner(text: str):
     except Exception:
         st.info(text)
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # PIN Utilities (clean)
 # ─────────────────────────────────────────────────────────────────────────────
-
 def verify_pin(user_sabun: str, pin: str) -> bool:
     """
     제출 직전 PIN 재인증용 (로그인 로직과 동일한 허용 범위 유지).
@@ -322,7 +320,6 @@ def _ws_values(ws, key: str):
     _VAL_CACHE[key] = (now, vals)
     return vals
 
-
 def _ws(title: str):
     now=time.time(); hit=_WS_CACHE.get(title)
     if hit and (now-hit[0]<_WS_TTL): return hit[1]
@@ -333,7 +330,6 @@ def _hdr(ws, key: str) -> Tuple[list[str], dict]:
     if hit and (now-hit[0]<_HDR_TTL): return hit[1], hit[2]
     header=_retry(ws.row_values, 1) or []; hmap={n:i+1 for i,n in enumerate(header)}
     _HDR_CACHE[key]=(now, header, hmap); return header, hmap
-
 
 def _ws_get_all_records(ws):
     try:
@@ -355,7 +351,6 @@ def _ws_get_all_records(ws):
             return _retry(ws.get_all_records, numericise_ignore=["all"])
         except TypeError:
             return _retry(ws.get_all_records)
-
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Sheet Readers (TTL↑)
@@ -424,8 +419,6 @@ def logout():
     try: st.cache_data.clear()
     except Exception: pass
     st.rerun()
-
-
 
 # --- Enter Key Binder (사번→PIN, PIN→로그인) -------------------------------
 import streamlit.components.v1 as components
@@ -577,7 +570,6 @@ def get_global_target()->Tuple[str,str]:
 # ══════════════════════════════════════════════════════════════════════════════
 # Left: 직원선택 (Enter 동기화)
 # ══════════════════════════════════════════════════════════════════════════════
-
 def render_staff_picker_left(emp_df: pd.DataFrame):
     # ▼ 필터 초기화 플래그 처리(위젯 생성 전에 초기화해야 오류 없음)
     if st.session_state.get("_left_reset", False):
@@ -671,10 +663,10 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
     cols = [c for c in ["사번", "이름", "부서1", "부서2", "직급"] if c in view.columns]
     st.caption(f"총 {len(view)}명")
     
-# ── 관리자/부서장: 현황 컬럼을 왼쪽 표에 합쳐서 표시 ───────────────────────────
+# ── 관리자/부서장: 대시보드 왼쪽 표에 합쳐서 표시 ───────────────────────────
 
-    # 빠른 화면을 원하면 '현황 컬럼 보기'를 끄세요.
-    show_dashboard_cols = st.checkbox("현황 컬럼 보기(빠름)", value=False, help="끄면 기본 직원표만 빠르게 표시됩니다.")
+    # 빠른 화면을 원하면 '대시보드 보기'를 끄세요.
+    show_dashboard_cols = st.checkbox("대시보드 보기(빠름)", value=False, help="끄면 기본 직원표만 빠르게 표시됩니다.")
     try:
 
         am_admin_or_mgr = (is_admin(me) or len(get_allowed_sabuns(emp_df, me, include_self=False)) > 0)
@@ -923,7 +915,6 @@ def tab_eval(emp_df: pd.DataFrame):
             allowed = set(str(x) for x in get_allowed_sabuns(emp_df, me_sabun, include_self=True))
             return base[base["사번"].isin(allowed - {me_sabun})]
 
-
     view = list_targets_for(my_role)[["사번","이름","부서1","부서2","직급"]].copy().sort_values(["사번"]).reset_index(drop=True)
 
     # --- 제출 여부 / 저장값 조회 ----------------------------------------------
@@ -1010,9 +1001,6 @@ def tab_eval(emp_df: pd.DataFrame):
 
     st.success(f"대상자: {target_name} ({target_sabun})", icon="✅")
 
-
-
-
     # === 제출시각 배너(인사평가) ===
     try:
         _emap = get_eval_summary_map_cached(int(year), st.session_state.get('eval_rev', 0))
@@ -1065,6 +1053,7 @@ def tab_eval(emp_df: pd.DataFrame):
     requested_edit = bool(st.session_state["eval2_edit_mode"])
     edit_mode = requested_edit and prereq_ok and (not is_locked)
     st.caption(f"현재: **{'수정모드' if edit_mode else '보기모드'}**")
+
 # --- 점수 입력 UI: 표만 -----------------------------------------------------
     st.markdown("#### 점수 입력 (자기/1차/2차) — 표에서 직접 수정하세요.")
 
@@ -1282,6 +1271,7 @@ def tab_eval(emp_df: pd.DataFrame):
                 st.rerun()
             except Exception as e:
                 st.exception(e)
+
 # ══════════════════════════════════════════════════════════════════════════════
 # 직무기술서
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1563,7 +1553,6 @@ def _jd_print_html(jd: dict, meta: dict) -> str:
     </html>
     """
     return html
-
 
 # ===== JD Approval (within JD tab) =====
 JD_APPROVAL_SHEET = "직무기술서_승인"
@@ -2079,7 +2068,6 @@ def tab_competency(emp_df: pd.DataFrame):
 
     st.success(f"대상자: {_emp_name_by_sabun(emp_df, sel_sab)} ({sel_sab})", icon="✅")
 
-
     # === 제출시각 배너(직무능력평가) ===
     comp_locked = False
     try:
@@ -2161,8 +2149,6 @@ def tab_competency(emp_df: pd.DataFrame):
             )
             st.success(("제출 완료" if rep.get("action")=="insert" else "업데이트 완료"), icon="✅")
         st.session_state['comp_rev'] = st.session_state.get('comp_rev', 0) + 1
-
-    
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 관리자: 직원/ PIN 관리 / 인사평가 항목 관리 / 권한 관리
@@ -2347,7 +2333,6 @@ def tab_admin_eval_items():
                 except Exception as e:
                     st.exception(e)
 
-
 def tab_admin_acl(emp_df: pd.DataFrame):
     me = st.session_state.get("user", {})
     am_admin = is_admin(str(me.get("사번","")))
@@ -2524,11 +2509,12 @@ def tab_help():
     - 구글시트 구조
         - 직원: `직원` 시트
         - 권한: `권한` 시트 (역할=admin/manager, 범위유형: 공란=전체 · 부서 · 개별)
-        - 평가 항목: `평가_항목`
-        - 인사평가: `인사평가_YYYY`
-        - 직무기술서: `직무기술서`
-        - 직무능력평가: `직무능력평가_YYYY`
-        - DB ☞ https://docs.google.com/spreadsheets/d/1Z4OrSwqVXsCBnCaa_eUPDGmNqMpgm6twR9o_D9Hnfzk/edit?usp=sharing
+        - 평가 항목: `평가_항목` 시트
+        - 인사평가: `인사평가_YYYY` 시트
+        - 직무기술서: `직무기술서` 시트
+        - 직무기술서(부서장 승인): `직무기술서_승인` 시트
+        - 직무능력평가: `직무능력평가_YYYY` 시트
+        - DB ☞ `https://docs.google.com/spreadsheets/d/1Z4OrSwqVXsCBnCaa_eUPDGmNqMpgm6twR9o_D9Hnfzk/edit?usp=sharing`
     """)
 
 # ══════════════════════════════════════════════════════════════════════════════
