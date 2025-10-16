@@ -1726,19 +1726,16 @@ def tab_job_desc(emp_df: pd.DataFrame):
         st.rerun()
     st.caption(f"현재: **{'수정모드' if st.session_state['jd2_edit_mode'] else '보기모드'}**")
     try:
-        _latest = _jd_latest_for(str(target_sabun), int(year))
-        _sub_ts = (str(_latest.get('제출시각','')).strip() if _latest else '')
-        # 승인시각 구하기
-        cur_when = ''
+        _jd = _jd_latest_for(str(target_sabun), int(year)) or {}
+        _sub_ts = (str(_jd.get('제출시각','')).strip() or "미제출")
+        latest_ver = _jd_latest_version_for(str(target_sabun), int(year))
+        appr_df = read_jd_approval_df(st.session_state.get('appr_rev', 0))
+        _appr = "미제출"
         if latest_ver > 0 and not appr_df.empty:
-            _sub = appr_df[(appr_df['연도']==int(year)) & (appr_df['사번'].astype(str)==str(target_sabun)) & (appr_df['버전']==int(latest_ver))]
-            if not _sub.empty:
-                _row = _sub.sort_values(['승인시각'], ascending=[False]).iloc[0].to_dict()
-                cur_when = str(_row.get('승인시각',''))
-        def _fmt(ts):
-            ts = (ts or '').strip()
-            return '-' if not ts else (ts if '(KST)' in ts else ts + ' (KST)')
-        st.info(f"🕒 제출시각: {_fmt(_sub_ts)}  ·  승인시각: {_fmt(cur_when)}")
+            _ok = appr_df[(appr_df['연도'] == int(year)) & (appr_df['사번'].astype(str) == str(target_sabun)) & (appr_df['버전'] == int(latest_ver)) & (appr_df['상태'].astype(str) == '승인')]
+            if not _ok.empty:
+                _appr = "승인"
+        show_submit_banner(f"🕒 제출시각  |  {_sub_ts if _sub_ts else '미제출'}  |  [부서장 승인] {_appr}")
     except Exception:
         pass
     edit_mode = bool(st.session_state["jd2_edit_mode"])
