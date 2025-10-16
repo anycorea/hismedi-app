@@ -1714,7 +1714,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
         def _fmt(ts):
             ts = (ts or '').strip()
             return '-' if not ts else (ts if '(KST)' in ts else ts + ' (KST)')
-        _banner_yellow(f"{_fmt(_sub_ts)} / 부서장 승인: {(_fmt(cur_when) if (cur_when and (cur_when != '-' )) else '미제출')}")
+        _banner_yellow(f"{_fmt_kst(_sub_ts)} / 부서장 승인: {(_fmt_kst(cur_when) if cur_when else '미제출')}")
     except Exception:
         pass
     edit_mode = bool(st.session_state["jd2_edit_mode"])
@@ -2095,7 +2095,7 @@ def tab_competency(emp_df: pd.DataFrame):
         def _fmt(ts):
             ts = (ts or '').strip()
             return '-' if not ts else (ts if '(KST)' in ts else ts + ' (KST)')
-        _banner_yellow(f"{_fmt(_cts)}")
+        _banner_yellow(f"{_fmt_kst(_cts)}")
         comp_locked = bool(_cts)
     except Exception:
         comp_locked = False
@@ -2109,7 +2109,7 @@ def tab_competency(emp_df: pd.DataFrame):
         try: eval_date=datetime.now(tz=tz_kst()).strftime('%Y-%m-%d')
         except Exception: eval_date=datetime.now().strftime('%Y-%m-%d')
         st.write('')
-try: edu_status=_edu_completion_from_jd(_jd_latest_for_comp(sel_sab, int(year)))
+    try: edu_status=_edu_completion_from_jd(_jd_latest_for_comp(sel_sab, int(year)))
     except Exception: edu_status="미완료"
     st.metric("교육이수 (자동)", edu_status)
     opinion=st.text_area("종합평가 의견", value="", height=150, key="cmpS_opinion", disabled=comp_locked)
