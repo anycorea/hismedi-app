@@ -1002,20 +1002,6 @@ def tab_eval(emp_df: pd.DataFrame):
 
 
 
-    # === 제출시각 배너(직무기술서) ===
-    try:
-        _jd = _jd_latest_for(str(target_sabun), int(year)) or {}
-        _sub_ts = (str(_jd.get('제출시각','')).strip() or "미제출")
-        latest_ver = _jd_latest_version_for(str(target_sabun), int(year))
-        appr_df = read_jd_approval_df(st.session_state.get('appr_rev', 0))
-        _appr = "미제출"
-        if latest_ver > 0 and not appr_df.empty:
-            _ok = appr_df[(appr_df['연도'] == int(year)) & (appr_df['사번'].astype(str) == str(target_sabun)) & (appr_df['버전'] == int(latest_ver)) & (appr_df['상태'].astype(str) == '승인')]
-            if not _ok.empty:
-                _appr = "승인"
-        show_submit_banner(f"🕒 제출시각  |  {_sub_ts}  |  [부서장 승인] {_appr}")
-    except Exception:
-        pass
 
     # === 제출시각 배너(인사평가) ===
     try:
@@ -1718,13 +1704,6 @@ def tab_job_desc(emp_df: pd.DataFrame):
             st.session_state["jd2_target_name"] = ""
         target_sabun = st.session_state["jd2_target_sabun"]; target_name = st.session_state["jd2_target_name"]
         st.success(f"대상자: {target_name} ({target_sabun})", icon="✅")
-
-    # 모드 토글 (인사평가와 동일 레이아웃)
-    if st.button(("수정모드로 전환" if not st.session_state["jd2_edit_mode"] else "보기모드로 전환"),
-                 use_container_width=True, key="jd2_toggle"):
-        st.session_state["jd2_edit_mode"] = not st.session_state["jd2_edit_mode"]
-        st.rerun()
-    st.caption(f"현재: **{'수정모드' if st.session_state['jd2_edit_mode'] else '보기모드'}**")
     try:
         _jd = _jd_latest_for(str(target_sabun), int(year)) or {}
         _sub_ts = (str(_jd.get('제출시각','')).strip() or "미제출")
@@ -1738,6 +1717,13 @@ def tab_job_desc(emp_df: pd.DataFrame):
         show_submit_banner(f"🕒 제출시각  |  {_sub_ts if _sub_ts else '미제출'}  |  [부서장 승인] {_appr}")
     except Exception:
         pass
+
+    # 모드 토글 (인사평가와 동일 레이아웃)
+    if st.button(("수정모드로 전환" if not st.session_state["jd2_edit_mode"] else "보기모드로 전환"),
+                 use_container_width=True, key="jd2_toggle"):
+        st.session_state["jd2_edit_mode"] = not st.session_state["jd2_edit_mode"]
+        st.rerun()
+    st.caption(f"현재: **{'수정모드' if st.session_state['jd2_edit_mode'] else '보기모드'}**")
     edit_mode = bool(st.session_state["jd2_edit_mode"])
 
     # 현재/초기 레코드
