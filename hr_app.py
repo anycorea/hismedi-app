@@ -178,7 +178,7 @@ st.markdown(
       /* 표 그리드(본체)에서만 가로 스크롤 */
       div[data-testid="stDataFrame"] [role="grid"] { overflow-x: auto !important; }
       /* 스크롤바 잡기 편하도록 표 아래쪽 여유 */
-      div[data-testid="stDataFrame"] { padding-bottom: 8px; }
+      div[data-testid="stDataFrame"] { padding-bottom: 10px; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -2528,6 +2528,7 @@ def tab_help():
         - 인사평가: `인사평가_YYYY`
         - 직무기술서: `직무기술서`
         - 직무능력평가: `직무능력평가_YYYY`
+        - DB ☞ https://docs.google.com/spreadsheets/d/1Z4OrSwqVXsCBnCaa_eUPDGmNqMpgm6twR9o_D9Hnfzk/edit?usp=sharing
     """)
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2545,7 +2546,6 @@ def main():
 
     left, right = st.columns([1.35, 3.65], gap="large")
 
-    
     with left:
         u = st.session_state.get("user", {})
         st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=True)
@@ -2564,7 +2564,6 @@ def main():
 
         # 좌측 메뉴
         render_staff_picker_left(emp_df)
-
 
     with right:
         tabs = st.tabs(["인사평가","직무기술서","직무능력평가","관리자","도움말"])
