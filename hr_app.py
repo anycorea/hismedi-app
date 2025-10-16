@@ -863,7 +863,7 @@ def read_my_eval_rows(year: int, sabun: str) -> pd.DataFrame:
     if sort_cols: df=df.sort_values(sort_cols, ascending=[True,True,False]).reset_index(drop=True)
     return df
 
-def tab_eval(emp_df: pd.DataFrame):
+def tab_eval(    emp_df: pd.DataFrame):
     """인사평가 탭 (심플·자동 라우팅)
     - 역할: employee / manager / admin
     - 유형 자동결정:
@@ -1004,19 +1004,19 @@ def tab_eval(emp_df: pd.DataFrame):
 
     
 
-# === 제출시각 배너(인사평가) ===
-try:
-    _emap = get_eval_summary_map_cached(int(year), st.session_state.get('eval_rev', 0))
-    def _b(stage:str) -> str:
-        try:
-            return (str(_emap.get((str(target_sabun), stage), ("",""))[1]).strip() or "미제출")
-        except Exception:
-            return "미제출"
-    _banner = f"🕒 제출시각  |  [자기] {_b('자기')}  |  [1차] {_b('1차')}  |  [2차] {_b('2차')}"
-    show_submit_banner(_banner)
-except Exception:
-    pass
-target_role = role_of(target_sabun)
+    # === 제출시각 배너(인사평가) ===
+    try:
+        _emap = get_eval_summary_map_cached(int(year), st.session_state.get('eval_rev', 0))
+        def _b(stage:str) -> str:
+            try:
+                return (str(_emap.get((str(target_sabun), stage), ('',''))[1]).strip() or '미제출')
+            except Exception:
+                return '미제출'
+        _banner = f"🕒 제출시각  |  [자기] {_b('자기')}  |  [1차] {_b('1차')}  |  [2차] {_b('2차')}"
+        show_submit_banner(_banner)
+    except Exception:
+        pass
+    target_role = role_of(target_sabun)
     if my_role == "employee":
         eval_type = "자기"
     elif my_role == "manager":
@@ -1055,7 +1055,7 @@ target_role = role_of(target_sabun)
     requested_edit = bool(st.session_state["eval2_edit_mode"])
     edit_mode = requested_edit and prereq_ok and (not is_locked)
     st.caption(f"현재: **{'수정모드' if edit_mode else '보기모드'}**")
-# --- 점수 입력 UI: 표만 -----------------------------------------------------
+    # --- 점수 입력 UI: 표만 -----------------------------------------------------
     st.markdown("#### 점수 입력 (자기/1차/2차) — 표에서 직접 수정하세요.")
 
     # ◇◇ Helper: 특정 평가유형(자기/1차/2차)의 '대상자 기준' 최신 점수(평가자 무관) 로드
@@ -1216,7 +1216,7 @@ target_role = role_of(target_sabun)
                 continue
             st.session_state[f"eval2_seg_{iid}_{kbase}"] = str(val)
             scores[iid] = val
-#### 제출 확인")st.markdown("#### 제출 확인")
+    #### 제출 확인")st.markdown("#### 제출 확인")
     cb1, cb2 = st.columns([2, 1])
     with cb1:
         attest_ok = st.checkbox(
@@ -1272,18 +1272,17 @@ target_role = role_of(target_sabun)
                 st.rerun()
             except Exception as e:
                 st.exception(e)
-# ══════════════════════════════════════════════════════════════════════════════
-# 직무기술서
-# ══════════════════════════════════════════════════════════════════════════════
-JOBDESC_SHEET = "직무기술서"
-JOBDESC_HEADERS = [
+    # ══════════════════════════════════════════════════════════════════════════════
+    # 직무기술서
+    # ══════════════════════════════════════════════════════════════════════════════
+    JOBDESC_SHEET = "직무기술서"
+    JOBDESC_HEADERS = [
     "사번","이름","연도","버전","부서1","부서2","작성자사번","작성자이름",
     "직군","직종","직무명","제정일","개정일","검토주기",
     "직무개요","주업무","기타업무",
     "필요학력","전공계열","직원공통필수교육","보수교육","기타교육","특성화교육",
     "면허","경력(자격요건)","비고","제출시각"
-]
-
+    ]
 def ensure_jobdesc_sheet():
     wb = get_book()
     try:
@@ -1652,7 +1651,7 @@ def set_jd_approval(year: int, sabun: str, name: str, version: int,
         except Exception: pass
         return {"action": "insert", "row": len(values) + 1}
 
-def tab_job_desc(emp_df: pd.DataFrame):
+def tab_job_desc(    emp_df: pd.DataFrame):
     """JD editor with 2-row header and 4-row education layout + print button order handled by _jd_print_html()."""
     try:
         this_year = datetime.now(tz=tz_kst()).year  # type: ignore
@@ -1705,20 +1704,20 @@ def tab_job_desc(emp_df: pd.DataFrame):
         target_sabun = st.session_state["jd2_target_sabun"]; target_name = st.session_state["jd2_target_name"]
         st.success(f"대상자: {target_name} ({target_sabun})", icon="✅")
 
-# === 제출시각 배너(직무기술서) ===
-try:
-    _jd = _jd_latest_for(str(target_sabun), int(year)) or {}
-    _sub_ts = (str(_jd.get('제출시각','')).strip() or "미제출")
-    latest_ver = _jd_latest_version_for(str(target_sabun), int(year))
-    appr_df = read_jd_approval_df(st.session_state.get('appr_rev', 0))
-    _appr = "미제출"
-    if latest_ver > 0 and not appr_df.empty:
-        _ok = appr_df[(appr_df['연도'] == int(year)) & (appr_df['사번'].astype(str) == str(target_sabun)) & (appr_df['버전'] == int(latest_ver)) & (appr_df['상태'].astype(str) == '승인')]
-        if not _ok.empty:
-            _appr = "승인"
-    show_submit_banner(f"🕒 제출시각  |  {_sub_ts}  |  [부서장 승인] {_appr}")
-except Exception:
-    pass
+    # === 제출시각 배너(직무기술서) ===
+    try:
+        _jd = _jd_latest_for(str(target_sabun), int(year)) or {}
+        _sub_ts = (str(_jd.get('제출시각','')).strip() or '미제출')
+        latest_ver = _jd_latest_version_for(str(target_sabun), int(year))
+        appr_df = read_jd_approval_df(st.session_state.get('appr_rev', 0))
+        _appr = '미제출'
+        if latest_ver > 0 and not appr_df.empty:
+            _ok = appr_df[(appr_df['연도'] == int(year)) & (appr_df['사번'].astype(str) == str(target_sabun)) & (appr_df['버전'] == int(latest_ver)) & (appr_df['상태'].astype(str) == '승인')]
+            if not _ok.empty:
+                _appr = '승인'
+        show_submit_banner(f"🕒 제출시각  |  {_sub_ts}  |  [부서장 승인] {_appr}")
+    except Exception:
+        pass
 
 
     # 모드 토글 (인사평가와 동일 레이아웃)
@@ -1940,15 +1939,16 @@ except Exception:
             st.dataframe(dfv, use_container_width=True, hide_index=True, height=260,
                          column_config={"연도": st.column_config.NumberColumn(format="%d")})
 
-# ══════════════════════════════════════════════════════════════════════════════
-# 직무능력평가 + JD 요약 스크롤
-# ══════════════════════════════════════════════════════════════════════════════
-COMP_SIMPLE_PREFIX = "직무능력평가_"
-COMP_SIMPLE_HEADERS = [
+    # ══════════════════════════════════════════════════════════════════════════════
+    # 직무능력평가 + JD 요약 스크롤
+    # ══════════════════════════════════════════════════════════════════════════════
+    COMP_SIMPLE_PREFIX = "직무능력평가_"
+    COMP_SIMPLE_HEADERS = [
     "연도","평가대상사번","평가대상이름","평가자사번","평가자이름",
     "평가일자","주업무평가","기타업무평가","교육이수","자격유지","종합의견",
     "상태","제출시각","잠금"
-]
+    ]
+
 def _simp_sheet_name(year:int|str)->str: return f"{COMP_SIMPLE_PREFIX}{int(year)}"
 
 def _ensure_comp_simple_sheet(year:int):
@@ -2033,7 +2033,7 @@ def read_my_comp_simple_rows(year:int, sabun:str)->pd.DataFrame:
     if sort_cols: df=df.sort_values(sort_cols, ascending=[True,False,False])
     return df.reset_index(drop=True)
 
-def tab_competency(emp_df: pd.DataFrame):
+def tab_competency(    emp_df: pd.DataFrame):
     # 권한 게이트: 관리자/평가권한자만 접근 가능 (일반 직원 접근 불가)
     u_check = st.session_state.get('user', {})
     me_check = str(u_check.get('사번',''))
@@ -2080,16 +2080,16 @@ def tab_competency(emp_df: pd.DataFrame):
 
     
 
-# === 제출시각 배너(직무능력평가) ===
-comp_locked = False
-try:
-    _cmap = get_comp_summary_map_cached(int(year), st.session_state.get('comp_rev', 0))
-    _cts = (str(_cmap.get(str(sel_sab), ("","","",""))[3]).strip())
-    show_submit_banner(f"🕒 제출시각  |  {_cts if _cts else '미제출'}")
-    comp_locked = bool(_cts)
-except Exception:
-    pass
-with st.expander("직무기술서 요약", expanded=True):
+    # === 제출시각 배너(직무능력평가) ===
+    comp_locked = False
+    try:
+        _cmap = get_comp_summary_map_cached(int(year), st.session_state.get('comp_rev', 0))
+        _cts = (str(_cmap.get(str(sel_sab), ('','','',''))[3]).strip())
+        show_submit_banner(f"🕒 제출시각  |  {_cts if _cts else '미제출'}")
+        comp_locked = bool(_cts)
+    except Exception:
+        pass
+    with st.expander("직무기술서 요약", expanded=True):
         jd=_jd_latest_for_comp(sel_sab, int(year))
         if jd:
             def V(key): return (_html_escape((jd.get(key,"") or "").strip()) or "—")
@@ -2106,7 +2106,7 @@ with st.expander("직무기술서 요약", expanded=True):
             st.markdown(html, unsafe_allow_html=True)
         else:
             st.caption("직무기술서가 없습니다. JD 없이도 평가를 진행할 수 있습니다.")
-st.markdown("### 평가 입력")
+    st.markdown("### 평가 입력")
     grade_options=["우수","양호","보통","미흡"]
     colG=st.columns(4)
     with colG[0]: g_main = st.radio("주업무 평가", grade_options, index=2, key="cmpS_main", horizontal=False, disabled=comp_locked)
@@ -2163,14 +2163,13 @@ st.markdown("### 평가 입력")
 
     
 
-# ══════════════════════════════════════════════════════════════════════════════
-# 관리자: 직원/ PIN 관리 / 인사평가 항목 관리 / 권한 관리
-# ══════════════════════════════════════════════════════════════════════════════
-REQ_EMP_COLS = [
+    # ══════════════════════════════════════════════════════════════════════════════
+    # 관리자: 직원/ PIN 관리 / 인사평가 항목 관리 / 권한 관리
+    # ══════════════════════════════════════════════════════════════════════════════
+    REQ_EMP_COLS = [
     "사번","이름","부서1","부서2","직급","직무","직군","입사일","퇴사일","기타1","기타2","재직여부",
     "PIN_hash","PIN_No"
-]
-
+    ]
 def _get_ws_and_headers(sheet_name: str):
     ws=_ws(sheet_name)
     header,_h=_hdr(ws, sheet_name)
