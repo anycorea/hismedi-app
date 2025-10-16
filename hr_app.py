@@ -1896,9 +1896,10 @@ def tab_job_desc(emp_df: pd.DataFrame):
                 st.markdown("<div class='approval-dim'>부서장 승인이 완료된 대상자입니다. (수정/변경 불가)</div>", unsafe_allow_html=True)
             else:
                 appr_remark = st.text_input("부서장 의견", key=f"jd_appr_remark_{year}_{target_sabun}")
-            with c_pin:
-                appr_pin = st.text_input("부서장 PIN 재입력", type="password", key=f"jd_appr_pin_{year}_{target_sabun}")
+        with c_pin:
+            appr_pin = st.text_input("부서장 PIN 재입력", type="password", key=f"jd_appr_pin_{year}_{target_sabun}")
 
+        if not _approved:
             # 승인/반려 버튼
             b1, b2 = st.columns([1,1])
             with b1:
@@ -1908,7 +1909,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
 
             if do_ok or do_rej:
                 if not verify_pin(me_sabun, appr_pin):
-                    st.error("PIN이 올바르지 않습니다.")
+                    st.error("부서장 PIN 이 올바르지 않습니다.", icon="🚫")
                 else:
                     status = "승인" if do_ok else "반려"
                     with st.spinner("처리 중..."):
