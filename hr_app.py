@@ -160,7 +160,17 @@ st.markdown(
       .scrollbox .kv{ margin-bottom: .6rem; }
       .scrollbox .k{ font-weight: 700; margin-bottom: .2rem; }
       .scrollbox .v{ white-space: pre-wrap; word-break: break-word; }
-    </style>
+    
+
+      .submit-banner{
+        background:#FEF3C7; /* amber-100 */
+        border:1px solid #FDE68A; /* amber-200 */
+        padding:.55rem .8rem;
+        border-radius:.5rem;
+        font-weight:600;
+        line-height:1.35;
+      }
+</style>
     """,
     unsafe_allow_html=True,
 )
@@ -176,6 +186,15 @@ def _normalize_private_key(raw: str) -> str:
     return raw.replace("\\n","\n") if "\\n" in raw and "BEGIN PRIVATE KEY" in raw else raw
 def _pin_hash(pin: str, sabun: str) -> str:
     return hashlib.sha256(f"{str(sabun).strip()}:{str(pin).strip()}".encode()).hexdigest()
+
+def show_submit_banner(text: str):
+    """Render a consistent yellow '제출시각' banner under the target banner on each tab."""
+    try:
+        st.markdown(f"<div class='submit-banner'>{text}</div>", unsafe_allow_html=True)
+    except Exception:
+        # Fallback (shouldn't happen)
+        st.info(text)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PIN Utilities (clean)
@@ -983,7 +1002,21 @@ def tab_eval(emp_df: pd.DataFrame):
 
     st.success(f"대상자: {target_name} ({target_sabun})", icon="✅")
 
-    target_role = role_of(target_sabun)
+    
+
+# === 제출시각 배너(인사평가) ===
+try:
+    _emap = get_eval_summary_map_cached(int(year), st.session_state.get('eval_rev', 0))
+    def _b(stage:str) -> str:
+        try:
+            return (str(_emap.get((str(target_sabun), stage), ("",""))[1]).strip() or "미제출")
+        except Exception:
+            return "미제출"
+    _banner = f"🕒 제출시각  |  [자기] {_b('자기')}  |  [1차] {_b('1차')}  |  [2차] {_b('2차')}"
+    show_submit_banner(_banner)
+except Exception:
+    pass
+target_role = role_of(target_sabun)
     if my_role == "employee":
         eval_type = "자기"
     elif my_role == "manager":
@@ -1672,28 +1705,28 @@ def tab_job_desc(emp_df: pd.DataFrame):
         target_sabun = st.session_state["jd2_target_sabun"]; target_name = st.session_state["jd2_target_name"]
         st.success(f"대상자: {target_name} ({target_sabun})", icon="✅")
 
+# === 제출시각 배너(직무기술서) ===
+try:
+    _jd = _jd_latest_for(str(target_sabun), int(year)) or {}
+    _sub_ts = (str(_jd.get('제출시각','')).strip() or "미제출")
+    latest_ver = _jd_latest_version_for(str(target_sabun), int(year))
+    appr_df = read_jd_approval_df(st.session_state.get('appr_rev', 0))
+    _appr = "미제출"
+    if latest_ver > 0 and not appr_df.empty:
+        _ok = appr_df[(appr_df['연도'] == int(year)) & (appr_df['사번'].astype(str) == str(target_sabun)) & (appr_df['버전'] == int(latest_ver)) & (appr_df['상태'].astype(str) == '승인')]
+        if not _ok.empty:
+            _appr = "승인"
+    show_submit_banner(f"🕒 제출시각  |  {_sub_ts}  |  [부서장 승인] {_appr}")
+except Exception:
+    pass
+
+
     # 모드 토글 (인사평가와 동일 레이아웃)
     if st.button(("수정모드로 전환" if not st.session_state["jd2_edit_mode"] else "보기모드로 전환"),
                  use_container_width=True, key="jd2_toggle"):
         st.session_state["jd2_edit_mode"] = not st.session_state["jd2_edit_mode"]
         st.rerun()
     st.caption(f"현재: **{'수정모드' if st.session_state['jd2_edit_mode'] else '보기모드'}**")
-    try:
-        _latest = _jd_latest_for(str(target_sabun), int(year))
-        _sub_ts = (str(_latest.get('제출시각','')).strip() if _latest else '')
-        # 승인시각 구하기
-        cur_when = ''
-        if latest_ver > 0 and not appr_df.empty:
-            _sub = appr_df[(appr_df['연도']==int(year)) & (appr_df['사번'].astype(str)==str(target_sabun)) & (appr_df['버전']==int(latest_ver))]
-            if not _sub.empty:
-                _row = _sub.sort_values(['승인시각'], ascending=[False]).iloc[0].to_dict()
-                cur_when = str(_row.get('승인시각',''))
-        def _fmt(ts):
-            ts = (ts or '').strip()
-            return '-' if not ts else (ts if '(KST)' in ts else ts + ' (KST)')
-        st.info(f"🕒 제출시각: {_fmt(_sub_ts)}  ·  승인시각: {_fmt(cur_when)}")
-    except Exception:
-        pass
     edit_mode = bool(st.session_state["jd2_edit_mode"])
 
     # 현재/초기 레코드
@@ -1854,8 +1887,6 @@ def tab_job_desc(emp_df: pd.DataFrame):
                 cur_status = str(srow.get("상태",""))
                 cur_when = str(srow.get("승인시각",""))
                 cur_who = str(srow.get("승인자이름",""))
-        st.write(f"대상자 최신버전: **{latest_ver if latest_ver else '-'}** / 현재상태: **{cur_status or '-'}** {('(' + cur_when + ', ' + cur_who + ')') if cur_status else ''}")
-
         # 의견/핀 입력 (의견을 좌측에 크게)
         c_remark, c_pin = st.columns([4,1])
         with c_remark:
@@ -2047,7 +2078,18 @@ def tab_competency(emp_df: pd.DataFrame):
 
     st.success(f"대상자: {_emp_name_by_sabun(emp_df, sel_sab)} ({sel_sab})", icon="✅")
 
-    with st.expander("직무기술서 요약", expanded=True):
+    
+
+# === 제출시각 배너(직무능력평가) ===
+comp_locked = False
+try:
+    _cmap = get_comp_summary_map_cached(int(year), st.session_state.get('comp_rev', 0))
+    _cts = (str(_cmap.get(str(sel_sab), ("","","",""))[3]).strip())
+    show_submit_banner(f"🕒 제출시각  |  {_cts if _cts else '미제출'}")
+    comp_locked = bool(_cts)
+except Exception:
+    pass
+with st.expander("직무기술서 요약", expanded=True):
         jd=_jd_latest_for_comp(sel_sab, int(year))
         if jd:
             def V(key): return (_html_escape((jd.get(key,"") or "").strip()) or "—")
@@ -2064,19 +2106,7 @@ def tab_competency(emp_df: pd.DataFrame):
             st.markdown(html, unsafe_allow_html=True)
         else:
             st.caption("직무기술서가 없습니다. JD 없이도 평가를 진행할 수 있습니다.")
-
-    st.markdown("### 평가 입력")
-    try:
-        _cmap = get_comp_summary_map_cached(int(year), st.session_state.get('comp_rev', 0))
-        _cts = (str(_cmap.get(str(sel_sab), ("","","",""))[3]).strip())
-        def _fmt(ts):
-            ts = (ts or '').strip()
-            return '-' if not ts else (ts if '(KST)' in ts else ts + ' (KST)')
-        st.info(f"🕒 제출시각: {_fmt(_cts)}")
-        comp_locked = bool(_cts)
-    except Exception:
-        comp_locked = False
-        pass
+st.markdown("### 평가 입력")
     grade_options=["우수","양호","보통","미흡"]
     colG=st.columns(4)
     with colG[0]: g_main = st.radio("주업무 평가", grade_options, index=2, key="cmpS_main", horizontal=False, disabled=comp_locked)
