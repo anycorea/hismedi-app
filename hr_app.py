@@ -178,7 +178,7 @@ st.markdown(
       /* 표 그리드(본체)에서만 가로 스크롤 */
       div[data-testid="stDataFrame"] [role="grid"] { overflow-x: auto !important; }
       /* 스크롤바 잡기 편하도록 표 아래쪽 여유 */
-      div[data-testid="stDataFrame"] { padding-bottom: 6px; }
+      div[data-testid="stDataFrame"] { padding-bottom: 8px; }
     </style>
     """,
     unsafe_allow_html=True,
