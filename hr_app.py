@@ -168,7 +168,8 @@ st.markdown(
     border-radius:.5rem;
     font-weight:600;
     line-height:1.35;
-  }
+    margin: 4px 0 14px 0; /* add comfortable spacing below */
+    display:block;}
 </style>
     """,
     unsafe_allow_html=True,
