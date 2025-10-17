@@ -117,8 +117,9 @@ from gspread.utils import rowcol_to_a1
 # ══════════════════════════════════════════════════════════════════════════════
 # Sync Utility (Force refresh Google Sheets caches)
 # ══════════════════════════════════════════════════════════════════════════════
+
 def force_sync():
-    """모든 캐시를 무효화하고 즉시 리런하여 구글시트 최신 데이터로 갱신합니다."""
+    """캐시 비우고, 편집/그리드/임시 상태만 정리한 뒤 즉시 리런 (로그인 유지)."""
     # 1) Streamlit 캐시 비우기
     try:
         st.cache_data.clear()
@@ -129,16 +130,26 @@ def force_sync():
     except Exception:
         pass
 
-    # 2) 세션 상태 중 로컬 캐시성 키 초기화(프로젝트 규칙에 맞게 prefix 추가/수정)
+    # 2) 세션 상태 정리 (로그인 관련 키는 유지)
+    preserve_exact = {"authed", "user", "auth_expires_at", "_state_owner_sabun"}
+    drop_prefixes = ("__cache_", "_df_", "_cache_", "gs_", "editor_", "grid_", "aggrid_", "jd_", "eval_", "cmpS_", "left_", "glob_")
     try:
         for k in list(st.session_state.keys()):
-            if k.startswith(("__cache_", "_df_", "_cache_", "gs_")):
+            if k in preserve_exact:
+                continue
+            if k.startswith(drop_prefixes):
                 del st.session_state[k]
     except Exception:
         pass
 
-    # 3) 즉시 리런
-    st.rerun()
+    # 3) 즉시 리런 (로그아웃 없이 화면만 새로고침)
+    try:
+        st.rerun()
+    except Exception:
+        try:
+            st.experimental_rerun()
+        except Exception:
+            pass
 
 # ══════════════════════════════════════════════════════════════════════════════
 # App Config / Style
