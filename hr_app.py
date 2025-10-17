@@ -70,28 +70,82 @@ def get_comp_summary_map_cached(_year: int, _rev: int = 0) -> dict:
     return out
 
 @st.cache_data(ttl=120, show_spinner=False)
+
+import pandas as pd
+import streamlit as st
+
+@st.cache_data(ttl=120, show_spinner=False)
 def get_jd_approval_map_cached(_year: int, _rev: int = 0) -> dict:
-    """Return {(사번, 최신버전)->(상태, 승인시각)} for the year from 직무기술서_승인."""
+    """Return {(사번, 최신버전)->(상태, 승인시각)} for the year from 직무기술서_승인.
+    Robust to empty/cleared sheets and missing columns.
+    """
+    sheet_name = globals().get("JD_APPROVAL_SHEET", "직무기술서_승인")
+    default_headers = ["연도","사번","이름","버전","승인자사번","승인자이름","상태","승인시각","비고"]
+    headers = globals().get("JD_APPROVAL_HEADERS", default_headers)
+
+    # Ensure sheet exists if helper available
     try:
-        ws = _ws("직무기술서_승인")
-        df = pd.DataFrame(_ws_get_all_records(ws))
+        ensure_fn = globals().get("ensure_jd_approval_sheet")
+        if callable(ensure_fn):
+            ensure_fn()
     except Exception:
-        df = pd.DataFrame(columns=["연도","사번","버전","상태","승인시각"])
-    for c in ["연도","버전"]:
-        if c in df.columns:
-            df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0).astype(int)
+        pass
+
+    # Load data safely
+    df = None
+    try:
+        _ws_func = globals().get("_ws")
+        _get_records = globals().get("_ws_get_all_records")
+        if callable(_ws_func) and callable(_get_records):
+            ws = _ws_func(sheet_name)
+            raw = _get_records(ws)
+            df = pd.DataFrame(raw)
+    except Exception:
+        df = None
+
+    if df is None:
+        try:
+            get_df = globals().get("get_sheet_as_df")
+            if callable(get_df):
+                df = get_df(sheet_name)
+        except Exception:
+            df = None
+
+    if df is None or df.empty:
+        df = pd.DataFrame(columns=headers)
+
+    # Ensure columns
+    for c in headers:
+        if c not in df.columns:
+            df[c] = ""
+
+    # Normalize
+    df["연도"] = pd.to_numeric(df["연도"], errors="coerce").fillna(0).astype(int)
+    if "버전" in df.columns:
+        df["버전"] = pd.to_numeric(df["버전"], errors="coerce").fillna(0).astype(int)
+    else:
+        df["버전"] = 0
     for c in ["사번","상태","승인시각"]:
         if c in df.columns:
             df[c] = df[c].astype(str)
-    df = df[df.get("연도",0).astype(int) == int(_year)]
+        else:
+            df[c] = ""
+
+    # Filter
+    try:
+        df = df[df["연도"] == int(_year)]
+    except Exception:
+        df = df.iloc[0:0]
+
     out = {}
     if not df.empty:
-        df = df.sort_values(["사번","버전","승인시각"], ascending=[True, True, True]).reset_index(drop=True)
+        sort_cols = [c for c in ["사번","버전","승인시각"] if c in df.columns]
+        if sort_cols:
+            df = df.sort_values(sort_cols, ascending=[True]*len(sort_cols), kind="stable").reset_index(drop=True)
         for _, rr in df.iterrows():
             k = (str(rr.get("사번","")), int(rr.get("버전",0)))
             out[k] = (str(rr.get("상태","")), str(rr.get("승인시각","")))
     return out
-
 from html import escape as _html_escape
 
 # Optional zoneinfo (KST)
@@ -2724,91 +2778,12 @@ if __name__ == "__main__":
     main()
 
 
-# ======================
-# PATCH 2025-10-17 (robust cache-safe implementation)
-# Reason: avoid AttributeError when '연도' column is missing/df is empty after clearing test data.
-# This definition overrides any previous get_jd_approval_map_cached in this module.
-# ======================
-import pandas as pd
-import streamlit as st
 
-@st.cache_data(ttl=120, show_spinner=False)
-def get_jd_approval_map_cached(_year: int, _rev: int = 0) -> dict:
-    """Return {(사번, 최신버전)->(상태, 승인시각)} for the year from 직무기술서_승인.
-    Robust to empty/cleared sheets and missing columns.
-    """
-    # Resolve sheet name / headers with safe fallbacks
-    sheet_name = globals().get("JD_APPROVAL_SHEET", "직무기술서_승인")
-    default_headers = ["연도","사번","이름","버전","승인자사번","승인자이름","상태","승인시각","비고"]
-    headers = globals().get("JD_APPROVAL_HEADERS", default_headers)
-
-    # 1) Try ensuring the sheet exists (if helper is available)
-    try:
-        ensure_fn = globals().get("ensure_jd_approval_sheet")
-        if callable(ensure_fn):
-            ensure_fn()
-    except Exception:
-        pass
-
-    # 2) Load as DataFrame via available helpers
-    df = None
-    try:
-        _ws_func = globals().get("_ws")
-        _get_records = globals().get("_ws_get_all_records")
-        if callable(_ws_func) and callable(_get_records):
-            ws = _ws_func(sheet_name)
-            raw = _get_records(ws)
-            df = pd.DataFrame(raw)
-    except Exception:
-        df = None
-
-    if df is None:
-        try:
-            # Fallback loader if the project defines one
-            get_df = globals().get("get_sheet_as_df")
-            if callable(get_df):
-                df = get_df(sheet_name)
-        except Exception:
-            df = None
-
-    if df is None or df.empty:
-        # Create an empty frame with expected headers so downstream ops are safe
-        df = pd.DataFrame(columns=headers)
-
-    # 3) Ensure required columns exist
-    for c in headers:
-        if c not in df.columns:
-            df[c] = ""
-
-    # 4) Normalize types
-    df["연도"] = pd.to_numeric(df["연도"], errors="coerce").fillna(0).astype(int)
-    if "버전" in df.columns:
-        df["버전"] = pd.to_numeric(df["버전"], errors="coerce").fillna(0).astype(int)
-    else:
-        df["버전"] = 0
-
-    for c in ["사번", "상태", "승인시각"]:
-        if c in df.columns:
-            df[c] = df[c].astype(str)
-        else:
-            df[c] = ""
-
-    # 5) Filter by year
-    try:
-        df = df[df["연도"] == int(_year)]
-    except Exception:
-        # If anything goes wrong, fall back to empty
-        df = df.iloc[0:0]
-
-    # 6) Build output mapping
-    out = {}
-    if not df.empty:
-        # 승인이 최근/최대 버전 우선이 되도록 정렬 (승인시각이 문자열일 수도 있어 안정적으로 정렬)
-        sort_cols = [c for c in ["사번", "버전", "승인시각"] if c in df.columns]
-        if sort_cols:
-            df = df.sort_values(sort_cols, ascending=[True]*len(sort_cols), kind="stable").reset_index(drop=True)
-        for _, rr in df.iterrows():
-            k = (str(rr.get("사번", "")), int(rr.get("버전", 0)))
-            out[k] = (str(rr.get("상태", "")), str(rr.get("승인시각", "")))
-    return out
-# ====================== END PATCH ======================
+# --- Optional: sidebar cache clear control (appended by patch) ---
+try:
+    with st.sidebar:
+        if st.button("캐시 초기화"):
+            st.cache_data.clear()
+            st.success("캐시를 비웠습니다. 다시 시도해 보세요.")
+except Exception:
+    pass
