@@ -10,6 +10,9 @@ from typing import Any, Tuple
 import pandas as pd
 import streamlit as st
 
+# Header auto-fix toggle (user manages Google Sheet headers)
+AUTO_FIX_HEADERS = False
+
 # ===== Cached summary helpers (performance) =====
 @st.cache_data(ttl=300, show_spinner=False)
 def get_eval_summary_map_cached(_year: int, _rev: int = 0) -> dict:
@@ -2191,9 +2194,17 @@ def ensure_emp_sheet_columns():
     ws, header, hmap = _get_ws_and_headers(EMP_SHEET)
     need = [c for c in REQ_EMP_COLS if c not in header]
     if need:
-        _retry(ws.update, "1:1", [header + need])
-        # NEW: refresh header & map so newly added columns (e.g., 적용여부) get positions
-        ws, header, hmap = _get_ws_and_headers(EMP_SHEET)
+        if AUTO_FIX_HEADERS:
+            _retry(ws.update, "1:1", [header + need])
+            ws, header, hmap = _get_ws_and_headers(EMP_SHEET)
+        else:
+            try:
+                st.warning(
+                    "직원 시트 헤더에 다음 컬럼이 없습니다: " + ", ".join(need) + "\n"
+                    "→ 시트를 직접 수정한 뒤 좌측 🔄 동기화 버튼을 눌러주세요.", icon="⚠️"
+                )
+            except Exception:
+                pass
     return ws, header, hmap
 
 def _find_row_by_sabun(ws, hmap, sabun: str) -> int:
