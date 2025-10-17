@@ -1,16 +1,3 @@
-# --- helper: detect Google Sheets quota(429) error ---
-def _is_quota_429(err) -> bool:
-    try:
-        from gspread.exceptions import APIError as _APIError
-        if isinstance(err, _APIError):
-            resp = getattr(err, "response", None)
-            code = getattr(resp, "status_code", None)
-            return code == 429
-    except Exception:
-        pass
-    return False
-# --- end helper ---
-
 # HISMEDI HR App
 # Tabs: 인사평가 / 직무기술서 / 직무능력평가 / 관리자 / 도움말
 
@@ -24,6 +11,23 @@ import pandas as pd
 import streamlit as st
 
 # Header auto-fix toggle (user manages Google Sheet headers)
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Helpers
+# ══════════════════════════════════════════════════════════════════════════════
+# --- helper: detect Google Sheets quota(429) error ---
+def _is_quota_429(err) -> bool:
+    try:
+        from gspread.exceptions import APIError as _APIError
+        if isinstance(err, _APIError):
+            resp = getattr(err, "response", None)
+            code = getattr(resp, "status_code", None)
+            return code == 429
+    except Exception:
+        pass
+    return False
+# --- end helper ---
+
 AUTO_FIX_HEADERS = False
 
 # ===== Cached summary helpers (performance) =====
@@ -215,11 +219,11 @@ st.markdown(
 # Utils
 
 def current_year() -> int:
+    """Return KST-based current year if tz_kst() is available, otherwise system year."""
     try:
-        return int(datetime.now(tz=tz_kst()).year)
+        return datetime.now(tz=tz_kst()).year  # tz_kst() must return a tzinfo
     except Exception:
-        return int(datetime.now().year)
-# ══════════════════════════════════════════════════════════════════════════════
+        return datetime.now().year
 def kst_now_str(): return datetime.now(tz=tz_kst()).strftime("%Y-%m-%d %H:%M:%S (%Z)")
 
 def _jd_plain_html(text: str) -> str:
