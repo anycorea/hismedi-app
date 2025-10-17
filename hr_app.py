@@ -2658,9 +2658,9 @@ gs_flush()
                 for i in range(0, len(rows), CHUNK):
                     ws.append_rows(rows[i:i+CHUNK], value_input_option="USER_ENTERED")
 
-            st.cache_data.clear()
+            gs_flush()
             st.success("권한이 전체 반영되었습니다.", icon="✅")
-            st.rerun()
+            st.toast("저장 완료", icon="💾")
         except Exception as e:
             st.exception(e)
 
