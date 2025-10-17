@@ -5,7 +5,7 @@
 # Imports
 # ══════════════════════════════════════════════════════════════════════════════
 import re, time, random, hashlib, secrets as pysecrets
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Tuple
 import pandas as pd
 import streamlit as st
@@ -953,16 +953,16 @@ def upsert_eval_response(emp_df: pd.DataFrame, year: int, eval_type: str,
         return {"action":"update","total":total}
 
 @st.cache_data(ttl=300, show_spinner=False)
-
-
-
-
-
-
-
-
-
-
+def read_my_eval_rows(year: int, sabun: str) -> pd.DataFrame:
+    name=_eval_sheet_name(year)
+    try:
+        ws=_ws(name); df=pd.DataFrame(_ws_get_all_records(ws))
+    except Exception: return pd.DataFrame(columns=EVAL_BASE_HEADERS)
+    if df.empty: return df
+    if "평가자사번" in df.columns: df=df[df["평가자사번"].astype(str)==str(sabun)]
+    sort_cols=[c for c in ["평가유형","평가대상사번","제출시각"] if c in df.columns]
+    if sort_cols: df=df.sort_values(sort_cols, ascending=[True,True,False]).reset_index(drop=True)
+    return df
 
 def tab_eval(emp_df: pd.DataFrame):
     """인사평가 탭 (심플·자동 라우팅)
@@ -2390,17 +2390,17 @@ def tab_staff_admin(emp_df: pd.DataFrame):
         except Exception as e:
             st.exception(e)
 
-
-
-
-
-
-
-
-
-
-
-
+def reissue_pin_inline(sabun: str, length: int = 4):
+    ws, header, hmap = ensure_emp_sheet_columns()
+    if "PIN_hash" not in hmap or "PIN_No" not in hmap: raise RuntimeError("PIN_hash/PIN_No 필요")
+    row_idx=_find_row_by_sabun(ws, hmap, str(sabun))
+    if row_idx==0: raise RuntimeError("사번을 찾지 못했습니다.")
+    pin = "".join(pysecrets.choice("0123456789") for _ in range(length))
+    ph  = _pin_hash(pin, str(sabun))
+    _retry(ws.update_cell, row_idx, hmap["PIN_hash"], ph)
+    _retry(ws.update_cell, row_idx, hmap["PIN_No"], pin)
+    st.cache_data.clear()
+    return {"PIN_No": pin, "PIN_hash": ph}
 
 def tab_admin_pin(emp_df):
     ws, header, hmap = ensure_emp_sheet_columns()
