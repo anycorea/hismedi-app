@@ -2015,7 +2015,9 @@ def _jd_latest_for_comp(sabun:str, year:int)->dict:
         q=df[(df["사번"].astype(str)==str(sabun))&(df["연도"].astype(int)==int(year))]
         if q.empty: return {}
         if "버전" in q.columns:
-            try: q["버전"]=pd.to_numeric(q["버전"], errors="coerce").fillna(0)
+            try:
+                q = q.copy()
+                q["버전"] = pd.to_numeric(q["버전"], errors="coerce").fillna(0)
             except Exception: pass
             q=q.sort_values("버전").iloc[-1]
         else:
