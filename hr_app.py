@@ -1621,15 +1621,16 @@ def read_jd_approval_df(_rev: int = 0) -> pd.DataFrame:
     return df
 
 def _ws_batch_row(ws, idx, hmap, kv: dict):
-    upd = []
+    updates = []
     for k, v in kv.items():
         c = hmap.get(k)
         if not c:
             continue
         a1 = gspread.utils.rowcol_to_a1(int(idx), int(c))
-        upd.append({"range": a1, "values": [[v]]})
-    if upd:
-        _retry(ws.batch_update, upd)
+        updates.append({"range": a1, "values": [[v]]})
+    if updates:
+        body = {"valueInputOption": "USER_ENTERED", "data": updates}
+        _retry(ws.spreadsheet.batch_update, body)
 
 def _jd_latest_version_for(sabun: str, year: int) -> int:
     row = _jd_latest_for(sabun, int(year)) or {}
@@ -2293,7 +2294,7 @@ def tab_staff_admin(emp_df: pd.DataFrame):
                         diff_cols.append(c)
                         # 불린 컬럼은 True/False로 유지
                         if c in ("재직여부", "적용여부"):
-                            payload[c] = bool(after.loc[sabun, c])
+                            payload[c] = "TRUE" if bool(after.loc[sabun, c]) else "FALSE"
                         else:
                             payload[c] = after.loc[sabun, c]
 
