@@ -2192,6 +2192,8 @@ def ensure_emp_sheet_columns():
     need = [c for c in REQ_EMP_COLS if c not in header]
     if need:
         _retry(ws.update, "1:1", [header + need])
+        # NEW: refresh header & map so newly added columns (e.g., 적용여부) get positions
+        ws, header, hmap = _get_ws_and_headers(EMP_SHEET)
     return ws, header, hmap
 
 def _find_row_by_sabun(ws, hmap, sabun: str) -> int:
