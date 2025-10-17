@@ -363,21 +363,25 @@ def _ws_get_all_records(ws):
 # Sheet Readers (TTL↑)
 # ══════════════════════════════════════════════════════════════════════════════
 LAST_GOOD: dict[str, pd.DataFrame] = {}
+
 @st.cache_data(ttl=600, show_spinner=False)
 def read_sheet_df(sheet_name: str) -> pd.DataFrame:
+    """구글시트 → DataFrame (빈칸 재직여부=True로 해석, 호환 유지)"""
     try:
         ws = _ws(sheet_name)
         df = pd.DataFrame(_ws_get_all_records(ws))
         if df.empty:
             return df
 
+        # 사번은 문자열 키로 고정
         if "사번" in df.columns:
             df["사번"] = df["사번"].astype(str)
 
+        # 재직여부: 빈칸은 True, 나머지는 _to_bool 규칙 적용
         if "재직여부" in df.columns:
-            # 빈칸을 False로 볼 경우(기본):
-            df["재직여부"] = df["재직여부"].where(df["재직여부"].notna(), "")
-            df["재직여부"] = df["재직여부"].map(_to_bool)
+            df["재직여부"] = df["재직여부"].map(
+                lambda v: True if str(v).strip() == "" else _to_bool(v)
+            )
 
         LAST_GOOD[sheet_name] = df.copy()
         return df
@@ -388,12 +392,24 @@ def read_sheet_df(sheet_name: str) -> pd.DataFrame:
             return LAST_GOOD[sheet_name]
         raise
 
+
 @st.cache_data(ttl=600, show_spinner=False)
 def read_emp_df() -> pd.DataFrame:
+    """직원 시트 표준화: 필수 컬럼 보강 및 dtype 정리"""
     df = read_sheet_df(EMP_SHEET)
-    for c in ["사번","이름","PIN_hash"]:
-        if c not in df.columns: df[c]=""
-    if "사번" in df.columns: df["사번"]=df["사번"].astype(str)
+
+    # 최소 컬럼 보강
+    for c in ["사번", "이름", "PIN_hash", "재직여부"]:
+        if c not in df.columns:
+            df[c] = "" if c != "재직여부" else True
+
+    # dtype 정리
+    df["사번"] = df["사번"].astype(str)
+    # 재직여부는 확실히 bool로
+    df["재직여부"] = df["재직여부"].map(
+        lambda v: True if str(v).strip() == "" else _to_bool(v)
+    ).astype(bool)
+
     return df
 
 # ══════════════════════════════════════════════════════════════════════════════
