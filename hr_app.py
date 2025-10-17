@@ -77,13 +77,19 @@ def get_jd_approval_map_cached(_year: int, _rev: int = 0) -> dict:
         df = pd.DataFrame(_ws_get_all_records(ws))
     except Exception:
         df = pd.DataFrame(columns=["연도","사번","버전","상태","승인시각"])
+
+    # 타입 정리(기존 유지)
     for c in ["연도","버전"]:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0).astype(int)
     for c in ["사번","상태","승인시각"]:
         if c in df.columns:
             df[c] = df[c].astype(str)
-    df = df[df.get("연도",0).astype(int) == int(_year)]
+
+    # ✅ 핵심: 안전한 연도 필터 (기존 1줄을 아래 2줄로 교체)
+    yr = pd.to_numeric(df.get("연도", pd.Series([None]*len(df))), errors="coerce").fillna(-1).astype(int)
+    df = df[yr == int(_year)]
+
     out = {}
     if not df.empty:
         df = df.sort_values(["사번","버전","승인시각"], ascending=[True, True, True]).reset_index(drop=True)
