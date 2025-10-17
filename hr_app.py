@@ -114,7 +114,7 @@ def force_sync():
     """모든 캐시를 무효화하고 즉시 리런하여 구글시트 최신 데이터로 갱신합니다."""
     # 1) Streamlit 캐시 비우기
     try:
-        st.session_state['emp_ver'] = int(st.session_state.get('emp_ver', 0)) + 1
+        st.cache_data.clear()
     except Exception:
         pass
     try:
@@ -330,16 +330,6 @@ def _ws_values(ws, key: str | None = None):
     _VAL_CACHE[key] = (now, vals)
     return vals
 
-
-def _col_letter(col_idx: int) -> str:
-    # 1-based column index to Excel column letters
-    col = ""
-    i = int(col_idx)
-    while i > 0:
-        i, r = divmod(i-1, 26)
-        col = chr(65 + r) + col
-    return col
-
 def _ws(title: str):
     now=time.time(); hit=_WS_CACHE.get(title)
     if hit and (now-hit[0]<_WS_TTL): return hit[1]
@@ -458,7 +448,7 @@ def logout():
     for k in list(st.session_state.keys()):
         try: del st.session_state[k]
         except Exception: pass
-    try: st.session_state['emp_ver'] = int(st.session_state.get('emp_ver', 0)) + 1
+    try: st.cache_data.clear()
     except Exception: pass
     st.rerun()
 
@@ -876,7 +866,7 @@ def upsert_eval_response(emp_df: pd.DataFrame, year: int, eval_type: str,
             c=hmap.get(f"점수_{iid}")
             if c: buf[c-1]=sc
         _retry(ws.append_row, buf, value_input_option="USER_ENTERED")
-        st.session_state['emp_ver'] = int(st.session_state.get('emp_ver', 0)) + 1
+        st.cache_data.clear()
         return {"action":"insert","total":total}
     else:
         payload={"총점": total, "상태": status, "제출시각": now, "평가대상이름": tname, "평가자이름": ename}
@@ -890,7 +880,7 @@ def upsert_eval_response(emp_df: pd.DataFrame, year: int, eval_type: str,
                     upd.append({"range": a1, "values": [[v]]})
             if upd: _retry(ws.batch_update, upd)
         _batch_row(ws, row_idx, hmap, payload)
-        st.session_state['emp_ver'] = int(st.session_state.get('emp_ver', 0)) + 1
+        st.cache_data.clear()
         return {"action":"update","total":total}
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -1439,11 +1429,11 @@ def upsert_jobdesc(rec: dict, as_new_version: bool = False) -> dict:
 
     if row_idx == 0:
         _retry(ws.append_row, build_row(), value_input_option="USER_ENTERED")
-        st.session_state['emp_ver'] = int(st.session_state.get('emp_ver', 0)) + 1
+        st.cache_data.clear()
         return {"action": "insert", "version": ver}
     else:
         _ws_batch_row(ws, row_idx, hmap, rec)
-        st.session_state['emp_ver'] = int(st.session_state.get('emp_ver', 0)) + 1
+        st.cache_data.clear()
         return {"action": "update", "version": ver}
 
 # -----------------------------------------------------------------------------
@@ -1682,7 +1672,7 @@ def set_jd_approval(year: int, sabun: str, name: str, version: int,
     }
     if target_row > 0:
         _ws_batch_row(ws, target_row, hmap, payload)
-        try: st.session_state['emp_ver'] = int(st.session_state.get('emp_ver', 0)) + 1
+        try: st.cache_data.clear()
         except Exception: pass
         return {"action": "update", "row": target_row}
     else:
@@ -1692,7 +1682,7 @@ def set_jd_approval(year: int, sabun: str, name: str, version: int,
             if c:
                 rowbuf[c-1] = v
         _retry(ws.append_row, rowbuf, value_input_option="USER_ENTERED")
-        try: st.session_state['emp_ver'] = int(st.session_state.get('emp_ver', 0)) + 1
+        try: st.cache_data.clear()
         except Exception: pass
         return {"action": "insert", "row": len(values) + 1}
 
@@ -2318,7 +2308,7 @@ def tab_staff_admin(emp_df: pd.DataFrame):
 
             # 캐시 비우고 새로고침
             try:
-                st.session_state['emp_ver'] = int(st.session_state.get('emp_ver', 0)) + 1
+                st.cache_data.clear()
             except Exception:
                 pass
             st.success(f"저장 완료: {change_cnt}명 반영", icon="✅")
@@ -2329,21 +2319,13 @@ def tab_staff_admin(emp_df: pd.DataFrame):
 def reissue_pin_inline(sabun: str, length: int = 4):
     ws, header, hmap = ensure_emp_sheet_columns()
     if "PIN_hash" not in hmap or "PIN_No" not in hmap: raise RuntimeError("PIN_hash/PIN_No 필요")
-    row_idx = _find_row_by_sabun(ws, hmap, str(sabun))
-    if row_idx == 0: raise RuntimeError("사번을 찾지 못했습니다.")
+    row_idx=_find_row_by_sabun(ws, hmap, str(sabun))
+    if row_idx==0: raise RuntimeError("사번을 찾지 못했습니다.")
     pin = "".join(pysecrets.choice("0123456789") for _ in range(length))
     ph  = _pin_hash(pin, str(sabun))
-
-    rng1 = f"{EMP_SHEET}!{_col_letter(hmap['PIN_hash'])}{row_idx}"
-    rng2 = f"{EMP_SHEET}!{_col_letter(hmap['PIN_No'])}{row_idx}"
-    ws.spreadsheet.batch_update({
-        'valueInputOption': 'USER_ENTERED',
-        'data': [
-            {'range': rng1, 'values': [[ph]]},
-            {'range': rng2, 'values': [[pin]]},
-        ]
-    })
-    st.session_state['emp_ver'] = int(st.session_state.get('emp_ver', 0)) + 1
+    _retry(ws.update_cell, row_idx, hmap["PIN_hash"], ph)
+    _retry(ws.update_cell, row_idx, hmap["PIN_No"], pin)
+    st.cache_data.clear()
     return {"PIN_No": pin, "PIN_hash": ph}
 
 def tab_admin_pin(emp_df):
@@ -2352,7 +2334,7 @@ def tab_admin_pin(emp_df):
     # 적용여부가 체크된 직원만 선택 대상으로 노출
     if "적용여부" in df.columns:
         df = df[df["적용여부"]==True].copy()
-    df['표시'] = df['사번'].astype(str).str.cat(df['이름'].astype(str), sep=' - ')
+    df["표시"] = df.apply(lambda r: f"{str(r.get('사번',''))} - {str(r.get('이름',''))}", axis=1)
     df = df.sort_values(["사번"]) if "사번" in df.columns else df
     sel = st.selectbox("직원 선택(사번 - 이름)", ["(선택)"] + df.get("표시", pd.Series(dtype=str)).tolist(), index=0, key="adm_pin_pick")
     if sel != "(선택)":
@@ -2375,14 +2357,14 @@ def tab_admin_pin(emp_df):
             hashed = _pin_hash(pin1.strip(), str(sabun))
             _retry(ws.update_cell, r, hmap["PIN_hash"], hashed)
             _retry(ws.update_cell, r, hmap["PIN_No"], pin1.strip())
-            st.session_state['emp_ver'] = int(st.session_state.get('emp_ver', 0)) + 1; st.success("PIN 저장 완료", icon="✅")
+            st.cache_data.clear(); st.success("PIN 저장 완료", icon="✅")
         if do_clear:
             if "PIN_hash" not in hmap or "PIN_No" not in hmap: st.error(f"'{EMP_SHEET}' 시트에 PIN_hash/PIN_No가 없습니다."); return
             r = _find_row_by_sabun(ws, hmap, sabun)
             if r == 0: st.error("시트에서 사번을 찾지 못했습니다."); return
             _retry(ws.update_cell, r, hmap["PIN_hash"], "")
             _retry(ws.update_cell, r, hmap["PIN_No"], "")
-            st.session_state['emp_ver'] = int(st.session_state.get('emp_ver', 0)) + 1; st.success("PIN 초기화 완료", icon="✅")
+            st.cache_data.clear(); st.success("PIN 초기화 완료", icon="✅")
 
 def tab_admin_eval_items():
     df = read_eval_items_df(only_active=False).copy()
@@ -2416,7 +2398,7 @@ def tab_admin_eval_items():
                     if iid in pos:
                         a1=gspread.utils.rowcol_to_a1(pos[iid], col_ord)
                         _retry(ws.update, a1, [[new]]); changed+=1
-                st.session_state['emp_ver'] = int(st.session_state.get('emp_ver', 0)) + 1; st.success(f"순서 저장 완료: {changed}건 반영", icon="✅"); st.rerun()
+                st.cache_data.clear(); st.success(f"순서 저장 완료: {changed}건 반영", icon="✅"); st.rerun()
             except Exception as e:
                 st.exception(e)
 
@@ -2469,7 +2451,7 @@ def tab_admin_eval_items():
                         put("순서",int(order)); put("활성",bool(active)); 
                         if "비고" in hmap: put("비고", memo.strip())
                         _retry(ws.append_row, rowbuf, value_input_option="USER_ENTERED")
-                        st.session_state['emp_ver'] = int(st.session_state.get('emp_ver', 0)) + 1; st.success(f"저장 완료 (항목ID: {new_id})"); st.rerun()
+                        st.cache_data.clear(); st.success(f"저장 완료 (항목ID: {new_id})"); st.rerun()
                     else:
                         col_id=hmap.get("항목ID"); idx=0
                         if col_id:
@@ -2483,7 +2465,7 @@ def tab_admin_eval_items():
                             ws.update_cell(idx, hmap["순서"], int(order))
                             ws.update_cell(idx, hmap["활성"], bool(active))
                             if "비고" in hmap: ws.update_cell(idx, hmap["비고"], memo.strip())
-                            st.session_state['emp_ver'] = int(st.session_state.get('emp_ver', 0)) + 1; st.success("업데이트 완료"); st.rerun()
+                            st.cache_data.clear(); st.success("업데이트 완료"); st.rerun()
                 except Exception as e:
                     st.exception(e)
 
@@ -2641,7 +2623,7 @@ def tab_admin_acl(emp_df: pd.DataFrame):
                 for i in range(0, len(rows), CHUNK):
                     ws.append_rows(rows[i:i+CHUNK], value_input_option="USER_ENTERED")
 
-            st.session_state['emp_ver'] = int(st.session_state.get('emp_ver', 0)) + 1
+            st.cache_data.clear()
             st.success("권한이 전체 반영되었습니다.", icon="✅")
             st.rerun()
         except Exception as e:
