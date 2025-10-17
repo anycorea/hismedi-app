@@ -10,6 +10,7 @@ def _is_quota_429(err) -> bool:
         pass
     return False
 # --- end helper ---
+
 # HISMEDI HR App
 # Tabs: 인사평가 / 직무기술서 / 직무능력평가 / 관리자 / 도움말
 
@@ -421,7 +422,11 @@ def read_sheet_df(sheet_name: str) -> pd.DataFrame:
         LAST_GOOD[sheet_name] = df.copy()
         return df
 
-    except APIError:
+    except APIError as e:
+        if _is_quota_429(e):
+            try: st.warning("구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 \"동기화\"를 눌러 다시 시도해 주세요.", icon="⏳")
+            except Exception: pass
+            return pd.DataFrame()
         if sheet_name in LAST_GOOD:
             st.info(f"네트워크 혼잡으로 캐시 데이터를 표시합니다: {sheet_name}")
             return LAST_GOOD[sheet_name]
