@@ -889,18 +889,41 @@ def upsert_eval_response(emp_df: pd.DataFrame, year: int, eval_type: str,
         st.cache_data.clear()
         return {"action":"insert","total":total}
     else:
-        payload={"총점": total, "상태": status, "제출시각": now, "평가대상이름": tname, "평가자이름": ename}
-        for iid, sc in zip(item_ids, scores_list): payload[f"점수_{iid}"]=sc
-        def _batch_row(ws, idx, hmap, kv):
-            upd=[]
-            for k,v in kv.items():
-                c=hmap.get(k)
-                if c:
-                    a1=gspread.utils.rowcol_to_a1(idx, c)
-                    upd.append({"range": a1, "values": [[v]]})
-            if upd: _retry(ws.batch_update, upd)
-        _batch_row(ws, row_idx, hmap, payload)
-        st.cache_data.clear()
+        # Build payload and write scores in one contiguous range if possible
+        payload = {"총점": total, "상태": status, "제출시각": now, "평가대상이름": tname, "평가자이름": ename}
+        for iid, sc in zip(item_ids, scores_list):
+            payload[f"점수_{iid}"] = sc
+
+        # Determine score columns and whether they are contiguous
+        score_cols = [hmap.get(f"점수_{iid}") for iid in item_ids if hmap.get(f"점수_{iid}")]
+        if score_cols:
+            score_cols_sorted = sorted(score_cols)
+            contiguous = all((b - a) == 1 for a, b in zip(score_cols_sorted, score_cols_sorted[1:]))
+            if contiguous:
+                start_c, end_c = score_cols_sorted[0], score_cols_sorted[-1]
+                # Map each contiguous column back to its value
+                col_to_val = {hmap[f"점수_{iid}"]: payload[f"점수_{iid}"] for iid in item_ids if hmap.get(f"점수_{iid}")}
+                row_vals = [col_to_val.get(c, "") for c in range(start_c, end_c+1)]
+                from gspread.utils import rowcol_to_a1
+                a1_start = rowcol_to_a1(row_idx, start_c)
+                a1_end = rowcol_to_a1(row_idx, end_c)
+                rng = f"{a1_start}:{a1_end}"
+                gs_enqueue_range(ws, rng, [row_vals], "USER_ENTERED")
+            else:
+                # Fallback: enqueue each score cell
+                for iid in item_ids:
+                    k = f"점수_{iid}"
+                    c = hmap.get(k)
+                    if c:
+                        gs_enqueue_cell(ws, row_idx, c, payload[k], "USER_ENTERED")
+
+        # Enqueue meta fields
+        for k in ["총점", "상태", "제출시각", "평가대상이름", "평가자이름"]:
+            c = hmap.get(k)
+            if c:
+                gs_enqueue_cell(ws, row_idx, c, payload[k], "USER_ENTERED")
+
+        gs_flush()
         return {"action":"update","total":total}
 
 @st.cache_data(ttl=300, show_spinner=False)
