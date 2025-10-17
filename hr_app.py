@@ -631,6 +631,9 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
     u = st.session_state.get("user", {})
     me = str(u.get("사번", ""))
     df = emp_df.copy()
+    # 적용여부가 체크된 직원만 좌측 메뉴에 노출
+    if "적용여부" in df.columns:
+        df = df[df["적용여부"]==True].copy()
 
     # ✅ 관리자라도 범위유형이 '부서/개별'이면 해당 범위만 보이도록 통일
     allowed = get_allowed_sabuns(emp_df, me, include_self=True)
@@ -2328,6 +2331,9 @@ def reissue_pin_inline(sabun: str, length: int = 4):
 def tab_admin_pin(emp_df):
     ws, header, hmap = ensure_emp_sheet_columns()
     df = emp_df.copy()
+    # 적용여부가 체크된 직원만 선택 대상으로 노출
+    if "적용여부" in df.columns:
+        df = df[df["적용여부"]==True].copy()
     df["표시"] = df.apply(lambda r: f"{str(r.get('사번',''))} - {str(r.get('이름',''))}", axis=1)
     df = df.sort_values(["사번"]) if "사번" in df.columns else df
     sel = st.selectbox("직원 선택(사번 - 이름)", ["(선택)"] + df.get("표시", pd.Series(dtype=str)).tolist(), index=0, key="adm_pin_pick")
