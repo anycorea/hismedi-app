@@ -363,54 +363,44 @@ def _ws_get_all_records(ws):
 # Sheet Readers (TTL↑)
 # ══════════════════════════════════════════════════════════════════════════════
 LAST_GOOD: dict[str, pd.DataFrame] = {}
-
 @st.cache_data(ttl=600, show_spinner=False)
 def read_sheet_df(sheet_name: str) -> pd.DataFrame:
-    """구글시트 → DataFrame (빈칸 재직여부=True로 해석, 호환 유지)"""
     try:
-        ws = _ws(sheet_name)
-        df = pd.DataFrame(_ws_get_all_records(ws))
+        ws=_ws(sheet_name)
+        df=pd.DataFrame(_ws_get_all_records(ws))
         if df.empty:
             return df
-
-        # 사번은 문자열 키로 고정
-        if "사번" in df.columns:
-            df["사번"] = df["사번"].astype(str)
-
-        # 재직여부: 빈칸은 True, 나머지는 _to_bool 규칙 적용
-        if "재직여부" in df.columns:
-            df["재직여부"] = df["재직여부"].map(
-                lambda v: True if str(v).strip() == "" else _to_bool(v)
-            )
-
+        if "사번" in df.columns: df["사번"]=df["사번"].astype(str)
+        if "적용여부" in df.columns:
+            df["적용여부"] = df["적용여부"].map(_to_bool)
+        elif "재직여부" in df.columns:
+            # 호환: 시트가 아직 옛 이름이라면 임시로 적용여부로 사용
+            df["적용여부"] = df["재직여부"].map(_to_bool)
         LAST_GOOD[sheet_name] = df.copy()
         return df
-
-    except APIError:
+    except APIError as e:
         if sheet_name in LAST_GOOD:
             st.info(f"네트워크 혼잡으로 캐시 데이터를 표시합니다: {sheet_name}")
             return LAST_GOOD[sheet_name]
         raise
-
+    if "사번" in df.columns: df["사번"]=df["사번"].astype(str)
+    if "적용여부" in df.columns: df["적용여부"]=df["적용여부"].map(_to_bool)
+    return df
 
 @st.cache_data(ttl=600, show_spinner=False)
 def read_emp_df() -> pd.DataFrame:
-    """직원 시트 표준화: 필수 컬럼 보강 및 dtype 정리"""
     df = read_sheet_df(EMP_SHEET)
-
-    # 최소 컬럼 보강
-    for c in ["사번", "이름", "PIN_hash", "재직여부"]:
+    # 필수 컬럼 보강
+    for c in ["사번","이름","PIN_hash","적용여부"]:
         if c not in df.columns:
-            df[c] = "" if c != "재직여부" else True
-
-    # dtype 정리
-    df["사번"] = df["사번"].astype(str)
-    # 재직여부는 확실히 bool로
-    df["재직여부"] = df["재직여부"].map(
-        lambda v: True if str(v).strip() == "" else _to_bool(v)
-    ).astype(bool)
-
+            df[c] = "" if c != "적용여부" else False
+    # dtype
+    if "사번" in df.columns:
+        df["사번"] = df["사번"].astype(str)
+    if "적용여부" in df.columns:
+        df["적용여부"] = df["적용여부"].map(_to_bool).astype(bool)
     return df
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Login + Session
@@ -512,7 +502,7 @@ def show_login(emp_df: pd.DataFrame):
         row=emp_df.loc[emp_df["사번"].astype(str)==str(sabun)]
         if row.empty: st.error("사번을 찾을 수 없습니다."); st.stop()
         r=row.iloc[0]
-        if not _to_bool(r.get("재직여부", True)):
+        if not _to_bool(r.get("적용여부", True)):
             st.error("재직 상태가 아닙니다."); st.stop()
         stored=str(r.get("PIN_hash","")).strip().lower()
         entered_plain=_sha256_hex(pin.strip())
@@ -926,8 +916,11 @@ def tab_eval(emp_df: pd.DataFrame):
     # --- 대상 후보 목록 ------------------------------------------------------
     def list_targets_for(me_role: str) -> pd.DataFrame:
         base = emp_df.copy(); base["사번"] = base["사번"].astype(str)
-        if "재직여부" in base.columns:
-            base = base[base["재직여부"] == True]
+        if "적용여부" in base.columns:
+            base = base[base["적용여부"] == True]
+            if base.empty:
+                st.info("선택할 직원이 없습니다. 적용여부를 확인해 주세요.", icon="ℹ️")
+                return
         if me_role == "employee":
             return base[base["사번"] == me_sabun]
         elif me_role == "manager":
@@ -1696,8 +1689,11 @@ def tab_job_desc(emp_df: pd.DataFrame):
         base = emp_df.copy()
         base["사번"] = base["사번"].astype(str)
         base = base[base["사번"].isin({str(s) for s in allowed})]
-        if "재직여부" in base.columns:
-            base = base[base["재직여부"] == True]
+        if "적용여부" in base.columns:
+            base = base[base["적용여부"] == True]
+            if base.empty:
+                st.info("선택할 직원이 없습니다. 적용여부를 확인해 주세요.", icon="ℹ️")
+                return
         cols = ["사번", "이름", "부서1", "부서2"]
         extra = ["직급"] if "직급" in base.columns else []
         view = base[cols + extra].copy().sort_values(["사번"]).reset_index(drop=True)
@@ -1944,8 +1940,11 @@ def tab_job_desc(emp_df: pd.DataFrame):
                     appr_df = read_jd_approval_df(st.session_state.get("appr_rev", 0))
                 base["사번"] = base["사번"].astype(str)
             base = base[base["사번"].isin({str(s) for s in allowed})]
-            if "재직여부" in base.columns:
-                base = base[base["재직여부"] == True]
+            if "적용여부" in base.columns:
+                base = base[base["적용여부"] == True]
+                if base.empty:
+                    st.info("선택할 직원이 없습니다. 적용여부를 확인해 주세요.", icon="ℹ️")
+                    return
             base = base.sort_values(["사번"]).reset_index(drop=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2063,7 +2062,10 @@ def tab_competency(emp_df: pd.DataFrame):
     if "사번" not in df.columns:
         st.info("직원 데이터에 '사번' 컬럼이 없습니다.", icon="ℹ️"); return
     df["사번"]=df["사번"].astype(str); df=df[df["사번"].isin(allowed)].copy()
-    if "재직여부" in df.columns: df=df[df["재직여부"]==True]
+    if "적용여부" in df.columns: df=df[df["적용여부"]==True]
+    if df.empty:
+        st.info("선택할 직원이 없습니다. 적용여부를 확인해 주세요.", icon="ℹ️")
+        return
     for c in ["이름","부서1","부서2","직급"]:
         if c not in df.columns: df[c]=""
 
@@ -2175,7 +2177,7 @@ def tab_competency(emp_df: pd.DataFrame):
 # 관리자: 직원/ PIN 관리 / 인사평가 항목 관리 / 권한 관리
 # ══════════════════════════════════════════════════════════════════════════════
 REQ_EMP_COLS = [
-    "사번","이름","부서1","부서2","직급","직무","직군","입사일","퇴사일","기타1","기타2","재직여부",
+    "사번","이름","부서1","부서2","직급","직무","직군","입사일","퇴사일","기타1","기타2","적용여부",
     "PIN_hash","PIN_No"
 ]
 
@@ -2201,89 +2203,8 @@ def _find_row_by_sabun(ws, hmap, sabun: str) -> int:
     return 0
 
 def tab_staff_admin(emp_df: pd.DataFrame):
-    # 1) 시트/헤더 확보 (+ 필수 컬럼 보장)
-    ws, header, hmap = ensure_emp_sheet_columns()  # '직원' 시트 1행에 누락 헤더 있으면 채움
-    view = emp_df.copy()
-
-    # 2) 민감 컬럼 숨기기
-    for c in ["PIN_hash", "PIN_No"]:
-        view = view.drop(columns=[c], errors="ignore")
-
-    st.write(f"결과: **{len(view):,}명**")
-
-    # 3) 편집 UI (사번=잠금, 재직여부=체크박스)
-    colcfg = {
-        "사번": st.column_config.TextColumn("사번", disabled=True),
-        "이름": st.column_config.TextColumn("이름"),
-        "부서1": st.column_config.TextColumn("부서1"),
-        "부서2": st.column_config.TextColumn("부서2"),
-        "직급": st.column_config.TextColumn("직급"),
-        "직무": st.column_config.TextColumn("직무"),
-        "직군": st.column_config.TextColumn("직군"),
-        "입사일": st.column_config.TextColumn("입사일"),
-        "퇴사일": st.column_config.TextColumn("퇴사일"),
-        "기타1": st.column_config.TextColumn("기타1"),
-        "기타2": st.column_config.TextColumn("기타2"),
-        "재직여부": st.column_config.CheckboxColumn("재직여부"),
-    }
-
-    edited = st.data_editor(
-        view,
-        use_container_width=True,
-        height=560,
-        hide_index=True,
-        num_rows="fixed",            # 행 추가/삭제는 막고 '수정'만
-        column_config=colcfg,
-    )
-
-    # 4) 저장 버튼 (변경된 칼럼만 배치 업데이트)
-    if st.button("변경사항 저장", type="primary", use_container_width=True):
-        try:
-            before = view.set_index("사번")
-            after  = edited.set_index("사번")
-
-            # 사번 없는 행들 제거(안전장치)
-            before = before[before.index.astype(str) != ""]
-            after  = after[after.index.astype(str) != ""]
-
-            change_cnt = 0
-            for sabun in after.index:
-                if sabun not in before.index:
-                    continue  # (num_rows="fixed"라서 거의 없음)
-                diff_cols = []
-                payload = {}
-
-                for c in after.columns:
-                    if c not in before.columns:
-                        continue
-                    v0 = str(before.loc[sabun, c])
-                    v1 = str(after.loc[sabun, c])
-                    if v0 != v1:
-                        diff_cols.append(c)
-                        # 불린 컬럼은 True/False로 유지
-                        if c == "재직여부":
-                            payload[c] = bool(after.loc[sabun, c])
-                        else:
-                            payload[c] = after.loc[sabun, c]
-
-                if not diff_cols:
-                    continue
-
-                # 시트에서 대상 행 찾기 → 변경 칼럼만 배치 업데이트
-                row_idx = _find_row_by_sabun(ws, hmap, str(sabun))
-                if row_idx > 0:
-                    _ws_batch_row(ws, row_idx, hmap, payload)
-                    change_cnt += 1
-
-            # 캐시 비우고 새로고침
-            try:
-                st.cache_data.clear()
-            except Exception:
-                pass
-            st.success(f"저장 완료: {change_cnt}명 반영", icon="✅")
-            st.rerun()
-        except Exception as e:
-            st.exception(e)
+    st.write(f"결과: **{len(emp_df):,}명**")
+    st.dataframe(emp_df.drop(columns=["PIN_hash"], errors="ignore"), use_container_width=True, height=560, hide_index=True)
 
 def reissue_pin_inline(sabun: str, length: int = 4):
     ws, header, hmap = ensure_emp_sheet_columns()
@@ -2316,7 +2237,7 @@ def tab_admin_pin(emp_df):
             if not pin1 or not pin2: st.error("PIN을 두 번 모두 입력하세요."); return
             if pin1 != pin2: st.error("PIN 확인이 일치하지 않습니다."); return
             if not pin1.isdigit(): st.error("PIN은 숫자만 입력하세요."); return
-            if not _to_bool(row.get("재직여부", False)): st.error("퇴직자는 변경할 수 없습니다."); return
+            if not _to_bool(row.get("적용여부", False)): st.error("퇴직자는 변경할 수 없습니다."); return
             if "PIN_hash" not in hmap or "PIN_No" not in hmap: st.error(f"'{EMP_SHEET}' 시트에 PIN_hash/PIN_No가 없습니다."); return
             r = _find_row_by_sabun(ws, hmap, sabun)
             if r == 0: st.error("시트에서 사번을 찾지 못했습니다."); return
