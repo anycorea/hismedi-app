@@ -74,7 +74,11 @@ def get_jd_approval_map_cached(_year: int, _rev: int = 0) -> dict:
     """Return {(사번, 최신버전)->(상태, 승인시각)} for the year from 직무기술서_승인."""
     try:
         ws = _ws("직무기술서_승인")
-        df = pd.DataFrame(_ws_get_all_records(ws))
+        last = max(2, len([v for v in _retry(ws.col_values, 1) if str(v).strip()]))
+        values = _retry(ws.get, f"A1:I{last}", value_render_option="UNFORMATTED_VALUE") or []
+        header = values[0] if values else ["연도","사번","이름","버전","승인자사번","승인자이름","상태","승인시각","비고"]
+        body = values[1:] if len(values) > 1 else []
+        df = pd.DataFrame(body, columns=header) if body else pd.DataFrame(columns=header)
     except Exception:
         df = pd.DataFrame(columns=["연도","사번","버전","상태","승인시각"])
 
@@ -112,6 +116,7 @@ except Exception:
 import gspread
 from google.oauth2.service_account import Credentials
 from gspread.exceptions import WorksheetNotFound, APIError
+from gspread.utils import rowcol_to_a1
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Sync Utility (Force refresh Google Sheets caches)
@@ -328,6 +333,36 @@ def get_client():
 
 @st.cache_resource(show_spinner=False)
 def get_book():
+
+# --- Batch write helpers (minimal) ---
+def _gs_queue_init():
+    if "gs_queue" not in st.session_state:
+        st.session_state.gs_queue = []
+
+def gs_enqueue_range(ws, range_a1, values_2d, value_input_option="RAW"):
+    _gs_queue_init()
+    rng = range_a1 if "!" in range_a1 else f"{ws.title}!{range_a1}"
+    st.session_state.gs_queue.append({"range": rng, "values": values_2d, "value_input_option": value_input_option})
+
+def gs_enqueue_cell(ws, row, col, value, value_input_option="RAW"):
+    _gs_queue_init()
+    a1 = rowcol_to_a1(row, col)
+    rng = f"{ws.title}!{a1}"
+    st.session_state.gs_queue.append({"range": rng, "values": [[value]], "value_input_option": value_input_option})
+
+def gs_flush():
+    if not st.session_state.get("gs_queue"):
+        return
+    data = st.session_state.gs_queue
+    # group by value_input_option to respect modes
+    by_mode = {}
+    for item in data:
+        by_mode.setdefault(item["value_input_option"], []).append({"range": item["range"], "values": item["values"]})
+    wb = get_book()
+    for mode, chunk in by_mode.items():
+        wb.values_batch_update({"valueInputOption": mode, "data": chunk})
+    st.session_state.gs_queue = []
+# --- end helpers ---
     return get_client().open_by_key(st.secrets["sheets"]["HR_SHEET_ID"])
 
 EMP_SHEET = st.secrets.get("sheets", {}).get("EMP_SHEET", "직원")
@@ -391,7 +426,11 @@ def read_sheet_df(sheet_name: str) -> pd.DataFrame:
     """구글시트 → DataFrame (빈칸 재직여부=True로 해석, 호환 유지)"""
     try:
         ws = _ws(sheet_name)
-        df = pd.DataFrame(_ws_get_all_records(ws))
+        last = max(2, len([v for v in _retry(ws.col_values, 1) if str(v).strip()]))
+        values = _retry(ws.get, f"A1:I{last}", value_render_option="UNFORMATTED_VALUE") or []
+        header = values[0] if values else ["연도","사번","이름","버전","승인자사번","승인자이름","상태","승인시각","비고"]
+        body = values[1:] if len(values) > 1 else []
+        df = pd.DataFrame(body, columns=header) if body else pd.DataFrame(columns=header)
         if df.empty:
             return df
 
@@ -568,7 +607,11 @@ AUTH_HEADERS=["사번","이름","역할","범위유형","부서1","부서2","대
 @st.cache_data(ttl=300, show_spinner=False)
 def read_auth_df()->pd.DataFrame:
     try:
-        ws=_ws(AUTH_SHEET); df=pd.DataFrame(_ws_get_all_records(ws))
+        ws=_ws(AUTH_SHEET); last = max(2, len([v for v in _retry(ws.col_values, 1) if str(v).strip()]))
+        values = _retry(ws.get, f"A1:I{last}", value_render_option="UNFORMATTED_VALUE") or []
+        header = values[0] if values else ["연도","사번","이름","버전","승인자사번","승인자이름","상태","승인시각","비고"]
+        body = values[1:] if len(values) > 1 else []
+        df = pd.DataFrame(body, columns=header) if body else pd.DataFrame(columns=header)
     except Exception:
         return pd.DataFrame(columns=AUTH_HEADERS)
     if df.empty: return pd.DataFrame(columns=AUTH_HEADERS)
@@ -815,7 +858,11 @@ def ensure_eval_items_sheet():
 def read_eval_items_df(only_active: bool = True) -> pd.DataFrame:
     ensure_eval_items_sheet()
     ws=_ws(EVAL_ITEMS_SHEET)
-    df=pd.DataFrame(_ws_get_all_records(ws))
+    last = max(2, len([v for v in _retry(ws.col_values, 1) if str(v).strip()]))
+        values = _retry(ws.get, f"A1:I{last}", value_render_option="UNFORMATTED_VALUE") or []
+        header = values[0] if values else ["연도","사번","이름","버전","승인자사번","승인자이름","상태","승인시각","비고"]
+        body = values[1:] if len(values) > 1 else []
+        df = pd.DataFrame(body, columns=header) if body else pd.DataFrame(columns=header)
     if df.empty: return pd.DataFrame(columns=EVAL_ITEM_HEADERS)
     if "순서" in df.columns:
         def _i(x):
@@ -906,7 +953,11 @@ def upsert_eval_response(emp_df: pd.DataFrame, year: int, eval_type: str,
 def read_my_eval_rows(year: int, sabun: str) -> pd.DataFrame:
     name=_eval_sheet_name(year)
     try:
-        ws=_ws(name); df=pd.DataFrame(_ws_get_all_records(ws))
+        ws=_ws(name); last = max(2, len([v for v in _retry(ws.col_values, 1) if str(v).strip()]))
+        values = _retry(ws.get, f"A1:I{last}", value_render_option="UNFORMATTED_VALUE") or []
+        header = values[0] if values else ["연도","사번","이름","버전","승인자사번","승인자이름","상태","승인시각","비고"]
+        body = values[1:] if len(values) > 1 else []
+        df = pd.DataFrame(body, columns=header) if body else pd.DataFrame(columns=header)
     except Exception: return pd.DataFrame(columns=EVAL_BASE_HEADERS)
     if df.empty: return df
     if "평가자사번" in df.columns: df=df[df["평가자사번"].astype(str)==str(sabun)]
@@ -1360,7 +1411,11 @@ def ensure_jobdesc_sheet():
 def read_jobdesc_df(_rev: int = 0) -> pd.DataFrame:
     ensure_jobdesc_sheet()
     ws = _ws(JOBDESC_SHEET)
-    df = pd.DataFrame(_ws_get_all_records(ws))
+    last = max(2, len([v for v in _retry(ws.col_values, 1) if str(v).strip()]))
+        values = _retry(ws.get, f"A1:I{last}", value_render_option="UNFORMATTED_VALUE") or []
+        header = values[0] if values else ["연도","사번","이름","버전","승인자사번","승인자이름","상태","승인시각","비고"]
+        body = values[1:] if len(values) > 1 else []
+        df = pd.DataFrame(body, columns=header) if body else pd.DataFrame(columns=header)
     if df.empty:
         return pd.DataFrame(columns=JOBDESC_HEADERS)
     # 타입 정리
@@ -1625,7 +1680,11 @@ def read_jd_approval_df(_rev: int = 0) -> pd.DataFrame:
     ensure_jd_approval_sheet()
     try:
         ws = _ws(JD_APPROVAL_SHEET)
-        df = pd.DataFrame(_ws_get_all_records(ws))
+        last = max(2, len([v for v in _retry(ws.col_values, 1) if str(v).strip()]))
+        values = _retry(ws.get, f"A1:I{last}", value_render_option="UNFORMATTED_VALUE") or []
+        header = values[0] if values else ["연도","사번","이름","버전","승인자사번","승인자이름","상태","승인시각","비고"]
+        body = values[1:] if len(values) > 1 else []
+        df = pd.DataFrame(body, columns=header) if body else pd.DataFrame(columns=header)
     except Exception:
         df = pd.DataFrame(columns=JD_APPROVAL_HEADERS)
     for c in JD_APPROVAL_HEADERS:
@@ -2012,7 +2071,6 @@ def _jd_latest_for_comp(sabun:str, year:int)->dict:
         df=read_jobdesc_df()
         if df is None or len(df)==0: return {}
         q=df[(df["사번"].astype(str)==str(sabun))&(df["연도"].astype(int)==int(year))]
-        q = q.copy()
         if q.empty: return {}
         if "버전" in q.columns:
             try: q["버전"]=pd.to_numeric(q["버전"], errors="coerce").fillna(0)
@@ -2074,7 +2132,11 @@ def upsert_comp_simple_response(emp_df: pd.DataFrame, year:int, target_sabun:str
 def read_my_comp_simple_rows(year:int, sabun:str)->pd.DataFrame:
     try:
         ws=get_book().worksheet(_simp_sheet_name(year))
-        df=pd.DataFrame(_ws_get_all_records(ws))
+        last = max(2, len([v for v in _retry(ws.col_values, 1) if str(v).strip()]))
+        values = _retry(ws.get, f"A1:I{last}", value_render_option="UNFORMATTED_VALUE") or []
+        header = values[0] if values else ["연도","사번","이름","버전","승인자사번","승인자이름","상태","승인시각","비고"]
+        body = values[1:] if len(values) > 1 else []
+        df = pd.DataFrame(body, columns=header) if body else pd.DataFrame(columns=header)
     except Exception: return pd.DataFrame(columns=COMP_SIMPLE_HEADERS)
     if df.empty: return df
     df=df[df["평가자사번"].astype(str)==str(sabun)]
@@ -2421,8 +2483,12 @@ def tab_admin_eval_items():
                     if iid in pos:
                         a1=gspread.utils.rowcol_to_a1(pos[iid], col_ord)
                         _retry(ws.update, a1, [[new]]); changed+=1
-                st.cache_data.clear(); st.success(f"순서 저장 완료: {changed}건 반영", icon="✅"); st.rerun()
-            except Exception as e:
+                gs_flush()
+
+                st.success("업데이트 완료", icon="✅")
+
+                st.toast("저장 완료", icon="💾")
+except Exception as e:
                 st.exception(e)
 
     st.divider()
@@ -2487,9 +2553,15 @@ def tab_admin_eval_items():
                             ws.update_cell(idx, hmap["내용"], desc.strip())
                             ws.update_cell(idx, hmap["순서"], int(order))
                             ws.update_cell(idx, hmap["활성"], bool(active))
-                            if "비고" in hmap: ws.update_cell(idx, hmap["비고"], memo.strip())
-                            st.cache_data.clear(); st.success("업데이트 완료"); st.rerun()
-                except Exception as e:
+                            if "비고" in hmap:
+
+                                gs_enqueue_cell(ws, idx, hmap["비고"], memo.strip(), "USER_ENTERED")
+gs_flush()
+
+st.success("업데이트 완료", icon="✅")
+
+st.toast("저장 완료", icon="💾")
+except Exception as e:
                     st.exception(e)
 
 def tab_admin_acl(emp_df: pd.DataFrame):
@@ -2632,12 +2704,14 @@ def tab_admin_acl(emp_df: pd.DataFrame):
                 ws=wb.worksheet(AUTH_SHEET)
             except WorksheetNotFound:
                 ws=wb.add_worksheet(title=AUTH_SHEET, rows=500, cols=12)
-                ws.update("A1", [AUTH_HEADERS])
+                gs_enqueue_range(ws, "A1", [AUTH_HEADERS], "USER_ENTERED")
+gs_flush()
             header = ws.row_values(1) or AUTH_HEADERS
 
             # 전체 초기화 후 헤더 재기입
             ws.clear()
-            ws.update("A1", [header])
+            gs_enqueue_range(ws, "A1", [header], "USER_ENTERED")
+gs_flush()
 
             out=fixed_df.copy()
             rows = out.apply(lambda r: [str(r.get(h, "")) for h in header], axis=1).tolist()
