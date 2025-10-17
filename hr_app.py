@@ -74,8 +74,7 @@ def get_jd_approval_map_cached(_year: int, _rev: int = 0) -> dict:
     """Return {(사번, 최신버전)->(상태, 승인시각)} for the year from 직무기술서_승인."""
     try:
         ws = _ws("직무기술서_승인")
-        df = _read_approval_df(ws)
-
+        df = pd.DataFrame(_ws_get_all_records(ws))
     except Exception:
         df = pd.DataFrame(columns=["연도","사번","버전","상태","승인시각"])
 
@@ -393,11 +392,7 @@ def read_sheet_df(sheet_name: str) -> pd.DataFrame:
     """구글시트 → DataFrame (빈칸 재직여부=True로 해석, 호환 유지)"""
     try:
         ws = _ws(sheet_name)
-        last = max(2, len([v for v in _retry(ws.col_values, 1) if str(v).strip()]))
-        values = _retry(ws.get, f"A1:I{last}", value_render_option="UNFORMATTED_VALUE") or []
-        header = values[0] if values else ["연도","사번","이름","버전","승인자사번","승인자이름","상태","승인시각","비고"]
-        body = values[1:] if len(values) > 1 else []
-        df = pd.DataFrame(body, columns=header) if body else pd.DataFrame(columns=header)
+        df = pd.DataFrame(_ws_get_all_records(ws))
         if df.empty:
             return df
 
@@ -1366,11 +1361,7 @@ def ensure_jobdesc_sheet():
 def read_jobdesc_df(_rev: int = 0) -> pd.DataFrame:
     ensure_jobdesc_sheet()
     ws = _ws(JOBDESC_SHEET)
-    last = max(2, len([v for v in _retry(ws.col_values, 1) if str(v).strip()]))
-        values = _retry(ws.get, f"A1:I{last}", value_render_option="UNFORMATTED_VALUE") or []
-        header = values[0] if values else ["연도","사번","이름","버전","승인자사번","승인자이름","상태","승인시각","비고"]
-        body = values[1:] if len(values) > 1 else []
-        df = pd.DataFrame(body, columns=header) if body else pd.DataFrame(columns=header)
+    df = pd.DataFrame(_ws_get_all_records(ws))
     if df.empty:
         return pd.DataFrame(columns=JOBDESC_HEADERS)
     # 타입 정리
@@ -1635,11 +1626,7 @@ def read_jd_approval_df(_rev: int = 0) -> pd.DataFrame:
     ensure_jd_approval_sheet()
     try:
         ws = _ws(JD_APPROVAL_SHEET)
-        last = max(2, len([v for v in _retry(ws.col_values, 1) if str(v).strip()]))
-        values = _retry(ws.get, f"A1:I{last}", value_render_option="UNFORMATTED_VALUE") or []
-        header = values[0] if values else ["연도","사번","이름","버전","승인자사번","승인자이름","상태","승인시각","비고"]
-        body = values[1:] if len(values) > 1 else []
-        df = pd.DataFrame(body, columns=header) if body else pd.DataFrame(columns=header)
+        df = pd.DataFrame(_ws_get_all_records(ws))
     except Exception:
         df = pd.DataFrame(columns=JD_APPROVAL_HEADERS)
     for c in JD_APPROVAL_HEADERS:
@@ -2861,8 +2848,7 @@ def gs_flush():
     for mode, payload in grouped.items():
         try:
             sh.values_batch_update({"valueInputOption": mode, "data": payload})
-        except Exception as e:
-            # Fallback: try batch_update if values_batch_update is unavailable
+        except Exception:
             try:
                 sh.batch_update({"valueInputOption": mode, "data": payload})
             except Exception:
