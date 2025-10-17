@@ -794,44 +794,25 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
         view2["사번"] = view2["사번"].astype(str)
         view2 = view2.merge(add_df, on="사번", how="left")
     
-                # --- Compact, no-horizontal-scroll styling (keeps ALL columns) ---
-        ext_cols = cols + [
-                                   "인사평가(자기)","인사평가(1차)","인사평가(2차)",
-                                   "직무기술서(작성)","직무기술서(승인)",
-                                   "직무능력평가(주업무)","직무능력평가(기타업무)","직무능력평가(자격유지)"
-                               ]
-
-        st.markdown("""
-        <style>
-          div[data-testid="stDataFrame"] div[role="gridcell"] { padding: 0 4px !important; }
-          div[data-testid="stDataFrame"] div[role="columnheader"] { padding: 0 4px !important; }
-          div[data-testid="stDataFrame"] { font-size: 12px !important; line-height: 1.1 !important; }
-        </style>
-        """, unsafe_allow_html=True)
-
-        _label_map = {
-            "인사평가(자기)": "자기",
-            "인사평가(1차)": "1차",
-            "인사평가(2차)": "2차",
-            "직무기술서(작성)": "JD작성",
-            "직무기술서(승인)": "JD승인",
-            "직무능력평가(주업무)": "주업무",
-            "직무능력평가(기타업무)": "기타업무",
-            "직무능력평가(자격유지)": "자격유지",
-        }
-        _colcfg = {}
-        for _c in ext_cols:
-            _label = _label_map.get(_c, _c)
-            _colcfg[_c] = st.column_config.TextColumn(_label, width="small")
-
+        ext_cols = cols + ["인사평가(자기)","인사평가(1차)","인사평가(2차)",
+                           "직무기술서(작성)","직무기술서(승인)",
+                           "직무능력평가(주업무)","직무능력평가(기타업무)","직무능력평가(자격유지)"]
         st.dataframe(
-            view2[ext_cols],
-            use_container_width=True,
-            height=420,
-            hide_index=True,
-            column_config=_colcfg,
-        )
-
+    view2[ext_cols],
+    use_container_width=True,
+    height=420,
+    hide_index=True,
+    column_config={
+        "인사평가(자기)": st.column_config.TextColumn("자기"),
+        "인사평가(1차)": st.column_config.TextColumn("1차"),
+        "인사평가(2차)": st.column_config.TextColumn("2차"),
+        "직무기술서(작성)": st.column_config.TextColumn("JD작성"),
+        "직무기술서(승인)": st.column_config.TextColumn("JD승인"),
+        "직무능력평가(주업무)": st.column_config.TextColumn("주업무"),
+        "직무능력평가(기타업무)": st.column_config.TextColumn("기타업무"),
+        "직무능력평가(자격유지)": st.column_config.TextColumn("자격유지"),
+    }
+)
     else:
         st.dataframe(view[cols], use_container_width=True, height=(360 if not show_dashboard_cols else 420), hide_index=True)
 
