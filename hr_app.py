@@ -151,7 +151,7 @@ def force_sync():
         pass
 
     # 3) 즉시 리런
-    st.rerun()
+    st.toast('갱신되었습니다.', icon='🔄')
 
 # ══════════════════════════════════════════════════════════════════════════════
 # App Config / Style
@@ -487,7 +487,7 @@ def logout():
         except Exception: pass
     try: st.cache_data.clear()
     except Exception: pass
-    st.rerun()
+    st.toast('갱신되었습니다.', icon='🔄')
 
 # --- Enter Key Binder (사번→PIN, PIN→로그인) -------------------------------
 import streamlit.components.v1 as components
@@ -562,7 +562,7 @@ def show_login(emp_df: pd.DataFrame):
         if stored not in (entered_plain, entered_salted):
             st.error("PIN이 올바르지 않습니다."); st.stop()
         _start_session({"사번":str(r.get("사번","")), "이름":str(r.get("이름",""))})
-        st.success("환영합니다!"); st.rerun()
+        st.success("환영합니다!")
 
 def require_login(emp_df: pd.DataFrame):
     if not _session_valid():
@@ -715,7 +715,7 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
     # ▼ 필터 초기화: 플래그만 세우고 즉시 rerun (다음 런 시작 시 초기화됨)
     if st.button("필터 초기화", use_container_width=True):
         st.session_state["_left_reset"] = True
-        st.rerun()
+        st.toast('갱신되었습니다.', icon='🔄')
 
     if picked and picked != "(선택)":
         sab = picked.split(" - ", 1)[0].strip()
@@ -1145,7 +1145,7 @@ def tab_eval(emp_df: pd.DataFrame):
     if st.button(("수정모드로 전환" if not st.session_state["eval2_edit_mode"] else "보기모드로 전환"),
                  use_container_width=True, key="eval2_toggle"):
         st.session_state["eval2_edit_mode"] = not st.session_state["eval2_edit_mode"]
-        st.rerun()
+        st.toast('갱신되었습니다.', icon='🔄')
     # '실제' 편집 가능 여부는 선행조건/잠금도 반영
     requested_edit = bool(st.session_state["eval2_edit_mode"])
     edit_mode = requested_edit and prereq_ok and (not is_locked)
@@ -1346,7 +1346,7 @@ def tab_eval(emp_df: pd.DataFrame):
         for _iid in item_ids:
             _k = f"eval2_seg_{_iid}_{kbase}"
             if _k in st.session_state: del st.session_state[_k]
-        st.rerun()
+        st.toast('갱신되었습니다.', icon='🔄')
 
     if do_save:
         if not attest_ok:
@@ -1365,7 +1365,7 @@ def tab_eval(emp_df: pd.DataFrame):
                 )
                 st.session_state["eval2_edit_mode"] = False
                 st.session_state['eval_rev'] = st.session_state.get('eval_rev', 0) + 1
-                st.rerun()
+                st.toast('갱신되었습니다.', icon='🔄')
             except Exception as e:
                 st.exception(e)
 
@@ -1819,7 +1819,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
     if st.button(("수정모드로 전환" if not st.session_state["jd2_edit_mode"] else "보기모드로 전환"),
                  use_container_width=True, key="jd2_toggle"):
         st.session_state["jd2_edit_mode"] = not st.session_state["jd2_edit_mode"]
-        st.rerun()
+        st.toast('갱신되었습니다.', icon='🔄')
     st.caption(f"현재: **{'수정모드' if st.session_state['jd2_edit_mode'] else '보기모드'}**")
     edit_mode = bool(st.session_state["jd2_edit_mode"])
 
@@ -1949,7 +1949,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
                 rep = upsert_jobdesc(rec, as_new_version=(version == 0))
                 st.success(f"저장 완료 (버전 {rep['version']})", icon="✅")
                 st.session_state['jobdesc_rev'] = st.session_state.get('jobdesc_rev', 0) + 1
-                st.rerun()
+                st.toast('갱신되었습니다.', icon='🔄')
             except Exception as e:
                 st.exception(e)
 
@@ -2239,7 +2239,7 @@ def tab_competency(emp_df: pd.DataFrame):
     if do_reset:
         for k in ["cmpS_main","cmpS_extra","cmpS_qual","cmpS_opinion"]:
             if k in st.session_state: del st.session_state[k]
-        st.rerun()
+        st.toast('갱신되었습니다.', icon='🔄')
 
     if do_save:
         # 1) 동의 체크
@@ -2382,7 +2382,7 @@ def tab_staff_admin(emp_df: pd.DataFrame):
             except Exception:
                 pass
             st.success(f"저장 완료: {change_cnt}명 반영", icon="✅")
-            st.rerun()
+            st.toast('갱신되었습니다.', icon='🔄')
         except Exception as e:
             st.exception(e)
 
@@ -2523,7 +2523,7 @@ def tab_admin_eval_items():
                         put("순서",int(order)); put("활성",bool(active)); 
                         if "비고" in hmap: put("비고", memo.strip())
                         _retry(ws.append_row, rowbuf, value_input_option="USER_ENTERED")
-                        st.cache_data.clear(); st.success(f"저장 완료 (항목ID: {new_id})"); st.rerun()
+                        st.cache_data.clear(); st.success(f"저장 완료 (항목ID: {new_id})")
                     else:
                         col_id=hmap.get("항목ID"); idx=0
                         if col_id:
@@ -2702,7 +2702,7 @@ def tab_admin_acl(emp_df: pd.DataFrame):
 
             st.cache_data.clear()
             st.success("권한이 전체 반영되었습니다.", icon="✅")
-            st.rerun()
+            st.toast('갱신되었습니다.', icon='🔄')
         except Exception as e:
             st.exception(e)
 
