@@ -1630,7 +1630,7 @@ def _ws_batch_row(ws, idx, hmap, kv: dict):
         updates.append({"range": a1, "values": [[v]]})
     if updates:
         body = {"valueInputOption": "USER_ENTERED", "data": updates}
-        _retry(ws.spreadsheet.batch_update, body)
+        _retry(ws.spreadsheet.values_batch_update, body)
 
 def _jd_latest_version_for(sabun: str, year: int) -> int:
     row = _jd_latest_for(sabun, int(year)) or {}
