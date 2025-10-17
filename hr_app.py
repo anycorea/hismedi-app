@@ -2422,9 +2422,7 @@ def tab_admin_eval_items():
                         a1=gspread.utils.rowcol_to_a1(pos[iid], col_ord)
                         _retry(ws.update, a1, [[new]]); changed+=1
                 gs_flush()
-
                 st.success("업데이트 완료", icon="✅")
-
                 st.toast("저장 완료", icon="💾")
             except Exception as e:
                 st.exception(e)
@@ -2492,12 +2490,9 @@ def tab_admin_eval_items():
                             ws.update_cell(idx, hmap["순서"], int(order))
                             ws.update_cell(idx, hmap["활성"], bool(active))
                             if "비고" in hmap:
-
                                 gs_enqueue_cell(ws, idx, hmap["비고"], memo.strip(), "USER_ENTERED")
                             gs_flush()
-
                             st.success("업데이트 완료", icon="✅")
-
                             st.toast("저장 완료", icon="💾")
                 except Exception as e:
                     st.exception(e)
@@ -2643,13 +2638,13 @@ def tab_admin_acl(emp_df: pd.DataFrame):
             except WorksheetNotFound:
                 ws=wb.add_worksheet(title=AUTH_SHEET, rows=500, cols=12)
                 gs_enqueue_range(ws, "A1", [AUTH_HEADERS], "USER_ENTERED")
-gs_flush()
+                gs_flush()
             header = ws.row_values(1) or AUTH_HEADERS
 
             # 전체 초기화 후 헤더 재기입
             ws.clear()
             gs_enqueue_range(ws, "A1", [header], "USER_ENTERED")
-gs_flush()
+            gs_flush()
 
             out=fixed_df.copy()
             rows = out.apply(lambda r: [str(r.get(h, "")) for h in header], axis=1).tolist()
@@ -2658,9 +2653,9 @@ gs_flush()
                 for i in range(0, len(rows), CHUNK):
                     ws.append_rows(rows[i:i+CHUNK], value_input_option="USER_ENTERED")
 
-            gs_flush()
+            st.cache_data.clear()
             st.success("권한이 전체 반영되었습니다.", icon="✅")
-            st.toast("저장 완료", icon="💾")
+            st.rerun()
         except Exception as e:
             st.exception(e)
 
