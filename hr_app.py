@@ -330,6 +330,14 @@ def _ws_values(ws, key: str | None = None):
     _VAL_CACHE[key] = (now, vals)
     return vals
 
+
+def _render_preserved(txt: str):
+    import html
+    s = (txt or "")
+    # Normalize line endings
+    s = s.replace("\r\n", "\n").replace("\r", "\n")
+    return f"""<div style="white-space:pre-wrap; font-family: inherit;">{html.escape(s)}</div>"""
+
 def _ws(title: str):
     now=time.time(); hit=_WS_CACHE.get(title)
     if hit and (now-hit[0]<_WS_TTL): return hit[1]
@@ -1779,14 +1787,17 @@ def tab_job_desc(emp_df: pd.DataFrame):
     }
 
     with st.expander("현재 저장된 직무기술서 요약", expanded=False):
-        st.write(f"**직무명:** {(jd_saved or {}).get('직무명','')}")
+        st.write(f"**직무명:** {(jd_saved or {}).get('직무명', '')}")
         cc = st.columns(2)
         with cc[0]:
+            st.markdown("**직무개요**")
+            st.markdown(_render_preserved((jd_saved or {}).get("직무개요", "") or "—"), unsafe_allow_html=True)
             st.markdown("**주업무**")
-            st.write((jd_saved or {}).get("주업무", "") or "—")
+            st.markdown(_render_preserved((jd_saved or {}).get("주업무", "") or "—"), unsafe_allow_html=True)
         with cc[1]:
             st.markdown("**기타업무**")
-            st.write((jd_saved or {}).get("기타업무", "") or "—")
+            st.markdown(_render_preserved((jd_saved or {}).get("기타업무", "") or "—"), unsafe_allow_html=True)
+
 
     # =================== Header Row 1 (가로) ===================
     r1 = st.columns([1, 1, 1, 1, 1.6])
@@ -1964,6 +1975,15 @@ def tab_job_desc(emp_df: pd.DataFrame):
             base = base.sort_values(["사번"]).reset_index(drop=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
+
+st.markdown("""
+<style>
+.kv { display: grid; grid-template-columns: 120px 1fr; gap: 8px 12px; margin-bottom: 6px; }
+.kv .k { font-weight: 600; color: var(--text-color); }
+.kv .v { white-space: pre-wrap; }
+.scrollbox { max-height: 380px; overflow-y: auto; padding-right: 8px; }
+</style>
+""", unsafe_allow_html=True)
 # 직무능력평가 + JD 요약 스크롤
 # ══════════════════════════════════════════════════════════════════════════════
 COMP_SIMPLE_PREFIX = "직무능력평가_"
@@ -2121,9 +2141,9 @@ def tab_competency(emp_df: pd.DataFrame):
             html = f"""
             <div class="scrollbox">
               <div class="kv"><div class="k">직무명</div><div class="v">{V('직무명')}</div></div>
-              <div class="kv"><div class="k">직무개요</div><div class="v">{V('직무개요')}</div></div>
-              <div class="kv"><div class="k">주요 업무</div><div class="v">{V('주업무')}</div></div>
-              <div class="kv"><div class="k">기타업무</div><div class="v">{V('기타업무')}</div></div>
+              \1<span style="white-space:pre-wrap">\2</span>\3
+              \1<span style="white-space:pre-wrap">\2</span>\3
+              \1<span style="white-space:pre-wrap">\2</span>\3
               <div class="kv"><div class="k">필요학력 / 전공</div><div class="v">{V('필요학력')} / {V('전공계열')}</div></div>
               <div class="kv"><div class="k">면허 / 경력(자격요건)</div><div class="v">{V('면허')} / {V('경력(자격요건)')}</div></div>
             </div>
