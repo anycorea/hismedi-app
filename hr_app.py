@@ -10,18 +10,6 @@ from typing import Any, Tuple
 import pandas as pd
 import streamlit as st
 
-
-
-
-# --- SAFE DEFAULTS (no Streamlit calls here) ---
-if "APP_TITLE" not in globals():
-    APP_TITLE = "HISMEDI 인사평가"
-if "APP_SUBTITLE" not in globals():
-    APP_SUBTITLE = ""
-if "APP_LOGO_URL" not in globals():
-    APP_LOGO_URL = ""
-# --- END SAFE DEFAULTS ---
-
 # Header auto-fix toggle (user manages Google Sheet headers)
 AUTO_FIX_HEADERS = False
 
@@ -129,9 +117,9 @@ from gspread.utils import rowcol_to_a1
 # ══════════════════════════════════════════════════════════════════════════════
 # Sync Utility (Force refresh Google Sheets caches)
 # ══════════════════════════════════════════════════════════════════════════════
-
-def force_sync(hard: bool = True):
-    # 1) cache clear
+def force_sync():
+    """모든 캐시를 무효화하고 즉시 리런하여 구글시트 최신 데이터로 갱신합니다."""
+    # 1) Streamlit 캐시 비우기
     try:
         st.cache_data.clear()
     except Exception:
@@ -141,29 +129,77 @@ def force_sync(hard: bool = True):
     except Exception:
         pass
 
-    # 2) selectively clear editor/grid/temp states, but keep auth/login
-    preserve = {"me", "auth_user", "auth_role", "login_time"}
-    drop_prefixes = ("_df_", "__cache_", "_cache_", "gs_", "editor_", "grid_", "aggrid_", "jd_", "eval_")
+    # 2) 세션 상태 중 로컬 캐시성 키 초기화(프로젝트 규칙에 맞게 prefix 추가/수정)
     try:
         for k in list(st.session_state.keys()):
-            if k in preserve:
-                continue
-            if k.startswith(drop_prefixes):
+            if k.startswith(("__cache_", "_df_", "_cache_", "gs_")):
                 del st.session_state[k]
     except Exception:
         pass
 
-    # 3) re-run app without logging out
-    if hard:
-        try:
-            st.rerun()
-        except Exception:
-            try:
-                st.experimental_rerun()
-            except Exception:
-                pass
+    # 3) 즉시 리런
+    st.rerun()
 
+# ══════════════════════════════════════════════════════════════════════════════
+# App Config / Style
+# ══════════════════════════════════════════════════════════════════════════════
+APP_TITLE = st.secrets.get("app", {}).get("TITLE", "HISMEDI - 인사/HR")
+st.set_page_config(page_title=APP_TITLE, layout="wide")
 
+# Disable st.help "No docs available"
+if not getattr(st, "_help_disabled", False):
+    def _noop_help(*args, **kwargs): return None
+    st.help = _noop_help
+    st._help_disabled = True
+
+st.markdown(
+    """
+    <style>
+      .block-container{ padding-top: 2.5rem !important; } 
+      .stTabs [role='tab']{ padding:10px 16px !important; font-size:1.02rem !important; }
+      .badge{display:inline-block;padding:.25rem .5rem;border-radius:.5rem;border:1px solid #9ae6b4;background:#e6ffed;color:#0f5132;font-weight:600;}
+      section[data-testid="stHelp"], div[data-testid="stHelp"]{ display:none !important; }
+      .muted{color:#6b7280;}
+      .app-title-hero{ font-weight:800; font-size:1.6rem; line-height:1.15; margin:.2rem 0 .6rem; }
+      @media (min-width:1400px){ .app-title-hero{ font-size:1.8rem; } }
+      div[data-testid="stFormSubmitButton"] button[kind="secondary"]{ padding: 0.35rem 0.5rem; font-size: .82rem; }
+
+      /* JD Summary scroll box (Competency tab) */
+      .scrollbox{ max-height: 280px; overflow-y: auto; padding: .6rem .75rem; background: #fafafa;
+                  border: 1px solid #e5e7eb; border-radius: .5rem; }
+      .scrollbox .kv{ margin-bottom: .6rem; }
+      .scrollbox .k{ font-weight: 700; margin-bottom: .2rem; }
+      .scrollbox .v{ white-space: pre-wrap; word-break: break-word; line-height: 1.42; }
+      
+/* JD summary tight mode: keep text exactly, but tighter spacing */
+.jd-tight { line-height: 1.42; }
+.jd-tight p, .jd-tight ul, .jd-tight ol, .jd-tight li { margin: 0; padding: 0; }
+
+      .submit-banner{
+        background:#FEF3C7; /* amber-100 */
+        border:1px solid #FDE68A; /* amber-200 */
+        padding:.55rem .8rem;
+        border-radius:.5rem;
+        font-weight:600;
+        line-height:1.35;
+        margin: 4px 0 14px 0; /* comfortable spacing below */
+        display:block;
+      }
+
+      /* ===== 좌우 스크롤 깔끔 모드 (표 구조 변경 없음) ===== */
+      /* 바깥 래퍼에서는 가로 스크롤 숨김 */
+      div[data-testid="stDataFrame"] > div { overflow-x: visible !important; }
+      /* 표 그리드(본체)에서만 가로 스크롤 */
+      div[data-testid="stDataFrame"] [role="grid"] { overflow-x: auto !important; }
+      /* 스크롤바 잡기 편하도록 표 아래쪽 여유 */
+      div[data-testid="stDataFrame"] { padding-bottom: 10px; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Utils
 
 def current_year() -> int:
     try:
