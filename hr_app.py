@@ -74,11 +74,8 @@ def get_jd_approval_map_cached(_year: int, _rev: int = 0) -> dict:
     """Return {(사번, 최신버전)->(상태, 승인시각)} for the year from 직무기술서_승인."""
     try:
         ws = _ws("직무기술서_승인")
-        last = max(2, len([v for v in _retry(ws.col_values, 1) if str(v).strip()]))
-        values = _retry(ws.get, f"A1:I{last}", value_render_option="UNFORMATTED_VALUE") or []
-        header = values[0] if values else ["연도","사번","이름","버전","승인자사번","승인자이름","상태","승인시각","비고"]
-        body = values[1:] if len(values) > 1 else []
-        df = pd.DataFrame(body, columns=header) if body else pd.DataFrame(columns=header)
+        df = _read_approval_df(ws)
+
     except Exception:
         df = pd.DataFrame(columns=["연도","사번","버전","상태","승인시각"])
 
