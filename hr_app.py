@@ -1,3 +1,15 @@
+# --- helper: detect Google Sheets quota(429) error ---
+def _is_quota_429(err) -> bool:
+    try:
+        from gspread.exceptions import APIError as _APIError
+        if isinstance(err, _APIError):
+            resp = getattr(err, "response", None)
+            code = getattr(resp, "status_code", None)
+            return code == 429
+    except Exception:
+        pass
+    return False
+# --- end helper ---
 # HISMEDI HR App
 # Tabs: 인사평가 / 직무기술서 / 직무능력평가 / 관리자 / 도움말
 
@@ -801,6 +813,7 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
 
 def _eval_sheet_name(year: int | str) -> str: return f"{EVAL_RESP_SHEET_PREFIX}{int(year)}"
 
+
 def ensure_eval_items_sheet():
     wb=get_book()
     try:
@@ -808,15 +821,39 @@ def ensure_eval_items_sheet():
     except WorksheetNotFound:
         ws=_retry(wb.add_worksheet, title=EVAL_ITEMS_SHEET, rows=200, cols=10)
         _retry(ws.update, "A1", [EVAL_ITEM_HEADERS]); return
-    header=_retry(ws.row_values, 1) or []
+    try:
+        header=_retry(ws.row_values, 1) or []
+    except Exception as e:
+        if _is_quota_429(e):
+            try: st.warning('구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 "동기화"를 눌러 다시 시도해 주세요.', icon='⏳')
+            except Exception: pass
+            return
+        raise
     need=[h for h in EVAL_ITEM_HEADERS if h not in header]
-    if need: _retry(ws.update, "1:1", [header+need])
+    if need:
+        try:
+            _retry(ws.update, "1:1", [header+need])
+        except Exception as e:
+            if _is_quota_429(e):
+                try: st.warning('구글시트 쓰기 할당량(1분) 초과. 잠시 후 좌측 "동기화" 후 다시 시도해 주세요.', icon='⏳')
+                except Exception: pass
+                return
+            raise
+
+
 
 @st.cache_data(ttl=300, show_spinner=False)
 def read_eval_items_df(only_active: bool = True) -> pd.DataFrame:
     ensure_eval_items_sheet()
     ws=_ws(EVAL_ITEMS_SHEET)
-    df=pd.DataFrame(_ws_get_all_records(ws))
+    try:
+        df=pd.DataFrame(_ws_get_all_records(ws))
+    except Exception as e:
+        if _is_quota_429(e):
+            try: st.warning('구글시트 읽기 할당량(1분) 초과. 잠시 후 "동기화"를 눌러 다시 시도해 주세요.', icon="⏳")
+            except Exception: pass
+            return pd.DataFrame(columns=EVAL_ITEM_HEADERS)
+        raise
     if df.empty: return pd.DataFrame(columns=EVAL_ITEM_HEADERS)
     if "순서" in df.columns:
         def _i(x):
@@ -828,6 +865,9 @@ def read_eval_items_df(only_active: bool = True) -> pd.DataFrame:
     if cols: df=df.sort_values(cols).reset_index(drop=True)
     if only_active and "활성" in df.columns: df=df[df["활성"]==True]
     return df
+
+
+
 
 def _ensure_eval_resp_sheet(year:int, item_ids:list[str]):
     name=_eval_sheet_name(year)
@@ -889,41 +929,18 @@ def upsert_eval_response(emp_df: pd.DataFrame, year: int, eval_type: str,
         st.cache_data.clear()
         return {"action":"insert","total":total}
     else:
-        # Build payload and write scores in one contiguous range if possible
-        payload = {"총점": total, "상태": status, "제출시각": now, "평가대상이름": tname, "평가자이름": ename}
-        for iid, sc in zip(item_ids, scores_list):
-            payload[f"점수_{iid}"] = sc
-
-        # Determine score columns and whether they are contiguous
-        score_cols = [hmap.get(f"점수_{iid}") for iid in item_ids if hmap.get(f"점수_{iid}")]
-        if score_cols:
-            score_cols_sorted = sorted(score_cols)
-            contiguous = all((b - a) == 1 for a, b in zip(score_cols_sorted, score_cols_sorted[1:]))
-            if contiguous:
-                start_c, end_c = score_cols_sorted[0], score_cols_sorted[-1]
-                # Map each contiguous column back to its value
-                col_to_val = {hmap[f"점수_{iid}"]: payload[f"점수_{iid}"] for iid in item_ids if hmap.get(f"점수_{iid}")}
-                row_vals = [col_to_val.get(c, "") for c in range(start_c, end_c+1)]
-                from gspread.utils import rowcol_to_a1
-                a1_start = rowcol_to_a1(row_idx, start_c)
-                a1_end = rowcol_to_a1(row_idx, end_c)
-                rng = f"{a1_start}:{a1_end}"
-                gs_enqueue_range(ws, rng, [row_vals], "USER_ENTERED")
-            else:
-                # Fallback: enqueue each score cell
-                for iid in item_ids:
-                    k = f"점수_{iid}"
-                    c = hmap.get(k)
-                    if c:
-                        gs_enqueue_cell(ws, row_idx, c, payload[k], "USER_ENTERED")
-
-        # Enqueue meta fields
-        for k in ["총점", "상태", "제출시각", "평가대상이름", "평가자이름"]:
-            c = hmap.get(k)
-            if c:
-                gs_enqueue_cell(ws, row_idx, c, payload[k], "USER_ENTERED")
-
-        gs_flush()
+        payload={"총점": total, "상태": status, "제출시각": now, "평가대상이름": tname, "평가자이름": ename}
+        for iid, sc in zip(item_ids, scores_list): payload[f"점수_{iid}"]=sc
+        def _batch_row(ws, idx, hmap, kv):
+            upd=[]
+            for k,v in kv.items():
+                c=hmap.get(k)
+                if c:
+                    a1=gspread.utils.rowcol_to_a1(idx, c)
+                    upd.append({"range": a1, "values": [[v]]})
+            if upd: _retry(ws.batch_update, upd)
+        _batch_row(ws, row_idx, hmap, payload)
+        st.cache_data.clear()
         return {"action":"update","total":total}
 
 @st.cache_data(ttl=300, show_spinner=False)
