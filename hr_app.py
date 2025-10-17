@@ -408,7 +408,11 @@ def read_emp_df() -> pd.DataFrame:
     # 재직여부는 확실히 bool로
     for _col in ["재직여부", "적용여부"]:
         if _col in df.columns:
-            df[_col] = df[_col].map(lambda v: True if str(v).strip() == "" else _to_bool(v)).astype(bool)return df
+            df[_col] = df[_col].map(
+                lambda v: True if str(v).strip() == "" else _to_bool(v)
+            ).astype(bool)
+
+    return df
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Login + Session
@@ -2172,7 +2176,8 @@ def tab_competency(emp_df: pd.DataFrame):
 # ══════════════════════════════════════════════════════════════════════════════
 # 관리자: 직원/ PIN 관리 / 인사평가 항목 관리 / 권한 관리
 # ══════════════════════════════════════════════════════════════════════════════
-REQ_EMP_COLS = ["사번","이름","부서1","부서2","직급","직무","직군","입사일","퇴사일","기타1","기타2","재직여부","적용여부",
+REQ_EMP_COLS = [
+"사번","이름","부서1","부서2","직급","직무","직군","입사일","퇴사일","기타1","기타2","재직여부","적용여부",
     "PIN_hash","PIN_No"
 ]
 
