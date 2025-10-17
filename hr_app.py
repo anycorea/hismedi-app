@@ -333,36 +333,6 @@ def get_client():
 
 @st.cache_resource(show_spinner=False)
 def get_book():
-
-# --- Batch write helpers (minimal) ---
-def _gs_queue_init():
-    if "gs_queue" not in st.session_state:
-        st.session_state.gs_queue = []
-
-def gs_enqueue_range(ws, range_a1, values_2d, value_input_option="RAW"):
-    _gs_queue_init()
-    rng = range_a1 if "!" in range_a1 else f"{ws.title}!{range_a1}"
-    st.session_state.gs_queue.append({"range": rng, "values": values_2d, "value_input_option": value_input_option})
-
-def gs_enqueue_cell(ws, row, col, value, value_input_option="RAW"):
-    _gs_queue_init()
-    a1 = rowcol_to_a1(row, col)
-    rng = f"{ws.title}!{a1}"
-    st.session_state.gs_queue.append({"range": rng, "values": [[value]], "value_input_option": value_input_option})
-
-def gs_flush():
-    if not st.session_state.get("gs_queue"):
-        return
-    data = st.session_state.gs_queue
-    # group by value_input_option to respect modes
-    by_mode = {}
-    for item in data:
-        by_mode.setdefault(item["value_input_option"], []).append({"range": item["range"], "values": item["values"]})
-    wb = get_book()
-    for mode, chunk in by_mode.items():
-        wb.values_batch_update({"valueInputOption": mode, "data": chunk})
-    st.session_state.gs_queue = []
-# --- end helpers ---
     return get_client().open_by_key(st.secrets["sheets"]["HR_SHEET_ID"])
 
 EMP_SHEET = st.secrets.get("sheets", {}).get("EMP_SHEET", "직원")
@@ -607,11 +577,7 @@ AUTH_HEADERS=["사번","이름","역할","범위유형","부서1","부서2","대
 @st.cache_data(ttl=300, show_spinner=False)
 def read_auth_df()->pd.DataFrame:
     try:
-        ws=_ws(AUTH_SHEET); last = max(2, len([v for v in _retry(ws.col_values, 1) if str(v).strip()]))
-        values = _retry(ws.get, f"A1:I{last}", value_render_option="UNFORMATTED_VALUE") or []
-        header = values[0] if values else ["연도","사번","이름","버전","승인자사번","승인자이름","상태","승인시각","비고"]
-        body = values[1:] if len(values) > 1 else []
-        df = pd.DataFrame(body, columns=header) if body else pd.DataFrame(columns=header)
+        ws=_ws(AUTH_SHEET); df=pd.DataFrame(_ws_get_all_records(ws))
     except Exception:
         return pd.DataFrame(columns=AUTH_HEADERS)
     if df.empty: return pd.DataFrame(columns=AUTH_HEADERS)
@@ -858,11 +824,7 @@ def ensure_eval_items_sheet():
 def read_eval_items_df(only_active: bool = True) -> pd.DataFrame:
     ensure_eval_items_sheet()
     ws=_ws(EVAL_ITEMS_SHEET)
-    last = max(2, len([v for v in _retry(ws.col_values, 1) if str(v).strip()]))
-        values = _retry(ws.get, f"A1:I{last}", value_render_option="UNFORMATTED_VALUE") or []
-        header = values[0] if values else ["연도","사번","이름","버전","승인자사번","승인자이름","상태","승인시각","비고"]
-        body = values[1:] if len(values) > 1 else []
-        df = pd.DataFrame(body, columns=header) if body else pd.DataFrame(columns=header)
+    df=pd.DataFrame(_ws_get_all_records(ws))
     if df.empty: return pd.DataFrame(columns=EVAL_ITEM_HEADERS)
     if "순서" in df.columns:
         def _i(x):
@@ -953,11 +915,7 @@ def upsert_eval_response(emp_df: pd.DataFrame, year: int, eval_type: str,
 def read_my_eval_rows(year: int, sabun: str) -> pd.DataFrame:
     name=_eval_sheet_name(year)
     try:
-        ws=_ws(name); last = max(2, len([v for v in _retry(ws.col_values, 1) if str(v).strip()]))
-        values = _retry(ws.get, f"A1:I{last}", value_render_option="UNFORMATTED_VALUE") or []
-        header = values[0] if values else ["연도","사번","이름","버전","승인자사번","승인자이름","상태","승인시각","비고"]
-        body = values[1:] if len(values) > 1 else []
-        df = pd.DataFrame(body, columns=header) if body else pd.DataFrame(columns=header)
+        ws=_ws(name); df=pd.DataFrame(_ws_get_all_records(ws))
     except Exception: return pd.DataFrame(columns=EVAL_BASE_HEADERS)
     if df.empty: return df
     if "평가자사번" in df.columns: df=df[df["평가자사번"].astype(str)==str(sabun)]
@@ -2132,11 +2090,7 @@ def upsert_comp_simple_response(emp_df: pd.DataFrame, year:int, target_sabun:str
 def read_my_comp_simple_rows(year:int, sabun:str)->pd.DataFrame:
     try:
         ws=get_book().worksheet(_simp_sheet_name(year))
-        last = max(2, len([v for v in _retry(ws.col_values, 1) if str(v).strip()]))
-        values = _retry(ws.get, f"A1:I{last}", value_render_option="UNFORMATTED_VALUE") or []
-        header = values[0] if values else ["연도","사번","이름","버전","승인자사번","승인자이름","상태","승인시각","비고"]
-        body = values[1:] if len(values) > 1 else []
-        df = pd.DataFrame(body, columns=header) if body else pd.DataFrame(columns=header)
+        df=pd.DataFrame(_ws_get_all_records(ws))
     except Exception: return pd.DataFrame(columns=COMP_SIMPLE_HEADERS)
     if df.empty: return df
     df=df[df["평가자사번"].astype(str)==str(sabun)]
@@ -2488,7 +2442,7 @@ def tab_admin_eval_items():
                 st.success("업데이트 완료", icon="✅")
 
                 st.toast("저장 완료", icon="💾")
-except Exception as e:
+            except Exception as e:
                 st.exception(e)
 
     st.divider()
@@ -2556,12 +2510,12 @@ except Exception as e:
                             if "비고" in hmap:
 
                                 gs_enqueue_cell(ws, idx, hmap["비고"], memo.strip(), "USER_ENTERED")
-gs_flush()
+                            gs_flush()
 
-st.success("업데이트 완료", icon="✅")
+                            st.success("업데이트 완료", icon="✅")
 
-st.toast("저장 완료", icon="💾")
-except Exception as e:
+                            st.toast("저장 완료", icon="💾")
+                except Exception as e:
                     st.exception(e)
 
 def tab_admin_acl(emp_df: pd.DataFrame):
@@ -2881,3 +2835,41 @@ def get_jd_approval_map_cached(_year: int, _rev: int = 0) -> dict:
     return out
 
 # --- END PATCH ---
+
+# ===== Batch write helpers (appended) =====
+def _gs_queue_init():
+    if "gs_queue" not in st.session_state:
+        st.session_state.gs_queue = []
+
+def gs_enqueue_range(ws, range_a1, values_2d, value_input_option="RAW"):
+    _gs_queue_init()
+    rng = range_a1 if "!" in range_a1 else f"{ws.title}!{range_a1}"
+    st.session_state.gs_queue.append({"range": rng, "values": values_2d, "value_input_option": value_input_option})
+
+def gs_enqueue_cell(ws, row, col, value, value_input_option="RAW"):
+    _gs_queue_init()
+    a1 = rowcol_to_a1(row, col)
+    rng = f"{ws.title}!{a1}"
+    st.session_state.gs_queue.append({"range": rng, "values": [[value]], "value_input_option": value_input_option})
+
+def gs_flush():
+    if not st.session_state.get("gs_queue"):
+        return
+    data = st.session_state.gs_queue
+    # group by value_input_option
+    grouped = {}
+    for item in data:
+        grouped.setdefault(item["value_input_option"], []).append({"range": item["range"], "values": item["values"]})
+    sh = get_book()
+    for mode, payload in grouped.items():
+        try:
+            sh.values_batch_update({"valueInputOption": mode, "data": payload})
+        except Exception as e:
+            # Fallback: try batch_update if values_batch_update is unavailable
+            try:
+                sh.batch_update({"valueInputOption": mode, "data": payload})
+            except Exception:
+                st.warning("일부 값 저장에 실패했습니다. 동기화 후 다시 시도해 주세요.")
+                raise
+    st.session_state.gs_queue = []
+# ===== End helpers =====
