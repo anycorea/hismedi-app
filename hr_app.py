@@ -2012,6 +2012,7 @@ def _jd_latest_for_comp(sabun:str, year:int)->dict:
         df=read_jobdesc_df()
         if df is None or len(df)==0: return {}
         q=df[(df["사번"].astype(str)==str(sabun))&(df["연도"].astype(int)==int(year))]
+        q = q.copy()
         if q.empty: return {}
         if "버전" in q.columns:
             try: q["버전"]=pd.to_numeric(q["버전"], errors="coerce").fillna(0)
