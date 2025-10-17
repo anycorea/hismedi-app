@@ -1779,17 +1779,14 @@ def tab_job_desc(emp_df: pd.DataFrame):
     }
 
     with st.expander("현재 저장된 직무기술서 요약", expanded=False):
-        st.write(f"**직무명:** {(jd_saved or {}).get('직무명', '')}")
-        c1, c2 = st.columns(2)
-        with c1:
-            st.caption("직무개요")
-            st.text_area(" ", (jd_saved or {}).get("직무개요", "") or "—", height=160, disabled=True, label_visibility="collapsed")
-            st.caption("주요 업무")
-            st.text_area("  ", (jd_saved or {}).get("주업무", "") or "—", height=200, disabled=True, label_visibility="collapsed")
-        with c2:
-            st.caption("기타업무")
-            st.text_area("   ", (jd_saved or {}).get("기타업무", "") or "—", height=200, disabled=True, label_visibility="collapsed")
-
+        st.write(f"**직무명:** {(jd_saved or {}).get('직무명','')}")
+        cc = st.columns(2)
+        with cc[0]:
+            st.markdown("**주업무**")
+            st.write((jd_saved or {}).get("주업무", "") or "—")
+        with cc[1]:
+            st.markdown("**기타업무**")
+            st.write((jd_saved or {}).get("기타업무", "") or "—")
 
     # =================== Header Row 1 (가로) ===================
     r1 = st.columns([1, 1, 1, 1, 1.6])
@@ -2118,18 +2115,22 @@ def tab_competency(emp_df: pd.DataFrame):
         pass
 
     with st.expander("직무기술서 요약", expanded=True):
-        jd = _jd_latest_for_comp(sel_sab, int(year))
+        jd=_jd_latest_for_comp(sel_sab, int(year))
         if jd:
-            st.text(f"직무명: {jd.get('직무명', '')}")
-            st.caption("직무개요")
-            st.text_area("직무개요", (jd.get("직무개요","") or ""), height=160, disabled=True)
-            st.caption("주요 업무")
-            st.text_area("주요 업무", (jd.get("주업무","") or ""), height=200, disabled=True)
-            st.caption("기타업무")
-            st.text_area("기타업무", (jd.get("기타업무","") or ""), height=180, disabled=True)
+            def V(key): return (_html_escape((jd.get(key,"") or "").strip()) or "—")
+            html = f"""
+            <div class="scrollbox">
+              <div class="kv"><div class="k">직무명</div><div class="v">{V('직무명')}</div></div>
+              <div class="kv"><div class="k">직무개요</div><div class="v">{V('직무개요')}</div></div>
+              <div class="kv"><div class="k">주요 업무</div><div class="v">{V('주업무')}</div></div>
+              <div class="kv"><div class="k">기타업무</div><div class="v">{V('기타업무')}</div></div>
+              <div class="kv"><div class="k">필요학력 / 전공</div><div class="v">{V('필요학력')} / {V('전공계열')}</div></div>
+              <div class="kv"><div class="k">면허 / 경력(자격요건)</div><div class="v">{V('면허')} / {V('경력(자격요건)')}</div></div>
+            </div>
+            """
+            st.markdown(html, unsafe_allow_html=True)
         else:
-            st.info("저장된 직무기술서가 없습니다.")
-
+            st.caption("직무기술서가 없습니다. JD 없이도 평가를 진행할 수 있습니다.")
 
     st.markdown("### 평가 입력")
     grade_options=["우수","양호","보통","미흡"]
