@@ -366,23 +366,27 @@ LAST_GOOD: dict[str, pd.DataFrame] = {}
 @st.cache_data(ttl=600, show_spinner=False)
 def read_sheet_df(sheet_name: str) -> pd.DataFrame:
     try:
-        ws=_ws(sheet_name)
-        df=pd.DataFrame(_ws_get_all_records(ws))
+        ws = _ws(sheet_name)
+        df = pd.DataFrame(_ws_get_all_records(ws))
         if df.empty:
             return df
-        if "사번" in df.columns: df["사번"]=df["사번"].astype(str)
-        if "재직여부" in df.columns: 
-            df["재직여부"]=df["재직여부"].astype(str).str.strip().map({"True": True, "true": True, "1": True, "": True}).fillna(True)
+
+        if "사번" in df.columns:
+            df["사번"] = df["사번"].astype(str)
+
+        if "재직여부" in df.columns:
+            # 빈칸을 False로 볼 경우(기본):
+            df["재직여부"] = df["재직여부"].where(df["재직여부"].notna(), "")
+            df["재직여부"] = df["재직여부"].map(_to_bool)
+
         LAST_GOOD[sheet_name] = df.copy()
         return df
-    except APIError as e:
+
+    except APIError:
         if sheet_name in LAST_GOOD:
             st.info(f"네트워크 혼잡으로 캐시 데이터를 표시합니다: {sheet_name}")
             return LAST_GOOD[sheet_name]
         raise
-    if "사번" in df.columns: df["사번"]=df["사번"].astype(str)
-    if "재직여부" in df.columns: df["재직여부"]=df["재직여부"].map(_to_bool)
-    return df
 
 @st.cache_data(ttl=600, show_spinner=False)
 def read_emp_df() -> pd.DataFrame:
