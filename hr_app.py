@@ -399,18 +399,16 @@ def read_emp_df() -> pd.DataFrame:
     df = read_sheet_df(EMP_SHEET)
 
     # 최소 컬럼 보강
-    for c in ["사번", "이름", "PIN_hash", "재직여부"]:
+    for c in ["사번", "이름", "PIN_hash", "재직여부", "적용여부"]:
         if c not in df.columns:
             df[c] = "" if c != "재직여부" else True
 
     # dtype 정리
     df["사번"] = df["사번"].astype(str)
     # 재직여부는 확실히 bool로
-    df["재직여부"] = df["재직여부"].map(
-        lambda v: True if str(v).strip() == "" else _to_bool(v)
-    ).astype(bool)
-
-    return df
+    for _col in ["재직여부", "적용여부"]:
+        if _col in df.columns:
+            df[_col] = df[_col].map(lambda v: True if str(v).strip() == "" else _to_bool(v)).astype(bool)return df
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Login + Session
@@ -2174,8 +2172,7 @@ def tab_competency(emp_df: pd.DataFrame):
 # ══════════════════════════════════════════════════════════════════════════════
 # 관리자: 직원/ PIN 관리 / 인사평가 항목 관리 / 권한 관리
 # ══════════════════════════════════════════════════════════════════════════════
-REQ_EMP_COLS = [
-    "사번","이름","부서1","부서2","직급","직무","직군","입사일","퇴사일","기타1","기타2","재직여부",
+REQ_EMP_COLS = ["사번","이름","부서1","부서2","직급","직무","직군","입사일","퇴사일","기타1","기타2","재직여부","적용여부",
     "PIN_hash","PIN_No"
 ]
 
@@ -2225,6 +2222,7 @@ def tab_staff_admin(emp_df: pd.DataFrame):
         "기타1": st.column_config.TextColumn("기타1"),
         "기타2": st.column_config.TextColumn("기타2"),
         "재직여부": st.column_config.CheckboxColumn("재직여부"),
+        "적용여부": st.column_config.CheckboxColumn("적용여부"),
     }
 
     edited = st.data_editor(
@@ -2261,7 +2259,7 @@ def tab_staff_admin(emp_df: pd.DataFrame):
                     if v0 != v1:
                         diff_cols.append(c)
                         # 불린 컬럼은 True/False로 유지
-                        if c == "재직여부":
+                        if c in ("재직여부", "적용여부"):
                             payload[c] = bool(after.loc[sabun, c])
                         else:
                             payload[c] = after.loc[sabun, c]
