@@ -11,32 +11,377 @@ import pandas as pd
 import streamlit as st
 
 # ===== Cached summary helpers (performance) =====
+@st.cache_data(ttl=300, show_spinner=False)
+def get_eval_summary_map_cached(_year: int, _rev: int = 0) -> dict:
+    """Return {(사번, 평가유형)->(총점, 제출시각)} for the year."""
+    items = read_eval_items_df(True)
+    item_ids = [str(x) for x in items["항목ID"].tolist()] if not items.empty else []
+    try:
+        ws = _ensure_eval_resp_sheet(int(_year), item_ids)
+        header = _retry(ws.row_values, 1) or []
+        hmap = {n:i+1 for i,n in enumerate(header)}
+        values = _ws_values(ws)
+    except Exception:
+        return {}
+    cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cTot=hmap.get("총점"); cSub=hmap.get("제출시각")
+    out = {}
+    for i in range(2, len(values)+1):
+        r = values[i-1]
+        try:
+            if str(r[cY-1]).strip() != str(_year): continue
+            k = (str(r[cTS-1]).strip(), str(r[cT-1]).strip())
+            tot = r[cTot-1] if (cTot and cTot-1 < len(r)) else ""
+            sub = r[cSub-1] if (cSub and cSub-1 < len(r)) else ""
+            if k not in out or str(out[k][1]) < str(sub):
+                out[k] = (tot, sub)
+        except Exception:
+            pass
+    return out
+
+@st.cache_data(ttl=300, show_spinner=False)
+def get_comp_summary_map_cached(_year: int, _rev: int = 0) -> dict:
+    """Return {사번->(주업무, 기타업무, 자격유지, 제출시각)} for the year."""
+    try:
+        ws = _ensure_comp_simple_sheet(int(_year))
+        header = _retry(ws.row_values,1) or []
+        hmap = {n:i+1 for i,n in enumerate(header)}
+        values = _ws_values(ws)
+    except Exception:
+        return {}
+    cY=hmap.get("연도"); cTS=hmap.get("평가대상사번"); cMain=hmap.get("주업무평가")
+    cExtra=hmap.get("기타업무평가"); cQual=hmap.get("자격유지"); cSub=hmap.get("제출시각")
+    out = {}
+    for i in range(2, len(values)+1):
+        r = values[i-1]
+        try:
+            if cY and str(r[cY-1]).strip()!=str(_year): continue
+            sab = str(r[cTS-1]).strip()
+            main = r[cMain-1] if cMain else ""
+            extra = r[cExtra-1] if cExtra else ""
+            qual = r[cQual-1] if cQual else ""
+            sub = r[cSub-1] if cSub else ""
+            if sab not in out or str(out[sab][3]) < str(sub):
+                out[sab] = (main, extra, qual, sub)
+        except Exception:
+            pass
+    return out
+
+@st.cache_data(ttl=120, show_spinner=False)
+def get_jd_approval_map_cached(_year: int, _rev: int = 0) -> dict:
+    """Return {(사번, 최신버전)->(상태, 승인시각)} for the year from 직무기술서_승인."""
+    try:
+        ws = _ws("직무기술서_승인")
+        df = pd.DataFrame(_ws_get_all_records(ws))
+    except Exception:
+        df = pd.DataFrame(columns=["연도","사번","버전","상태","승인시각"])
+    for c in ["연도","버전"]:
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0).astype(int)
+    for c in ["사번","상태","승인시각"]:
+        if c in df.columns:
+            df[c] = df[c].astype(str)
+    df = df[df.get("연도",0).astype(int) == int(_year)]
+    out = {}
+    if not df.empty:
+        df = df.sort_values(["사번","버전","승인시각"], ascending=[True, True, True]).reset_index(drop=True)
+        for _, rr in df.iterrows():
+            k = (str(rr.get("사번","")), int(rr.get("버전",0)))
+            out[k] = (str(rr.get("상태","")), str(rr.get("승인시각","")))
+    return out
+
+from html import escape as _html_escape
+
+# Optional zoneinfo (KST)
+try:
+    from zoneinfo import ZoneInfo
+    def tz_kst(): return ZoneInfo(st.secrets.get("app", {}).get("TZ", "Asia/Seoul"))
+except Exception:
+    import pytz
+    def tz_kst(): return pytz.timezone(st.secrets.get("app", {}).get("TZ", "Asia/Seoul"))
+
+# gspread (배포 최적화: 자동 pip 설치 제거, 의존성 사전 설치 전제)
+import gspread
+from google.oauth2.service_account import Credentials
+from gspread.exceptions import WorksheetNotFound, APIError
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Sync Utility (Force refresh Google Sheets caches)
+# ══════════════════════════════════════════════════════════════════════════════
+def force_sync():
+    """모든 캐시를 무효화하고 즉시 리런하여 구글시트 최신 데이터로 갱신합니다."""
+    # 1) Streamlit 캐시 비우기
+    try:
+        st.cache_data.clear()
+    except Exception:
+        pass
+    try:
+        st.cache_resource.clear()
+    except Exception:
+        pass
+
+    # 2) 세션 상태 중 로컬 캐시성 키 초기화(프로젝트 규칙에 맞게 prefix 추가/수정)
+    try:
+        for k in list(st.session_state.keys()):
+            if k.startswith(("__cache_", "_df_", "_cache_", "gs_")):
+                del st.session_state[k]
+    except Exception:
+        pass
+
+    # 3) 즉시 리런
+    st.rerun()
+
+# ══════════════════════════════════════════════════════════════════════════════
+# App Config / Style
+# ══════════════════════════════════════════════════════════════════════════════
+APP_TITLE = st.secrets.get("app", {}).get("TITLE", "HISMEDI - 인사/HR")
+st.set_page_config(page_title=APP_TITLE, layout="wide")
+
+# Disable st.help "No docs available"
+if not getattr(st, "_help_disabled", False):
+    def _noop_help(*args, **kwargs): return None
+    st.help = _noop_help
+    st._help_disabled = True
+
+st.markdown(
+    """
+    <style>
+      .block-container{ padding-top: 2.5rem !important; } 
+      .stTabs [role='tab']{ padding:10px 16px !important; font-size:1.02rem !important; }
+      .badge{display:inline-block;padding:.25rem .5rem;border-radius:.5rem;border:1px solid #9ae6b4;background:#e6ffed;color:#0f5132;font-weight:600;}
+      section[data-testid="stHelp"], div[data-testid="stHelp"]{ display:none !important; }
+      .muted{color:#6b7280;}
+      .app-title-hero{ font-weight:800; font-size:1.6rem; line-height:1.15; margin:.2rem 0 .6rem; }
+      @media (min-width:1400px){ .app-title-hero{ font-size:1.8rem; } }
+      div[data-testid="stFormSubmitButton"] button[kind="secondary"]{ padding: 0.35rem 0.5rem; font-size: .82rem; }
+
+      /* JD Summary scroll box (Competency tab) */
+      .scrollbox{ max-height: 280px; overflow-y: auto; padding: .6rem .75rem; background: #fafafa;
+                  border: 1px solid #e5e7eb; border-radius: .5rem; }
+      .scrollbox .kv{ margin-bottom: .6rem; }
+      .scrollbox .k{ font-weight: 700; margin-bottom: .2rem; }
+      .scrollbox .v{ white-space: pre-wrap; word-break: break-word; }
+    
+      .submit-banner{
+        background:#FEF3C7; /* amber-100 */
+        border:1px solid #FDE68A; /* amber-200 */
+        padding:.55rem .8rem;
+        border-radius:.5rem;
+        font-weight:600;
+        line-height:1.35;
+        margin: 4px 0 14px 0; /* comfortable spacing below */
+        display:block;
+      }
+
+      /* ===== 좌우 스크롤 깔끔 모드 (표 구조 변경 없음) ===== */
+      /* 바깥 래퍼에서는 가로 스크롤 숨김 */
+      div[data-testid="stDataFrame"] > div { overflow-x: visible !important; }
+      /* 표 그리드(본체)에서만 가로 스크롤 */
+      div[data-testid="stDataFrame"] [role="grid"] { overflow-x: auto !important; }
+      /* 스크롤바 잡기 편하도록 표 아래쪽 여유 */
+      div[data-testid="stDataFrame"] { padding-bottom: 10px; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Utils
+
+def current_year() -> int:
+    try:
+        return int(datetime.now(tz=tz_kst()).year)
+    except Exception:
+        return int(datetime.now().year)
+# ══════════════════════════════════════════════════════════════════════════════
+def kst_now_str(): return datetime.now(tz=tz_kst()).strftime("%Y-%m-%d %H:%M:%S (%Z)")
+def _sha256_hex(s: str) -> str: return hashlib.sha256(str(s).encode()).hexdigest()
+def _to_bool(x) -> bool: return str(x).strip().lower() in ("true","1","y","yes","t")
+def _normalize_private_key(raw: str) -> str:
+    if not raw: return raw
+    return raw.replace("\\n","\n") if "\\n" in raw and "BEGIN PRIVATE KEY" in raw else raw
+def _pin_hash(pin: str, sabun: str) -> str:
+    return hashlib.sha256(f"{str(sabun).strip()}:{str(pin).strip()}".encode()).hexdigest()
+
+
+def show_submit_banner(text: str):
+    try:
+        st.markdown(f"<div class='submit-banner'>{text}</div>", unsafe_allow_html=True)
+    except Exception:
+        st.info(text)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PIN Utilities (clean)
+# ─────────────────────────────────────────────────────────────────────────────
+def verify_pin(user_sabun: str, pin: str) -> bool:
+    """
+    제출 직전 PIN 재인증용 (로그인 로직과 동일한 허용 범위 유지).
+    - PIN 저장 형태: SHA256(pin) 또는 SHA256(sabun:pin)
+    - 우선순위:
+      1) st.session_state["pin_map"] → 평문 비교
+      2) st.session_state["pin_hash_map"] → 해시 비교 (단일 / salt 포함 둘 다 허용)
+      3) st.session_state["user"] → pin / pin_hash 필드 비교
+      4) 직원시트 데이터 기반 보조 검증
+    """
+    sabun = str(user_sabun).strip()
+    val = str(pin).strip()
+    if not (sabun and val):
+        return False
+
+    # 1) 평문 맵
+    pin_map = st.session_state.get("pin_map", {})
+    if sabun in pin_map:
+        return str(pin_map.get(sabun, "")) == val
+
+    # 2) 해시 맵
+    pin_hash_map = st.session_state.get("pin_hash_map", {})
+    if sabun in pin_hash_map:
+        stored_hash = str(pin_hash_map.get(sabun, "")).lower().strip()
+        try:
+            return stored_hash in (_sha256_hex(val), _pin_hash(val, sabun))
+        except Exception:
+            pass
+
+    # 3) 세션 내 사용자 객체
+    u = st.session_state.get("user", {}) or {}
+    if str(u.get("사번", "")).strip() == sabun:
+        if "pin" in u:
+            return str(u.get("pin", "")) == val
+        if "pin_hash" in u:
+            stored_hash = str(u.get("pin_hash", "")).lower().strip()
+            try:
+                return stored_hash in (_sha256_hex(val), _pin_hash(val, sabun))
+            except Exception:
+                pass
+
+    # 4) 직원 DF 기반 보조 검증 (직원시트 읽기)
+    try:
+        emp_df = st.session_state.get("emp_df")
+        if emp_df is not None and "사번" in emp_df.columns and "PIN_hash" in emp_df.columns:
+            row = emp_df.loc[emp_df["사번"].astype(str) == sabun]
+            if not row.empty:
+                stored_hash = str(row.iloc[0].get("PIN_hash", "")).lower().strip()
+                if stored_hash in (_sha256_hex(val), _pin_hash(val, sabun)):
+                    return True
+    except Exception:
+        pass
+
+    return False
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Google Auth / Sheets
+# ══════════════════════════════════════════════════════════════════════════════
+API_BACKOFF_SEC = [0.0, 0.8, 1.6, 3.2, 6.4, 9.6]
+
+def _retry(fn, *args, **kwargs):
+    last=None
+    for b in API_BACKOFF_SEC:
+        try:
+            return fn(*args, **kwargs)
+        except APIError as e:
+            status = None; ra = None
+            try:
+                status = getattr(e, "response", None).status_code
+                ra = getattr(e, "response", None).headers.get("Retry-After")
+            except Exception:
+                pass
+            if status in (400, 401, 403, 404):
+                raise
+            wait = float(ra) if ra else (b + random.uniform(0, 0.5))
+            time.sleep(max(0.2, wait))
+            last = e
+        except Exception as e:
+            last = e
+            time.sleep(b + random.uniform(0, 0.5))
+    if last:
+        raise last
+    return fn(*args, **kwargs)
+
+@st.cache_resource(show_spinner=False)
+def get_client():
+    svc = dict(st.secrets["gcp_service_account"])
+    svc["private_key"] = _normalize_private_key(svc.get("private_key",""))
+    scopes=["https://www.googleapis.com/auth/spreadsheets","https://www.googleapis.com/auth/drive"]
+    creds=Credentials.from_service_account_info(svc, scopes=scopes)
+    return gspread.authorize(creds)
+
+@st.cache_resource(show_spinner=False)
+def get_book():
+    return get_client().open_by_key(st.secrets["sheets"]["HR_SHEET_ID"])
+
+EMP_SHEET = st.secrets.get("sheets", {}).get("EMP_SHEET", "직원")
+
+_WS_CACHE: dict[str, Tuple[float, Any]] = {}
+_HDR_CACHE: dict[str, Tuple[float, list[str], dict]] = {}
+_WS_TTL, _HDR_TTL = 120, 120
+
+_VAL_CACHE: dict[str, Tuple[float, list]] = {}
+_VAL_TTL = 90
+
+def _ws_values(ws, key: str | None = None):
+    key = key or getattr(ws, 'title', '') or 'ws_values'
+    now = time.time()
+    hit = _VAL_CACHE.get(key)
+    if hit and (now - hit[0] < _VAL_TTL):
+        return hit[1]
+    vals = _retry(ws.get_all_values)
+    _VAL_CACHE[key] = (now, vals)
+    return vals
+
+def _ws(title: str):
+    now=time.time(); hit=_WS_CACHE.get(title)
+    if hit and (now-hit[0]<_WS_TTL): return hit[1]
+    ws=_retry(get_book().worksheet, title); _WS_CACHE[title]=(now,ws); return ws
+
+def _hdr(ws, key: str) -> Tuple[list[str], dict]:
+    now=time.time(); hit=_HDR_CACHE.get(key)
+    if hit and (now-hit[0]<_HDR_TTL): return hit[1], hit[2]
+    header=_retry(ws.row_values, 1) or []; hmap={n:i+1 for i,n in enumerate(header)}
+    _HDR_CACHE[key]=(now, header, hmap); return header, hmap
+
+def _ws_get_all_records(ws):
+    try:
+        title = getattr(ws, "title", None) or ""
+        vals = _ws_values(ws, title)
+        if not vals: 
+            return []
+        header = [str(x).strip() for x in (vals[0] if vals else [])]
+        out = []
+        for i in range(1, len(vals)):
+            row = vals[i] if i < len(vals) else []
+            rec = {}
+            for j, h in enumerate(header):
+                rec[h] = row[j] if j < len(row) else ""
+            out.append(rec)
+        return out
+    except Exception:
+        try:
+            return _retry(ws.get_all_records, numericise_ignore=["all"])
+        except TypeError:
+            return _retry(ws.get_all_records)
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Sheet Readers (TTL↑)
+# ══════════════════════════════════════════════════════════════════════════════
+LAST_GOOD: dict[str, pd.DataFrame] = {}
 
 @st.cache_data(ttl=600, show_spinner=False)
 def read_sheet_df(sheet_name: str) -> pd.DataFrame:
-    """
-    구글시트 → DataFrame
-    - 기본 컬럼 정리
-    - 적용여부(Boolean) 정규화
-    - 시트 헤더가 아직 '재직여부'인 경우도 임시 호환 (읽을 때만)
-    """
+    """구글시트 → DataFrame (빈칸 재직여부=True로 해석, 호환 유지)"""
     try:
         ws = _ws(sheet_name)
         df = pd.DataFrame(_ws_get_all_records(ws))
         if df.empty:
             return df
 
-        # 호환: 시트가 아직 '재직여부'면 이를 '적용여부'로 미러링
-        if "적용여부" not in df.columns and "재직여부" in df.columns:
-            df["적용여부"] = df["재직여부"]
-
         # 사번은 문자열 키로 고정
         if "사번" in df.columns:
             df["사번"] = df["사번"].astype(str)
 
-        # 적용여부 불린화
-        if "적용여부" in df.columns:
-            df["적용여부"] = df["적용여부"].map(_to_bool)
+        # 재직여부: 빈칸은 True, 나머지는 _to_bool 규칙 적용
+        if "재직여부" in df.columns:
+            df["재직여부"] = df["재직여부"].map(
+                lambda v: True if str(v).strip() == "" else _to_bool(v)
+            )
 
         LAST_GOOD[sheet_name] = df.copy()
         return df
@@ -46,6 +391,43 @@ def read_sheet_df(sheet_name: str) -> pd.DataFrame:
             st.info(f"네트워크 혼잡으로 캐시 데이터를 표시합니다: {sheet_name}")
             return LAST_GOOD[sheet_name]
         raise
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def read_emp_df() -> pd.DataFrame:
+    """직원 시트 표준화: 필수 컬럼 보강 및 dtype 정리"""
+    df = read_sheet_df(EMP_SHEET)
+
+    # 최소 컬럼 보강
+    for c in ["사번", "이름", "PIN_hash", "재직여부"]:
+        if c not in df.columns:
+            df[c] = "" if c != "재직여부" else True
+
+    # dtype 정리
+    df["사번"] = df["사번"].astype(str)
+    # 재직여부는 확실히 bool로
+    df["재직여부"] = df["재직여부"].map(
+        lambda v: True if str(v).strip() == "" else _to_bool(v)
+    ).astype(bool)
+
+    return df
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Login + Session
+# ══════════════════════════════════════════════════════════════════════════════
+SESSION_TTL_MIN=30
+
+def _session_valid()->bool:
+    exp=st.session_state.get("auth_expires_at")
+    ok=st.session_state.get("authed", False)
+    return bool(ok and exp and time.time()<exp)
+
+def _start_session(user: dict):
+    st.session_state["authed"]=True
+    st.session_state["user"]=user
+    st.session_state["auth_expires_at"]=time.time()+SESSION_TTL_MIN*60
+    st.session_state["_state_owner_sabun"]=str(user.get("사번",""))
+
 def _ensure_state_owner():
     try:
         cur=str(st.session_state.get("user",{}).get("사번","") or "")
@@ -130,8 +512,8 @@ def show_login(emp_df: pd.DataFrame):
         row=emp_df.loc[emp_df["사번"].astype(str)==str(sabun)]
         if row.empty: st.error("사번을 찾을 수 없습니다."); st.stop()
         r=row.iloc[0]
-        if not _to_bool(r.get("적용여부", True)):
-            st.error("적용 상태가 아닙니다."); st.stop()
+        if not _to_bool(r.get("재직여부", True)):
+            st.error("재직 상태가 아닙니다."); st.stop()
         stored=str(r.get("PIN_hash","")).strip().lower()
         entered_plain=_sha256_hex(pin.strip())
         entered_salted=_pin_hash(pin.strip(), str(r.get("사번","")))
@@ -544,8 +926,8 @@ def tab_eval(emp_df: pd.DataFrame):
     # --- 대상 후보 목록 ------------------------------------------------------
     def list_targets_for(me_role: str) -> pd.DataFrame:
         base = emp_df.copy(); base["사번"] = base["사번"].astype(str)
-        if "적용여부" in base.columns:
-            base = base[base["적용여부"] == True]
+        if "재직여부" in base.columns:
+            base = base[base["재직여부"] == True]
         if me_role == "employee":
             return base[base["사번"] == me_sabun]
         elif me_role == "manager":
@@ -1314,8 +1696,8 @@ def tab_job_desc(emp_df: pd.DataFrame):
         base = emp_df.copy()
         base["사번"] = base["사번"].astype(str)
         base = base[base["사번"].isin({str(s) for s in allowed})]
-        if "적용여부" in base.columns:
-            base = base[base["적용여부"] == True]
+        if "재직여부" in base.columns:
+            base = base[base["재직여부"] == True]
         cols = ["사번", "이름", "부서1", "부서2"]
         extra = ["직급"] if "직급" in base.columns else []
         view = base[cols + extra].copy().sort_values(["사번"]).reset_index(drop=True)
@@ -1562,8 +1944,8 @@ def tab_job_desc(emp_df: pd.DataFrame):
                     appr_df = read_jd_approval_df(st.session_state.get("appr_rev", 0))
                 base["사번"] = base["사번"].astype(str)
             base = base[base["사번"].isin({str(s) for s in allowed})]
-            if "적용여부" in base.columns:
-                base = base[base["적용여부"] == True]
+            if "재직여부" in base.columns:
+                base = base[base["재직여부"] == True]
             base = base.sort_values(["사번"]).reset_index(drop=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1681,7 +2063,7 @@ def tab_competency(emp_df: pd.DataFrame):
     if "사번" not in df.columns:
         st.info("직원 데이터에 '사번' 컬럼이 없습니다.", icon="ℹ️"); return
     df["사번"]=df["사번"].astype(str); df=df[df["사번"].isin(allowed)].copy()
-    if "적용여부" in df.columns: df=df[df["적용여부"]==True]
+    if "재직여부" in df.columns: df=df[df["재직여부"]==True]
     for c in ["이름","부서1","부서2","직급"]:
         if c not in df.columns: df[c]=""
 
@@ -1793,7 +2175,7 @@ def tab_competency(emp_df: pd.DataFrame):
 # 관리자: 직원/ PIN 관리 / 인사평가 항목 관리 / 권한 관리
 # ══════════════════════════════════════════════════════════════════════════════
 REQ_EMP_COLS = [
-    "사번","이름","부서1","부서2","직급","직무","직군","입사일","퇴사일","기타1","기타2","적용여부",
+    "사번","이름","부서1","부서2","직급","직무","직군","입사일","퇴사일","기타1","기타2","재직여부",
     "PIN_hash","PIN_No"
 ]
 
@@ -1819,8 +2201,89 @@ def _find_row_by_sabun(ws, hmap, sabun: str) -> int:
     return 0
 
 def tab_staff_admin(emp_df: pd.DataFrame):
-    st.write(f"결과: **{len(emp_df):,}명**")
-    st.dataframe(emp_df.drop(columns=["PIN_hash"], errors="ignore"), use_container_width=True, height=560, hide_index=True)
+    # 1) 시트/헤더 확보 (+ 필수 컬럼 보장)
+    ws, header, hmap = ensure_emp_sheet_columns()  # '직원' 시트 1행에 누락 헤더 있으면 채움
+    view = emp_df.copy()
+
+    # 2) 민감 컬럼 숨기기
+    for c in ["PIN_hash", "PIN_No"]:
+        view = view.drop(columns=[c], errors="ignore")
+
+    st.write(f"결과: **{len(view):,}명**")
+
+    # 3) 편집 UI (사번=잠금, 재직여부=체크박스)
+    colcfg = {
+        "사번": st.column_config.TextColumn("사번", disabled=True),
+        "이름": st.column_config.TextColumn("이름"),
+        "부서1": st.column_config.TextColumn("부서1"),
+        "부서2": st.column_config.TextColumn("부서2"),
+        "직급": st.column_config.TextColumn("직급"),
+        "직무": st.column_config.TextColumn("직무"),
+        "직군": st.column_config.TextColumn("직군"),
+        "입사일": st.column_config.TextColumn("입사일"),
+        "퇴사일": st.column_config.TextColumn("퇴사일"),
+        "기타1": st.column_config.TextColumn("기타1"),
+        "기타2": st.column_config.TextColumn("기타2"),
+        "재직여부": st.column_config.CheckboxColumn("재직여부"),
+    }
+
+    edited = st.data_editor(
+        view,
+        use_container_width=True,
+        height=560,
+        hide_index=True,
+        num_rows="fixed",            # 행 추가/삭제는 막고 '수정'만
+        column_config=colcfg,
+    )
+
+    # 4) 저장 버튼 (변경된 칼럼만 배치 업데이트)
+    if st.button("변경사항 저장", type="primary", use_container_width=True):
+        try:
+            before = view.set_index("사번")
+            after  = edited.set_index("사번")
+
+            # 사번 없는 행들 제거(안전장치)
+            before = before[before.index.astype(str) != ""]
+            after  = after[after.index.astype(str) != ""]
+
+            change_cnt = 0
+            for sabun in after.index:
+                if sabun not in before.index:
+                    continue  # (num_rows="fixed"라서 거의 없음)
+                diff_cols = []
+                payload = {}
+
+                for c in after.columns:
+                    if c not in before.columns:
+                        continue
+                    v0 = str(before.loc[sabun, c])
+                    v1 = str(after.loc[sabun, c])
+                    if v0 != v1:
+                        diff_cols.append(c)
+                        # 불린 컬럼은 True/False로 유지
+                        if c == "재직여부":
+                            payload[c] = bool(after.loc[sabun, c])
+                        else:
+                            payload[c] = after.loc[sabun, c]
+
+                if not diff_cols:
+                    continue
+
+                # 시트에서 대상 행 찾기 → 변경 칼럼만 배치 업데이트
+                row_idx = _find_row_by_sabun(ws, hmap, str(sabun))
+                if row_idx > 0:
+                    _ws_batch_row(ws, row_idx, hmap, payload)
+                    change_cnt += 1
+
+            # 캐시 비우고 새로고침
+            try:
+                st.cache_data.clear()
+            except Exception:
+                pass
+            st.success(f"저장 완료: {change_cnt}명 반영", icon="✅")
+            st.rerun()
+        except Exception as e:
+            st.exception(e)
 
 def reissue_pin_inline(sabun: str, length: int = 4):
     ws, header, hmap = ensure_emp_sheet_columns()
@@ -1853,7 +2316,7 @@ def tab_admin_pin(emp_df):
             if not pin1 or not pin2: st.error("PIN을 두 번 모두 입력하세요."); return
             if pin1 != pin2: st.error("PIN 확인이 일치하지 않습니다."); return
             if not pin1.isdigit(): st.error("PIN은 숫자만 입력하세요."); return
-            if not _to_bool(row.get("적용여부", False)): st.error("퇴직자는 변경할 수 없습니다."); return
+            if not _to_bool(row.get("재직여부", False)): st.error("퇴직자는 변경할 수 없습니다."); return
             if "PIN_hash" not in hmap or "PIN_No" not in hmap: st.error(f"'{EMP_SHEET}' 시트에 PIN_hash/PIN_No가 없습니다."); return
             r = _find_row_by_sabun(ws, hmap, sabun)
             if r == 0: st.error("시트에서 사번을 찾지 못했습니다."); return
@@ -2209,23 +2672,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
-@st.cache_data(ttl=600, show_spinner=False)
-def read_emp_df() -> pd.DataFrame:
-    """직원 시트 표준화: 필수 컬럼 보강 및 dtype 정리"""
-    df = read_sheet_df(EMP_SHEET)
-
-    # 최소 컬럼 보강
-    for c in ["사번", "이름", "PIN_hash", "적용여부"]:
-        if c not in df.columns:
-            df[c] = "" if c != "적용여부" else True
-
-    # dtype 정리
-    df["사번"] = df["사번"].astype(str)
-    # 적용여부는 확실히 bool로
-    df["적용여부"] = df["적용여부"].map(_to_bool).astype(bool)
-
-    return df
-
