@@ -11,26 +11,16 @@ import pandas as pd
 import streamlit as st
 
 
-# --- HOTFIX: App title/subtitle/logo defaults (avoid NameError) ---
-try:
-    APP_TITLE
-except NameError:
-    try:
-        APP_TITLE = st.secrets.get("app", {}).get("TITLE", "HISMEDI 인사평가")
-    except Exception:
-        APP_TITLE = "HISMEDI 인사평가"
 
-# Optional: prevent NameError if these are referenced
-for _k, _default in {
-    "APP_SUBTITLE": "",
-    "APP_LOGO_URL": "",
-}.items():
-    if _k not in globals():
-        try:
-            globals()[_k] = st.secrets.get("app", {}).get(_k, _default)
-        except Exception:
-            globals()[_k] = _default
-# --- END HOTFIX ---
+
+# --- SAFE DEFAULTS (no Streamlit calls here) ---
+if "APP_TITLE" not in globals():
+    APP_TITLE = "HISMEDI 인사평가"
+if "APP_SUBTITLE" not in globals():
+    APP_SUBTITLE = ""
+if "APP_LOGO_URL" not in globals():
+    APP_LOGO_URL = ""
+# --- END SAFE DEFAULTS ---
 
 # Header auto-fix toggle (user manages Google Sheet headers)
 AUTO_FIX_HEADERS = False
