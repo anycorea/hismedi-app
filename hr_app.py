@@ -1320,7 +1320,13 @@ def ensure_jobdesc_sheet():
         header = _retry(ws.row_values, 1) or []
         need = [h for h in JOBDESC_HEADERS if h not in header]
         if need:
-            _retry(ws.update, "1:1", [header + need])
+            if AUTO_FIX_HEADERS:
+                _retry(ws.update, "1:1", [header + need])
+            else:
+                try:
+                    st.warning("시트 헤더에 다음 컬럼이 없습니다: " + ", ".join(need) + "\n"                               "→ 시트를 직접 수정한 뒤 좌측 🔄 동기화 버튼을 눌러주세요.", icon="⚠️")
+                except Exception:
+                    pass
         return ws
     except Exception as e:
         # WorksheetNotFound 등
@@ -2195,7 +2201,13 @@ def ensure_emp_sheet_columns():
     need = [c for c in REQ_EMP_COLS if c not in header]
     if need:
         if AUTO_FIX_HEADERS:
-            _retry(ws.update, "1:1", [header + need])
+            if AUTO_FIX_HEADERS:
+                _retry(ws.update, "1:1", [header + need])
+            else:
+                try:
+                    st.warning("시트 헤더에 다음 컬럼이 없습니다: " + ", ".join(need) + "\n"                               "→ 시트를 직접 수정한 뒤 좌측 🔄 동기화 버튼을 눌러주세요.", icon="⚠️")
+                except Exception:
+                    pass
             ws, header, hmap = _get_ws_and_headers(EMP_SHEET)
         else:
             try:
