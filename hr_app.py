@@ -2380,11 +2380,10 @@ def tab_staff_admin(emp_df: pd.DataFrame):
                     if v0 != v1:
                         diff_cols.append(c)
                         # 불린 컬럼은 True/False로 유지
-                        if c in ("재직여부", "적용여부"):
-                            payload[c] = "TRUE" if bool(after.loc[sabun, c]) else "FALSE"
-                        else:
-                            payload[c] = after.loc[sabun, c]
-
+                if c in ("재직여부", "적용여부"):
+                    payload[c] = bool(after.loc[sabun, c])
+                else:
+                    payload[c] = after.loc[sabun, c]
                 if not diff_cols:
                     continue
 
