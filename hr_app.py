@@ -1375,12 +1375,13 @@ def tab_eval(emp_df: pd.DataFrame):
     # - 1차/2차  : 평가자(본인) 사번
     sabun_for_pin = str(target_sabun) if str(eval_type) == "자기" else str(me_sabun)
 
-    cbtn = st.columns([1, 1, 3])
-    with cbtn[0]:
-        do_save = st.button("제출/저장", type="primary", use_container_width=True,
+    with st.form(key=f"eval_form_{kbase}"):
+        cbtn = st.columns([1,1,3])
+        with cbtn[0]:
+            do_save = st.form_submit_button("제출/저장", type="primary", use_container_width=True,
                             key=f"eval_save_{kbase}", disabled=not edit_mode)
-    with cbtn[1]:
-        do_reset = st.button("초기화", use_container_width=True,
+        with cbtn[1]:
+            do_reset = st.form_submit_button("초기화", use_container_width=True,
                              key=f"eval_reset_{kbase}", disabled=not edit_mode)
 
     if do_reset:
@@ -2271,11 +2272,12 @@ def tab_competency(emp_df: pd.DataFrame):
             key=f"comp_attest_pin_{year}_{sel_sab}_{me_sabun}",
         )
 
-    cbtn = st.columns([1, 1, 3])
-    with cbtn[0]:
-        do_save = st.button("제출/저장", type="primary", use_container_width=True, key="cmpS_save", disabled=comp_locked)
-    with cbtn[1]:
-        do_reset = st.button("초기화", use_container_width=True, key="cmpS_reset")
+    with st.form(key=f"comp_form_{year}_{sel_sab}_{me_sabun}"):
+        cbtn = st.columns([1,1,3])
+        with cbtn[0]:
+            do_save = st.form_submit_button("제출/저장", type="primary", use_container_width=True, key="cmpS_save", disabled=comp_locked)
+        with cbtn[1]:
+            do_reset = st.form_submit_button("초기화", use_container_width=True, key="cmpS_reset")
 
     if do_reset:
         for k in ["cmpS_main","cmpS_extra","cmpS_qual","cmpS_opinion"]:
