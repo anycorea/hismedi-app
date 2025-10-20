@@ -2689,17 +2689,23 @@ def tab_admin_acl(emp_df: pd.DataFrame):
                 gs_flush()
             header = ws.row_values(1) or AUTH_HEADERS
 
-            # 전체 초기화 후 헤더 재기입
-            ws.clear()
-            gs_enqueue_range(ws, "A1", [header], "USER_ENTERED")
-            gs_flush()
+            # 헤더/데이터 덮어쓰기(지우지 않음)
+            ws.update("A1", [header], value_input_option="USER_ENTERED")
 
-            out=fixed_df.copy()
+            out = fixed_df.copy()
             rows = out.apply(lambda r: [str(r.get(h, "")) for h in header], axis=1).tolist()
+
             if rows:
-                CHUNK=500
+                CHUNK = 500
                 for i in range(0, len(rows), CHUNK):
-                    ws.append_rows(rows[i:i+CHUNK], value_input_option="USER_ENTERED")
+                    start_row = 2 + i
+                    ws.update(f"A{start_row}", rows[i:i+CHUNK], value_input_option="USER_ENTERED")
+            else:
+                # 데이터가 없을 땐 헤더만 남기고 아래 영역 정리(선택)
+                try:
+                    ws.batch_clear(["2:10000"])
+                except Exception:
+                    pass
 
             st.cache_data.clear()
             st.success("권한이 전체 반영되었습니다.", icon="✅")
