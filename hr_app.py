@@ -153,8 +153,9 @@ except Exception:
 # ═════════════════════════════════════════════════════════════════════════════
 
 
+
 def force_sync():
-    """모든 캐시/세션 편집본을 비우고 즉시 리런."""
+    """데이터/편집 캐시만 비우고 즉시 리런 (로그인 세션/인증 키는 유지)."""
     # Streamlit 캐시
     try:
         st.cache_data.clear()
@@ -175,13 +176,20 @@ def force_sync():
         except Exception:
             pass
 
-    # 세션 상태 캐시: 기존 프리픽스 + 권한/에디터 관련 키 싹 비움
+    # 세션 상태: 편집/데이터 캐시만 선별 제거 (로그인/인증 관련 키는 보존)
+    SAFE_KEEP = {"user", "access_token", "refresh_token", "login_time", "login_provider"}
+    ACL_KEYS  = {"acl_df", "acl_header", "acl_editor", "auth_editor", "auth_editor_df", "__auth_sab_sig"}
+    PREFIXES  = ("__cache_", "_df_", "_cache_", "gs_")  # 데이터 캐시성 키만
+    
     try:
         to_del = []
         for k in list(st.session_state.keys()):
-            if k.startswith(("__cache_", "_df_", "_cache_", "gs_", "acl_", "auth_")) \
-               or k in {"acl_df", "acl_header", "acl_editor", "auth_editor", "auth_editor_df", "__auth_sab_sig"}:
-                to_del.append(k)
+            if k in SAFE_KEEP:
+                continue
+            if k in ACL_KEYS:
+                to_del.append(k); continue
+            if any(k.startswith(p) for p in PREFIXES):
+                to_del.append(k); continue
         for k in to_del:
             del st.session_state[k]
     except Exception:
