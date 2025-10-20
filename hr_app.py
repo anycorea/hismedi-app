@@ -2687,19 +2687,35 @@ def tab_admin_acl(emp_df: pd.DataFrame):
         st.rerun()
 
 
+    
     def _editor_to_canonical(df: pd.DataFrame) -> pd.DataFrame:
-        df=df.copy()
+        df = df.copy()
+        # Map '사번 - 이름' label back to '사번' and fill blanks for 이름/부서1/부서2
         if "사번" in df.columns:
             for i, val in df["사번"].items():
-        v=str(val).strip()
-        if not v: continue
-                sab = sabun_by_label.get(v) or (v.split(" - ",1)[0].strip() if " - " in v else v)
-                df.at[i,"사번"]=sab
-                nm = emp_lookup.get(sab,{}).get("이름","")
-                if nm: df.at[i,"이름"]=nm
+                v = str(val).strip()
+                if not v:
+                    continue
+                sab = sabun_by_label.get(v) or (v.split(" - ", 1)[0].strip() if " - " in v else v)
+                df.at[i, "사번"] = sab
+                info = emp_lookup.get(sab, {})
+                # 이름
+                if "이름" in df.columns:
+                    cur = "" if pd.isna(df.at[i, "이름"]) else str(df.at[i, "이름"])
+                    if not cur.strip():
+                        df.at[i, "이름"] = info.get("이름", "")
+                # 부서1
+                if "부서1" in df.columns:
+                    cur = "" if pd.isna(df.at[i, "부서1"]) else str(df.at[i, "부서1"])
+                    if not cur.strip():
+                        df.at[i, "부서1"] = info.get("부서1", "")
+                # 부서2
+                if "부서2" in df.columns:
+                    cur = "" if pd.isna(df.at[i, "부서2"]) else str(df.at[i, "부서2"])
+                    if not cur.strip():
+                        df.at[i, "부서2"] = info.get("부서2", "")
         return df
-
-    edited_canon = _editor_to_canonical(edited.drop(columns=["삭제"], errors="ignore"))
+edited_canon = _editor_to_canonical(edited.drop(columns=["삭제"], errors="ignore"))
 
     def _validate_and_fix(df: pd.DataFrame):
         df=df.copy().fillna("")
