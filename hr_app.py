@@ -2530,7 +2530,7 @@ def tab_admin_eval_items():
                         _retry(ws.update, _col_range(col_act, 2, n+1), active_values, value_input_option="USER_ENTERED")
 
                 st.success("업데이트 완료", icon="✅")
-                st.toast("저장 완료", icon="💾")
+                
             except Exception as e:
                 st.exception(e)
 
@@ -2601,7 +2601,7 @@ def tab_admin_eval_items():
                                 gs_enqueue_cell(ws, idx, hmap["비고"], memo.strip(), "USER_ENTERED")
                             gs_flush()
                             st.success("업데이트 완료", icon="✅")
-                            st.toast("저장 완료", icon="💾")
+                            
                 except Exception as e:
                     st.exception(e)
 
