@@ -152,9 +152,10 @@ except Exception:
 # Sync Utility (Force refresh Google Sheets caches)
 # ═════════════════════════════════════════════════════════════════════════════
 
+
 def force_sync():
-    """모든 캐시를 무효화하고 즉시 리런하여 구글시트 최신 데이터로 갱신합니다."""
-    # 1) Streamlit 캐시 비우기
+    """모든 캐시/세션 편집본을 비우고 즉시 리런."""
+    # Streamlit 캐시
     try:
         st.cache_data.clear()
     except Exception:
@@ -164,29 +165,28 @@ def force_sync():
     except Exception:
         pass
 
-    # 1-1) 모듈 레벨 캐시도 모두 초기화
+    # 모듈 레벨 캐시
     try:
         global _WS_CACHE, _HDR_CACHE, _VAL_CACHE
-        _WS_CACHE.clear()
-        _HDR_CACHE.clear()
-        _VAL_CACHE.clear()
+        _WS_CACHE.clear(); _HDR_CACHE.clear(); _VAL_CACHE.clear()
     except Exception:
         try:
-            _WS_CACHE = {}
-            _HDR_CACHE = {}
-            _VAL_CACHE = {}
+            _WS_CACHE = {}; _HDR_CACHE = {}; _VAL_CACHE = {}
         except Exception:
             pass
 
-    # 2) 세션 상태 중 로컬 캐시성 키 초기화(프로젝트 규칙에 맞게 prefix 추가/수정)
+    # 세션 상태 캐시: 기존 프리픽스 + 권한/에디터 관련 키 싹 비움
     try:
+        to_del = []
         for k in list(st.session_state.keys()):
-            if k.startswith(("__cache_", "_df_", "_cache_", "gs_")):
-                del st.session_state[k]
+            if k.startswith(("__cache_", "_df_", "_cache_", "gs_", "acl_", "auth_")) \
+               or k in {"acl_df", "acl_header", "acl_editor", "auth_editor", "auth_editor_df", "__auth_sab_sig"}:
+                to_del.append(k)
+        for k in to_del:
+            del st.session_state[k]
     except Exception:
         pass
 
-    # 3) 즉시 리런
     st.rerun()
 
 # ═════════════════════════════════════════════════════════════════════════════
