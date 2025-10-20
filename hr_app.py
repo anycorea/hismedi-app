@@ -2630,10 +2630,11 @@ def tab_admin_acl(emp_df: pd.DataFrame):
         if c in df_auth.columns: df_auth[c]=df_auth[c].map(_tostr)
     if "활성" in df_auth.columns:
         df_auth["활성"]=df_auth["활성"].map(lambda x: str(x).strip().lower() in ("true","1","y","yes","t"))
-
-    df_disp=df_auth.copy()
+    # --- Build grid (session-managed so that 이름 auto-updates on 사번 change) ---
+    df_disp = df_auth.copy()
     if "사번" in df_disp.columns:
-        df_disp["사번"]=df_disp["사번"].map(lambda v: label_by_sabun.get(str(v).strip(), str(v).strip()))
+        # map raw sabun -> "사번 - 이름" label for display
+        df_disp["사번"] = df_disp["사번"].map(lambda v: label_by_sabun.get(str(v).strip(), str(v).strip()))
 
     role_options  = ["admin","manager"]
     scope_options = ["","부서","개별"]
@@ -2641,9 +2642,21 @@ def tab_admin_acl(emp_df: pd.DataFrame):
     if "삭제" not in df_disp.columns:
         df_disp.insert(len(df_disp.columns), "삭제", False)
 
+    # Initialize or get working grid from session
+    _work = st.session_state.get("auth_editor_df")
+    if _work is None:
+        _work = df_disp.copy()
+    # Always recompute '이름' from current '사번' selection to keep in sync (display side)
+    def _name_from_label(val:str) -> str:
+        s = str(val).strip()
+        sab = sabun_by_label.get(s) or (s.split(" - ",1)[0].strip() if " - " in s else s)
+        return emp_lookup.get(sab,{}).get("이름","")
+    if "사번" in _work.columns and "이름" in _work.columns:
+        _work["이름"] = _work["사번"].map(_name_from_label)
+
     column_config = {
-        "사번": st.column_config.SelectboxColumn("사번 - 이름", options=labels, help="사번을 선택하면 이름은 자동 동기화됩니다."),
-        "이름": st.column_config.TextColumn("이름", help="사번 선택 시 자동 보정됩니다."),
+        "사번": st.column_config.SelectboxColumn("사번 - 이름", options=labels, help="사번을 선택하면 이름이 자동으로 동기화됩니다."),
+        "이름": st.column_config.TextColumn("이름", help="사번 선택 시 자동 채움(수정 가능)."),
         "역할": st.column_config.SelectboxColumn("역할", options=role_options),
         "범위유형": st.column_config.SelectboxColumn("범위유형", options=scope_options, help="빈값=전체 / 부서 / 개별"),
         "부서1": st.column_config.TextColumn("부서1"),
@@ -2655,7 +2668,7 @@ def tab_admin_acl(emp_df: pd.DataFrame):
     }
 
     edited = st.data_editor(
-        df_disp[[c for c in AUTH_HEADERS if c in df_disp.columns] + ["삭제"]],
+        _work[[c for c in AUTH_HEADERS if c in _work.columns] + ["삭제"]],
         key="auth_editor",
         use_container_width=True,
         hide_index=True,
@@ -2664,13 +2677,22 @@ def tab_admin_acl(emp_df: pd.DataFrame):
         disabled=not am_admin,
         column_config=column_config,
     )
+    # After edit: if 이름 differs from 사번 selection, auto-patch session dataframe and rerun
+    _patched = edited.copy()
+    if "사번" in _patched.columns and "이름" in _patched.columns:
+        _patched["이름"] = _patched["사번"].map(_name_from_label)
+    if st.session_state.get("auth_editor_df") is None or not _patched.equals(st.session_state.get("auth_editor_df")):
+        st.session_state["auth_editor_df"] = _patched
+        # Rerun to reflect into the grid immediately
+        st.rerun()
+
 
     def _editor_to_canonical(df: pd.DataFrame) -> pd.DataFrame:
         df=df.copy()
         if "사번" in df.columns:
             for i, val in df["사번"].items():
-                v=str(val).strip()
-                if not v: continue
+        v=str(val).strip()
+        if not v: continue
                 sab = sabun_by_label.get(v) or (v.split(" - ",1)[0].strip() if " - " in v else v)
                 df.at[i,"사번"]=sab
                 nm = emp_lookup.get(sab,{}).get("이름","")
@@ -2687,15 +2709,20 @@ def tab_admin_acl(emp_df: pd.DataFrame):
         df = df[df.astype(str).apply(lambda r: "".join(r.values).strip() != "", axis=1)]
 
         # 기본 필드 보정
+        # 기본 필드 보정 (사번 유효성만 강제, 이름/부서는 비어있을 때만 자동 채움)
         if "사번" in df.columns:
             for i,row in df.iterrows():
-                sab=str(row.get("사번","")).strip()
+                sab = str(row.get("사번","")).strip()
                 if not sab:
                     errs.append(f"{i+1}행: 사번이 비어 있습니다."); continue
                 if sab not in emp_lookup:
                     errs.append(f"{i+1}행: 사번 '{sab}' 은(는) 직원 목록에 없습니다."); continue
-                nm=emp_lookup[sab]["이름"]
-                if str(row.get("이름","")).strip()!=nm: df.at[i,"이름"]=nm
+                nm = emp_lookup[sab]["이름"]
+                d1 = emp_lookup[sab]["부서1"]
+                d2 = emp_lookup[sab]["부서2"]
+                if str(row.get("이름","")).strip() == "": df.at[i,"이름"] = nm
+                if str(row.get("부서1","")).strip() == "": df.at[i,"부서1"] = d1
+                if str(row.get("부서2","")).strip() == "": df.at[i,"부서2"] = d2
                 if not str(row.get("부서1","")).strip(): df.at[i,"부서1"]=emp_lookup[sab]["부서1"]
                 if not str(row.get("부서2","")).strip(): df.at[i,"부서2"]=emp_lookup[sab]["부서2"]
 
