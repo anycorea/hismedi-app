@@ -1378,7 +1378,7 @@ def tab_eval(emp_df: pd.DataFrame):
     with st.form(key=f"eval_form_{kbase}"):
         cbtn = st.columns([1,1,3])
         with cbtn[0]:
-            do_save = st.form_submit_button("제출/저장", type="primary", use_container_width=True,
+            do_save = st.form_submit_button("제출/저장", use_container_width=True,
                             key=f"eval_save_{kbase}", disabled=not edit_mode)
         with cbtn[1]:
             do_reset = st.form_submit_button("초기화", use_container_width=True,
@@ -2275,7 +2275,7 @@ def tab_competency(emp_df: pd.DataFrame):
     with st.form(key=f"comp_form_{year}_{sel_sab}_{me_sabun}"):
         cbtn = st.columns([1,1,3])
         with cbtn[0]:
-            do_save = st.form_submit_button("제출/저장", type="primary", use_container_width=True, key="cmpS_save", disabled=comp_locked)
+            do_save = st.form_submit_button("제출/저장", use_container_width=True, key="cmpS_save", disabled=comp_locked)
         with cbtn[1]:
             do_reset = st.form_submit_button("초기화", use_container_width=True, key="cmpS_reset")
 
