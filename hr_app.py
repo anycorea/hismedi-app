@@ -2613,13 +2613,13 @@ def tab_admin_eval_items():
                     st.exception(e)
 
 def tab_admin_acl(emp_df: pd.DataFrame):
-    """권한 관리: '사번-이름' 선택 시 이름 자동 채움(사번 변경시에만 1회 새로고침), 기본값/드롭다운, 부분 저장."""
+    """권한 관리(빠른 편집): 사번 변경 시 이름 자동, 기본값/드롭다운, 부분 저장. 시트는 저장 때만 접근."""
     me = st.session_state.get("user", {})
     am_admin = is_admin(str(me.get("사번","")))
     if not am_admin:
         st.error("Master만 저장할 수 있습니다. (표/저장 모두 비활성화)", icon="🛡️")
 
-    # 직원 레이블/룩업
+    # 직원 레이블/룩업 (메모리 계산만)
     base = emp_df[["사번","이름","부서1","부서2"]].copy() if not emp_df.empty else pd.DataFrame(columns=["사번","이름","부서1","부서2"])
     base["사번"] = base["사번"].astype(str).str.strip()
     emp_lookup = {
@@ -2638,72 +2638,57 @@ def tab_admin_acl(emp_df: pd.DataFrame):
         label_by_sabun[s] = lab
         sabun_by_label[lab] = s
 
-    # 시트 로드
-    ws = get_book().worksheet(AUTH_SHEET)
-    header = _retry(ws.row_values, 1) or []
-    if not header:
-        header = AUTH_HEADERS
-        _retry(ws.update, "1:1", [header])
-    hmap = {n: i+1 for i, n in enumerate(header)}
+    # 최초 1회만 시트 → 세션 적재
+    if "acl_df" not in st.session_state:
+        try:
+            ws = get_book().worksheet(AUTH_SHEET)
+            header = _retry(ws.row_values, 1) or AUTH_HEADERS
+            vals = _retry(ws.get_all_values) or []
+            rows = vals[1:] if len(vals) > 1 else []
+            df_auth = pd.DataFrame(rows, columns=header).fillna("")
+        except Exception:
+            header = AUTH_HEADERS
+            df_auth = pd.DataFrame(columns=header)
 
-    # 값 로드 → DataFrame
-    values = _retry(ws.get_all_values) or []
-    rows = values[1:] if len(values) > 1 else []
-    df_auth = pd.DataFrame(rows, columns=header).fillna("") if rows else pd.DataFrame(columns=header)
+        # 표시용 변환(사번 라벨) + 기본값(빈 칸만)
+        df_disp = df_auth.copy()
+        if "사번" in df_disp.columns:
+            df_disp["사번"] = df_disp["사번"].map(lambda v: label_by_sabun.get(str(v).strip(), str(v).strip()))
+        def _blank(x): return (x is None) or (str(x).strip()=="")
+        # 기본값
+        df_disp["역할"] = df_disp.get("역할","").map(lambda x: x if not _blank(x) else "manager")
+        df_disp["범위유형"] = df_disp.get("범위유형","").map(lambda x: x if not _blank(x) else "부서")
+        df_disp["활성"] = df_disp.get("활성", True)
+        if df_disp["활성"].dtype != bool:
+            df_disp["활성"] = df_disp["활성"].map(lambda x: True if _blank(x) else str(x).strip().lower() in ("true","1","y","yes","t","on","checked"))
+        for c in ["대상사번","비고"]:
+            df_disp[c] = df_disp.get(c, "").map(lambda x: "" if _blank(x) else x)
 
-    # 타입 보정
-    if "활성" in df_auth.columns:
-        df_auth["활성"] = df_auth["활성"].map(lambda x: str(x).strip().lower() in ("true","1","y","yes","t","on","checked"))
+        st.session_state["acl_header"] = header
+        st.session_state["acl_df"] = df_disp
 
-    # 표시용 변환
-    df_disp = df_auth.copy()
-    if "사번" in df_disp.columns:
-        df_disp["사번"] = df_disp["사번"].map(lambda v: label_by_sabun.get(str(v).strip(), str(v).strip()))
+    header = st.session_state["acl_header"]
+    work = st.session_state["acl_df"].copy()
 
-    # 기본값 적용(보여줄 때 빈 칸인 곳만 세팅)
-    def _blank(x): return (x is None) or (str(x).strip() == "")
-    if "역할" in df_disp.columns:
-        df_disp["역할"] = df_disp["역할"].map(lambda x: x if not _blank(x) else "manager")
-    else:
-        df_disp["역할"] = "manager"
-    if "범위유형" in df_disp.columns:
-        df_disp["범위유형"] = df_disp["범위유형"].map(lambda x: x if not _blank(x) else "부서")
-    else:
-        df_disp["범위유형"] = "부서"
-    if "활성" in df_disp.columns:
-        def _to_bool_default_true(x):
-            if _blank(x): return True
-            return str(x).strip().lower() in ("true","1","y","yes","t","on","checked")
-        df_disp["활성"] = df_disp["활성"].map(_to_bool_default_true)
-    else:
-        df_disp["활성"] = True
-    for c in ["대상사번","비고"]:
-        if c in df_disp.columns:
-            df_disp[c] = df_disp[c].map(lambda x: "" if _blank(x) else x)
-        else:
-            df_disp[c] = ""
-
-    # 부서 드롭다운 옵션(직원 시트 유니크)
+    # 드롭다운 옵션(직원 시트 유니크)
     dept1_options = [""] + sorted({str(x).strip() for x in base.get("부서1", pd.Series(dtype=str)).dropna().unique().tolist() if str(x).strip()})
     dept2_options = [""] + sorted({str(x).strip() for x in base.get("부서2", pd.Series(dtype=str)).dropna().unique().tolist() if str(x).strip()})
 
-    # 컬럼 구성
     column_config = {
-        "사번": st.column_config.SelectboxColumn("사번 - 이름", options=labels, help="사번을 선택하면 아래 '이름'이 자동 채워집니다."),
-        "이름": st.column_config.TextColumn("이름", help="사번 변경시에만 자동 채움(수정 가능)."),
+        "사번": st.column_config.SelectboxColumn("사번 - 이름", options=labels, help="사번 변경 시 바로 아래 '이름' 자동 채움"),
+        "이름": st.column_config.TextColumn("이름", help="자동 채움 후 수정 가능"),
         "역할": st.column_config.SelectboxColumn("역할", options=["admin","manager"]),
-        "범위유형": st.column_config.SelectboxColumn("범위유형", options=["","부서","개별"], help="빈값=전체 / 부서 / 개별"),
+        "범위유형": st.column_config.SelectboxColumn("범위유형", options=["","부서","개별"]),
         "부서1": st.column_config.SelectboxColumn("부서1", options=dept1_options),
         "부서2": st.column_config.SelectboxColumn("부서2", options=dept2_options),
-        "대상사번": st.column_config.TextColumn("대상사번", help="범위유형='개별'일 때 대상 사번(쉼표/공백 구분)"),
+        "대상사번": st.column_config.TextColumn("대상사번"),
         "활성": st.column_config.CheckboxColumn("활성"),
         "비고": st.column_config.TextColumn("비고"),
     }
 
-    # 에디터 표시
     edited = st.data_editor(
-        df_disp[[c for c in AUTH_HEADERS if c in df_disp.columns]],
-        key="auth_editor",
+        work[[c for c in AUTH_HEADERS if c in work.columns]],
+        key="acl_editor",
         use_container_width=True,
         hide_index=True,
         num_rows="dynamic",
@@ -2712,100 +2697,65 @@ def tab_admin_acl(emp_df: pd.DataFrame):
         column_config=column_config,
     )
 
-    # ---- 사번 변경 감지 → 이름만 자동 채움 (필요할 때만 1회 rerun) ----
-    def _sab_from_label(val: str) -> str:
-        s = str(val).strip()
-        return sabun_by_label.get(s) or (s.split(" - ",1)[0].strip() if " - " in s else s)
+    # 변경 감지 → '사번' 바뀐 행의 '이름' 즉시 보정 + 기본값(빈 칸만)
+    try:
+        prev = work
+        cur = edited.copy()
+        def _sab_from_label(v:str):
+            s = str(v).strip()
+            return sabun_by_label.get(s) or (s.split(" - ",1)[0].strip() if " - " in s else s)
 
-    sab_sig = "|".join([_sab_from_label(v) for v in (edited["사번"] if "사번" in edited.columns else [])])
-    prev_sig = st.session_state.get("__auth_sab_sig")
-    if prev_sig != sab_sig:
-        # 이름 재계산: 사번이 바뀐 경우에만
-        patched = edited.copy()
-        if "사번" in patched.columns and "이름" in patched.columns:
-            def _auto_name(x):
-                sab = _sab_from_label(x)
-                return emp_lookup.get(sab,{}).get("이름","")
-            patched["이름"] = patched["사번"].map(_auto_name)
-        st.session_state["__auth_sab_sig"] = sab_sig
-        # 반영을 위해 1회만 rerun
-        st.experimental_rerun = getattr(st, "experimental_rerun", None)
-        if callable(st.experimental_rerun):
-            # replace edited via session_state and rerun
-            st.session_state["auth_editor"] = patched
-            st.experimental_rerun()
+        changed_rows = []
+        if "사번" in prev.columns and "사번" in cur.columns:
+            min_len = min(len(prev), len(cur))
+            for i in range(min_len):
+                if str(prev.iloc[i]["사번"]) != str(cur.iloc[i]["사번"]):
+                    changed_rows.append(i)
 
-    # 사번 라벨 → 실제 사번으로 변환 + 저장용 캐논
-    def _editor_to_canonical(df: pd.DataFrame) -> pd.DataFrame:
-        df = df.copy()
-        if "사번" in df.columns:
-            for i, val in df["사번"].items():
-                v = str(val).strip()
-                if not v:
-                    continue
-                sab = _sab_from_label(v)
-                df.at[i, "사번"] = sab
-        return df
+        # 이름 자동 채움
+        if "사번" in cur.columns and "이름" in cur.columns:
+            for i in changed_rows:
+                sab = _sab_from_label(cur.iloc[i]["사번"])
+                cur.iat[i, cur.columns.get_loc("이름")] = emp_lookup.get(sab,{}).get("이름","")
 
-    edited_canon = _editor_to_canonical(edited)
+        # 기본값은 빈 칸일 때만
+        if "역할" in cur.columns:
+            cur["역할"] = cur["역할"].map(lambda x: "manager" if (x is None or str(x).strip()=="") else x)
+        if "범위유형" in cur.columns:
+            cur["범위유형"] = cur["범위유형"].map(lambda x: "부서" if (x is None or str(x).strip()=="") else x)
+        if "활성" in cur.columns:
+            cur["활성"] = cur["활성"].map(lambda x: True if (x in ("", None)) else bool(x))
+        for c in ["대상사번","비고"]:
+            if c in cur.columns:
+                cur[c] = cur[c].map(lambda x: "" if (x is None) else x)
 
-    # 검증/보정
-    def _validate_and_fix(df: pd.DataFrame):
-        df = df.copy().fillna("")
-        errs = []
+        # 세션 반영 (다음 rerun에서 곧바로 보임)
+        if not cur.equals(prev):
+            st.session_state["acl_df"] = cur
+    except Exception:
+        pass
 
-        df = df[df.astype(str).apply(lambda r: "".join(r.values).strip() != "", axis=1)]
-
-        if "사번" in df.columns:
-            for i, row in df.iterrows():
-                sab = str(row.get("사번","")).strip()
-                if not sab:
-                    errs.append(f"{i+1}행: 사번이 비어 있습니다."); continue
-                if sab not in emp_lookup:
-                    errs.append(f"{i+1}행: 사번 '{sab}' 은(는) 직원 목록에 없습니다."); continue
-                nm = emp_lookup[sab]["이름"]
-                if str(row.get("이름","")).strip() == "":
-                    df.at[i,"이름"] = nm
-
-        if "역할" in df.columns:
-            bad = df[~df["역할"].isin(["admin","manager"]) & (df["역할"].astype(str).str.strip()!="")]
-            for i in bad.index.tolist():
-                errs.append(f"{i+1}행: 역할 값이 잘못되었습니다. ({df.loc[i,'역할']})")
-        if "범위유형" in df.columns:
-            bad = df[~df["범위유형"].isin(["","부서","개별"]) & (df["범위유형"].astype(str).str.strip()!="")]
-            for i in bad.index.tolist():
-                errs.append(f"{i+1}행: 범위유형 값이 잘못되었습니다. ({df.loc[i,'범위유형']})")
-
-        return df, errs
-
-    fixed_df, errs = _validate_and_fix(edited_canon)
-    if errs:
-        st.error("검증 오류:\n- " + "\n- ".join(errs))
-        st.stop()
-
-    # 저장 버튼(부분 갱신)
+    # 저장 버튼(부분 갱신) — 시트는 여기서만 접근
     if st.button("권한 전체 반영", type="primary", use_container_width=True):
         try:
             ws = get_book().worksheet(AUTH_SHEET)
-            header = _retry(ws.row_values, 1) or AUTH_HEADERS
+            header = st.session_state.get("acl_header", AUTH_HEADERS)
             _retry(ws.update, "1:1", [header], value_input_option="USER_ENTERED")
 
-            # 저장 데이터 구성(활성은 bool 보장)
-            desired = fixed_df[header].astype(object).copy()
+            desired = st.session_state["acl_df"][header].astype(object).copy()
+            if "사번" in desired.columns:
+                desired["사번"] = desired["사번"].map(_sab_from_label)
             if "활성" in desired.columns:
                 desired["활성"] = desired["활성"].map(lambda x: bool(x))
 
             desired_vals = desired.fillna("").values.tolist()
             current_vals = (_retry(ws.get_all_values)[1:]) if (_retry(ws.get_all_values)) else []
 
-            # 컬럼 수 맞춤
             max_cols = max(len(header), *(len(r) for r in current_vals) or [len(header)])
-            def _pad(row):
-                return list(row) + [""] * (max_cols - len(row))
+            def _pad(row): return list(row) + [""] * (max_cols - len(row))
             current = [_pad(r) for r in current_vals]
             desired = [_pad(r) for r in desired_vals]
 
-            # 변경 구간 계산
             if len(desired) < len(current):
                 try: ws.batch_clear([f"2:100000"])
                 except Exception: pass
@@ -2828,8 +2778,6 @@ def tab_admin_acl(emp_df: pd.DataFrame):
                 rng = f"A{start_row}:{last_col_letter}{end_row}"
                 _retry(ws.update, rng, desired[a:b+1], value_input_option="USER_ENTERED")
 
-            try: st.cache_data.clear()
-            except Exception: pass
             st.success("업데이트 완료", icon="✅")
         except Exception as e:
             st.exception(e)
