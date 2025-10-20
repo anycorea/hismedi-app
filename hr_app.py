@@ -2715,7 +2715,7 @@ def tab_admin_acl(emp_df: pd.DataFrame):
                     if not cur.strip():
                         df.at[i, "부서2"] = info.get("부서2", "")
         return df
-edited_canon = _editor_to_canonical(edited.drop(columns=["삭제"], errors="ignore"))
+    edited_canon = _editor_to_canonical(edited.drop(columns=["삭제"], errors="ignore"))
 
     def _validate_and_fix(df: pd.DataFrame):
         df=df.copy().fillna("")
