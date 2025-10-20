@@ -1726,16 +1726,34 @@ def read_jd_approval_df(_rev: int = 0) -> pd.DataFrame:
     return df
 
 def _ws_batch_row(ws, idx, hmap, kv: dict):
+
+    # Build updates while tracking maximum column index needed
     updates = []
+    max_col_needed = 0
     for k, v in kv.items():
         c = hmap.get(k)
         if not c:
             continue
+        max_col_needed = max(max_col_needed, int(c))
         a1 = gspread.utils.rowcol_to_a1(int(idx), int(c))
-        updates.append({"range": a1, "values": [[v]]})
-    if updates:
-        body = {"valueInputOption": "USER_ENTERED", "data": updates}
-        _retry(ws.spreadsheet.values_batch_update, body)
+        # IMPORTANT: include the sheet title in the A1 range to avoid defaulting to first sheet
+        updates.append({"range": f"'{ws.title}'!{a1}", "values": [[v]]})
+
+    if not updates:
+        return
+
+    # SAFETY: ensure sheet is large enough (Google Values API does not auto-expand grid)
+    need_rows = max(getattr(ws, "row_count", 0) or 0, int(idx))
+    need_cols = max(getattr(ws, "col_count", 0) or 0, int(max_col_needed))
+    try:
+        if (getattr(ws, "row_count", 0) or 0) < need_rows or (getattr(ws, "col_count", 0) or 0) < need_cols:
+            ws.resize(rows=need_rows, cols=need_cols)
+    except Exception:
+        # If resize fails (rare), continue; API will still error if truly out of bounds.
+        pass
+
+    body = {"valueInputOption": "USER_ENTERED", "data": updates}
+    _retry(ws.spreadsheet.values_batch_update, body)
 
 def _jd_latest_version_for(sabun: str, year: int) -> int:
     row = _jd_latest_for(sabun, int(year)) or {}
