@@ -151,6 +151,7 @@ except Exception:
 # ═════════════════════════════════════════════════════════════════════════════
 # Sync Utility (Force refresh Google Sheets caches)
 # ═════════════════════════════════════════════════════════════════════════════
+
 def force_sync():
     """모든 캐시를 무효화하고 즉시 리런하여 구글시트 최신 데이터로 갱신합니다."""
     # 1) Streamlit 캐시 비우기
@@ -162,6 +163,20 @@ def force_sync():
         st.cache_resource.clear()
     except Exception:
         pass
+
+    # 1-1) 모듈 레벨 캐시도 모두 초기화
+    try:
+        global _WS_CACHE, _HDR_CACHE, _VAL_CACHE
+        _WS_CACHE.clear()
+        _HDR_CACHE.clear()
+        _VAL_CACHE.clear()
+    except Exception:
+        try:
+            _WS_CACHE = {}
+            _HDR_CACHE = {}
+            _VAL_CACHE = {}
+        except Exception:
+            pass
 
     # 2) 세션 상태 중 로컬 캐시성 키 초기화(프로젝트 규칙에 맞게 prefix 추가/수정)
     try:
@@ -2356,6 +2371,7 @@ def tab_staff_admin(emp_df: pd.DataFrame):
     )
 
     # 4) 저장 버튼 (변경된 칼럼만 배치 업데이트)
+    # 4) 저장 버튼 (변경된 칼럼만 배치 업데이트)
     if st.button("변경사항 저장", type="primary", use_container_width=True):
         try:
             before = view.set_index("사번")
@@ -2369,22 +2385,21 @@ def tab_staff_admin(emp_df: pd.DataFrame):
             for sabun in after.index:
                 if sabun not in before.index:
                     continue  # (num_rows="fixed"라서 거의 없음)
-                diff_cols = []
-                payload = {}
 
+                payload = {}
                 for c in after.columns:
                     if c not in before.columns:
                         continue
-                    v0 = str(before.loc[sabun, c])
-                    v1 = str(after.loc[sabun, c])
-                    if v0 != v1:
-                        diff_cols.append(c)
-                        # 불린 컬럼은 True/False로 유지
-                if c in ("재직여부", "적용여부"):
-                    payload[c] = bool(after.loc[sabun, c])
-                else:
-                    payload[c] = after.loc[sabun, c]
-                if not diff_cols:
+                    v0 = before.loc[sabun, c]
+                    v1 = after.loc[sabun, c]
+                    # 변경된 경우에만 payload에 추가
+                    if str(v0) != str(v1):
+                        if c in ("재직여부", "적용여부"):
+                            payload[c] = bool(v1)
+                        else:
+                            payload[c] = v1
+
+                if not payload:
                     continue
 
                 # 시트에서 대상 행 찾기 → 변경 칼럼만 배치 업데이트
@@ -2402,7 +2417,6 @@ def tab_staff_admin(emp_df: pd.DataFrame):
             st.rerun()
         except Exception as e:
             st.exception(e)
-
 def reissue_pin_inline(sabun: str, length: int = 4):
     ws, header, hmap = ensure_emp_sheet_columns()
     if "PIN_hash" not in hmap or "PIN_No" not in hmap: raise RuntimeError("PIN_hash/PIN_No 필요")
