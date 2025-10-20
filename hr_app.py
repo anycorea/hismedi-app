@@ -2613,7 +2613,7 @@ def tab_admin_eval_items():
                     st.exception(e)
 
 def tab_admin_acl(emp_df: pd.DataFrame):
-    """권한 관리: '사번-이름' 선택 시 이름 자동 채움, 기본값/드롭다운, 부분 저장."""
+    """권한 관리: '사번-이름' 선택 시 이름 자동 채움(사번 변경시에만 1회 새로고침), 기본값/드롭다운, 부분 저장."""
     me = st.session_state.get("user", {})
     am_admin = is_admin(str(me.get("사번","")))
     if not am_admin:
@@ -2660,23 +2660,26 @@ def tab_admin_acl(emp_df: pd.DataFrame):
     if "사번" in df_disp.columns:
         df_disp["사번"] = df_disp["사번"].map(lambda v: label_by_sabun.get(str(v).strip(), str(v).strip()))
 
-    # 기본값 적용(빈 칸인 곳)
-    def _is_blank(x): return (x is None) or (str(x).strip() == "")
+    # 기본값 적용(보여줄 때 빈 칸인 곳만 세팅)
+    def _blank(x): return (x is None) or (str(x).strip() == "")
     if "역할" in df_disp.columns:
-        df_disp["역할"] = df_disp["역할"].map(lambda x: x if not _is_blank(x) else "manager")
+        df_disp["역할"] = df_disp["역할"].map(lambda x: x if not _blank(x) else "manager")
     else:
         df_disp["역할"] = "manager"
     if "범위유형" in df_disp.columns:
-        df_disp["범위유형"] = df_disp["범위유형"].map(lambda x: x if not _is_blank(x) else "부서")
+        df_disp["범위유형"] = df_disp["범위유형"].map(lambda x: x if not _blank(x) else "부서")
     else:
         df_disp["범위유형"] = "부서"
     if "활성" in df_disp.columns:
-        df_disp["활성"] = df_disp["활성"].map(lambda x: True if _is_blank(x) else bool(str(x).strip().lower() in ("true","1","y","yes","t","on","checked")))
+        def _to_bool_default_true(x):
+            if _blank(x): return True
+            return str(x).strip().lower() in ("true","1","y","yes","t","on","checked")
+        df_disp["활성"] = df_disp["활성"].map(_to_bool_default_true)
     else:
         df_disp["활성"] = True
     for c in ["대상사번","비고"]:
         if c in df_disp.columns:
-            df_disp[c] = df_disp[c].map(lambda x: "" if _is_blank(x) else x)
+            df_disp[c] = df_disp[c].map(lambda x: "" if _blank(x) else x)
         else:
             df_disp[c] = ""
 
@@ -2686,8 +2689,8 @@ def tab_admin_acl(emp_df: pd.DataFrame):
 
     # 컬럼 구성
     column_config = {
-        "사번": st.column_config.SelectboxColumn("사번 - 이름", options=labels, help="사번을 선택하면 '이름'은 자동으로 채워집니다."),
-        "이름": st.column_config.TextColumn("이름", help="사번 선택 시 자동 채움(수정 가능)."),
+        "사번": st.column_config.SelectboxColumn("사번 - 이름", options=labels, help="사번을 선택하면 아래 '이름'이 자동 채워집니다."),
+        "이름": st.column_config.TextColumn("이름", help="사번 변경시에만 자동 채움(수정 가능)."),
         "역할": st.column_config.SelectboxColumn("역할", options=["admin","manager"]),
         "범위유형": st.column_config.SelectboxColumn("범위유형", options=["","부서","개별"], help="빈값=전체 / 부서 / 개별"),
         "부서1": st.column_config.SelectboxColumn("부서1", options=dept1_options),
@@ -2709,7 +2712,30 @@ def tab_admin_acl(emp_df: pd.DataFrame):
         column_config=column_config,
     )
 
-    # 사번 라벨 → 실제 사번, 이름 자동 채움
+    # ---- 사번 변경 감지 → 이름만 자동 채움 (필요할 때만 1회 rerun) ----
+    def _sab_from_label(val: str) -> str:
+        s = str(val).strip()
+        return sabun_by_label.get(s) or (s.split(" - ",1)[0].strip() if " - " in s else s)
+
+    sab_sig = "|".join([_sab_from_label(v) for v in (edited["사번"] if "사번" in edited.columns else [])])
+    prev_sig = st.session_state.get("__auth_sab_sig")
+    if prev_sig != sab_sig:
+        # 이름 재계산: 사번이 바뀐 경우에만
+        patched = edited.copy()
+        if "사번" in patched.columns and "이름" in patched.columns:
+            def _auto_name(x):
+                sab = _sab_from_label(x)
+                return emp_lookup.get(sab,{}).get("이름","")
+            patched["이름"] = patched["사번"].map(_auto_name)
+        st.session_state["__auth_sab_sig"] = sab_sig
+        # 반영을 위해 1회만 rerun
+        st.experimental_rerun = getattr(st, "experimental_rerun", None)
+        if callable(st.experimental_rerun):
+            # replace edited via session_state and rerun
+            st.session_state["auth_editor"] = patched
+            st.experimental_rerun()
+
+    # 사번 라벨 → 실제 사번으로 변환 + 저장용 캐논
     def _editor_to_canonical(df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
         if "사번" in df.columns:
@@ -2717,14 +2743,8 @@ def tab_admin_acl(emp_df: pd.DataFrame):
                 v = str(val).strip()
                 if not v:
                     continue
-                sab = sabun_by_label.get(v) or (v.split(" - ",1)[0].strip() if " - " in v else v)
+                sab = _sab_from_label(v)
                 df.at[i, "사번"] = sab
-                # 이름만 자동 채움(빈 칸일 때), 부서는 수정 가능
-                info = emp_lookup.get(sab, {})
-                if "이름" in df.columns:
-                    cur = "" if pd.isna(df.at[i,"이름"]) else str(df.at[i,"이름"])
-                    if not cur.strip():
-                        df.at[i,"이름"] = info.get("이름","")
         return df
 
     edited_canon = _editor_to_canonical(edited)
@@ -2734,10 +2754,8 @@ def tab_admin_acl(emp_df: pd.DataFrame):
         df = df.copy().fillna("")
         errs = []
 
-        # 빈행 제거
         df = df[df.astype(str).apply(lambda r: "".join(r.values).strip() != "", axis=1)]
 
-        # 사번 유효성 + 이름(빈칸 채움만)
         if "사번" in df.columns:
             for i, row in df.iterrows():
                 sab = str(row.get("사번","")).strip()
@@ -2749,7 +2767,6 @@ def tab_admin_acl(emp_df: pd.DataFrame):
                 if str(row.get("이름","")).strip() == "":
                     df.at[i,"이름"] = nm
 
-        # 역할/범위유형 유효성
         if "역할" in df.columns:
             bad = df[~df["역할"].isin(["admin","manager"]) & (df["역할"].astype(str).str.strip()!="")]
             for i in bad.index.tolist():
@@ -2773,11 +2790,10 @@ def tab_admin_acl(emp_df: pd.DataFrame):
             header = _retry(ws.row_values, 1) or AUTH_HEADERS
             _retry(ws.update, "1:1", [header], value_input_option="USER_ENTERED")
 
-            # 현재/목표 비교
+            # 저장 데이터 구성(활성은 bool 보장)
             desired = fixed_df[header].astype(object).copy()
-            # 활성은 bool로 변환
             if "활성" in desired.columns:
-                desired["활성"] = desired["활성"].map(lambda x: bool(str(x).strip().lower() in ("true","1","y","yes","t","on","checked")) if not isinstance(x, bool) else x)
+                desired["활성"] = desired["활성"].map(lambda x: bool(x))
 
             desired_vals = desired.fillna("").values.tolist()
             current_vals = (_retry(ws.get_all_values)[1:]) if (_retry(ws.get_all_values)) else []
@@ -2789,46 +2805,31 @@ def tab_admin_acl(emp_df: pd.DataFrame):
             current = [_pad(r) for r in current_vals]
             desired = [_pad(r) for r in desired_vals]
 
-            # 동일 시 스킵
-            if current == desired:
-                st.success("변경사항 없음", icon="✅")
-                return
-
-            # 길이 차이/대량 시 전체 덮어쓰기 대신 tail clear + 변경 구간 업데이트
+            # 변경 구간 계산
             if len(desired) < len(current):
-                try:
-                    ws.batch_clear([f"2:100000"])
-                except Exception:
-                    pass
+                try: ws.batch_clear([f"2:100000"])
+                except Exception: pass
 
             nmin = min(len(current), len(desired))
-            spans = []
-            s = None
+            spans, s = [], None
             for i in range(nmin):
                 if current[i] != desired[i]:
                     if s is None: s = i
                 else:
-                    if s is not None:
-                        spans.append((s, i-1)); s=None
-            if s is not None:
-                spans.append((s, nmin-1))
-            if len(desired) > nmin:
-                spans.append((nmin, len(desired)-1))
+                    if s is not None: spans.append((s, i-1)); s=None
+            if s is not None: spans.append((s, nmin-1))
+            if len(desired) > nmin: spans.append((nmin, len(desired)-1))
 
-            # 범위 업데이트
             import gspread
+            last_col_letter = re.match(r"([A-Z]+)", gspread.utils.rowcol_to_a1(1, max_cols)).group(1)
             for a,b in spans:
                 start_row = a + 2
                 end_row   = b + 2
-                # A..last col
-                last_col_letter = re.match(r"([A-Z]+)", gspread.utils.rowcol_to_a1(1, max_cols)).group(1)
                 rng = f"A{start_row}:{last_col_letter}{end_row}"
                 _retry(ws.update, rng, desired[a:b+1], value_input_option="USER_ENTERED")
 
-            try:
-                st.cache_data.clear()
-            except Exception:
-                pass
+            try: st.cache_data.clear()
+            except Exception: pass
             st.success("업데이트 완료", icon="✅")
         except Exception as e:
             st.exception(e)
