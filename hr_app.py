@@ -2348,8 +2348,8 @@ def tab_staff_admin(emp_df: pd.DataFrame):
     colcfg = {
         "사번": st.column_config.TextColumn("사번", disabled=True),
         "이름": st.column_config.TextColumn("이름"),
-        "부서1": st.column_config.TextColumn("부서1"),
-        "부서2": st.column_config.TextColumn("부서2"),
+        "부서1": st.column_config.SelectboxColumn("부서1", options=dept1_options),
+        "부서2": st.column_config.SelectboxColumn("부서2", options=dept2_options),
         "직급": st.column_config.TextColumn("직급"),
         "직무": st.column_config.TextColumn("직무"),
         "직군": st.column_config.TextColumn("직군"),
@@ -2659,8 +2659,8 @@ def tab_admin_acl(emp_df: pd.DataFrame):
         "이름": st.column_config.TextColumn("이름", help="사번 선택 시 자동 채움(수정 가능)."),
         "역할": st.column_config.SelectboxColumn("역할", options=role_options),
         "범위유형": st.column_config.SelectboxColumn("범위유형", options=scope_options, help="빈값=전체 / 부서 / 개별"),
-        "부서1": st.column_config.TextColumn("부서1"),
-        "부서2": st.column_config.TextColumn("부서2"),
+        "부서1": st.column_config.SelectboxColumn("부서1", options=dept1_options),
+        "부서2": st.column_config.SelectboxColumn("부서2", options=dept2_options),
         "대상사번": st.column_config.TextColumn("대상사번", help="범위유형이 '개별'일 때 대상 사번(쉼표/공백 구분)"),
         "활성": st.column_config.CheckboxColumn("활성"),
         "비고": st.column_config.TextColumn("비고"),
@@ -2704,16 +2704,7 @@ def tab_admin_acl(emp_df: pd.DataFrame):
                     cur = "" if pd.isna(df.at[i, "이름"]) else str(df.at[i, "이름"])
                     if not cur.strip():
                         df.at[i, "이름"] = info.get("이름", "")
-                # 부서1
-                if "부서1" in df.columns:
-                    cur = "" if pd.isna(df.at[i, "부서1"]) else str(df.at[i, "부서1"])
-                    if not cur.strip():
-                        df.at[i, "부서1"] = info.get("부서1", "")
-                # 부서2
-                if "부서2" in df.columns:
-                    cur = "" if pd.isna(df.at[i, "부서2"]) else str(df.at[i, "부서2"])
-                    if not cur.strip():
-                        df.at[i, "부서2"] = info.get("부서2", "")
+
         return df
     edited_canon = _editor_to_canonical(edited.drop(columns=["삭제"], errors="ignore"))
 
@@ -2734,13 +2725,7 @@ def tab_admin_acl(emp_df: pd.DataFrame):
                 if sab not in emp_lookup:
                     errs.append(f"{i+1}행: 사번 '{sab}' 은(는) 직원 목록에 없습니다."); continue
                 nm = emp_lookup[sab]["이름"]
-                d1 = emp_lookup[sab]["부서1"]
-                d2 = emp_lookup[sab]["부서2"]
                 if str(row.get("이름","")).strip() == "": df.at[i,"이름"] = nm
-                if str(row.get("부서1","")).strip() == "": df.at[i,"부서1"] = d1
-                if str(row.get("부서2","")).strip() == "": df.at[i,"부서2"] = d2
-                if not str(row.get("부서1","")).strip(): df.at[i,"부서1"]=emp_lookup[sab]["부서1"]
-                if not str(row.get("부서2","")).strip(): df.at[i,"부서2"]=emp_lookup[sab]["부서2"]
 
         if "역할" in df.columns:
             bad=df[~df["역할"].isin(role_options) & (df["역할"].astype(str).str.strip()!="")]
