@@ -2664,7 +2664,17 @@ def tab_admin_acl(emp_df: pd.DataFrame):
     if "사번" in _work.columns and "이름" in _work.columns:
         _work["이름"] = _work["사번"].map(_name_from_label)
 
-    column_config = {
+    
+    # 부서 드롭다운 옵션(직원 시트의 유니크 값)
+    try:
+        dept1_options = [""] + sorted({str(x).strip() for x in base.get("부서1", pd.Series(dtype=str)).dropna().unique().tolist() if str(x).strip()})
+    except Exception:
+        dept1_options = [""]
+    try:
+        dept2_options = [""] + sorted({str(x).strip() for x in base.get("부서2", pd.Series(dtype=str)).dropna().unique().tolist() if str(x).strip()})
+    except Exception:
+        dept2_options = [""]
+column_config = {
         "사번": st.column_config.SelectboxColumn("사번 - 이름", options=labels, help="사번을 선택하면 이름이 자동으로 동기화됩니다."),
         "이름": st.column_config.TextColumn("이름", help="사번 선택 시 자동 채움(수정 가능)."),
         "역할": st.column_config.SelectboxColumn("역할", options=role_options),
