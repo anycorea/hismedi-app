@@ -2345,7 +2345,17 @@ def tab_staff_admin(emp_df: pd.DataFrame):
     st.write(f"결과: **{len(view):,}명**")
 
     # 3) 편집 UI (사번=잠금, 재직여부=체크박스)
-    colcfg = {
+    
+    # 부서 드롭다운 옵션(직원 시트의 유니크 값)
+    try:
+        dept1_options = [""] + sorted({str(x).strip() for x in emp_df.get("부서1", pd.Series(dtype=str)).dropna().unique().tolist() if str(x).strip()})
+    except Exception:
+        dept1_options = [""]
+    try:
+        dept2_options = [""] + sorted({str(x).strip() for x in emp_df.get("부서2", pd.Series(dtype=str)).dropna().unique().tolist() if str(x).strip()})
+    except Exception:
+        dept2_options = [""]
+colcfg = {
         "사번": st.column_config.TextColumn("사번", disabled=True),
         "이름": st.column_config.TextColumn("이름"),
         "부서1": st.column_config.SelectboxColumn("부서1", options=dept1_options),
