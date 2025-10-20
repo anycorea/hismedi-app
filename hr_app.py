@@ -2474,47 +2474,52 @@ def tab_admin_eval_items():
             },
         )
         
-            if st.button("순서 일괄 저장", type="primary", use_container_width=True):
-                try:
-                    ws = get_book().worksheet(EVAL_ITEMS_SHEET)
-                    header = _retry(ws.row_values, 1) or []
-                    hmap = {n: i+1 for i, n in enumerate(header)}
+        if st.button("순서 일괄 저장", type="primary", use_container_width=True):
+            try:
+                ws = get_book().worksheet(EVAL_ITEMS_SHEET)
+                header = _retry(ws.row_values, 1) or []
+                hmap = {n: i+1 for i, n in enumerate(header)}
 
-                    # 기본 컬럼 확인
-                    col_id = hmap.get("항목ID")
-                    col_ord = hmap.get("순서")
-                    col_act = hmap.get("활성")
-                    if not (col_id and col_ord):
-                        st.error("'항목ID' 또는 '순서' 헤더가 없습니다."); st.stop()
+                # 기본 컬럼 확인
+                col_id = hmap.get("항목ID")
+                col_ord = hmap.get("순서")
+                col_act = hmap.get("활성")
+                if not (col_id and col_ord):
+                    st.error("'항목ID' 또는 '순서' 헤더가 없습니다."); st.stop()
 
-                    # 현재 시트의 항목ID 순서 읽기
-                    id_vals = _retry(ws.col_values, col_id)[1:]  # 2행부터
-                    n = len(id_vals)
+                # 현재 시트의 항목ID 순서 읽기 (2행부터)
+                id_vals = _retry(ws.col_values, col_id)[1:]
+                n = len(id_vals)
 
-                    # 편집 결과를 딕셔너리로 (iid -> 값)
-                    def _to_bool_local(x):
-                        if isinstance(x, bool):
-                            return x
-                        if x is None:
-                            return False
-                        s = str(x).strip().lower()
-                        return s in ("1","y","yes","true","t","on","checked")
-                    edited_map_order = { str(r["항목ID"]).strip(): int(r["순서"]) for _, r in edited.iterrows() }
-                    edited_map_active = { str(r["항목ID"]).strip(): _to_bool_local(r["활성"]) for _, r in edited.iterrows() } if "활성" in edited.columns else {}
+                # 편집 결과를 dict로 준비 (iid -> 값)
+                def _to_bool_local(x):
+                    if isinstance(x, bool): return x
+                    if x is None: return False
+                    s = str(x).strip().lower()
+                    return s in ("1","y","yes","true","t","on","checked")
 
-                    # D열(순서), E열(활성) 일괄 덮어쓰기 — 체크박스는 bool로
-                    if n > 0:
-                        order_values = [[ int(edited_map_order.get(iid, 0)) ] for iid in id_vals ]
-                        _retry(ws.update, f"{gspread.utils.rowcol_to_a1(2, col_ord).split('2')[0]}2:{gspread.utils.rowcol_to_a1(n+1, col_ord)}", order_values, value_input_option="USER_ENTERED")
+                edited_map_order = { str(r["항목ID"]).strip(): int(r["순서"]) for _, r in edited.iterrows() }
+                edited_map_active = { str(r["항목ID"]).strip(): _to_bool_local(r["활성"]) for _, r in edited.iterrows() } if "활성" in edited.columns else {}
 
-                        if col_act:
-                            active_values = [[ bool(edited_map_active.get(iid, False)) ] for iid in id_vals ]
-                            _retry(ws.update, f"{gspread.utils.rowcol_to_a1(2, col_act).split('2')[0]}2:{gspread.utils.rowcol_to_a1(n+1, col_act)}", active_values, value_input_option="USER_ENTERED")
+                # 범위 문자열 생성 도우미 (주어진 컬럼 인덱스 -> 'A2:A{n+1}' 형태)
+                import re as _re_local
+                def _col_range(col_idx: int, start_row: int, end_row: int) -> str:
+                    letters = _re_local.match(r"([A-Z]+)", gspread.utils.rowcol_to_a1(1, col_idx)).group(1)
+                    return f"{letters}{start_row}:{letters}{end_row}"
 
-                    st.success("업데이트 완료", icon="✅")
-                    st.toast("저장 완료", icon="💾")
-                except Exception as e:
-                    st.exception(e)
+                # D열(순서), E열(활성) 일괄 덮어쓰기 — 체크박스는 bool로
+                if n > 0:
+                    order_values = [[ int(edited_map_order.get(iid, 0)) ] for iid in id_vals ]
+                    _retry(ws.update, _col_range(col_ord, 2, n+1), order_values, value_input_option="USER_ENTERED")
+
+                    if col_act:
+                        active_values = [[ bool(edited_map_active.get(iid, False)) ] for iid in id_vals ]
+                        _retry(ws.update, _col_range(col_act, 2, n+1), active_values, value_input_option="USER_ENTERED")
+
+                st.success("업데이트 완료", icon="✅")
+                st.toast("저장 완료", icon="💾")
+            except Exception as e:
+                st.exception(e)
 
 
     st.divider()
