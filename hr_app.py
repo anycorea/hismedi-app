@@ -1374,7 +1374,7 @@ def tab_eval(emp_df: pd.DataFrame):
                 continue
             st.session_state[f"eval2_seg_{iid}_{kbase}"] = str(val)
             scores[iid] = val
-st.markdown("#### 제출 확인")
+    st.markdown("#### 제출 확인")
     cb1, cb2 = st.columns([2, 1])
     with cb1:
         attest_ok = st.checkbox(
