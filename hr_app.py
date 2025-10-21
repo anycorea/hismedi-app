@@ -30,6 +30,99 @@ from typing import Any, Tuple
 import pandas as pd
 import streamlit as st
 
+
+# --- safe workbook accessor (added) ---
+def get_wb():
+    """Return a gspread Spreadsheet handle.
+    Tries session cache, then secrets/env-based open. Caches in session_state.
+    """
+    try:
+        wb = st.session_state.get("wb") or st.session_state.get("_wb")
+        if wb is not None:
+            return wb
+    except Exception:
+        pass
+
+    import os
+    import re as _re
+    import gspread
+    # Try to get service account from Streamlit secrets (preferred on Cloud)
+    creds_info = None
+    try:
+        creds_info = st.secrets.get("gcp_service_account", None)
+    except Exception:
+        creds_info = None
+
+    gc = None
+    if isinstance(creds_info, dict):
+        try:
+            from google.oauth2.service_account import Credentials
+            scopes = [
+                "https://www.googleapis.com/auth/spreadsheets",
+                "https://www.googleapis.com/auth/drive",
+            ]
+            cred = Credentials.from_service_account_info(creds_info, scopes=scopes)
+            gc = gspread.authorize(cred)
+        except Exception:
+            gc = None
+
+    if gc is None:
+        # Fallback: default oauth (local dev) or gspread auth via env
+        try:
+            gc = gspread.oauth()
+        except Exception:
+            # last resort: anonymous (will fail on private sheets)
+            gc = gspread.client.Client(None)
+
+    # Find spreadsheet id/url from secrets or env
+    ssid = ""
+    try:
+        ssid = (
+            (st.secrets.get("GS_SHEET_KEY", "") if hasattr(st, "secrets") else "") or
+            (st.secrets.get("GS_SPREADSHEET_ID", "") if hasattr(st, "secrets") else "") or
+            (st.secrets.get("SPREADSHEET_ID", "") if hasattr(st, "secrets") else "") or
+            os.getenv("GS_SHEET_KEY", "") or
+            os.getenv("GS_SPREADSHEET_ID", "") or
+            os.getenv("SPREADSHEET_ID", "") or
+            os.getenv("GSHEET_ID", "") or
+            ""
+        )
+    except Exception:
+        ssid = os.getenv("GS_SHEET_KEY", "") or os.getenv("GS_SPREADSHEET_ID", "") or os.getenv("SPREADSHEET_ID", "") or os.getenv("GSHEET_ID", "")
+
+    wb = None
+    if ssid:
+        try:
+            if _re.match(r"^[a-zA-Z0-9_-]{40,}$", ssid):
+                wb = gc.open_by_key(ssid)
+            else:
+                wb = gc.open_by_url(ssid)
+        except Exception:
+            wb = None
+
+    if wb is None:
+        # If key not provided, try a titled open via secrets/env (GS_SHEET_NAME)
+        ssname = ""
+        try:
+            ssname = (st.secrets.get("GS_SHEET_NAME", "") if hasattr(st, "secrets") else "") or os.getenv("GS_SHEET_NAME", "")
+        except Exception:
+            ssname = os.getenv("GS_SHEET_NAME", "")
+        if ssname:
+            try:
+                wb = gc.open(ssname)
+            except Exception:
+                wb = None
+
+    if wb is None:
+        raise RuntimeError("Spreadsheet handle not initialized: set GS_SHEET_KEY / GS_SPREADSHEET_ID in secrets or env.")
+
+    try:
+        st.session_state["wb"] = wb
+    except Exception:
+        pass
+    return wb
+
+
 # ==== Fast Webhook Queue (Apps Script) ====
 import os as _os_webhook
 import json as _json_webhook
