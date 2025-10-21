@@ -49,9 +49,7 @@ GS_WEBHOOK_URL = (_os_webhook.getenv("GS_WEBHOOK_URL", "") or _DEFAULT_GS_WEBHOO
 GS_WEBHOOK_TOKEN = (_os_webhook.getenv("GS_WEBHOOK_TOKEN", "") or _DEFAULT_GS_WEBHOOK_TOKEN).strip()
 FAST_WEBHOOK = bool(GS_WEBHOOK_URL and GS_WEBHOOK_TOKEN)
 
-
-
-def fast_webhook_enqueue(kind: str, payload: dict, sabun: str = "", year: int | None = None, timeout_sec: float = 3.0) -> bool:
+def fast_webhook_enqueue(kind: str, payload: dict, sabun: str = "", year: int | None = None, timeout_sec: float = 2.0) -> bool:
     """
     Apps Script Web App으로 초경량 POST.
     200 OK + {"ok": true}면 True, 그 외/예외는 False (폴백용).
@@ -276,8 +274,6 @@ def force_sync():
 # ═════════════════════════════════════════════════════════════════════════════
 APP_TITLE = st.secrets.get("app", {}).get("TITLE", "HISMEDI - 인사/HR")
 st.set_page_config(page_title=APP_TITLE, layout="wide")
-
-
 
 # Disable st.help "No docs available"
 if not getattr(st, "_help_disabled", False):
@@ -1513,26 +1509,62 @@ JOBDESC_HEADERS = [
     "면허","경력(자격요건)","비고","제출시각"
 ]
 
+
 def ensure_jobdesc_sheet():
+    """Return the '직무기술서' worksheet.
+    - If missing, create with header.
+    - If present but header incomplete, append missing header columns (when AUTO_FIX_HEADERS).
+    - Never attempts to create if the sheet already exists (avoids DuplicateSheetName 400).
+    """
     wb = get_book()
+    # 1) check existence by listing titles (robust against transient API errors)
     try:
-        ws = wb.worksheet(JOBDESC_SHEET)
+        sheets = _retry(wb.worksheets) or []
+        titles = {getattr(s, 'title', None) for s in sheets}
+    except Exception:
+        sheets = []
+        titles = set()
+    ws = None
+    if JOBDESC_SHEET in titles:
+        try:
+            ws = _retry(wb.worksheet, JOBDESC_SHEET)
+        except Exception:
+            # fallback: pick by title from listed sheets
+            for s in sheets:
+                if getattr(s, 'title', None) == JOBDESC_SHEET:
+                    ws = s
+                    break
+    else:
+        # create once
+        try:
+            ws = _retry(wb.add_worksheet, title=JOBDESC_SHEET, rows=2000, cols=80)
+            _retry(ws.update, "A1", [JOBDESC_HEADERS])
+            return ws
+        except Exception:
+            # In case of race/duplicate, try to fetch again
+            try:
+                ws = _retry(wb.worksheet, JOBDESC_SHEET)
+            except Exception as _e:
+                raise _e
+    # 2) ensure header if we got a worksheet
+    try:
         header = _retry(ws.row_values, 1) or []
         need = [h for h in JOBDESC_HEADERS if h not in header]
-        if need:
-            if AUTO_FIX_HEADERS:
-                _retry(ws.update, "1:1", [header + need])
-            else:
-                try:
-                    st.warning("시트 헤더에 다음 컬럼이 없습니다: " + ", ".join(need) + "\n"                               "→ 시트를 직접 수정한 뒤 좌측 🔄 동기화 버튼을 눌러주세요.", icon="⚠️")
-                except Exception:
-                    pass
-        return ws
-    except Exception as e:
-        # WorksheetNotFound 등
-        ws = _retry(wb.add_worksheet, title=JOBDESC_SHEET, rows=2000, cols=80)
-        _retry(ws.update, "A1", [JOBDESC_HEADERS])
-        return ws
+        if need and AUTO_FIX_HEADERS:
+            _retry(ws.update, "1:1", [header + need])
+        elif need:
+            try:
+                st.warning(
+                    "직무기술서 시트 헤더에 다음 컬럼이 없습니다: " + ", ".join(need) +
+                    " → 시트를 직접 수정 후 좌측 🔄 동기화 버튼을 눌러주세요.",
+                    icon="⚠️"
+                )
+            except Exception:
+                pass
+    except Exception:
+        # Non-fatal: ignore header check failure
+        pass
+    return ws
 
 @st.cache_data(ttl=600, show_spinner=False)
 def read_jobdesc_df(_rev: int = 0) -> pd.DataFrame:
