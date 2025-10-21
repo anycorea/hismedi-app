@@ -283,6 +283,19 @@ try:
     st.caption(f"WEBHOOK={'ON' if FAST_WEBHOOK else 'OFF'} → {GS_WEBHOOK_URL[:60]}…")
 except Exception:
     pass
+
+# --- sidebar and visible banner for webhook status ---
+try:
+    _webhook_msg = f"WEBHOOK={'ON' if FAST_WEBHOOK else 'OFF'} → {GS_WEBHOOK_URL[:72]}…"
+    st.info(_webhook_msg)
+    try:
+        st.sidebar.caption(_webhook_msg)
+        (st.sidebar.success if FAST_WEBHOOK else st.sidebar.warning)('Webhook ' + ('ON' if FAST_WEBHOOK else 'OFF'))
+    except Exception:
+        pass
+    print('[WEBHOOK]', _webhook_msg)
+except Exception:
+    pass
 # Disable st.help "No docs available"
 if not getattr(st, "_help_disabled", False):
     def _noop_help(*args, **kwargs): return None
