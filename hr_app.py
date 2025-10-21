@@ -49,7 +49,14 @@ GS_WEBHOOK_URL = (_os_webhook.getenv("GS_WEBHOOK_URL", "") or _DEFAULT_GS_WEBHOO
 GS_WEBHOOK_TOKEN = (_os_webhook.getenv("GS_WEBHOOK_TOKEN", "") or _DEFAULT_GS_WEBHOOK_TOKEN).strip()
 FAST_WEBHOOK = bool(GS_WEBHOOK_URL and GS_WEBHOOK_TOKEN)
 
-def fast_webhook_enqueue(kind: str, payload: dict, sabun: str = "", year: int | None = None, timeout_sec: float = 2.0) -> bool:
+# --- debug caption for webhook status ---
+try:
+    st.caption(f"WEBHOOK={'ON' if FAST_WEBHOOK else 'OFF'} → {GS_WEBHOOK_URL[:60]}…")
+except Exception:
+    pass
+
+
+def fast_webhook_enqueue(kind: str, payload: dict, sabun: str = "", year: int | None = None, timeout_sec: float = 3.0) -> bool:
     """
     Apps Script Web App으로 초경량 POST.
     200 OK + {"ok": true}면 True, 그 외/예외는 False (폴백용).
