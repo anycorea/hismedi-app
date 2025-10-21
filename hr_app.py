@@ -40,7 +40,7 @@ def get_eval_summary_map_cached(_year: int, _rev: int = 0) -> dict:
         ws = _ensure_eval_resp_sheet(int(_year), item_ids)
         header = _retry(ws.row_values, 1) or []
         hmap = {n:i+1 for i,n in enumerate(header)}
-        values = _ws_values(ws, key=f"{ws.title}:{_year}:{_rev}")
+        values = _ws_values(ws)
     except Exception:
         return {}
     cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cTot=hmap.get("총점"); cSub=hmap.get("제출시각")
@@ -65,8 +65,7 @@ def get_comp_summary_map_cached(_year: int, _rev: int = 0) -> dict:
         ws = _ensure_comp_simple_sheet(int(_year))
         header = _retry(ws.row_values,1) or []
         hmap = {n:i+1 for i,n in enumerate(header)}
-        values = _ws_values(ws, key=f"{ws.title}:{_year}:{_rev}")  # default cache
-        values = _ws_values(ws, key=f"{ws.title}:{_year}:{_rev}")
+        values = _ws_values(ws)
     except Exception:
         return {}
     cY=hmap.get("연도"); cTS=hmap.get("평가대상사번"); cMain=hmap.get("주업무평가")
@@ -469,7 +468,7 @@ def read_sheet_df(sheet_name: str) -> pd.DataFrame:
 
     except APIError as e:
         if _is_quota_429(e):
-            try: st.warning('구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 "동기화"를 눌러 다시 시도해 주세요.', icon="⏳")
+            try: st.warning("구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 \"동기화\"를 눌러 다시 시도해 주세요.", icon="⏳")
             except Exception: pass
             return pd.DataFrame()
         if sheet_name in LAST_GOOD:
@@ -953,7 +952,7 @@ def upsert_eval_response(emp_df: pd.DataFrame, year: int, eval_type: str,
     total=round(sum(scores_list)*(100.0/max(1,len(item_ids)*5)),1)
     tname=_emp_name_by_sabun(emp_df, target_sabun); ename=_emp_name_by_sabun(emp_df, evaluator_sabun)
     now=kst_now_str()
-    values = _ws_values(ws, key=f"{ws.title}:{_year}:{_rev}"); cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
+    values = _ws_values(ws); cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
     row_idx=0
     for i in range(2, len(values)+1):
         r=values[i-1]
@@ -1062,7 +1061,7 @@ def tab_eval(emp_df: pd.DataFrame):
         try:
             ws = _ensure_eval_resp_sheet(int(_year), item_ids)
             header = _retry(ws.row_values, 1) or []; hmap = {n: i+1 for i, n in enumerate(header)}
-            values = _ws_values(ws, key=f"{ws.title}:{_year}:{_rev}")
+            values = _ws_values(ws)
             cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cS=hmap.get("상태")
             if not all([cY, cT, cTS, cS]): return False
             for r in values[1:]:
@@ -1080,7 +1079,7 @@ def tab_eval(emp_df: pd.DataFrame):
         try:
             ws = _ensure_eval_resp_sheet(int(year), item_ids)
             header = _retry(ws.row_values, 1) or []; hmap = {n: i+1 for i, n in enumerate(header)}
-            values = _ws_values(ws, key=f"{ws.title}:{_year}:{_rev}")
+            values = _ws_values(ws)
             cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
             row_idx = 0
             for i in range(2, len(values)+1):
@@ -1201,7 +1200,7 @@ def tab_eval(emp_df: pd.DataFrame):
         try:
             ws = _ensure_eval_resp_sheet(int(_year), item_ids)
             header = _retry(ws.row_values, 1) or []; hmap = {n: i+1 for i, n in enumerate(header)}
-            values = _ws_values(ws, key=f"{ws.title}:{_year}:{_rev}")
+            values = _ws_values(ws)
             cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cDT=hmap.get("제출시각")
             # 최신 제출시각 우선
             picked = None; picked_dt = ""
@@ -1376,12 +1375,13 @@ def tab_eval(emp_df: pd.DataFrame):
     # - 1차/2차  : 평가자(본인) 사번
     sabun_for_pin = str(target_sabun) if str(eval_type) == "자기" else str(me_sabun)
 
-    with st.form(key=f"eval_form_{kbase}"):
-        cbtn = st.columns([1,1,3])
-        with cbtn[0]:
-            do_save = st.form_submit_button("제출/저장")
-        with cbtn[1]:
-            do_reset = st.form_submit_button("초기화")
+    cbtn = st.columns([1, 1, 3])
+    with cbtn[0]:
+        do_save = st.button("제출/저장", type="primary", use_container_width=True,
+                            key=f"eval_save_{kbase}", disabled=not edit_mode)
+    with cbtn[1]:
+        do_reset = st.button("초기화", use_container_width=True,
+                             key=f"eval_reset_{kbase}", disabled=not edit_mode)
 
     if do_reset:
         for _iid in item_ids:
@@ -1516,7 +1516,7 @@ def upsert_jobdesc(rec: dict, as_new_version: bool = False) -> dict:
     rec["제출시각"] = kst_now_str()
     rec["이름"] = _emp_name_by_sabun(read_emp_df(), sabun)
 
-    values = _ws_values(ws, key=f"{ws.title}:{_year}:{_rev}")
+    values = _ws_values(ws)
     row_idx = 0
     cS, cY, cV = hmap.get("사번"), hmap.get("연도"), hmap.get("버전")
     for i in range(2, len(values) + 1):
@@ -1727,26 +1727,14 @@ def read_jd_approval_df(_rev: int = 0) -> pd.DataFrame:
     return df
 
 def _ws_batch_row(ws, idx, hmap, kv: dict):
-    # Build updates and track max col needed
     updates = []
-    max_col_needed = 0
     for k, v in kv.items():
         c = hmap.get(k)
         if not c:
             continue
-        c = int(c); r = int(idx)
-        a1 = gspread.utils.rowcol_to_a1(r, c)
-        updates.append({"range": f"'{ws.title}'!{a1}", "values": [[v]]})
-        if c > max_col_needed: max_col_needed = c
+        a1 = gspread.utils.rowcol_to_a1(int(idx), int(c))
+        updates.append({"range": a1, "values": [[v]]})
     if updates:
-        # Ensure grid is large enough (Google Values API won't expand automatically)
-        try:
-            need_rows = max(getattr(ws, "row_count", 0) or 0, int(idx))
-            need_cols = max(getattr(ws, "col_count", 0) or 0, int(max_col_needed))
-            if need_rows > (getattr(ws, "row_count", 0) or 0) or need_cols > (getattr(ws, "col_count", 0) or 0):
-                ws.resize(rows=need_rows, cols=need_cols)
-        except Exception:
-            pass
         body = {"valueInputOption": "USER_ENTERED", "data": updates}
         _retry(ws.spreadsheet.values_batch_update, body)
 
@@ -1766,7 +1754,7 @@ def set_jd_approval(year: int, sabun: str, name: str, version: int,
     ws = _ws(JD_APPROVAL_SHEET)
     header = _retry(ws.row_values, 1) or JD_APPROVAL_HEADERS
     hmap = {n: i+1 for i, n in enumerate(header)}
-    values = _ws_values(ws, key=f"{ws.title}:{_year}:{_rev}")
+    values = _ws_values(ws)
     cY = hmap.get("연도"); cS = hmap.get("사번"); cV = hmap.get("버전")
     target_row = 0
     for i in range(2, len(values)+1):
@@ -2094,24 +2082,16 @@ COMP_SIMPLE_HEADERS = [
 ]
 def _simp_sheet_name(year:int|str)->str: return f"{COMP_SIMPLE_PREFIX}{int(year)}"
 
-
 def _ensure_comp_simple_sheet(year:int):
-    wb = get_book(); name = _simp_sheet_name(year)
+    wb=get_book(); name=_simp_sheet_name(year)
     try:
-        ws = wb.worksheet(name)
-    except Exception:
-        # Create if missing or inaccessible by name
-        ws = _retry(wb.add_worksheet, title=name, rows=1000, cols=max(50, len(COMP_SIMPLE_HEADERS)))
-        _retry(ws.update, "1:1", [COMP_SIMPLE_HEADERS], value_input_option="USER_ENTERED")
-        return ws
-    # Ensure headers include all expected columns (append missing to the right)
-    header = _retry(ws.row_values, 1) or []
-    if not header:
-        _retry(ws.update, "1:1", [COMP_SIMPLE_HEADERS], value_input_option="USER_ENTERED")
-        return ws
-    need = [h for h in COMP_SIMPLE_HEADERS if h not in header]
-    if need:
-        _retry(ws.update, "1:1", [header + need], value_input_option="USER_ENTERED")
+        ws=wb.worksheet(name)
+    except WorksheetNotFound:
+        ws=_retry(wb.add_worksheet, title=name, rows=1000, cols=50)
+        _retry(ws.update, "1:1", [COMP_SIMPLE_HEADERS]); return ws
+    header=_retry(ws.row_values,1) or []
+    need=[h for h in COMP_SIMPLE_HEADERS if h not in header]
+    if need: _retry(ws.update, "1:1", [header+need])
     return ws
 
 def _jd_latest_for_comp(sabun:str, year:int)->dict:
@@ -2143,7 +2123,7 @@ def upsert_comp_simple_response(emp_df: pd.DataFrame, year:int, target_sabun:str
     jd=_jd_latest_for_comp(target_sabun, int(year)); edu_status=_edu_completion_from_jd(jd)
     t_name=_emp_name_by_sabun(emp_df, target_sabun); e_name=_emp_name_by_sabun(emp_df, evaluator_sabun)
     now=kst_now_str()
-    values = _ws_values(ws, key=f"{ws.title}:{_year}:{_rev}"); cY=hmap.get("연도"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
+    values = _ws_values(ws); cY=hmap.get("연도"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
     row_idx=0
     for i in range(2, len(values)+1):
         r=values[i-1]
@@ -2191,75 +2171,138 @@ def read_my_comp_simple_rows(year:int, sabun:str)->pd.DataFrame:
     return df.reset_index(drop=True)
 
 def tab_competency(emp_df: pd.DataFrame):
-    """직무능력평가: 제출시각 즉시 업데이트, 제출 후 잠금."""
-    # 접근 권한
-    me = st.session_state.get("user", {})
-    me_sabun = str(me.get("사번","")); me_name = str(me.get("이름",""))
-    if not (is_admin(me_sabun) or len(get_allowed_sabuns(emp_df, me_sabun, include_self=False))>0):
-        st.warning("권한이 없습니다. 관리자/평가 권한자만 접근할 수 있습니다.", icon="🔒")
+    # 권한 게이트: 관리자/평가권한자만 접근 가능 (일반 직원 접근 불가)
+    u_check = st.session_state.get('user', {})
+    me_check = str(u_check.get('사번',''))
+    am_admin_or_mgr = (is_admin(me_check) or len(get_allowed_sabuns(emp_df, me_check, include_self=False))>0)
+    if not am_admin_or_mgr:
+        st.warning('권한이 없습니다. 관리자/평가 권한자만 접근할 수 있습니다.', icon='🔒')
         return
 
-    year_val = int(current_year())
-    year_val = st.number_input("연도", min_value=2000, max_value=2100, value=year_val, step=1, key="comp_year")
+    this_year = current_year()
+    year = st.number_input("연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="cmpS_year")
 
-    # 대상자
-    allowed = sorted(set(map(str, get_allowed_sabuns(emp_df, me_sabun, include_self=True))))
-    if not allowed:
-        st.info("평가 대상자가 없습니다.")
+    u=st.session_state.get("user",{}); me_sabun=str(u.get("사번","")); me_name=str(u.get("이름",""))
+    allowed=set(map(str, get_allowed_sabuns(emp_df, me_sabun, include_self=True)))
+    df=emp_df.copy()
+    if "사번" not in df.columns:
+        st.info("직원 데이터에 '사번' 컬럼이 없습니다.", icon="ℹ️"); return
+    df["사번"]=df["사번"].astype(str); df=df[df["사번"].isin(allowed)].copy()
+    if "재직여부" in df.columns: df=df[df["재직여부"]==True]
+    for c in ["이름","부서1","부서2","직급"]:
+        if c not in df.columns: df[c]=""
+
+    try: df["사번_sort"]=df["사번"].astype(int)
+    except Exception: df["사번_sort"]=df["사번"].astype(str)
+    df=df.sort_values(["사번_sort","이름"]).reset_index(drop=True)
+
+    glob_sab, _ = get_global_target()
+    default = glob_sab if glob_sab in set(df["사번"].astype(str)) else (str(me_sabun) if str(me_sabun) in set(df["사번"]) else df["사번"].astype(str).tolist()[0])
+    sabuns=df["사번"].astype(str).tolist(); names=df["이름"].astype(str).tolist()
+    d2s=df["부서2"].astype(str).tolist() if "부서2" in df.columns else [""]*len(sabuns)
+    opts=[f"{s} - {n} - {d2}" for s,n,d2 in zip(sabuns,names,d2s)]
+    sel_idx=sabuns.index(default) if default in sabuns else 0
+    sel_label = st.selectbox("대상자 선택", ["(선택)"] + opts, index=0 if not st.session_state.get("cmpS_target_sabun") else (1 + sabuns.index(st.session_state.get("cmpS_target_sabun"))) if st.session_state.get("cmpS_target_sabun") in sabuns else 0, key="cmpS_pick_select")
+    if sel_label == "(선택)":
+        st.session_state["cmpS_target_sabun"] = ""
+        st.session_state["cmpS_target_name"] = ""
+        st.info("대상자를 선택하세요.", icon="👈")
         return
-    label_map = {s: f"{s} - {_emp_name_by_sabun(emp_df, s)}" for s in allowed}
-    labels = [label_map[s] for s in allowed]
-    sel_label = st.selectbox("대상자", options=labels, index=0, key=f"comp_target_{year_val}_{me_sabun}")
-    sel_sab = next((s for s,l in label_map.items() if l==sel_label), allowed[0])
+    sel_sab=sel_label.split(" - ",1)[0] if isinstance(sel_label,str) else sabuns[sel_idx]
+    st.session_state["cmpS_target_sabun"]=str(sel_sab)
+    st.session_state["cmpS_target_name"]=_emp_name_by_sabun(emp_df, str(sel_sab))
 
-    # 잠금 여부 (제출시각 존재)
-    comp_rev = st.session_state.get("comp_rev", 0)
-    summary = get_comp_summary_map_cached(int(year_val), _rev=comp_rev)  # {사번: (main, extra, qual, 제출시각)}
-    sub_ts = ""
-    if sel_sab in summary and isinstance(summary[sel_sab], (tuple, list)) and len(summary[sel_sab])>=4:
-        sub_ts = str(summary[sel_sab][3]).strip()
-    comp_locked = bool(sub_ts)
+    st.success(f"대상자: {_emp_name_by_sabun(emp_df, sel_sab)} ({sel_sab})", icon="✅")
 
-    if comp_locked:
-        st.info("평가를 완료하여 수정할 수 없습니다.", icon="🔒")
-        st.write(f"제출시각: **{sub_ts}**")
-        return
+    # === 제출시각 배너(직무능력평가) ===
+    comp_locked = False
+    try:
+        _cmap = get_comp_summary_map_cached(int(year), st.session_state.get('comp_rev', 0))
+        _cts = (str(_cmap.get(str(sel_sab), ("","","",""))[3]).strip())
+        show_submit_banner(f"🕒 제출시각  |  {_cts if _cts else '미제출'}")
+        comp_locked = bool(_cts)
+    except Exception:
+        pass
 
-    # 입력 폼
-    with st.form(key=f"comp_form_{year_val}_{sel_sab}_{me_sabun}"):
-        c1, c2 = st.columns([1,1])
-        with c1:
-            eval_date = st.date_input("평가일자", value=pd.Timestamp.today(), key=f"comp_date_{year_val}_{sel_sab}")
-        with c2:
-            attest = st.checkbox("본인은 사실대로 평가했음을 확인합니다.", value=False, key=f"comp_attest_{year_val}_{sel_sab}")
-        main_grade = st.text_input("주업무평가", key=f"cmpS_main_{year_val}_{sel_sab}")
-        extra_grade = st.text_input("기타업무평가", key=f"cmpS_extra_{year_val}_{sel_sab}")
-        qual_status = st.text_input("자격유지", key=f"cmpS_qual_{year_val}_{sel_sab}")
-        opinion = st.text_area("종합의견", key=f"cmpS_opinion_{year_val}_{sel_sab}", height=120)
-        pin = st.text_input("PIN", type="password", key=f"comp_pin_{year_val}_{sel_sab}_{me_sabun}")
+    with st.expander("직무기술서 요약", expanded=True):
+        jd=_jd_latest_for_comp(sel_sab, int(year))
+        if jd:
+            def V(key): return (_html_escape((jd.get(key,"") or "").strip()) or "—")
+            html = f"""
+            <div class="scrollbox">
+              <div class="kv"><div class="k">직무명</div><div class="v">{V('직무명')}</div></div>
+              <div class="kv"><div class="k">직무개요</div><div class="v">{_jd_plain_html(jd.get('직무개요', '') or '—')}</div></div>
+              <div class="kv"><div class="k">주요 업무</div><div class="v">{_jd_plain_html(jd.get('주업무', '') or '—')}</div></div>
+              <div class="kv"><div class="k">기타업무</div><div class="v">{_jd_plain_html(jd.get('기타업무', '') or '—')}</div></div>
+              <div class="kv"><div class="k">필요학력 / 전공</div><div class="v">{V('필요학력')} / {V('전공계열')}</div></div>
+              <div class="kv"><div class="k">면허 / 경력(자격요건)</div><div class="v">{V('면허')} / {V('경력(자격요건)')}</div></div>
+            </div>
+            """
+            st.markdown(html, unsafe_allow_html=True)
+        else:
+            st.caption("직무기술서가 없습니다. JD 없이도 평가를 진행할 수 있습니다.")
 
-        do_save = st.form_submit_button("제출/저장")
-        do_reset = st.form_submit_button("초기화")
+    st.markdown("### 평가 입력")
+    grade_options=["우수","양호","보통","미흡"]
+    colG=st.columns(4)
+    with colG[0]: g_main = st.radio("주업무 평가", grade_options, index=2, key="cmpS_main", horizontal=False, disabled=comp_locked)
+    with colG[1]: g_extra= st.radio("기타업무 평가", grade_options, index=2, key="cmpS_extra", horizontal=False, disabled=comp_locked)
+    with colG[2]: qual   = st.radio("직무 자격 유지 여부", ["직무 유지","직무 변경","직무비부여"], index=0, key="cmpS_qual", disabled=comp_locked)
+    with colG[3]:
+        eval_date = ""  # 입력란 제거: 제출시각으로 대체 기록
+
+    try: edu_status=_edu_completion_from_jd(_jd_latest_for_comp(sel_sab, int(year)))
+    except Exception: edu_status="미완료"
+    st.metric("교육이수 (자동)", edu_status)
+    opinion=st.text_area("종합평가 의견", value="", height=150, key="cmpS_opinion", disabled=comp_locked)
+
+    # ===== 제출 확인(PIN 재확인 + 동의 체크) =====
+    cb1, cb2 = st.columns([2, 1])
+    with cb1:
+        comp_attest_ok = st.checkbox(
+            "본인은 입력한 직무능력평가 내용이 사실이며, 회사 정책에 따라 제출함을 확인합니다.",
+            key=f"comp_attest_ok_{year}_{sel_sab}_{me_sabun}",
+        )
+    with cb2:
+        comp_pin_input = st.text_input(
+            "PIN 재입력",
+            value="",
+            type="password",
+            key=f"comp_attest_pin_{year}_{sel_sab}_{me_sabun}",
+        )
+
+    cbtn = st.columns([1, 1, 3])
+    with cbtn[0]:
+        do_save = st.button("제출/저장", type="primary", use_container_width=True, key="cmpS_save", disabled=comp_locked)
+    with cbtn[1]:
+        do_reset = st.button("초기화", use_container_width=True, key="cmpS_reset")
 
     if do_reset:
-        for k in [f"cmpS_main_{year_val}_{sel_sab}", f"cmpS_extra_{year_val}_{sel_sab}", f"cmpS_qual_{year_val}_{sel_sab}", f"cmpS_opinion_{year_val}_{sel_sab}"]:
+        for k in ["cmpS_main","cmpS_extra","cmpS_qual","cmpS_opinion"]:
             if k in st.session_state: del st.session_state[k]
         st.rerun()
 
     if do_save:
-        if not attest:
-            st.error("제출 전에 확인란에 체크해주세요."); return
-        if not verify_pin(me_sabun, pin):
-            st.error("PIN이 올바르지 않습니다."); return
-
-        rep = upsert_comp_simple_response(
-            emp_df, int(year_val), str(sel_sab), str(me_sabun),
-            str(main_grade), str(extra_grade), str(qual_status), str(opinion),
-            str(pd.to_datetime(eval_date).date())
-        )
-        st.success(("제출 완료" if rep.get("action")=="insert" else "업데이트 완료"), icon="✅")
+        # 1) 동의 체크
+        if not comp_attest_ok:
+            st.error("제출 전에 확인란에 체크해주세요.")
+        # 2) PIN 검증
+        elif not verify_pin(me_sabun, comp_pin_input):
+            st.error("PIN이 올바르지 않습니다.")
+        else:
+            rep = upsert_comp_simple_response(
+                emp_df, int(year), str(sel_sab), str(me_sabun), g_main, g_extra, qual, opinion, eval_date
+            )
+            st.success(("제출 완료" if rep.get("action")=="insert" else "업데이트 완료"), icon="✅")
         st.session_state['comp_rev'] = st.session_state.get('comp_rev', 0) + 1
-        st.rerun()
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 관리자: 직원/ PIN 관리 / 인사평가 항목 관리 / 권한 관리
+# ═════════════════════════════════════════════════════════════════════════════
+REQ_EMP_COLS = [
+"사번","이름","부서1","부서2","직급","직무","직군","입사일","퇴사일","기타1","기타2","재직여부","적용여부",
+    "PIN_hash","PIN_No"
+]
 
 def _get_ws_and_headers(sheet_name: str):
     ws=_ws(sheet_name)
