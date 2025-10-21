@@ -66,7 +66,7 @@ def get_comp_summary_map_cached(_year: int, _rev: int = 0) -> dict:
         header = _retry(ws.row_values,1) or []
         hmap = {n:i+1 for i,n in enumerate(header)}
         values = _ws_values(ws, key=f"{ws.title}:{_year}:{_rev}")  # default cache
-        values = _ws_values(ws, key=f\"{ws.title}:{_year}:{_rev}\")
+        values = _ws_values(ws, key=f"{ws.title}:{_year}:{_rev}")
     except Exception:
         return {}
     cY=hmap.get("연도"); cTS=hmap.get("평가대상사번"); cMain=hmap.get("주업무평가")
@@ -469,7 +469,7 @@ def read_sheet_df(sheet_name: str) -> pd.DataFrame:
 
     except APIError as e:
         if _is_quota_429(e):
-            try: st.warning("구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 \"동기화\"를 눌러 다시 시도해 주세요.", icon="⏳")
+            try: st.warning("구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 "동기화"를 눌러 다시 시도해 주세요.", icon="⏳")
             except Exception: pass
             return pd.DataFrame()
         if sheet_name in LAST_GOOD:
