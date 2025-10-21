@@ -49,15 +49,26 @@ GS_WEBHOOK_URL = (_os_webhook.getenv("GS_WEBHOOK_URL", "") or _DEFAULT_GS_WEBHOO
 GS_WEBHOOK_TOKEN = (_os_webhook.getenv("GS_WEBHOOK_TOKEN", "") or _DEFAULT_GS_WEBHOOK_TOKEN).strip()
 FAST_WEBHOOK = bool(GS_WEBHOOK_URL and GS_WEBHOOK_TOKEN)
 
-\g<1>3.0\g<2> -> bool:
-    """
-    Apps Script Web App으로 초경량 POST.
-    200 OK + {"ok": true}면 True, 그 외/예외는 False (폴백용).
-    """
+
+def fast_webhook_enqueue(
+    kind: str,
+    payload: dict,
+    sabun: str = "",
+    year: int | None = None,
+    timeout_sec: float = 3.0,
+) -> bool:
+    """Send POST to Apps Script Web App and return immediately.
+    Returns True if accepted ({"ok":true}), else False. Never raises."""
     if not FAST_WEBHOOK:
         return False
     try:
-        data = {"kind": kind, "sabun": sabun, "year": year, "payload": payload, "token": GS_WEBHOOK_TOKEN}
+        data = {
+            "kind": kind,
+            "sabun": sabun,
+            "year": year,
+            "payload": payload,
+            "token": GS_WEBHOOK_TOKEN,
+        }
         if _use_requests:
             r = _req_webhook.post(GS_WEBHOOK_URL, json=data, timeout=timeout_sec)
             if not r.ok:
@@ -70,7 +81,11 @@ FAST_WEBHOOK = bool(GS_WEBHOOK_URL and GS_WEBHOOK_TOKEN)
         else:
             req = _urlreq_webhook.Request(GS_WEBHOOK_URL, method="POST")
             req.add_header("Content-Type", "application/json")
-            with _urlreq_webhook.urlopen(req, data=_json_webhook.dumps(data).encode("utf-8"), timeout=timeout_sec) as resp:
+            with _urlreq_webhook.urlopen(
+                req,
+                data=_json_webhook.dumps(data).encode("utf-8"),
+                timeout=timeout_sec,
+            ) as resp:
                 if resp.status != 200:
                     return False
                 body = resp.read().decode("utf-8")
@@ -82,12 +97,6 @@ FAST_WEBHOOK = bool(GS_WEBHOOK_URL and GS_WEBHOOK_TOKEN)
     except Exception:
         return False
 
-# Header auto-fix toggle (user manages Google Sheet headers)
-
-# ═════════════════════════════════════════════════════════════════════════════
-# Helpers
-# ═════════════════════════════════════════════════════════════════════════════
-# --- helper: detect Google Sheets quota(429) error -------------------------------
 def _is_quota_429(err) -> bool:
     try:
         from gspread.exceptions import APIError as _APIError
@@ -481,13 +490,13 @@ def _ws_values(ws, key: str | None = None):
 
 
 
-# --- safe wrappers to avoid crashing on Sheets transient errors ---
+# --- safe wrapper: avoid crashing on transient API errors ---
 def _ws_values_safe(ws):
     try:
         return _ws_values(ws)
-    except Exception as _e:
+    except Exception:
         try:
-            st.info("네트워크 지연으로 재시도 없이 넘어갑니다. (웹훅으로 반영)", icon="ℹ️")
+            st.info("네트워크 지연으로 일시적으로 저장 경로를 우회합니다. (웹훅으로 반영)", icon="ℹ️")
         except Exception:
             pass
         return []
@@ -1522,28 +1531,53 @@ JOBDESC_HEADERS = [
     "면허","경력(자격요건)","비고","제출시각"
 ]
 
-def ensure_jobdesc_sheet():
-    wb = get_book()
-    try:
-        ws = wb.worksheet(JOBDESC_SHEET)
-        header = _retry(ws.row_values, 1) or []
-        need = [h for h in JOBDESC_HEADERS if h not in header]
-        if need:
-            if AUTO_FIX_HEADERS:
-                _retry(ws.update, "1:1", [header + need])
-            else:
-                try:
-                    st.warning("시트 헤더에 다음 컬럼이 없습니다: " + ", ".join(need) + "\n"                               "→ 시트를 직접 수정한 뒤 좌측 🔄 동기화 버튼을 눌러주세요.", icon="⚠️")
-                except Exception:
-                    pass
-        return ws
-    except Exception as e:
-        # WorksheetNotFound 등
-        ws = _retry(wb.add_worksheet, title=JOBDESC_SHEET, rows=2000, cols=80)
-        _retry(ws.update, "A1", [JOBDESC_HEADERS])
-        return ws
 
-@st.cache_data(ttl=600, show_spinner=False)
+def ensure_jobdesc_sheet():
+    """Ensure '직무기술서' sheet exists with sufficient size and header, without duplicating."""
+    wb = get_wb()
+    title = JOBDESC_SHEET
+    # 1) try to find existing
+    try:
+        sheets = wb.worksheets()
+        by_title = {s.title: s for s in sheets}
+        if title in by_title:
+            ws = by_title[title]
+        else:
+            ws = _retry(wb.add_worksheet, title=title, rows=2000, cols=80)
+    except Exception:
+        # Fallback: try get_worksheet by index or add if fails
+        try:
+            ws = wb.worksheet(title)
+        except Exception:
+            ws = _retry(wb.add_worksheet, title=title, rows=2000, cols=80)
+
+    # 2) Ensure capacity (no-op if big enough)
+    try:
+        _ensure_capacity(ws, min_rows=2000, min_cols=80)
+    except Exception:
+        pass
+
+    # 3) Ensure header row (idempotent)
+    try:
+        header = [
+            "사번","이름","연도","버전","부서1","부서2","작성자사번","작성자이름","직군","직종",
+            "직무명","제정일","개정일","검토주기","직무개요","주업무","기타업무","필요학력","전공계열",
+            "직원공통필수교육","보수교육","기타교육","특성화교육","면허","경력(자격요건)","비고","제출시각"
+        ]
+        h = _ws_header(ws)
+        if not h:
+            _ws_set_header(ws, header)
+        else:
+            # Extend header if needed (append missing columns at end)
+            missing = [c for c in header if c not in h]
+            if missing:
+                new_h = h + missing
+                _ws_set_header(ws, new_h)
+    except Exception:
+        pass
+
+    return ws
+
 def read_jobdesc_df(_rev: int = 0) -> pd.DataFrame:
     ensure_jobdesc_sheet()
     ws = _ws(JOBDESC_SHEET)
@@ -2420,38 +2454,8 @@ def tab_competency(emp_df: pd.DataFrame):
         elif not verify_pin(me_sabun, comp_pin_input):
             st.error("PIN이 올바르지 않습니다.")
         else:
-            
-# --- fast webhook path (competency) ---
-try:
-    _comp_payload = {
-        "연도": int(year) if 'year' in locals() else int(globals().get('year', datetime.now().year)),
-        "평가대상사번": str(sel_sab if 'sel_sab' in locals() else globals().get('sel_sab','')),
-        "평가자사번": str(me_sabun if 'me_sabun' in locals() else globals().get('me_sabun','')),
-        "주업무평가": str(g_main if 'g_main' in locals() else globals().get('g_main','')),
-        "기타업무평가": str(g_extra if 'g_extra' in locals() else globals().get('g_extra','')),
-        "교육이수": str(edu_status if 'edu_status' in locals() else globals().get('edu_status','')),
-        "자격유지": str(qual if 'qual' in locals() else globals().get('qual','')),
-        "종합의견": str(opinion if 'opinion' in locals() else globals().get('opinion','')),
-        "상태": "제출"
-    }
-    if fast_webhook_enqueue("COMP", _comp_payload, sabun=str(_comp_payload["평가대상사번"]), year=int(_comp_payload["연도"]), timeout_sec=3.0):
-        try:
-            st.success("접수되었습니다. (시트에 자동 반영)", icon="✅")
-        except Exception:
-            pass
-        st.rerun()
-except Exception:
-    pass
-# --- end fast webhook path ---
-try:
-    rep = upsert_comp_simple_response(
-                emp_df, int(year)
-except Exception as _e:
-    try:
-        st.warning('직무능력평가를 큐로 접수했습니다. 시트 반영은 잠시 후 처리됩니다.', icon='⏳')
-    except Exception:
-        pass
-    rep = {'ok': False, 'error': str(_e)}, str(sel_sab), str(me_sabun), g_main, g_extra, qual, opinion, eval_date
+            rep = upsert_comp_simple_response(
+                emp_df, int(year), str(sel_sab), str(me_sabun), g_main, g_extra, qual, opinion, eval_date
             )
             st.success(("제출 완료" if rep.get("action")=="insert" else "업데이트 완료"), icon="✅")
         st.session_state['comp_rev'] = st.session_state.get('comp_rev', 0) + 1
