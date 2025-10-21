@@ -29,6 +29,7 @@ from datetime import datetime, timedelta
 from typing import Any, Tuple
 import pandas as pd
 import streamlit as st
+
 # ==== Fast Webhook Queue (Apps Script) ====
 import os as _os_webhook
 import json as _json_webhook
@@ -40,15 +41,18 @@ except Exception:
     import urllib.request as _urlreq_webhook
     _use_requests = False
 
-GS_WEBHOOK_URL = (_os_webhook.getenv("GS_WEBHOOK_URL", "") or "https://script.google.com/macros/s/AKfycbw0ftUebqyzeqr0WC8V4Uz26KIUdVCtqFGSQg1vruqBy0-Muv75BJ8vnG76E94na8d6fA/exec").strip()
-GS_WEBHOOK_TOKEN = _os_webhook.getenv("GS_WEBHOOK_TOKEN", "").strip()
+# --- 기본값(환경변수 없을 때 사용) ---
+_DEFAULT_GS_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbw0ftUebqyzeqr0WC8V4Uz26KIUdVCtqFGSQg1vruqBy0-Muv75BJ8vnG76E94na8d6fA/exec"
+_DEFAULT_GS_WEBHOOK_TOKEN = "HISMEDI_HR2025_Que"  # Apps Script의 SECRET과 동일
+
+GS_WEBHOOK_URL = (_os_webhook.getenv("GS_WEBHOOK_URL", "") or _DEFAULT_GS_WEBHOOK_URL).strip()
+GS_WEBHOOK_TOKEN = (_os_webhook.getenv("GS_WEBHOOK_TOKEN", "") or _DEFAULT_GS_WEBHOOK_TOKEN).strip()
 FAST_WEBHOOK = bool(GS_WEBHOOK_URL and GS_WEBHOOK_TOKEN)
 
 def fast_webhook_enqueue(kind: str, payload: dict, sabun: str = "", year: int | None = None, timeout_sec: float = 2.0) -> bool:
     """
-    Send a tiny POST to Apps Script Web App and return immediately.
-    Returns True if accepted (HTTP 200 and {"ok":true}), else False.
-    Never raises.
+    Apps Script Web App으로 초경량 POST.
+    200 OK + {"ok": true}면 True, 그 외/예외는 False (폴백용).
     """
     if not FAST_WEBHOOK:
         return False
@@ -77,7 +81,6 @@ def fast_webhook_enqueue(kind: str, payload: dict, sabun: str = "", year: int | 
                 return bool(j.get("ok") is True)
     except Exception:
         return False
-
 
 # Header auto-fix toggle (user manages Google Sheet headers)
 
