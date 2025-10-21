@@ -29,6 +29,55 @@ from datetime import datetime, timedelta
 from typing import Any, Tuple
 import pandas as pd
 import streamlit as st
+# ==== Fast Webhook Queue (Apps Script) ====
+import os as _os_webhook
+import json as _json_webhook
+# prefer requests; fallback to urllib if missing
+try:
+    import requests as _req_webhook
+    _use_requests = True
+except Exception:
+    import urllib.request as _urlreq_webhook
+    _use_requests = False
+
+GS_WEBHOOK_URL = (_os_webhook.getenv("GS_WEBHOOK_URL", "") or "https://script.google.com/macros/s/AKfycbw0ftUebqyzeqr0WC8V4Uz26KIUdVCtqFGSQg1vruqBy0-Muv75BJ8vnG76E94na8d6fA/exec").strip()
+GS_WEBHOOK_TOKEN = _os_webhook.getenv("GS_WEBHOOK_TOKEN", "").strip()
+FAST_WEBHOOK = bool(GS_WEBHOOK_URL and GS_WEBHOOK_TOKEN)
+
+def fast_webhook_enqueue(kind: str, payload: dict, sabun: str = "", year: int | None = None, timeout_sec: float = 2.0) -> bool:
+    """
+    Send a tiny POST to Apps Script Web App and return immediately.
+    Returns True if accepted (HTTP 200 and {"ok":true}), else False.
+    Never raises.
+    """
+    if not FAST_WEBHOOK:
+        return False
+    try:
+        data = {"kind": kind, "sabun": sabun, "year": year, "payload": payload, "token": GS_WEBHOOK_TOKEN}
+        if _use_requests:
+            r = _req_webhook.post(GS_WEBHOOK_URL, json=data, timeout=timeout_sec)
+            if not r.ok:
+                return False
+            try:
+                j = r.json()
+            except Exception:
+                return False
+            return bool(j.get("ok") is True)
+        else:
+            req = _urlreq_webhook.Request(GS_WEBHOOK_URL, method="POST")
+            req.add_header("Content-Type", "application/json")
+            with _urlreq_webhook.urlopen(req, data=_json_webhook.dumps(data).encode("utf-8"), timeout=timeout_sec) as resp:
+                if resp.status != 200:
+                    return False
+                body = resp.read().decode("utf-8")
+                try:
+                    j = _json_webhook.loads(body)
+                except Exception:
+                    return False
+                return bool(j.get("ok") is True)
+    except Exception:
+        return False
+
 
 # Header auto-fix toggle (user manages Google Sheet headers)
 
@@ -961,9 +1010,24 @@ def _emp_name_by_sabun(emp_df: pd.DataFrame, sabun: str) -> str:
 def upsert_eval_response(emp_df: pd.DataFrame, year: int, eval_type: str,
                          target_sabun: str, evaluator_sabun: str,
                          scores: dict[str,int], status="제출")->dict:
+
     items=read_eval_items_df(True); item_ids=[str(x) for x in items["항목ID"].tolist()]
     ws=_ensure_eval_resp_sheet(year, item_ids)
     header=_retry(ws.row_values, 1); hmap={n:i+1 for i,n in enumerate(header)}
+    # Webhook fast path
+    try:
+        # Compute simple total from given scores (avoid heavy ops)
+        _vals = list(scores.values()) if hasattr(scores, "values") else []
+        _n = len(_vals) if _vals else 1
+        _total = round((sum(int(v) if str(v).isdigit() else 3 for v in _vals)) * (100.0 / max(1, _n * 5)), 1)
+    except Exception:
+        _total = None
+    if fast_webhook_enqueue("EVAL", {
+        "연도": int(year), "평가유형": str(eval_type),
+        "평가대상사번": str(target_sabun), "평가자사번": str(evaluator_sabun),
+        "총점": _total, "제출시각": kst_now_str() if "kst_now_str" in globals() else ""
+    }, sabun=str(target_sabun), year=int(year)):
+        return {"action": "queued", "total": _total}
     def c5(v):
         try: v=int(v)
         except: v=3
@@ -1536,10 +1600,20 @@ def upsert_jobdesc(rec: dict, as_new_version: bool = False) -> dict:
     rec["제출시각"] = kst_now_str()
     rec["이름"] = _emp_name_by_sabun(read_emp_df(), sabun)
 
+    # Webhook fast path (non-blocking). If accepted, skip direct Sheets write.
+    try:
+        _sab = str(rec.get("사번", "")).strip()
+        _year = int(rec.get("연도", 0) or 0)
+    except Exception:
+        _sab, _year = "", 0
+    if fast_webhook_enqueue("JD", rec, sabun=_sab, year=_year):
+        return {"action": "queued", "version": int(rec.get("버전", 0) or 0)}
+
     values = _ws_values(ws)
     row_idx = 0
     cS, cY, cV = hmap.get("사번"), hmap.get("연도"), hmap.get("버전")
     for i in range(2, len(values) + 1):
+
         row = values[i - 1]
         if str(row[cS - 1]).strip() == sabun and str(row[cY - 1]).strip() == str(year) and str(row[cV - 1]).strip() == str(ver):
             row_idx = i
@@ -2151,6 +2225,18 @@ def upsert_comp_simple_response(emp_df: pd.DataFrame, year:int, target_sabun:str
     jd=_jd_latest_for_comp(target_sabun, int(year)); edu_status=_edu_completion_from_jd(jd)
     t_name=_emp_name_by_sabun(emp_df, target_sabun); e_name=_emp_name_by_sabun(emp_df, evaluator_sabun)
     now=kst_now_str()
+
+    # Webhook fast path
+    if fast_webhook_enqueue("COMP", {
+        "연도": int(year),
+        "평가대상사번": str(target_sabun),
+        "평가자사번": str(evaluator_sabun),
+        "주업무평가": str(main_grade), "기타업무평가": str(extra_grade),
+        "자격유지": str(qual_status), "종합의견": str(opinion),
+        "평가일자": str(eval_date), "제출시각": kst_now_str() if "kst_now_str" in globals() else ""
+    }, sabun=str(target_sabun), year=int(year)):
+        return {"action": "queued"}
+
     values = _ws_values(ws); cY=hmap.get("연도"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
     row_idx=0
     for i in range(2, len(values)+1):
