@@ -1,4 +1,20 @@
 # -*- coding: utf-8 -*-
+
+def _ensure_capacity(ws, min_row: int, min_col: int):
+    """Ensure worksheet has at least (min_row x min_col) grid. Expands columns/rows only if needed."""
+    try:
+        r_needed = int(min_row) if min_row is not None else 0
+        c_needed = int(min_col) if min_col is not None else 0
+        # gspread Worksheet has row_count / col_count
+        if hasattr(ws, "row_count") and ws.row_count < r_needed:
+            ws.add_rows(r_needed - int(ws.row_count))
+        if hasattr(ws, "col_count") and ws.col_count < c_needed:
+            ws.add_cols(c_needed - int(ws.col_count))
+    except Exception as _e:
+        # Non-fatal: if expansion fails, next API call may still error; upstream handles with _retry.
+        pass
+
+
 # Minimal tuned build (2025-10-21): label text clarified; optional defaults normalized.
 # Safe: No structural deletions. Original logic preserved.
 
@@ -1732,13 +1748,21 @@ def read_jd_approval_df(_rev: int = 0) -> pd.DataFrame:
 
 def _ws_batch_row(ws, idx, hmap, kv: dict):
     updates = []
+    max_c = 0
     for k, v in kv.items():
         c = hmap.get(k)
         if not c:
             continue
-        a1 = gspread.utils.rowcol_to_a1(int(idx), int(c))
-        updates.append({"range": a1, "values": [[v]]})
+        try:
+            cc = int(c)
+        except Exception:
+            continue
+        if cc > max_c:
+            max_c = cc
+        a1 = gspread.utils.rowcol_to_a1(int(idx), cc)
+        updates.append({\"range\": a1, \"values\": [[v]]})
     if updates:
+        _ensure_capacity(ws, int(idx), int(max_c) if max_c else None)
         body = {"valueInputOption": "USER_ENTERED", "data": updates}
         _retry(ws.spreadsheet.values_batch_update, body)
 
