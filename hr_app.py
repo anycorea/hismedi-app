@@ -42,7 +42,7 @@ except Exception:
     _use_requests = False
 
 # --- 기본값(환경변수 없을 때 사용) ---
-_DEFAULT_GS_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbw0ftUebqyzeqr0WC8V4Uz26KIUdVCtqFGSQg1vruqBy0-Muv75BJ8vnG76E94na8d6fA/exec"
+_DEFAULT_GS_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbxg3naOTsjJY_aCkKRc0MsTn_x3CQq1RV7o4s-DSH-NF04N12QEHYGLbQbvOsc9EASE1g/exec"
 _DEFAULT_GS_WEBHOOK_TOKEN = "HISMEDI_HR2025_Que"  # Apps Script의 SECRET과 동일
 
 GS_WEBHOOK_URL = (_os_webhook.getenv("GS_WEBHOOK_URL", "") or _DEFAULT_GS_WEBHOOK_URL).strip()
