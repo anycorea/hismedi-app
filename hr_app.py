@@ -488,7 +488,7 @@ def read_sheet_df(sheet_name: str) -> pd.DataFrame:
 
     except APIError as e:
         if _is_quota_429(e):
-            try: st.warning("구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 \"동기화\"를 눌러 다시 시도해 주세요.", icon="⏳")
+            try: st.warning("구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 '동기화'를 눌러 다시 시도해 주세요.", icon="⏳")
             except Exception: pass
             return pd.DataFrame()
         if sheet_name in LAST_GOOD:
@@ -1760,7 +1760,7 @@ def _ws_batch_row(ws, idx, hmap, kv: dict):
         if cc > max_c:
             max_c = cc
         a1 = gspread.utils.rowcol_to_a1(int(idx), cc)
-        updates.append({\"range\": a1, \"values\": [[v]]})
+        updates.append({"range": a1, "values": [[v]]})
     if updates:
         _ensure_capacity(ws, int(idx), int(max_c) if max_c else None)
         body = {"valueInputOption": "USER_ENTERED", "data": updates}
