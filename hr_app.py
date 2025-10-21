@@ -1726,34 +1726,28 @@ def read_jd_approval_df(_rev: int = 0) -> pd.DataFrame:
     return df
 
 def _ws_batch_row(ws, idx, hmap, kv: dict):
-
-    # Build updates while tracking maximum column index needed
+    # Build updates and track max col needed
     updates = []
     max_col_needed = 0
     for k, v in kv.items():
         c = hmap.get(k)
         if not c:
             continue
-        max_col_needed = max(max_col_needed, int(c))
-        a1 = gspread.utils.rowcol_to_a1(int(idx), int(c))
-        # IMPORTANT: include the sheet title in the A1 range to avoid defaulting to first sheet
+        c = int(c); r = int(idx)
+        a1 = gspread.utils.rowcol_to_a1(r, c)
         updates.append({"range": f"'{ws.title}'!{a1}", "values": [[v]]})
-
-    if not updates:
-        return
-
-    # SAFETY: ensure sheet is large enough (Google Values API does not auto-expand grid)
-    need_rows = max(getattr(ws, "row_count", 0) or 0, int(idx))
-    need_cols = max(getattr(ws, "col_count", 0) or 0, int(max_col_needed))
-    try:
-        if (getattr(ws, "row_count", 0) or 0) < need_rows or (getattr(ws, "col_count", 0) or 0) < need_cols:
-            ws.resize(rows=need_rows, cols=need_cols)
-    except Exception:
-        # If resize fails (rare), continue; API will still error if truly out of bounds.
-        pass
-
-    body = {"valueInputOption": "USER_ENTERED", "data": updates}
-    _retry(ws.spreadsheet.values_batch_update, body)
+        if c > max_col_needed: max_col_needed = c
+    if updates:
+        # Ensure grid is large enough (Google Values API won't expand automatically)
+        try:
+            need_rows = max(getattr(ws, "row_count", 0) or 0, int(idx))
+            need_cols = max(getattr(ws, "col_count", 0) or 0, int(max_col_needed))
+            if need_rows > (getattr(ws, "row_count", 0) or 0) or need_cols > (getattr(ws, "col_count", 0) or 0):
+                ws.resize(rows=need_rows, cols=need_cols)
+        except Exception:
+            pass
+        body = {"valueInputOption": "USER_ENTERED", "data": updates}
+        _retry(ws.spreadsheet.values_batch_update, body)
 
 def _jd_latest_version_for(sabun: str, year: int) -> int:
     row = _jd_latest_for(sabun, int(year)) or {}
@@ -2099,16 +2093,24 @@ COMP_SIMPLE_HEADERS = [
 ]
 def _simp_sheet_name(year:int|str)->str: return f"{COMP_SIMPLE_PREFIX}{int(year)}"
 
+
 def _ensure_comp_simple_sheet(year:int):
-    wb=get_book(); name=_simp_sheet_name(year)
+    wb = get_book(); name = _simp_sheet_name(year)
     try:
-        ws=wb.worksheet(name)
-    except WorksheetNotFound:
-        ws=_retry(wb.add_worksheet, title=name, rows=1000, cols=50)
-        _retry(ws.update, "1:1", [COMP_SIMPLE_HEADERS]); return ws
-    header=_retry(ws.row_values,1) or []
-    need=[h for h in COMP_SIMPLE_HEADERS if h not in header]
-    if need: _retry(ws.update, "1:1", [header+need])
+        ws = wb.worksheet(name)
+    except Exception:
+        # Create if missing or inaccessible by name
+        ws = _retry(wb.add_worksheet, title=name, rows=1000, cols=max(50, len(COMP_SIMPLE_HEADERS)))
+        _retry(ws.update, "1:1", [COMP_SIMPLE_HEADERS], value_input_option="USER_ENTERED")
+        return ws
+    # Ensure headers include all expected columns (append missing to the right)
+    header = _retry(ws.row_values, 1) or []
+    if not header:
+        _retry(ws.update, "1:1", [COMP_SIMPLE_HEADERS], value_input_option="USER_ENTERED")
+        return ws
+    need = [h for h in COMP_SIMPLE_HEADERS if h not in header]
+    if need:
+        _retry(ws.update, "1:1", [header + need], value_input_option="USER_ENTERED")
     return ws
 
 def _jd_latest_for_comp(sabun:str, year:int)->dict:
