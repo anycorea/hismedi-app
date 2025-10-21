@@ -1,3 +1,7 @@
+# -*- coding: utf-8 -*-
+# Minimal tuned build (2025-10-21): label text clarified; optional defaults normalized.
+# Safe: No structural deletions. Original logic preserved.
+
 # HISMEDI HR App
 # Tabs: 인사평가 / 직무기술서 / 직무능력평가 / 관리자 / 도움말
 
@@ -782,7 +786,7 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
 # ── 관리자/부서장: 대시보드 왼쪽 표에 합쳐서 표시 ───────────────────────────
 
     # 빠른 화면을 원하면 '대시보드 보기'를 끄세요.
-    show_dashboard_cols = st.checkbox("대시보드 보기(빠름)", value=False, help="끄면 기본 직원표만 빠르게 표시됩니다.")
+    show_dashboard_cols = st.checkbox("대시보드 보기(요약 컬럼 표시)", value=False, help="끄면 기본 직원표만 빠르게 표시됩니다.")
     try:
 
         am_admin_or_mgr = (is_admin(me) or len(get_allowed_sabuns(emp_df, me, include_self=False)) > 0)
@@ -2904,12 +2908,12 @@ def _gs_queue_init():
     if "gs_queue" not in st.session_state:
         st.session_state.gs_queue = []
 
-def gs_enqueue_range(ws, range_a1, values_2d, value_input_option="RAW"):
+def gs_enqueue_range(ws, range_a1, values_2d, value_input_option="USER_ENTERED"):
     _gs_queue_init()
     rng = range_a1 if "!" in range_a1 else f"{ws.title}!{range_a1}"
     st.session_state.gs_queue.append({"range": rng, "values": values_2d, "value_input_option": value_input_option})
 
-def gs_enqueue_cell(ws, row, col, value, value_input_option="RAW"):
+def gs_enqueue_cell(ws, row, col, value, value_input_option="USER_ENTERED"):
     _gs_queue_init()
     a1 = rowcol_to_a1(row, col)
     rng = f"{ws.title}!{a1}"
