@@ -107,7 +107,7 @@ def get_comp_summary_map_cached(_year: int, _rev: int = 0) -> dict:
     return out
 
 @st.cache_data(ttl=120, show_spinner=False)
-def get_jd_approval_map_cached(_year: int, _rev: int = 0) -> dict:
+def get_jd_approval_map_cached_legacy(_year: int, _rev: int = 0) -> dict:
     """Return {(사번, 최신버전)->(상태, 승인시각)} for the year from 직무기술서_승인."""
     try:
         ws = _ws("직무기술서_승인")
@@ -1181,6 +1181,7 @@ def tab_eval(emp_df: pd.DataFrame):
         eval_type = "1차" if target_role == "manager" else "2차"
 
     st.info(f"평가유형: **{eval_type}** (자동 결정)", icon="ℹ️")
+    st.session_state['eval2_type'] = str(eval_type)
 
 # --- 선행조건 / 잠금 -------------------------------
     prereq_ok, prereq_msg = True, ""
@@ -1373,7 +1374,7 @@ def tab_eval(emp_df: pd.DataFrame):
                 continue
             st.session_state[f"eval2_seg_{iid}_{kbase}"] = str(val)
             scores[iid] = val
-#### 제출 확인")st.markdown("#### 제출 확인")
+st.markdown("#### 제출 확인")
     cb1, cb2 = st.columns([2, 1])
     with cb1:
         attest_ok = st.checkbox(
