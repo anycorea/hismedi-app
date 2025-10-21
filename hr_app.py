@@ -279,8 +279,6 @@ st.set_page_config(page_title=APP_TITLE, layout="wide")
 
 
 
-except Exception:
-    pass
 # Disable st.help "No docs available"
 if not getattr(st, "_help_disabled", False):
     def _noop_help(*args, **kwargs): return None
