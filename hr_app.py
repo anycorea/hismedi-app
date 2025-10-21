@@ -278,22 +278,7 @@ APP_TITLE = st.secrets.get("app", {}).get("TITLE", "HISMEDI - 인사/HR")
 st.set_page_config(page_title=APP_TITLE, layout="wide")
 
 
-# --- debug caption for webhook status (safe position after set_page_config) ---
-try:
-    st.caption(f"WEBHOOK={'ON' if FAST_WEBHOOK else 'OFF'} → {GS_WEBHOOK_URL[:60]}…")
-except Exception:
-    pass
 
-# --- sidebar and visible banner for webhook status ---
-try:
-    _webhook_msg = f"WEBHOOK={'ON' if FAST_WEBHOOK else 'OFF'} → {GS_WEBHOOK_URL[:72]}…"
-    st.info(_webhook_msg)
-    try:
-        st.sidebar.caption(_webhook_msg)
-        (st.sidebar.success if FAST_WEBHOOK else st.sidebar.warning)('Webhook ' + ('ON' if FAST_WEBHOOK else 'OFF'))
-    except Exception:
-        pass
-    print('[WEBHOOK]', _webhook_msg)
 except Exception:
     pass
 # Disable st.help "No docs available"
