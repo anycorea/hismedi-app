@@ -1760,7 +1760,7 @@ def _ws_batch_row(ws, idx, hmap, kv: dict):
         if cc > max_c:
             max_c = cc
         a1 = gspread.utils.rowcol_to_a1(int(idx), cc)
-        updates.append({"range": a1, "values": [[v]]})
+        updates.append({"range": f"'{ws.title}'!{a1}", "values": [[v]]})
     if updates:
         _ensure_capacity(ws, int(idx), int(max_c) if max_c else None)
         body = {"valueInputOption": "USER_ENTERED", "data": updates}
