@@ -30,166 +30,12 @@ from typing import Any, Tuple
 import pandas as pd
 import streamlit as st
 
+# Header auto-fix toggle (user manages Google Sheet headers)
 
-# --- safe workbook accessor (added) ---
-def get_wb():
-    """Return a gspread Spreadsheet handle.
-    Tries session cache, then secrets/env-based open. Caches in session_state.
-    """
-    try:
-        wb = st.session_state.get("wb") or st.session_state.get("_wb")
-        if wb is not None:
-            return wb
-    except Exception:
-        pass
-
-    import os
-    import re as _re
-    import gspread
-    # Try to get service account from Streamlit secrets (preferred on Cloud)
-    creds_info = None
-    try:
-        creds_info = st.secrets.get("gcp_service_account", None)
-    except Exception:
-        creds_info = None
-
-    gc = None
-    if isinstance(creds_info, dict):
-        try:
-            from google.oauth2.service_account import Credentials
-            scopes = [
-                "https://www.googleapis.com/auth/spreadsheets",
-                "https://www.googleapis.com/auth/drive",
-            ]
-            cred = Credentials.from_service_account_info(creds_info, scopes=scopes)
-            gc = gspread.authorize(cred)
-        except Exception:
-            gc = None
-
-    if gc is None:
-        # Fallback: default oauth (local dev) or gspread auth via env
-        try:
-            gc = gspread.oauth()
-        except Exception:
-            # last resort: anonymous (will fail on private sheets)
-            gc = gspread.client.Client(None)
-
-    # Find spreadsheet id/url from secrets or env
-    ssid = ""
-    try:
-        ssid = (
-            (st.secrets.get("GS_SHEET_KEY", "") if hasattr(st, "secrets") else "") or
-            (st.secrets.get("GS_SPREADSHEET_ID", "") if hasattr(st, "secrets") else "") or
-            (st.secrets.get("SPREADSHEET_ID", "") if hasattr(st, "secrets") else "") or
-            os.getenv("GS_SHEET_KEY", "") or
-            os.getenv("GS_SPREADSHEET_ID", "") or
-            os.getenv("SPREADSHEET_ID", "") or
-            os.getenv("GSHEET_ID", "") or
-            ""
-        )
-    except Exception:
-        ssid = os.getenv("GS_SHEET_KEY", "") or os.getenv("GS_SPREADSHEET_ID", "") or os.getenv("SPREADSHEET_ID", "") or os.getenv("GSHEET_ID", "")
-
-    wb = None
-    if ssid:
-        try:
-            if _re.match(r"^[a-zA-Z0-9_-]{40,}$", ssid):
-                wb = gc.open_by_key(ssid)
-            else:
-                wb = gc.open_by_url(ssid)
-        except Exception:
-            wb = None
-
-    if wb is None:
-        # If key not provided, try a titled open via secrets/env (GS_SHEET_NAME)
-        ssname = ""
-        try:
-            ssname = (st.secrets.get("GS_SHEET_NAME", "") if hasattr(st, "secrets") else "") or os.getenv("GS_SHEET_NAME", "")
-        except Exception:
-            ssname = os.getenv("GS_SHEET_NAME", "")
-        if ssname:
-            try:
-                wb = gc.open(ssname)
-            except Exception:
-                wb = None
-
-    if wb is None:
-        raise RuntimeError("Spreadsheet handle not initialized: set GS_SHEET_KEY / GS_SPREADSHEET_ID in secrets or env.")
-
-    try:
-        st.session_state["wb"] = wb
-    except Exception:
-        pass
-    return wb
-
-
-# ==== Fast Webhook Queue (Apps Script) ====
-import os as _os_webhook
-import json as _json_webhook
-# prefer requests; fallback to urllib if missing
-try:
-    import requests as _req_webhook
-    _use_requests = True
-except Exception:
-    import urllib.request as _urlreq_webhook
-    _use_requests = False
-
-# --- 기본값(환경변수 없을 때 사용) ---
-_DEFAULT_GS_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbxg3naOTsjJY_aCkKRc0MsTn_x3CQq1RV7o4s-DSH-NF04N12QEHYGLbQbvOsc9EASE1g/exec"
-_DEFAULT_GS_WEBHOOK_TOKEN = "HISMEDI_HR2025_Que"  # Apps Script의 SECRET과 동일
-
-GS_WEBHOOK_URL = (_os_webhook.getenv("GS_WEBHOOK_URL", "") or _DEFAULT_GS_WEBHOOK_URL).strip()
-GS_WEBHOOK_TOKEN = (_os_webhook.getenv("GS_WEBHOOK_TOKEN", "") or _DEFAULT_GS_WEBHOOK_TOKEN).strip()
-FAST_WEBHOOK = bool(GS_WEBHOOK_URL and GS_WEBHOOK_TOKEN)
-
-
-def fast_webhook_enqueue(
-    kind: str,
-    payload: dict,
-    sabun: str = "",
-    year: int | None = None,
-    timeout_sec: float = 3.0,
-) -> bool:
-    """Send POST to Apps Script Web App and return immediately.
-    Returns True if accepted ({"ok":true}), else False. Never raises."""
-    if not FAST_WEBHOOK:
-        return False
-    try:
-        data = {
-            "kind": kind,
-            "sabun": sabun,
-            "year": year,
-            "payload": payload,
-            "token": GS_WEBHOOK_TOKEN,
-        }
-        if _use_requests:
-            r = _req_webhook.post(GS_WEBHOOK_URL, json=data, timeout=timeout_sec)
-            if not r.ok:
-                return False
-            try:
-                j = r.json()
-            except Exception:
-                return False
-            return bool(j.get("ok") is True)
-        else:
-            req = _urlreq_webhook.Request(GS_WEBHOOK_URL, method="POST")
-            req.add_header("Content-Type", "application/json")
-            with _urlreq_webhook.urlopen(
-                req,
-                data=_json_webhook.dumps(data).encode("utf-8"),
-                timeout=timeout_sec,
-            ) as resp:
-                if resp.status != 200:
-                    return False
-                body = resp.read().decode("utf-8")
-                try:
-                    j = _json_webhook.loads(body)
-                except Exception:
-                    return False
-                return bool(j.get("ok") is True)
-    except Exception:
-        return False
-
+# ═════════════════════════════════════════════════════════════════════════════
+# Helpers
+# ═════════════════════════════════════════════════════════════════════════════
+# --- helper: detect Google Sheets quota(429) error -------------------------------
 def _is_quota_429(err) -> bool:
     try:
         from gspread.exceptions import APIError as _APIError
@@ -214,7 +60,7 @@ def get_eval_summary_map_cached(_year: int, _rev: int = 0) -> dict:
         ws = _ensure_eval_resp_sheet(int(_year), item_ids)
         header = _retry(ws.row_values, 1) or []
         hmap = {n:i+1 for i,n in enumerate(header)}
-        values = _ws_values_safe(ws)
+        values = _ws_values(ws)
     except Exception:
         return {}
     cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cTot=hmap.get("총점"); cSub=hmap.get("제출시각")
@@ -239,7 +85,7 @@ def get_comp_summary_map_cached(_year: int, _rev: int = 0) -> dict:
         ws = _ensure_comp_simple_sheet(int(_year))
         header = _retry(ws.row_values,1) or []
         hmap = {n:i+1 for i,n in enumerate(header)}
-        values = _ws_values_safe(ws)
+        values = _ws_values(ws)
     except Exception:
         return {}
     cY=hmap.get("연도"); cTS=hmap.get("평가대상사번"); cMain=hmap.get("주업무평가")
@@ -580,19 +426,6 @@ def _ws_values(ws, key: str | None = None):
     vals = _retry(ws.get_all_values)
     _VAL_CACHE[key] = (now, vals)
     return vals
-
-
-
-# --- safe wrapper: avoid crashing on transient API errors ---
-def _ws_values_safe(ws):
-    try:
-        return _ws_values(ws)
-    except Exception:
-        try:
-            st.info("네트워크 지연으로 일시적으로 저장 경로를 우회합니다. (웹훅으로 반영)", icon="ℹ️")
-        except Exception:
-            pass
-        return []
 
 def _ws(title: str):
     now=time.time(); hit=_WS_CACHE.get(title)
@@ -1128,24 +961,9 @@ def _emp_name_by_sabun(emp_df: pd.DataFrame, sabun: str) -> str:
 def upsert_eval_response(emp_df: pd.DataFrame, year: int, eval_type: str,
                          target_sabun: str, evaluator_sabun: str,
                          scores: dict[str,int], status="제출")->dict:
-
     items=read_eval_items_df(True); item_ids=[str(x) for x in items["항목ID"].tolist()]
     ws=_ensure_eval_resp_sheet(year, item_ids)
     header=_retry(ws.row_values, 1); hmap={n:i+1 for i,n in enumerate(header)}
-    # Webhook fast path
-    try:
-        # Compute simple total from given scores (avoid heavy ops)
-        _vals = list(scores.values()) if hasattr(scores, "values") else []
-        _n = len(_vals) if _vals else 1
-        _total = round((sum(int(v) if str(v).isdigit() else 3 for v in _vals)) * (100.0 / max(1, _n * 5)), 1)
-    except Exception:
-        _total = None
-    if fast_webhook_enqueue("EVAL", {
-        "연도": int(year), "평가유형": str(eval_type),
-        "평가대상사번": str(target_sabun), "평가자사번": str(evaluator_sabun),
-        "총점": _total, "제출시각": kst_now_str() if "kst_now_str" in globals() else ""
-    }, sabun=str(target_sabun), year=int(year)):
-        return {"action": "queued", "total": _total}
     def c5(v):
         try: v=int(v)
         except: v=3
@@ -1154,7 +972,7 @@ def upsert_eval_response(emp_df: pd.DataFrame, year: int, eval_type: str,
     total=round(sum(scores_list)*(100.0/max(1,len(item_ids)*5)),1)
     tname=_emp_name_by_sabun(emp_df, target_sabun); ename=_emp_name_by_sabun(emp_df, evaluator_sabun)
     now=kst_now_str()
-    values = _ws_values_safe(ws); cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
+    values = _ws_values(ws); cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
     row_idx=0
     for i in range(2, len(values)+1):
         r=values[i-1]
@@ -1263,7 +1081,7 @@ def tab_eval(emp_df: pd.DataFrame):
         try:
             ws = _ensure_eval_resp_sheet(int(_year), item_ids)
             header = _retry(ws.row_values, 1) or []; hmap = {n: i+1 for i, n in enumerate(header)}
-            values = _ws_values_safe(ws)
+            values = _ws_values(ws)
             cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cS=hmap.get("상태")
             if not all([cY, cT, cTS, cS]): return False
             for r in values[1:]:
@@ -1281,7 +1099,7 @@ def tab_eval(emp_df: pd.DataFrame):
         try:
             ws = _ensure_eval_resp_sheet(int(year), item_ids)
             header = _retry(ws.row_values, 1) or []; hmap = {n: i+1 for i, n in enumerate(header)}
-            values = _ws_values_safe(ws)
+            values = _ws_values(ws)
             cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
             row_idx = 0
             for i in range(2, len(values)+1):
@@ -1402,7 +1220,7 @@ def tab_eval(emp_df: pd.DataFrame):
         try:
             ws = _ensure_eval_resp_sheet(int(_year), item_ids)
             header = _retry(ws.row_values, 1) or []; hmap = {n: i+1 for i, n in enumerate(header)}
-            values = _ws_values_safe(ws)
+            values = _ws_values(ws)
             cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cDT=hmap.get("제출시각")
             # 최신 제출시각 우선
             picked = None; picked_dt = ""
@@ -1624,53 +1442,28 @@ JOBDESC_HEADERS = [
     "면허","경력(자격요건)","비고","제출시각"
 ]
 
-
 def ensure_jobdesc_sheet():
-    """Ensure '직무기술서' sheet exists with sufficient size and header, without duplicating."""
-    wb = get_wb()
-    title = JOBDESC_SHEET
-    # 1) try to find existing
+    wb = get_book()
     try:
-        sheets = wb.worksheets()
-        by_title = {s.title: s for s in sheets}
-        if title in by_title:
-            ws = by_title[title]
-        else:
-            ws = _retry(wb.add_worksheet, title=title, rows=2000, cols=80)
-    except Exception:
-        # Fallback: try get_worksheet by index or add if fails
-        try:
-            ws = wb.worksheet(title)
-        except Exception:
-            ws = _retry(wb.add_worksheet, title=title, rows=2000, cols=80)
+        ws = wb.worksheet(JOBDESC_SHEET)
+        header = _retry(ws.row_values, 1) or []
+        need = [h for h in JOBDESC_HEADERS if h not in header]
+        if need:
+            if AUTO_FIX_HEADERS:
+                _retry(ws.update, "1:1", [header + need])
+            else:
+                try:
+                    st.warning("시트 헤더에 다음 컬럼이 없습니다: " + ", ".join(need) + "\n"                               "→ 시트를 직접 수정한 뒤 좌측 🔄 동기화 버튼을 눌러주세요.", icon="⚠️")
+                except Exception:
+                    pass
+        return ws
+    except Exception as e:
+        # WorksheetNotFound 등
+        ws = _retry(wb.add_worksheet, title=JOBDESC_SHEET, rows=2000, cols=80)
+        _retry(ws.update, "A1", [JOBDESC_HEADERS])
+        return ws
 
-    # 2) Ensure capacity (no-op if big enough)
-    try:
-        _ensure_capacity(ws, min_rows=2000, min_cols=80)
-    except Exception:
-        pass
-
-    # 3) Ensure header row (idempotent)
-    try:
-        header = [
-            "사번","이름","연도","버전","부서1","부서2","작성자사번","작성자이름","직군","직종",
-            "직무명","제정일","개정일","검토주기","직무개요","주업무","기타업무","필요학력","전공계열",
-            "직원공통필수교육","보수교육","기타교육","특성화교육","면허","경력(자격요건)","비고","제출시각"
-        ]
-        h = _ws_header(ws)
-        if not h:
-            _ws_set_header(ws, header)
-        else:
-            # Extend header if needed (append missing columns at end)
-            missing = [c for c in header if c not in h]
-            if missing:
-                new_h = h + missing
-                _ws_set_header(ws, new_h)
-    except Exception:
-        pass
-
-    return ws
-
+@st.cache_data(ttl=600, show_spinner=False)
 def read_jobdesc_df(_rev: int = 0) -> pd.DataFrame:
     ensure_jobdesc_sheet()
     ws = _ws(JOBDESC_SHEET)
@@ -1743,20 +1536,10 @@ def upsert_jobdesc(rec: dict, as_new_version: bool = False) -> dict:
     rec["제출시각"] = kst_now_str()
     rec["이름"] = _emp_name_by_sabun(read_emp_df(), sabun)
 
-    # Webhook fast path (non-blocking). If accepted, skip direct Sheets write.
-    try:
-        _sab = str(rec.get("사번", "")).strip()
-        _year = int(rec.get("연도", 0) or 0)
-    except Exception:
-        _sab, _year = "", 0
-    if fast_webhook_enqueue("JD", rec, sabun=_sab, year=_year):
-        return {"action": "queued", "version": int(rec.get("버전", 0) or 0)}
-
-    values = _ws_values_safe(ws)
+    values = _ws_values(ws)
     row_idx = 0
     cS, cY, cV = hmap.get("사번"), hmap.get("연도"), hmap.get("버전")
     for i in range(2, len(values) + 1):
-
         row = values[i - 1]
         if str(row[cS - 1]).strip() == sabun and str(row[cY - 1]).strip() == str(year) and str(row[cV - 1]).strip() == str(ver):
             row_idx = i
@@ -1999,7 +1782,7 @@ def set_jd_approval(year: int, sabun: str, name: str, version: int,
     ws = _ws(JD_APPROVAL_SHEET)
     header = _retry(ws.row_values, 1) or JD_APPROVAL_HEADERS
     hmap = {n: i+1 for i, n in enumerate(header)}
-    values = _ws_values_safe(ws)
+    values = _ws_values(ws)
     cY = hmap.get("연도"); cS = hmap.get("사번"); cV = hmap.get("버전")
     target_row = 0
     for i in range(2, len(values)+1):
@@ -2368,19 +2151,7 @@ def upsert_comp_simple_response(emp_df: pd.DataFrame, year:int, target_sabun:str
     jd=_jd_latest_for_comp(target_sabun, int(year)); edu_status=_edu_completion_from_jd(jd)
     t_name=_emp_name_by_sabun(emp_df, target_sabun); e_name=_emp_name_by_sabun(emp_df, evaluator_sabun)
     now=kst_now_str()
-
-    # Webhook fast path
-    if fast_webhook_enqueue("COMP", {
-        "연도": int(year),
-        "평가대상사번": str(target_sabun),
-        "평가자사번": str(evaluator_sabun),
-        "주업무평가": str(main_grade), "기타업무평가": str(extra_grade),
-        "자격유지": str(qual_status), "종합의견": str(opinion),
-        "평가일자": str(eval_date), "제출시각": kst_now_str() if "kst_now_str" in globals() else ""
-    }, sabun=str(target_sabun), year=int(year)):
-        return {"action": "queued"}
-
-    values = _ws_values_safe(ws); cY=hmap.get("연도"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
+    values = _ws_values(ws); cY=hmap.get("연도"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
     row_idx=0
     for i in range(2, len(values)+1):
         r=values[i-1]
