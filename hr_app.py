@@ -49,11 +49,6 @@ GS_WEBHOOK_URL = (_os_webhook.getenv("GS_WEBHOOK_URL", "") or _DEFAULT_GS_WEBHOO
 GS_WEBHOOK_TOKEN = (_os_webhook.getenv("GS_WEBHOOK_TOKEN", "") or _DEFAULT_GS_WEBHOOK_TOKEN).strip()
 FAST_WEBHOOK = bool(GS_WEBHOOK_URL and GS_WEBHOOK_TOKEN)
 
-# --- debug caption for webhook status ---
-try:
-    st.caption(f"WEBHOOK={'ON' if FAST_WEBHOOK else 'OFF'} → {GS_WEBHOOK_URL[:60]}…")
-except Exception:
-    pass
 
 
 def fast_webhook_enqueue(kind: str, payload: dict, sabun: str = "", year: int | None = None, timeout_sec: float = 3.0) -> bool:
@@ -282,6 +277,12 @@ def force_sync():
 APP_TITLE = st.secrets.get("app", {}).get("TITLE", "HISMEDI - 인사/HR")
 st.set_page_config(page_title=APP_TITLE, layout="wide")
 
+
+# --- debug caption for webhook status (safe position after set_page_config) ---
+try:
+    st.caption(f"WEBHOOK={'ON' if FAST_WEBHOOK else 'OFF'} → {GS_WEBHOOK_URL[:60]}…")
+except Exception:
+    pass
 # Disable st.help "No docs available"
 if not getattr(st, "_help_disabled", False):
     def _noop_help(*args, **kwargs): return None
