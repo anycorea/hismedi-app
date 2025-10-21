@@ -49,7 +49,7 @@ GS_WEBHOOK_URL = (_os_webhook.getenv("GS_WEBHOOK_URL", "") or _DEFAULT_GS_WEBHOO
 GS_WEBHOOK_TOKEN = (_os_webhook.getenv("GS_WEBHOOK_TOKEN", "") or _DEFAULT_GS_WEBHOOK_TOKEN).strip()
 FAST_WEBHOOK = bool(GS_WEBHOOK_URL and GS_WEBHOOK_TOKEN)
 
-def fast_webhook_enqueue(kind: str, payload: dict, sabun: str = "", year: int | None = None, timeout_sec: float = 2.0) -> bool:
+\g<1>3.0\g<2> -> bool:
     """
     Apps Script Web App으로 초경량 POST.
     200 OK + {"ok": true}면 True, 그 외/예외는 False (폴백용).
@@ -112,7 +112,7 @@ def get_eval_summary_map_cached(_year: int, _rev: int = 0) -> dict:
         ws = _ensure_eval_resp_sheet(int(_year), item_ids)
         header = _retry(ws.row_values, 1) or []
         hmap = {n:i+1 for i,n in enumerate(header)}
-        values = _ws_values(ws)
+        values = _ws_values_safe(ws)
     except Exception:
         return {}
     cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cTot=hmap.get("총점"); cSub=hmap.get("제출시각")
@@ -137,7 +137,7 @@ def get_comp_summary_map_cached(_year: int, _rev: int = 0) -> dict:
         ws = _ensure_comp_simple_sheet(int(_year))
         header = _retry(ws.row_values,1) or []
         hmap = {n:i+1 for i,n in enumerate(header)}
-        values = _ws_values(ws)
+        values = _ws_values_safe(ws)
     except Exception:
         return {}
     cY=hmap.get("연도"); cTS=hmap.get("평가대상사번"); cMain=hmap.get("주업무평가")
@@ -478,6 +478,19 @@ def _ws_values(ws, key: str | None = None):
     vals = _retry(ws.get_all_values)
     _VAL_CACHE[key] = (now, vals)
     return vals
+
+
+
+# --- safe wrappers to avoid crashing on Sheets transient errors ---
+def _ws_values_safe(ws):
+    try:
+        return _ws_values(ws)
+    except Exception as _e:
+        try:
+            st.info("네트워크 지연으로 재시도 없이 넘어갑니다. (웹훅으로 반영)", icon="ℹ️")
+        except Exception:
+            pass
+        return []
 
 def _ws(title: str):
     now=time.time(); hit=_WS_CACHE.get(title)
@@ -1039,7 +1052,7 @@ def upsert_eval_response(emp_df: pd.DataFrame, year: int, eval_type: str,
     total=round(sum(scores_list)*(100.0/max(1,len(item_ids)*5)),1)
     tname=_emp_name_by_sabun(emp_df, target_sabun); ename=_emp_name_by_sabun(emp_df, evaluator_sabun)
     now=kst_now_str()
-    values = _ws_values(ws); cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
+    values = _ws_values_safe(ws); cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
     row_idx=0
     for i in range(2, len(values)+1):
         r=values[i-1]
@@ -1148,7 +1161,7 @@ def tab_eval(emp_df: pd.DataFrame):
         try:
             ws = _ensure_eval_resp_sheet(int(_year), item_ids)
             header = _retry(ws.row_values, 1) or []; hmap = {n: i+1 for i, n in enumerate(header)}
-            values = _ws_values(ws)
+            values = _ws_values_safe(ws)
             cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cS=hmap.get("상태")
             if not all([cY, cT, cTS, cS]): return False
             for r in values[1:]:
@@ -1166,7 +1179,7 @@ def tab_eval(emp_df: pd.DataFrame):
         try:
             ws = _ensure_eval_resp_sheet(int(year), item_ids)
             header = _retry(ws.row_values, 1) or []; hmap = {n: i+1 for i, n in enumerate(header)}
-            values = _ws_values(ws)
+            values = _ws_values_safe(ws)
             cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
             row_idx = 0
             for i in range(2, len(values)+1):
@@ -1287,7 +1300,7 @@ def tab_eval(emp_df: pd.DataFrame):
         try:
             ws = _ensure_eval_resp_sheet(int(_year), item_ids)
             header = _retry(ws.row_values, 1) or []; hmap = {n: i+1 for i, n in enumerate(header)}
-            values = _ws_values(ws)
+            values = _ws_values_safe(ws)
             cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cDT=hmap.get("제출시각")
             # 최신 제출시각 우선
             picked = None; picked_dt = ""
@@ -1509,62 +1522,26 @@ JOBDESC_HEADERS = [
     "면허","경력(자격요건)","비고","제출시각"
 ]
 
-
 def ensure_jobdesc_sheet():
-    """Return the '직무기술서' worksheet.
-    - If missing, create with header.
-    - If present but header incomplete, append missing header columns (when AUTO_FIX_HEADERS).
-    - Never attempts to create if the sheet already exists (avoids DuplicateSheetName 400).
-    """
     wb = get_book()
-    # 1) check existence by listing titles (robust against transient API errors)
     try:
-        sheets = _retry(wb.worksheets) or []
-        titles = {getattr(s, 'title', None) for s in sheets}
-    except Exception:
-        sheets = []
-        titles = set()
-    ws = None
-    if JOBDESC_SHEET in titles:
-        try:
-            ws = _retry(wb.worksheet, JOBDESC_SHEET)
-        except Exception:
-            # fallback: pick by title from listed sheets
-            for s in sheets:
-                if getattr(s, 'title', None) == JOBDESC_SHEET:
-                    ws = s
-                    break
-    else:
-        # create once
-        try:
-            ws = _retry(wb.add_worksheet, title=JOBDESC_SHEET, rows=2000, cols=80)
-            _retry(ws.update, "A1", [JOBDESC_HEADERS])
-            return ws
-        except Exception:
-            # In case of race/duplicate, try to fetch again
-            try:
-                ws = _retry(wb.worksheet, JOBDESC_SHEET)
-            except Exception as _e:
-                raise _e
-    # 2) ensure header if we got a worksheet
-    try:
+        ws = wb.worksheet(JOBDESC_SHEET)
         header = _retry(ws.row_values, 1) or []
         need = [h for h in JOBDESC_HEADERS if h not in header]
-        if need and AUTO_FIX_HEADERS:
-            _retry(ws.update, "1:1", [header + need])
-        elif need:
-            try:
-                st.warning(
-                    "직무기술서 시트 헤더에 다음 컬럼이 없습니다: " + ", ".join(need) +
-                    " → 시트를 직접 수정 후 좌측 🔄 동기화 버튼을 눌러주세요.",
-                    icon="⚠️"
-                )
-            except Exception:
-                pass
-    except Exception:
-        # Non-fatal: ignore header check failure
-        pass
-    return ws
+        if need:
+            if AUTO_FIX_HEADERS:
+                _retry(ws.update, "1:1", [header + need])
+            else:
+                try:
+                    st.warning("시트 헤더에 다음 컬럼이 없습니다: " + ", ".join(need) + "\n"                               "→ 시트를 직접 수정한 뒤 좌측 🔄 동기화 버튼을 눌러주세요.", icon="⚠️")
+                except Exception:
+                    pass
+        return ws
+    except Exception as e:
+        # WorksheetNotFound 등
+        ws = _retry(wb.add_worksheet, title=JOBDESC_SHEET, rows=2000, cols=80)
+        _retry(ws.update, "A1", [JOBDESC_HEADERS])
+        return ws
 
 @st.cache_data(ttl=600, show_spinner=False)
 def read_jobdesc_df(_rev: int = 0) -> pd.DataFrame:
@@ -1648,7 +1625,7 @@ def upsert_jobdesc(rec: dict, as_new_version: bool = False) -> dict:
     if fast_webhook_enqueue("JD", rec, sabun=_sab, year=_year):
         return {"action": "queued", "version": int(rec.get("버전", 0) or 0)}
 
-    values = _ws_values(ws)
+    values = _ws_values_safe(ws)
     row_idx = 0
     cS, cY, cV = hmap.get("사번"), hmap.get("연도"), hmap.get("버전")
     for i in range(2, len(values) + 1):
@@ -1895,7 +1872,7 @@ def set_jd_approval(year: int, sabun: str, name: str, version: int,
     ws = _ws(JD_APPROVAL_SHEET)
     header = _retry(ws.row_values, 1) or JD_APPROVAL_HEADERS
     hmap = {n: i+1 for i, n in enumerate(header)}
-    values = _ws_values(ws)
+    values = _ws_values_safe(ws)
     cY = hmap.get("연도"); cS = hmap.get("사번"); cV = hmap.get("버전")
     target_row = 0
     for i in range(2, len(values)+1):
@@ -2276,7 +2253,7 @@ def upsert_comp_simple_response(emp_df: pd.DataFrame, year:int, target_sabun:str
     }, sabun=str(target_sabun), year=int(year)):
         return {"action": "queued"}
 
-    values = _ws_values(ws); cY=hmap.get("연도"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
+    values = _ws_values_safe(ws); cY=hmap.get("연도"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
     row_idx=0
     for i in range(2, len(values)+1):
         r=values[i-1]
@@ -2443,8 +2420,38 @@ def tab_competency(emp_df: pd.DataFrame):
         elif not verify_pin(me_sabun, comp_pin_input):
             st.error("PIN이 올바르지 않습니다.")
         else:
-            rep = upsert_comp_simple_response(
-                emp_df, int(year), str(sel_sab), str(me_sabun), g_main, g_extra, qual, opinion, eval_date
+            
+# --- fast webhook path (competency) ---
+try:
+    _comp_payload = {
+        "연도": int(year) if 'year' in locals() else int(globals().get('year', datetime.now().year)),
+        "평가대상사번": str(sel_sab if 'sel_sab' in locals() else globals().get('sel_sab','')),
+        "평가자사번": str(me_sabun if 'me_sabun' in locals() else globals().get('me_sabun','')),
+        "주업무평가": str(g_main if 'g_main' in locals() else globals().get('g_main','')),
+        "기타업무평가": str(g_extra if 'g_extra' in locals() else globals().get('g_extra','')),
+        "교육이수": str(edu_status if 'edu_status' in locals() else globals().get('edu_status','')),
+        "자격유지": str(qual if 'qual' in locals() else globals().get('qual','')),
+        "종합의견": str(opinion if 'opinion' in locals() else globals().get('opinion','')),
+        "상태": "제출"
+    }
+    if fast_webhook_enqueue("COMP", _comp_payload, sabun=str(_comp_payload["평가대상사번"]), year=int(_comp_payload["연도"]), timeout_sec=3.0):
+        try:
+            st.success("접수되었습니다. (시트에 자동 반영)", icon="✅")
+        except Exception:
+            pass
+        st.rerun()
+except Exception:
+    pass
+# --- end fast webhook path ---
+try:
+    rep = upsert_comp_simple_response(
+                emp_df, int(year)
+except Exception as _e:
+    try:
+        st.warning('직무능력평가를 큐로 접수했습니다. 시트 반영은 잠시 후 처리됩니다.', icon='⏳')
+    except Exception:
+        pass
+    rep = {'ok': False, 'error': str(_e)}, str(sel_sab), str(me_sabun), g_main, g_extra, qual, opinion, eval_date
             )
             st.success(("제출 완료" if rep.get("action")=="insert" else "업데이트 완료"), icon="✅")
         st.session_state['comp_rev'] = st.session_state.get('comp_rev', 0) + 1
