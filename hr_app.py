@@ -2286,7 +2286,10 @@ def tab_job_desc(emp_df: pd.DataFrame):
                         )
                         st.session_state["appr_rev"] = st.session_state.get("appr_rev", 0) + 1
                     st.success(f"{status} 처리되었습니다. ({res.get('action')})", icon="✅")
-        _appr_map = get_jd_approval_map_cached(int(year), st.session_state.get('appr_rev', 0))
+        
+                    st.session_state.setdefault('jd_appr_last', {})
+                    st.session_state['jd_appr_last'][(str(target_sabun), int(year), int(latest_ver))] = (status, kst_now_str())
+_appr_map = get_jd_approval_map_cached(int(year), st.session_state.get('appr_rev', 0))
 
 
 
