@@ -1118,16 +1118,51 @@ def read_my_eval_rows(year: int, sabun: str) -> pd.DataFrame:
     return df
 
 # --- Compatibility shim: ensure read_eval_items_df exists ---
-def read_eval_items_df(*args, **kwargs):
-    """Return evaluation items DataFrame (cached). Keeps legacy signature read_eval_items_df(True)."""
+def read_eval_items_df(only_active: bool=True) -> pd.DataFrame:
+    """평가 항목 시트를 읽어 DataFrame 반환.
+    - only_active=True: '활성'이 True인 항목만
+    - 정렬: '순서' 오름차순 → '항목ID' 오름차순
+    """
+    ensure_eval_items_sheet()
     try:
-        return get_eval_items_df_cached(st.session_state.get('eval_items_rev', 0))
+        df = read_sheet_df(EVAL_ITEMS_SHEET).copy()
     except Exception:
-        # Fallback: if a non-cached builder exists
-        try:
-            return build_eval_items_df()
-        except Exception:
-            return pd.DataFrame()
+        return pd.DataFrame(columns=EVAL_ITEM_HEADERS)
+
+    # 컬럼 보정
+    for c in EVAL_ITEM_HEADERS:
+        if c not in df.columns:
+            df[c] = ""
+
+    # 타입 정규화
+    try:
+        df["항목ID"] = df["항목ID"].astype(str)
+    except Exception:
+        pass
+    try:
+        df["순서"] = pd.to_numeric(df["순서"], errors="coerce").fillna(0).astype(int)
+    except Exception:
+        df["순서"] = 0
+    # 활성: 문자열/숫자/불리언을 모두 수용
+    def _to_bool_local(v):
+        s = str(v).strip().lower()
+        if s in ("1","y","yes","true","t","on","사용","활성","o"):
+            return True
+        if s in ("0","n","no","false","f","off","미사용","비활성","x"):
+            return False
+        return bool(v)  # fallback
+    try:
+        df["활성"] = df["활성"].map(_to_bool_local)
+    except Exception:
+        df["활성"] = True
+
+    if only_active:
+        df = df[df["활성"] == True].copy()
+
+    # 정렬
+    df = df.sort_values(["순서","항목ID"], ascending=[True, True]).reset_index(drop=True)
+    return df[EVAL_ITEM_HEADERS if set(EVAL_ITEM_HEADERS).issubset(df.columns) else df.columns.tolist()]
+
 
 def tab_eval(emp_df: pd.DataFrame):
     """인사평가 탭 (심플·자동 라우팅)
