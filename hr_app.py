@@ -2012,31 +2012,31 @@ def tab_job_desc(emp_df: pd.DataFrame):
             st.info("👈 대상자를 왼쪽에서 선택하면 직무기술서를 불러옵니다.", icon="ℹ️")
             return
 
+try:
+    _jd = _jd_latest_for(str(target_sabun), int(year)) or {}
+    _sub_ts = (str(_jd.get('제출시각','')).strip() or '미제출')
     try:
-        _jd = _jd_latest_for(str(target_sabun), int(year)) or {}
-        _sub_ts = (str(_jd.get('제출시각','')).strip() or '미제출')
-        _sub_ts = (str(_jd.get('제출시각','')).strip() or '미제출')
-        try:
-            _ver_map = get_jobdesc_latest_version_map_cached(int(year), st.session_state.get('jobdesc_rev', 0))
-            latest_ver = int(_ver_map.get(str(target_sabun), 0))
-        except Exception:
-            latest_ver = _jd_latest_version_for(str(target_sabun), int(year))
-        # Fast path: use cached approval map to avoid full DataFrame reads
-        _appr_stat = '미제출'
-        _appr_ts = ''
-        try:
-            key = (str(target_sabun), int(latest_ver)) if latest_ver else None
-            if key and key in _appr_map:
-                _appr_stat, _appr_ts = _appr_map[key][0], _appr_map[key][1]
-        except Exception:
-            pass
-        # Optimistic override (if just approved/rejected in this session)
-        _opt = st.session_state.get('jd_appr_last', {}).get((str(target_sabun), int(year), int(latest_ver)))
-        if _opt:
-            _appr_stat, _appr_ts = _opt[0], _opt[1]
-        show_submit_banner(f"🕒 제출시각  |  {_sub_ts if _sub_ts else '미제출'}  |  [부서장 승인여부] {_appr_stat}{(' ' + _appr_ts) if _appr_ts else ''}")
+        _ver_map = get_jobdesc_latest_version_map_cached(int(year), st.session_state.get('jobdesc_rev', 0))
+        latest_ver = int(_ver_map.get(str(target_sabun), 0))
+    except Exception:
+        latest_ver = _jd_latest_version_for(str(target_sabun), int(year))
+    # Fast path: approval status/time
+    _appr_stat = '미제출'
+    _appr_ts = ''
+    try:
+        _appr_map = get_jd_approval_map_cached(int(year), st.session_state.get('appr_rev', 0))
+        key = (str(target_sabun), int(latest_ver)) if latest_ver else None
+        if key and key in _appr_map:
+            _appr_stat, _appr_ts = _appr_map[key][0], _appr_map[key][1]
     except Exception:
         pass
+    # Optimistic override
+    _opt = (st.session_state.get('jd_appr_last', {}) or {}).get((str(target_sabun), int(year), int(latest_ver)))
+    if _opt:
+        _appr_stat, _appr_ts = _opt[0], _opt[1]
+    show_submit_banner(f"🕒 제출시각  |  {_sub_ts if _sub_ts else '미제출'}  |  [부서장 승인여부] {_appr_stat}{(' ' + _appr_ts) if _appr_ts else ''}")
+except Exception:
+    pass
 
     # 모드 토글 (인사평가와 동일 레이아웃)
     if st.button(("수정모드로 전환" if not st.session_state["jd2_edit_mode"] else "보기모드로 전환"),
@@ -2196,6 +2196,10 @@ def tab_job_desc(emp_df: pd.DataFrame):
         st.markdown("### 부서장 승인")
         latest_ver = _jd_latest_version_for(target_sabun, int(year))
         _approved = False
+        try:
+            _approved = (_appr_stat == '승인')
+        except Exception:
+            _approved = False
         cur_status = ''
         cur_when = ''
         cur_who = ''
