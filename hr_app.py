@@ -25,33 +25,171 @@ def _ensure_capacity(ws, min_row: int, min_col: int):
 # Imports
 # ═════════════════════════════════════════════════════════════════════════════
 import re, time, random, hashlib, secrets as pysecrets
-
-
-from contextlib import contextmanager
-import time
-
-@contextmanager
-def perf(label: str):
-    _on = bool(st.session_state.get('perf_debug', False))
-    _t = time.perf_counter()
-    try:
-        yield
-    finally:
-        if _on:
-            dt = (time.perf_counter() - _t) * 1000.0
-            st.sidebar.markdown(f"⏱️ **{label}**: {dt:.1f} ms")
-
 from datetime import datetime, timedelta
 from typing import Any, Tuple
 import pandas as pd
 import streamlit as st
 
-# Header auto-fix toggle (user manages Google Sheet headers)
 
-# ═════════════════════════════════════════════════════════════════════════════
-# Helpers
-# ═════════════════════════════════════════════════════════════════════════════
-# --- helper: detect Google Sheets quota(429) error -------------------------------
+# --- safe workbook accessor (added) ---
+def get_wb():
+    """Return a gspread Spreadsheet handle.
+    Tries session cache, then secrets/env-based open. Caches in session_state.
+    """
+    try:
+        wb = st.session_state.get("wb") or st.session_state.get("_wb")
+        if wb is not None:
+            return wb
+    except Exception:
+        pass
+
+    import os
+    import re as _re
+    import gspread
+    # Try to get service account from Streamlit secrets (preferred on Cloud)
+    creds_info = None
+    try:
+        creds_info = st.secrets.get("gcp_service_account", None)
+    except Exception:
+        creds_info = None
+
+    gc = None
+    if isinstance(creds_info, dict):
+        try:
+            from google.oauth2.service_account import Credentials
+            scopes = [
+                "https://www.googleapis.com/auth/spreadsheets",
+                "https://www.googleapis.com/auth/drive",
+            ]
+            cred = Credentials.from_service_account_info(creds_info, scopes=scopes)
+            gc = gspread.authorize(cred)
+        except Exception:
+            gc = None
+
+    if gc is None:
+        # Fallback: default oauth (local dev) or gspread auth via env
+        try:
+            gc = gspread.oauth()
+        except Exception:
+            # last resort: anonymous (will fail on private sheets)
+            gc = gspread.client.Client(None)
+
+    # Find spreadsheet id/url from secrets or env
+    ssid = ""
+    try:
+        ssid = (
+            (st.secrets.get("GS_SHEET_KEY", "") if hasattr(st, "secrets") else "") or
+            (st.secrets.get("GS_SPREADSHEET_ID", "") if hasattr(st, "secrets") else "") or
+            (st.secrets.get("SPREADSHEET_ID", "") if hasattr(st, "secrets") else "") or
+            os.getenv("GS_SHEET_KEY", "") or
+            os.getenv("GS_SPREADSHEET_ID", "") or
+            os.getenv("SPREADSHEET_ID", "") or
+            os.getenv("GSHEET_ID", "") or
+            ""
+        )
+    except Exception:
+        ssid = os.getenv("GS_SHEET_KEY", "") or os.getenv("GS_SPREADSHEET_ID", "") or os.getenv("SPREADSHEET_ID", "") or os.getenv("GSHEET_ID", "")
+
+    wb = None
+    if ssid:
+        try:
+            if _re.match(r"^[a-zA-Z0-9_-]{40,}$", ssid):
+                wb = gc.open_by_key(ssid)
+            else:
+                wb = gc.open_by_url(ssid)
+        except Exception:
+            wb = None
+
+    if wb is None:
+        # If key not provided, try a titled open via secrets/env (GS_SHEET_NAME)
+        ssname = ""
+        try:
+            ssname = (st.secrets.get("GS_SHEET_NAME", "") if hasattr(st, "secrets") else "") or os.getenv("GS_SHEET_NAME", "")
+        except Exception:
+            ssname = os.getenv("GS_SHEET_NAME", "")
+        if ssname:
+            try:
+                wb = gc.open(ssname)
+            except Exception:
+                wb = None
+
+    if wb is None:
+        raise RuntimeError("Spreadsheet handle not initialized: set GS_SHEET_KEY / GS_SPREADSHEET_ID in secrets or env.")
+
+    try:
+        st.session_state["wb"] = wb
+    except Exception:
+        pass
+    return wb
+
+
+# ==== Fast Webhook Queue (Apps Script) ====
+import os as _os_webhook
+import json as _json_webhook
+# prefer requests; fallback to urllib if missing
+try:
+    import requests as _req_webhook
+    _use_requests = True
+except Exception:
+    import urllib.request as _urlreq_webhook
+    _use_requests = False
+
+# --- 기본값(환경변수 없을 때 사용) ---
+_DEFAULT_GS_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbxg3naOTsjJY_aCkKRc0MsTn_x3CQq1RV7o4s-DSH-NF04N12QEHYGLbQbvOsc9EASE1g/exec"
+_DEFAULT_GS_WEBHOOK_TOKEN = "HISMEDI_HR2025_Que"  # Apps Script의 SECRET과 동일
+
+GS_WEBHOOK_URL = (_os_webhook.getenv("GS_WEBHOOK_URL", "") or _DEFAULT_GS_WEBHOOK_URL).strip()
+GS_WEBHOOK_TOKEN = (_os_webhook.getenv("GS_WEBHOOK_TOKEN", "") or _DEFAULT_GS_WEBHOOK_TOKEN).strip()
+FAST_WEBHOOK = bool(GS_WEBHOOK_URL and GS_WEBHOOK_TOKEN)
+
+
+def fast_webhook_enqueue(
+    kind: str,
+    payload: dict,
+    sabun: str = "",
+    year: int | None = None,
+    timeout_sec: float = 3.0,
+) -> bool:
+    """Send POST to Apps Script Web App and return immediately.
+    Returns True if accepted ({"ok":true}), else False. Never raises."""
+    if not FAST_WEBHOOK:
+        return False
+    try:
+        data = {
+            "kind": kind,
+            "sabun": sabun,
+            "year": year,
+            "payload": payload,
+            "token": GS_WEBHOOK_TOKEN,
+        }
+        if _use_requests:
+            r = _req_webhook.post(GS_WEBHOOK_URL, json=data, timeout=timeout_sec)
+            if not r.ok:
+                return False
+            try:
+                j = r.json()
+            except Exception:
+                return False
+            return bool(j.get("ok") is True)
+        else:
+            req = _urlreq_webhook.Request(GS_WEBHOOK_URL, method="POST")
+            req.add_header("Content-Type", "application/json")
+            with _urlreq_webhook.urlopen(
+                req,
+                data=_json_webhook.dumps(data).encode("utf-8"),
+                timeout=timeout_sec,
+            ) as resp:
+                if resp.status != 200:
+                    return False
+                body = resp.read().decode("utf-8")
+                try:
+                    j = _json_webhook.loads(body)
+                except Exception:
+                    return False
+                return bool(j.get("ok") is True)
+    except Exception:
+        return False
+
 def _is_quota_429(err) -> bool:
     try:
         from gspread.exceptions import APIError as _APIError
@@ -76,7 +214,7 @@ def get_eval_summary_map_cached(_year: int, _rev: int = 0) -> dict:
         ws = _ensure_eval_resp_sheet(int(_year), item_ids)
         header = _retry(ws.row_values, 1) or []
         hmap = {n:i+1 for i,n in enumerate(header)}
-        values = _ws_values(ws)
+        values = _ws_values_safe(ws)
     except Exception:
         return {}
     cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cTot=hmap.get("총점"); cSub=hmap.get("제출시각")
@@ -101,7 +239,7 @@ def get_comp_summary_map_cached(_year: int, _rev: int = 0) -> dict:
         ws = _ensure_comp_simple_sheet(int(_year))
         header = _retry(ws.row_values,1) or []
         hmap = {n:i+1 for i,n in enumerate(header)}
-        values = _ws_values(ws)
+        values = _ws_values_safe(ws)
     except Exception:
         return {}
     cY=hmap.get("연도"); cTS=hmap.get("평가대상사번"); cMain=hmap.get("주업무평가")
@@ -123,7 +261,7 @@ def get_comp_summary_map_cached(_year: int, _rev: int = 0) -> dict:
     return out
 
 @st.cache_data(ttl=120, show_spinner=False)
-def get_jd_approval_map_cached_legacy(_year: int, _rev: int = 0) -> dict:
+def get_jd_approval_map_cached(_year: int, _rev: int = 0) -> dict:
     """Return {(사번, 최신버전)->(상태, 승인시각)} for the year from 직무기술서_승인."""
     try:
         ws = _ws("직무기술서_승인")
@@ -189,86 +327,6 @@ except Exception:
 # ═════════════════════════════════════════════════════════════════════════════
 
 
-
-
-# --- ROBUST JD APPROVAL MAP (moved above main) ---
-def get_jd_approval_map_cached(_year: int, _rev: int = 0) -> dict:
-    """
-    Robust version: safe when sheet is empty / headers missing / type coercion fails.
-    Returns mapping {(사번, 버전)->(상태, 승인시각)} for the given year.
-    """
-    sheet_name = globals().get("JD_APPROVAL_SHEET", "직무기술서_승인")
-    default_headers = ["연도","사번","이름","버전","승인자사번","승인자이름","상태","승인시각","비고"]
-    headers = globals().get("JD_APPROVAL_HEADERS", default_headers)
-
-    # Ensure sheet if helper exists
-    try:
-        ensure_fn = globals().get("ensure_jd_approval_sheet")
-        if callable(ensure_fn):
-            ensure_fn()
-    except Exception:
-        pass
-
-    # Load records using available helpers
-    df = None
-    try:
-        _ws_func = globals().get("_ws")
-        _get_records = globals().get("_ws_get_all_records")
-        if callable(_ws_func) and callable(_get_records):
-            ws = _ws_func(sheet_name)
-            raw = _get_records(ws)
-            df = pd.DataFrame(raw)
-    except Exception:
-        df = None
-
-    if df is None:
-        try:
-            get_df = globals().get("get_sheet_as_df")
-            if callable(get_df):
-                df = get_df(sheet_name)
-        except Exception:
-            df = None
-
-    if df is None or df.empty:
-        df = pd.DataFrame(columns=headers)
-
-    # Ensure columns exist
-    for c in headers:
-        if c not in df.columns:
-            df[c] = ""
-
-    # Normalize types
-    df["연도"] = pd.to_numeric(df["연도"], errors="coerce").fillna(0).astype(int)
-    if "버전" in df.columns:
-        df["버전"] = pd.to_numeric(df["버전"], errors="coerce").fillna(0).astype(int)
-    else:
-        df["버전"] = 0
-    for c in ["사번","상태","승인시각"]:
-        if c in df.columns:
-            df[c] = df[c].astype(str)
-        else:
-            df[c] = ""
-
-    # Filter by year safely
-    try:
-        df = df[df["연도"] == int(_year)]
-    except Exception:
-        df = df.iloc[0:0]
-
-    # Build output
-    out = {}
-    if not df.empty:
-        sort_cols = [c for c in ["사번","버전","승인시각"] if c in df.columns]
-        if sort_cols:
-            df = df.sort_values(sort_cols, ascending=[True]*len(sort_cols), kind="stable").reset_index(drop=True)
-        for _, rr in df.iterrows():
-            k = (str(rr.get("사번","")), int(rr.get("버전",0)))
-            out[k] = (str(rr.get("상태","")), str(rr.get("승인시각","")))
-    return out
-
-# --- END PATCH -------------------------------
-
-# ===== Batch write helpers (appended) =====
 
 def force_sync():
     """데이터/편집 캐시만 비우고 즉시 리런 (로그인 세션/인증 키는 유지)."""
@@ -523,6 +581,19 @@ def _ws_values(ws, key: str | None = None):
     _VAL_CACHE[key] = (now, vals)
     return vals
 
+
+
+# --- safe wrapper: avoid crashing on transient API errors ---
+def _ws_values_safe(ws):
+    try:
+        return _ws_values(ws)
+    except Exception:
+        try:
+            st.info("네트워크 지연으로 일시적으로 저장 경로를 우회합니다. (웹훅으로 반영)", icon="ℹ️")
+        except Exception:
+            pass
+        return []
+
 def _ws(title: str):
     now=time.time(); hit=_WS_CACHE.get(title)
     if hit and (now-hit[0]<_WS_TTL): return hit[1]
@@ -584,7 +655,7 @@ def read_sheet_df(sheet_name: str) -> pd.DataFrame:
 
     except APIError as e:
         if _is_quota_429(e):
-            try: st.toast('구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 "동기화"를 눌러 다시 시도해 주세요.', icon='⏳'); st.session_state['read_cooldown_until']=time.time()+10
+            try: st.warning("구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 '동기화'를 눌러 다시 시도해 주세요.", icon="⏳")
             except Exception: pass
             return pd.DataFrame()
         if sheet_name in LAST_GOOD:
@@ -980,73 +1051,73 @@ def _eval_sheet_name(year: int | str) -> str: return f"{EVAL_RESP_SHEET_PREFIX}{
 
 
 def ensure_eval_items_sheet():
-    """Ensure 평가항목 시트가 존재하고 헤더가 갖춰져 있도록 보정."""
-    wb = get_book()
+    wb=get_book()
     try:
-        ws = _retry(wb.worksheet, EVAL_ITEMS_SHEET)
+        ws=wb.worksheet(EVAL_ITEMS_SHEET)
     except WorksheetNotFound:
-        ws = _retry(wb.add_worksheet, title=EVAL_ITEMS_SHEET, rows=200, cols=10)
-        _retry(ws.update, "1:1", [EVAL_ITEM_HEADERS])
-        return
-    except Exception as e:
-        if _is_quota_429(e):
-            try:
-                st.toast('구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 "동기화"를 눌러 다시 시도해 주세요.', icon='⏳')
-                st.session_state['read_cooldown_until'] = time.time() + 10
-            except Exception:
-                pass
-            return
-        raise
-
-    # Header ensure
+        ws=_retry(wb.add_worksheet, title=EVAL_ITEMS_SHEET, rows=200, cols=10)
+        _retry(ws.update, "A1", [EVAL_ITEM_HEADERS]); return
     try:
-        header = _retry(ws.row_values, 1) or []
+        header=_retry(ws.row_values, 1) or []
     except Exception as e:
         if _is_quota_429(e):
-            try:
-                st.toast('구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 "동기화"를 눌러 다시 시도해 주세요.', icon='⏳')
-                st.session_state['read_cooldown_until'] = time.time() + 10
-            except Exception:
-                pass
+            try: st.warning('구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 "동기화"를 눌러 다시 시도해 주세요.', icon='⏳')
+            except Exception: pass
             return
         raise
-
-    need = [h for h in EVAL_ITEM_HEADERS if h not in header]
+    need=[h for h in EVAL_ITEM_HEADERS if h not in header]
     if need:
         try:
-            _retry(ws.update, "1:1", [header + need])
+            _retry(ws.update, "1:1", [header+need])
         except Exception as e:
             if _is_quota_429(e):
-                try:
-                    st.toast('구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 "동기화"를 눌러 다시 시도해 주세요.', icon='⏳')
-                    st.session_state['read_cooldown_until'] = time.time() + 10
-                except Exception:
-                    pass
+                try: st.warning('구글시트 쓰기 할당량(1분) 초과. 잠시 후 좌측 "동기화" 후 다시 시도해 주세요.', icon='⏳')
+                except Exception: pass
                 return
             raise
-    return
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def read_eval_items_df(only_active: bool = True) -> pd.DataFrame:
+    ensure_eval_items_sheet()
+    ws=_ws(EVAL_ITEMS_SHEET)
+    try:
+        df=pd.DataFrame(_ws_get_all_records(ws))
+    except Exception as e:
+        if _is_quota_429(e):
+            try: st.warning('구글시트 읽기 할당량(1분) 초과. 잠시 후 "동기화"를 눌러 다시 시도해 주세요.', icon="⏳")
+            except Exception: pass
+            return pd.DataFrame(columns=EVAL_ITEM_HEADERS)
+        raise
+    if df.empty: return pd.DataFrame(columns=EVAL_ITEM_HEADERS)
+    if "순서" in df.columns:
+        def _i(x):
+            try: return int(float(str(x).strip()))
+            except: return 0
+        df["순서"]=df["순서"].apply(_i)
+    if "활성" in df.columns: df["활성"]=df["활성"].map(_to_bool)
+    cols=[c for c in ["순서","항목"] if c in df.columns]
+    if cols: df=df.sort_values(cols).reset_index(drop=True)
+    if only_active and "활성" in df.columns: df=df[df["활성"]==True]
+    return df
+
 
 def _ensure_eval_resp_sheet(year:int, item_ids:list[str]):
     name=_eval_sheet_name(year)
     wb=get_book()
-    # create or open sheet
     try:
         ws=_ws(name)
     except WorksheetNotFound:
-        # create with enough columns for base headers + items
-        cols = max(50, len(item_ids) + 16)
-        ws=_retry(wb.add_worksheet, title=name, rows=5000, cols=cols)
-    # ensure headers
+        ws=_retry(wb.add_worksheet, title=name, rows=5000, cols=max(50, len(item_ids)+16))
+        _WS_CACHE[name]=(time.time(), ws)
     need=list(EVAL_BASE_HEADERS)+[f"점수_{iid}" for iid in item_ids]
     header,_=_hdr(ws, name)
     if not header:
-        _retry(ws.update, "1:1", [need])
-        _HDR_CACHE[name]=(time.time(), need, {n:i+1 for i,n in enumerate(need)})
+        _retry(ws.update, "1:1", [need]); _HDR_CACHE[name]=(time.time(), need, {n:i+1 for i,n in enumerate(need)})
     else:
         miss=[h for h in need if h not in header]
         if miss:
-            new=header+miss
-            _retry(ws.update, "1:1", [new])
+            new=header+miss; _retry(ws.update, "1:1", [new])
             _HDR_CACHE[name]=(time.time(), new, {n:i+1 for i,n in enumerate(new)})
     return ws
 
@@ -1057,9 +1128,24 @@ def _emp_name_by_sabun(emp_df: pd.DataFrame, sabun: str) -> str:
 def upsert_eval_response(emp_df: pd.DataFrame, year: int, eval_type: str,
                          target_sabun: str, evaluator_sabun: str,
                          scores: dict[str,int], status="제출")->dict:
+
     items=read_eval_items_df(True); item_ids=[str(x) for x in items["항목ID"].tolist()]
     ws=_ensure_eval_resp_sheet(year, item_ids)
     header=_retry(ws.row_values, 1); hmap={n:i+1 for i,n in enumerate(header)}
+    # Webhook fast path
+    try:
+        # Compute simple total from given scores (avoid heavy ops)
+        _vals = list(scores.values()) if hasattr(scores, "values") else []
+        _n = len(_vals) if _vals else 1
+        _total = round((sum(int(v) if str(v).isdigit() else 3 for v in _vals)) * (100.0 / max(1, _n * 5)), 1)
+    except Exception:
+        _total = None
+    if fast_webhook_enqueue("EVAL", {
+        "연도": int(year), "평가유형": str(eval_type),
+        "평가대상사번": str(target_sabun), "평가자사번": str(evaluator_sabun),
+        "총점": _total, "제출시각": kst_now_str() if "kst_now_str" in globals() else ""
+    }, sabun=str(target_sabun), year=int(year)):
+        return {"action": "queued", "total": _total}
     def c5(v):
         try: v=int(v)
         except: v=3
@@ -1068,7 +1154,7 @@ def upsert_eval_response(emp_df: pd.DataFrame, year: int, eval_type: str,
     total=round(sum(scores_list)*(100.0/max(1,len(item_ids)*5)),1)
     tname=_emp_name_by_sabun(emp_df, target_sabun); ename=_emp_name_by_sabun(emp_df, evaluator_sabun)
     now=kst_now_str()
-    values = _ws_values(ws); cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
+    values = _ws_values_safe(ws); cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
     row_idx=0
     for i in range(2, len(values)+1):
         r=values[i-1]
@@ -1089,7 +1175,7 @@ def upsert_eval_response(emp_df: pd.DataFrame, year: int, eval_type: str,
             if c: buf[c-1]=sc
         _retry(ws.append_row, buf, value_input_option="USER_ENTERED")
         st.cache_data.clear()
-        return {"action":"insert", "total": total, "ts": now}
+        return {"action":"insert","total":total}
     else:
         payload={"총점": total, "상태": status, "제출시각": now, "평가대상이름": tname, "평가자이름": ename}
         for iid, sc in zip(item_ids, scores_list): payload[f"점수_{iid}"]=sc
@@ -1103,7 +1189,7 @@ def upsert_eval_response(emp_df: pd.DataFrame, year: int, eval_type: str,
             if upd: _retry(ws.batch_update, upd)
         _batch_row(ws, row_idx, hmap, payload)
         st.cache_data.clear()
-        return {"action":"update", "total": total, "ts": now}
+        return {"action":"update","total":total}
 
 @st.cache_data(ttl=300, show_spinner=False)
 def read_my_eval_rows(year: int, sabun: str) -> pd.DataFrame:
@@ -1116,53 +1202,6 @@ def read_my_eval_rows(year: int, sabun: str) -> pd.DataFrame:
     sort_cols=[c for c in ["평가유형","평가대상사번","제출시각"] if c in df.columns]
     if sort_cols: df=df.sort_values(sort_cols, ascending=[True,True,False]).reset_index(drop=True)
     return df
-
-# --- Compatibility shim: ensure read_eval_items_df exists ---
-def read_eval_items_df(only_active: bool=True) -> pd.DataFrame:
-    """평가 항목 시트를 읽어 DataFrame 반환.
-    - only_active=True: '활성'이 True인 항목만
-    - 정렬: '순서' 오름차순 → '항목ID' 오름차순
-    """
-    ensure_eval_items_sheet()
-    try:
-        df = read_sheet_df(EVAL_ITEMS_SHEET).copy()
-    except Exception:
-        return pd.DataFrame(columns=EVAL_ITEM_HEADERS)
-
-    # 컬럼 보정
-    for c in EVAL_ITEM_HEADERS:
-        if c not in df.columns:
-            df[c] = ""
-
-    # 타입 정규화
-    try:
-        df["항목ID"] = df["항목ID"].astype(str)
-    except Exception:
-        pass
-    try:
-        df["순서"] = pd.to_numeric(df["순서"], errors="coerce").fillna(0).astype(int)
-    except Exception:
-        df["순서"] = 0
-    # 활성: 문자열/숫자/불리언을 모두 수용
-    def _to_bool_local(v):
-        s = str(v).strip().lower()
-        if s in ("1","y","yes","true","t","on","사용","활성","o"):
-            return True
-        if s in ("0","n","no","false","f","off","미사용","비활성","x"):
-            return False
-        return bool(v)  # fallback
-    try:
-        df["활성"] = df["활성"].map(_to_bool_local)
-    except Exception:
-        df["활성"] = True
-
-    if only_active:
-        df = df[df["활성"] == True].copy()
-
-    # 정렬
-    df = df.sort_values(["순서","항목ID"], ascending=[True, True]).reset_index(drop=True)
-    return df[EVAL_ITEM_HEADERS if set(EVAL_ITEM_HEADERS).issubset(df.columns) else df.columns.tolist()]
-
 
 def tab_eval(emp_df: pd.DataFrame):
     """인사평가 탭 (심플·자동 라우팅)
@@ -1224,7 +1263,7 @@ def tab_eval(emp_df: pd.DataFrame):
         try:
             ws = _ensure_eval_resp_sheet(int(_year), item_ids)
             header = _retry(ws.row_values, 1) or []; hmap = {n: i+1 for i, n in enumerate(header)}
-            values = _ws_values(ws)
+            values = _ws_values_safe(ws)
             cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cS=hmap.get("상태")
             if not all([cY, cT, cTS, cS]): return False
             for r in values[1:]:
@@ -1242,7 +1281,7 @@ def tab_eval(emp_df: pd.DataFrame):
         try:
             ws = _ensure_eval_resp_sheet(int(year), item_ids)
             header = _retry(ws.row_values, 1) or []; hmap = {n: i+1 for i, n in enumerate(header)}
-            values = _ws_values(ws)
+            values = _ws_values_safe(ws)
             cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
             row_idx = 0
             for i in range(2, len(values)+1):
@@ -1301,24 +1340,12 @@ def tab_eval(emp_df: pd.DataFrame):
         target_name  = st.session_state["eval2_target_name"]
 
     st.success(f"대상자: {target_name} ({target_sabun})", icon="✅")
-    # --- lightweight guard to prevent background I/O ---
-    try:
-        _sel = st.session_state.get("eval2_target_sabun","")
-    except Exception:
-        _sel = ""
-    if not _sel:
-        st.info("👈 대상자를 왼쪽에서 선택하면 평가 항목을 불러옵니다.", icon="ℹ️")
-        return
-
 
     # === 제출시각 배너(인사평가) ===
     try:
         _emap = get_eval_summary_map_cached(int(year), st.session_state.get('eval_rev', 0))
         def _b(stage:str) -> str:
             try:
-                _opt = (st.session_state.get('eval_last_ts', {}) or {}).get((str(target_sabun), stage), '')
-                if _opt:
-                    return _opt
                 return (str(_emap.get((str(target_sabun), stage), ("",""))[1]).strip() or "미제출")
             except Exception:
                 return "미제출"
@@ -1336,7 +1363,6 @@ def tab_eval(emp_df: pd.DataFrame):
         eval_type = "1차" if target_role == "manager" else "2차"
 
     st.info(f"평가유형: **{eval_type}** (자동 결정)", icon="ℹ️")
-    st.session_state['eval2_type'] = str(eval_type)
 
 # --- 선행조건 / 잠금 -------------------------------
     prereq_ok, prereq_msg = True, ""
@@ -1376,7 +1402,7 @@ def tab_eval(emp_df: pd.DataFrame):
         try:
             ws = _ensure_eval_resp_sheet(int(_year), item_ids)
             header = _retry(ws.row_values, 1) or []; hmap = {n: i+1 for i, n in enumerate(header)}
-            values = _ws_values(ws)
+            values = _ws_values_safe(ws)
             cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cDT=hmap.get("제출시각")
             # 최신 제출시각 우선
             picked = None; picked_dt = ""
@@ -1529,7 +1555,7 @@ def tab_eval(emp_df: pd.DataFrame):
                 continue
             st.session_state[f"eval2_seg_{iid}_{kbase}"] = str(val)
             scores[iid] = val
-    st.markdown("#### 제출 확인")
+#### 제출 확인")st.markdown("#### 제출 확인")
     cb1, cb2 = st.columns([2, 1])
     with cb1:
         attest_ok = st.checkbox(
@@ -1582,8 +1608,7 @@ def tab_eval(emp_df: pd.DataFrame):
                 )
                 st.session_state["eval2_edit_mode"] = False
                 st.session_state['eval_rev'] = st.session_state.get('eval_rev', 0) + 1
-                st.session_state.setdefault('eval_last_ts', {})
-                st.session_state['eval_last_ts'][(str(target_sabun), str(eval_type))] = rep.get('ts', kst_now_str())
+                st.rerun()
             except Exception as e:
                 st.exception(e)
 
@@ -1599,28 +1624,53 @@ JOBDESC_HEADERS = [
     "면허","경력(자격요건)","비고","제출시각"
 ]
 
-def ensure_jobdesc_sheet():
-    wb = get_book()
-    try:
-        ws = _retry(wb.worksheet, JOBDESC_SHEET)
-        header = _retry(ws.row_values, 1) or []
-        need = [h for h in JOBDESC_HEADERS if h not in header]
-        if need:
-            if AUTO_FIX_HEADERS:
-                _retry(ws.update, "1:1", [header + need])
-            else:
-                try:
-                    st.warning("시트 헤더에 다음 컬럼이 없습니다: " + ", ".join(need) + "\n"                               "→ 시트를 직접 수정한 뒤 좌측 🔄 동기화 버튼을 눌러주세요.", icon="⚠️")
-                except Exception:
-                    pass
-        return ws
-    except Exception as e:
-        # WorksheetNotFound 등
-        ws = _retry(wb.add_worksheet, title=JOBDESC_SHEET, rows=2000, cols=80)
-        _retry(ws.update, "A1", [JOBDESC_HEADERS])
-        return ws
 
-@st.cache_data(ttl=600, show_spinner=False)
+def ensure_jobdesc_sheet():
+    """Ensure '직무기술서' sheet exists with sufficient size and header, without duplicating."""
+    wb = get_wb()
+    title = JOBDESC_SHEET
+    # 1) try to find existing
+    try:
+        sheets = wb.worksheets()
+        by_title = {s.title: s for s in sheets}
+        if title in by_title:
+            ws = by_title[title]
+        else:
+            ws = _retry(wb.add_worksheet, title=title, rows=2000, cols=80)
+    except Exception:
+        # Fallback: try get_worksheet by index or add if fails
+        try:
+            ws = wb.worksheet(title)
+        except Exception:
+            ws = _retry(wb.add_worksheet, title=title, rows=2000, cols=80)
+
+    # 2) Ensure capacity (no-op if big enough)
+    try:
+        _ensure_capacity(ws, min_rows=2000, min_cols=80)
+    except Exception:
+        pass
+
+    # 3) Ensure header row (idempotent)
+    try:
+        header = [
+            "사번","이름","연도","버전","부서1","부서2","작성자사번","작성자이름","직군","직종",
+            "직무명","제정일","개정일","검토주기","직무개요","주업무","기타업무","필요학력","전공계열",
+            "직원공통필수교육","보수교육","기타교육","특성화교육","면허","경력(자격요건)","비고","제출시각"
+        ]
+        h = _ws_header(ws)
+        if not h:
+            _ws_set_header(ws, header)
+        else:
+            # Extend header if needed (append missing columns at end)
+            missing = [c for c in header if c not in h]
+            if missing:
+                new_h = h + missing
+                _ws_set_header(ws, new_h)
+    except Exception:
+        pass
+
+    return ws
+
 def read_jobdesc_df(_rev: int = 0) -> pd.DataFrame:
     ensure_jobdesc_sheet()
     ws = _ws(JOBDESC_SHEET)
@@ -1693,10 +1743,20 @@ def upsert_jobdesc(rec: dict, as_new_version: bool = False) -> dict:
     rec["제출시각"] = kst_now_str()
     rec["이름"] = _emp_name_by_sabun(read_emp_df(), sabun)
 
-    values = _ws_values(ws)
+    # Webhook fast path (non-blocking). If accepted, skip direct Sheets write.
+    try:
+        _sab = str(rec.get("사번", "")).strip()
+        _year = int(rec.get("연도", 0) or 0)
+    except Exception:
+        _sab, _year = "", 0
+    if fast_webhook_enqueue("JD", rec, sabun=_sab, year=_year):
+        return {"action": "queued", "version": int(rec.get("버전", 0) or 0)}
+
+    values = _ws_values_safe(ws)
     row_idx = 0
     cS, cY, cV = hmap.get("사번"), hmap.get("연도"), hmap.get("버전")
     for i in range(2, len(values) + 1):
+
         row = values[i - 1]
         if str(row[cS - 1]).strip() == sabun and str(row[cY - 1]).strip() == str(year) and str(row[cV - 1]).strip() == str(ver):
             row_idx = i
@@ -1713,11 +1773,11 @@ def upsert_jobdesc(rec: dict, as_new_version: bool = False) -> dict:
     if row_idx == 0:
         _retry(ws.append_row, build_row(), value_input_option="USER_ENTERED")
         st.cache_data.clear()
-        return {"action":"insert", "version": ver, "ts": rec.get('제출시각','')}
+        return {"action": "insert", "version": ver}
     else:
         _ws_batch_row(ws, row_idx, hmap, rec)
         st.cache_data.clear()
-        return {"action":"update", "version": ver, "ts": rec.get('제출시각','')}
+        return {"action": "update", "version": ver}
 
 # ────────────────────────────────────────────────────────────────────────────
 # 인쇄용 HTML (심플 · 모든 섹션 포함 · 첫 페이지부터 연속 인쇄)
@@ -1879,21 +1939,12 @@ JD_APPROVAL_HEADERS = ["연도","사번","이름","버전","승인자사번","�
 def ensure_jd_approval_sheet():
     wb = get_book()
     try:
-        _ = _retry(wb.worksheet, JD_APPROVAL_SHEET)
-        return
+        _ = wb.worksheet(JD_APPROVAL_SHEET)
     except WorksheetNotFound:
         ws = _retry(wb.add_worksheet, title=JD_APPROVAL_SHEET, rows=3000, cols=20)
         _retry(ws.update, "1:1", [JD_APPROVAL_HEADERS])
-        return
-    except Exception as e:
-        # if transient quota errors, surface a gentle toast and return
-        if _is_quota_429(e):
-            try:
-                st.toast('구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 "동기화"를 눌러 다시 시도해 주세요.', icon='⏳')
-            except Exception:
-                pass
-        return
 
+@st.cache_data(ttl=300, show_spinner=False)
 def read_jd_approval_df(_rev: int = 0) -> pd.DataFrame:
     ensure_jd_approval_sheet()
     try:
@@ -1948,7 +1999,7 @@ def set_jd_approval(year: int, sabun: str, name: str, version: int,
     ws = _ws(JD_APPROVAL_SHEET)
     header = _retry(ws.row_values, 1) or JD_APPROVAL_HEADERS
     hmap = {n: i+1 for i, n in enumerate(header)}
-    values = _ws_values(ws)
+    values = _ws_values_safe(ws)
     cY = hmap.get("연도"); cS = hmap.get("사번"); cV = hmap.get("버전")
     target_row = 0
     for i in range(2, len(values)+1):
@@ -2036,40 +2087,17 @@ def tab_job_desc(emp_df: pd.DataFrame):
             st.session_state["jd2_target_name"] = ""
         target_sabun = st.session_state["jd2_target_sabun"]; target_name = st.session_state["jd2_target_name"]
         st.success(f"대상자: {target_name} ({target_sabun})", icon="✅")
-        # --- lightweight guard to prevent background I/O ---
-        try:
-            _sel = st.session_state.get("jd2_target_sabun","")
-        except Exception:
-            _sel = ""
-        if not _sel:
-            st.info("👈 대상자를 왼쪽에서 선택하면 직무기술서를 불러옵니다.", icon="ℹ️")
-            return
-
     try:
         _jd = _jd_latest_for(str(target_sabun), int(year)) or {}
-        _sub_ts = (str(_jd.get('제출시각','')).strip() or '미제출')
-        # optimistic override from recent save
-        _sub_ts = (st.session_state.get('jd_last_ts', {}).get(str(target_sabun)) or _sub_ts)
-        try:
-            _ver_map = get_jobdesc_latest_version_map_cached(int(year), st.session_state.get('jobdesc_rev', 0))
-            latest_ver = int(_ver_map.get(str(target_sabun), 0))
-        except Exception:
-            latest_ver = _jd_latest_version_for(str(target_sabun), int(year))
-        # Fast path: use cached approval map to avoid full DataFrame reads
-        _appr_stat = '미제출'
-        _appr_ts = ''
-        try:
-            _appr_map = get_jd_approval_map_cached(int(year), st.session_state.get('appr_rev', 0))
-            key = (str(target_sabun), int(latest_ver)) if latest_ver else None
-            if key and key in _appr_map:
-                _appr_stat, _appr_ts = _appr_map[key][0], _appr_map[key][1]
-        except Exception:
-            pass
-        # Optimistic override (if just approved/rejected in this session)
-        _opt = st.session_state.get('jd_appr_last', {}).get((str(target_sabun), int(year), int(latest_ver)))
-        if _opt:
-            _appr_stat, _appr_ts = _opt[0], _opt[1]
-        show_submit_banner(f"🕒 제출시각  |  {_sub_ts if _sub_ts else '미제출'}  |  [부서장 승인여부] {_appr_stat}{(' ' + _appr_ts) if _appr_ts else ''}")
+        _sub_ts = (str(_jd.get('제출시각','')).strip() or "미제출")
+        latest_ver = _jd_latest_version_for(str(target_sabun), int(year))
+        appr_df = read_jd_approval_df(st.session_state.get('appr_rev', 0))
+        _appr = "미제출"
+        if latest_ver > 0 and not appr_df.empty:
+            _ok = appr_df[(appr_df['연도'] == int(year)) & (appr_df['사번'].astype(str) == str(target_sabun)) & (appr_df['버전'] == int(latest_ver)) & (appr_df['상태'].astype(str) == '승인')]
+            if not _ok.empty:
+                _appr = "승인"
+        show_submit_banner(f"🕒 제출시각  |  {_sub_ts if _sub_ts else '미제출'}  |  [부서장 승인] {_appr}")
     except Exception:
         pass
 
@@ -2207,8 +2235,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
                 rep = upsert_jobdesc(rec, as_new_version=(version == 0))
                 st.success(f"저장 완료 (버전 {rep['version']})", icon="✅")
                 st.session_state['jobdesc_rev'] = st.session_state.get('jobdesc_rev', 0) + 1
-                st.session_state.setdefault('jd_last_ts', {})
-                st.session_state['jd_last_ts'][str(target_sabun)] = rep.get('ts', kst_now_str())
+                st.rerun()
             except Exception as e:
                 st.exception(e)
 
@@ -2230,26 +2257,22 @@ def tab_job_desc(emp_df: pd.DataFrame):
     # ===== (관리자/부서장) 승인 처리 =====
     if am_admin_or_mgr:
         st.markdown("### 부서장 승인")
+        appr_df = read_jd_approval_df(st.session_state.get("appr_rev", 0))
         latest_ver = _jd_latest_version_for(target_sabun, int(year))
         _approved = False
-        cur_status = ''
-        cur_when = ''
-        cur_who = ''
-        try:
-            _appr_map = get_jd_approval_map_cached(int(year), st.session_state.get('appr_rev', 0))
-            key = (str(target_sabun), int(latest_ver)) if latest_ver and int(latest_ver) > 0 else None
-            if key and key in _appr_map:
-                cur_status = str(_appr_map[key][0] or '')
-                cur_when = str(_appr_map[key][1] or '')
-                try: cur_who = str(_appr_map[key][2] or '')
-                except Exception: cur_who = ''
-                _approved = (cur_status == '승인')
-        except Exception:
-            pass
-
-
-
-
+        if latest_ver > 0 and not appr_df.empty:
+            _ok = appr_df[(appr_df['연도'] == int(year)) & (appr_df['사번'].astype(str) == str(target_sabun)) & (appr_df['버전'] == int(latest_ver)) & (appr_df['상태'].astype(str) == '승인')]
+            _approved = not _ok.empty
+        cur_status = ""
+        cur_when = ""
+        cur_who = ""
+        if latest_ver > 0 and not appr_df.empty:
+            sub = appr_df[(appr_df["연도"]==int(year)) & (appr_df["사번"].astype(str)==str(target_sabun)) & (appr_df["버전"]==int(latest_ver))]
+            if not sub.empty:
+                srow = sub.sort_values(["승인시각"], ascending=[False]).iloc[0].to_dict()
+                cur_status = str(srow.get("상태",""))
+                cur_when = str(srow.get("승인시각",""))
+                cur_who = str(srow.get("승인자이름",""))
         # 의견/핀 입력 (의견을 좌측에 크게)
         c_remark, c_pin = st.columns([4,1])
         with c_remark:
@@ -2286,12 +2309,12 @@ def tab_job_desc(emp_df: pd.DataFrame):
                         )
                         st.session_state["appr_rev"] = st.session_state.get("appr_rev", 0) + 1
                     st.success(f"{status} 처리되었습니다. ({res.get('action')})", icon="✅")
-        _appr_map = get_jd_approval_map_cached(int(year), st.session_state.get('appr_rev', 0))
-
-
-
-
-
+                    appr_df = read_jd_approval_df(st.session_state.get("appr_rev", 0))
+                base["사번"] = base["사번"].astype(str)
+            base = base[base["사번"].isin({str(s) for s in allowed})]
+            if "재직여부" in base.columns:
+                base = base[base["재직여부"] == True]
+            base = base.sort_values(["사번"]).reset_index(drop=True)
 
 # ═════════════════════════════════════════════════════════════════════════════
 # 직무능력평가 + JD 요약 스크롤
@@ -2307,23 +2330,13 @@ def _simp_sheet_name(year:int|str)->str: return f"{COMP_SIMPLE_PREFIX}{int(year)
 def _ensure_comp_simple_sheet(year:int):
     wb=get_book(); name=_simp_sheet_name(year)
     try:
-        ws=_retry(wb.worksheet, name)
+        ws=wb.worksheet(name)
     except WorksheetNotFound:
-        ws=_retry(wb.add_worksheet, title=name, rows=2000, cols=50)
-        _retry(ws.update, "1:1", [COMP_SIMPLE_HEADERS])
-        return ws
-    except Exception as e:
-        if _is_quota_429(e):
-            try: st.toast('구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 "동기화"를 눌러 다시 시도해 주세요.', icon='⏳')
-            except Exception: pass
-            # fallback: attempt to open again quickly next run
-            return ws if 'ws' in locals() else None
-        raise
-    # ensure headers
+        ws=_retry(wb.add_worksheet, title=name, rows=1000, cols=50)
+        _retry(ws.update, "1:1", [COMP_SIMPLE_HEADERS]); return ws
     header=_retry(ws.row_values,1) or []
     need=[h for h in COMP_SIMPLE_HEADERS if h not in header]
-    if need:
-        _retry(ws.update, "1:1", [header+need])
+    if need: _retry(ws.update, "1:1", [header+need])
     return ws
 
 def _jd_latest_for_comp(sabun:str, year:int)->dict:
@@ -2355,7 +2368,19 @@ def upsert_comp_simple_response(emp_df: pd.DataFrame, year:int, target_sabun:str
     jd=_jd_latest_for_comp(target_sabun, int(year)); edu_status=_edu_completion_from_jd(jd)
     t_name=_emp_name_by_sabun(emp_df, target_sabun); e_name=_emp_name_by_sabun(emp_df, evaluator_sabun)
     now=kst_now_str()
-    values = _ws_values(ws); cY=hmap.get("연도"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
+
+    # Webhook fast path
+    if fast_webhook_enqueue("COMP", {
+        "연도": int(year),
+        "평가대상사번": str(target_sabun),
+        "평가자사번": str(evaluator_sabun),
+        "주업무평가": str(main_grade), "기타업무평가": str(extra_grade),
+        "자격유지": str(qual_status), "종합의견": str(opinion),
+        "평가일자": str(eval_date), "제출시각": kst_now_str() if "kst_now_str" in globals() else ""
+    }, sabun=str(target_sabun), year=int(year)):
+        return {"action": "queued"}
+
+    values = _ws_values_safe(ws); cY=hmap.get("연도"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
     row_idx=0
     for i in range(2, len(values)+1):
         r=values[i-1]
@@ -2374,7 +2399,7 @@ def upsert_comp_simple_response(emp_df: pd.DataFrame, year:int, target_sabun:str
         _retry(ws.append_row, buf, value_input_option="USER_ENTERED")
         try: read_my_comp_simple_rows.clear()
         except Exception: pass
-        return {"action":"insert", "ts": now}
+        return {"action":"insert"}
     else:
         _ws_batch_row(ws, row_idx, hmap, {
             "평가일자": eval_date,
@@ -2388,7 +2413,7 @@ def upsert_comp_simple_response(emp_df: pd.DataFrame, year:int, target_sabun:str
         })
         try: read_my_comp_simple_rows.clear()
         except Exception: pass
-        return {"action":"update", "ts": now}
+        return {"action":"update"}
 
 @st.cache_data(ttl=300, show_spinner=False)
 def read_my_comp_simple_rows(year:int, sabun:str)->pd.DataFrame:
@@ -2445,28 +2470,18 @@ def tab_competency(emp_df: pd.DataFrame):
     st.session_state["cmpS_target_name"]=_emp_name_by_sabun(emp_df, str(sel_sab))
 
     st.success(f"대상자: {_emp_name_by_sabun(emp_df, sel_sab)} ({sel_sab})", icon="✅")
-    # --- lightweight guard to prevent background I/O ---
-    try:
-        _sel = st.session_state.get("cmpS_target_sabun","")
-    except Exception:
-        _sel = ""
-    if not _sel:
-        st.info("👈 대상자를 왼쪽에서 선택하면 직무능력평가를 불러옵니다.", icon="ℹ️")
-        return
-
 
     # === 제출시각 배너(직무능력평가) ===
     comp_locked = False
     try:
         _cmap = get_comp_summary_map_cached(int(year), st.session_state.get('comp_rev', 0))
-        _optim = (st.session_state.get("comp_last_ts", {}) or {}).get(str(sel_sab), "")
-        _cts = _optim or (str(_cmap.get(str(sel_sab), ("","","",""))[3]).strip())
+        _cts = (str(_cmap.get(str(sel_sab), ("","","",""))[3]).strip())
         show_submit_banner(f"🕒 제출시각  |  {_cts if _cts else '미제출'}")
         comp_locked = bool(_cts)
     except Exception:
         pass
 
-    with st.expander("직무기술서 요약", expanded=False):
+    with st.expander("직무기술서 요약", expanded=True):
         jd=_jd_latest_for_comp(sel_sab, int(year))
         if jd:
             def V(key): return (_html_escape((jd.get(key,"") or "").strip()) or "—")
@@ -3012,42 +3027,6 @@ def tab_help():
 # ═════════════════════════════════════════════════════════════════════════════
 # Main App
 # ═════════════════════════════════════════════════════════════════════════════
-
-# --- Cached latest version map for Jobdesc ---
-@st.cache_data(show_spinner=False)
-def get_jobdesc_latest_version_map_cached(_year: int, _rev: int = 0) -> dict:
-    """Return {sabun(str): latest_version(int)} for the given year using minimal reads.
-    Falls back to _jd_latest_version_for per sabun if sheet schema changed.
-    """
-    try:
-        # Try using existing jobdesc table utilities if available
-        # Expect upsert/read helpers to provide a compact rows reader
-        rows = read_jobdesc_rows_for_year(_year)  # may not exist in all versions
-    except Exception:
-        rows = None
-
-    d = {}
-    if rows:
-        try:
-            # rows: list[dict] with keys including '연도','사번','버전'
-            for r in rows:
-                try:
-                    if int(r.get('연도',0)) != int(_year): 
-                        continue
-                    sab = str(r.get('사번','')).strip()
-                    ver = int(r.get('버전', 0))
-                    if sab and ver >= 0:
-                        if sab not in d or ver > d[sab]:
-                            d[sab] = ver
-                except Exception:
-                    continue
-        except Exception:
-            pass
-
-    # Fallback (slower): compute only for current target when needed.
-    return d
-
-
 def main():
     emp_df = read_emp_df()
     st.session_state["emp_df"] = emp_df.copy()
@@ -3099,7 +3078,85 @@ def main():
 if __name__ == "__main__":
     main()
 
-# --- PATCHED helpers (gs batch queue) ---
+# --- PATCH 2025-10-17: robust get_jd_approval_map_cached (append-only) -------------------------------
+@st.cache_data(ttl=120, show_spinner=False)
+def get_jd_approval_map_cached(_year: int, _rev: int = 0) -> dict:
+    """
+    Robust version: safe when sheet is empty / headers missing / type coercion fails.
+    Returns mapping {(사번, 버전)->(상태, 승인시각)} for the given year.
+    """
+    sheet_name = globals().get("JD_APPROVAL_SHEET", "직무기술서_승인")
+    default_headers = ["연도","사번","이름","버전","승인자사번","승인자이름","상태","승인시각","비고"]
+    headers = globals().get("JD_APPROVAL_HEADERS", default_headers)
+
+    # Ensure sheet if helper exists
+    try:
+        ensure_fn = globals().get("ensure_jd_approval_sheet")
+        if callable(ensure_fn):
+            ensure_fn()
+    except Exception:
+        pass
+
+    # Load records using available helpers
+    df = None
+    try:
+        _ws_func = globals().get("_ws")
+        _get_records = globals().get("_ws_get_all_records")
+        if callable(_ws_func) and callable(_get_records):
+            ws = _ws_func(sheet_name)
+            raw = _get_records(ws)
+            df = pd.DataFrame(raw)
+    except Exception:
+        df = None
+
+    if df is None:
+        try:
+            get_df = globals().get("get_sheet_as_df")
+            if callable(get_df):
+                df = get_df(sheet_name)
+        except Exception:
+            df = None
+
+    if df is None or df.empty:
+        df = pd.DataFrame(columns=headers)
+
+    # Ensure columns exist
+    for c in headers:
+        if c not in df.columns:
+            df[c] = ""
+
+    # Normalize types
+    df["연도"] = pd.to_numeric(df["연도"], errors="coerce").fillna(0).astype(int)
+    if "버전" in df.columns:
+        df["버전"] = pd.to_numeric(df["버전"], errors="coerce").fillna(0).astype(int)
+    else:
+        df["버전"] = 0
+    for c in ["사번","상태","승인시각"]:
+        if c in df.columns:
+            df[c] = df[c].astype(str)
+        else:
+            df[c] = ""
+
+    # Filter by year safely
+    try:
+        df = df[df["연도"] == int(_year)]
+    except Exception:
+        df = df.iloc[0:0]
+
+    # Build output
+    out = {}
+    if not df.empty:
+        sort_cols = [c for c in ["사번","버전","승인시각"] if c in df.columns]
+        if sort_cols:
+            df = df.sort_values(sort_cols, ascending=[True]*len(sort_cols), kind="stable").reset_index(drop=True)
+        for _, rr in df.iterrows():
+            k = (str(rr.get("사번","")), int(rr.get("버전",0)))
+            out[k] = (str(rr.get("상태","")), str(rr.get("승인시각","")))
+    return out
+
+# --- END PATCH -------------------------------
+
+# ===== Batch write helpers (appended) =====
 def _gs_queue_init():
     if "gs_queue" not in st.session_state:
         st.session_state.gs_queue = []
