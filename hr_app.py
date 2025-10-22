@@ -30,8 +30,6 @@ from typing import Any, Tuple
 import pandas as pd
 import streamlit as st
 
-
-st.set_page_config(page_title=APP_TITLE if "APP_TITLE" in globals() else "HR App", layout="wide")
 # Header auto-fix toggle (user manages Google Sheet headers)
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -223,6 +221,8 @@ def force_sync():
 # App Config / Style
 # ═════════════════════════════════════════════════════════════════════════════
 APP_TITLE = st.secrets.get("app", {}).get("TITLE", "HISMEDI - 인사/HR")
+st.set_page_config(page_title=APP_TITLE, layout="wide")
+
 # Disable st.help "No docs available"
 if not getattr(st, "_help_disabled", False):
     def _noop_help(*args, **kwargs): return None
@@ -1879,6 +1879,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
         _appr_status = "미제출"
         _appr_time = ""
         if latest_ver > 0 and not appr_df.empty:
+            # 최신 승인/반려 레코드 한 건 선택 (승인시각 기준 내림차순)
             sub = appr_df[(appr_df['연도'] == int(year)) &
                           (appr_df['사번'].astype(str) == str(target_sabun)) &
                           (appr_df['버전'] == int(latest_ver))].copy()
@@ -1886,9 +1887,10 @@ def tab_job_desc(emp_df: pd.DataFrame):
                 if '승인시각' in sub.columns:
                     sub = sub.sort_values(['승인시각'], ascending=[False]).reset_index(drop=True)
                 srow = sub.iloc[0].to_dict()
-                _appr_status = (str(srow.get('상태','')).strip() or "미제출")
+                _appr_status = str(srow.get('상태','')).strip() or "미제출"     # 승인 / 반려 / (없음)
                 _appr_time   = str(srow.get('승인시각','')).strip()
     
+        # 표기: 제출시각(직원 제출) | [부서장 승인여부] 승인/반려 (승인시각)
         _appr_right = _appr_status if _appr_status else "미제출"
         if _appr_time:
             _appr_right += f" {_appr_time}"
@@ -2104,8 +2106,6 @@ def tab_job_desc(emp_df: pd.DataFrame):
                         )
                         st.session_state["appr_rev"] = st.session_state.get("appr_rev", 0) + 1
                     st.success(f"{status} 처리되었습니다. ({res.get('action')})", icon="✅")
-                    
-                    st.rerun()
                     appr_df = read_jd_approval_df(st.session_state.get("appr_rev", 0))
                 base["사번"] = base["사번"].astype(str)
             base = base[base["사번"].isin({str(s) for s in allowed})]
@@ -2336,7 +2336,6 @@ def tab_competency(emp_df: pd.DataFrame):
                 emp_df, int(year), str(sel_sab), str(me_sabun), g_main, g_extra, qual, opinion, eval_date
             )
             st.success(("제출 완료" if rep.get("action")=="insert" else "업데이트 완료"), icon="✅")
-            st.rerun()
         st.session_state['comp_rev'] = st.session_state.get('comp_rev', 0) + 1
 
 # ═════════════════════════════════════════════════════════════════════════════
