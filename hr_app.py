@@ -17,8 +17,6 @@ def _ensure_capacity(ws, min_row: int, min_col: int):
 
 # Minimal tuned build (2025-10-21): label text clarified; optional defaults normalized.
 # Safe: No structural deletions. Original logic preserved.
-# Patch (2025-10-22): QUIET Google Sheets quota handling — suppresses noisy warnings and
-# quietly falls back to cached data where possible.
 
 # HISMEDI HR App
 # Tabs: 인사평가 / 직무기술서 / 직무능력평가 / 관리자 / 도움말
@@ -490,12 +488,11 @@ def read_sheet_df(sheet_name: str) -> pd.DataFrame:
 
     except APIError as e:
         if _is_quota_429(e):
-            # QUIET: fallback to cached data if available; no UI warning
-            if sheet_name in LAST_GOOD:
-                return LAST_GOOD[sheet_name]
+            try: st.warning("구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 '동기화'를 눌러 다시 시도해 주세요.", icon="⏳")
+            except Exception: pass
             return pd.DataFrame()
         if sheet_name in LAST_GOOD:
-            # QUIET: show cached data without UI message
+            st.info(f"네트워크 혼잡으로 캐시 데이터를 표시합니다: {sheet_name}")
             return LAST_GOOD[sheet_name]
         raise
 
@@ -897,7 +894,8 @@ def ensure_eval_items_sheet():
         header=_retry(ws.row_values, 1) or []
     except Exception as e:
         if _is_quota_429(e):
-            # QUIET: just return silently when read quota exceeded
+            try: st.warning('구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 "동기화"를 눌러 다시 시도해 주세요.', icon='⏳')
+            except Exception: pass
             return
         raise
     need=[h for h in EVAL_ITEM_HEADERS if h not in header]
@@ -920,7 +918,8 @@ def read_eval_items_df(only_active: bool = True) -> pd.DataFrame:
         df=pd.DataFrame(_ws_get_all_records(ws))
     except Exception as e:
         if _is_quota_429(e):
-            # QUIET: return empty DataFrame; upstream UI handles gracefully
+            try: st.warning('구글시트 읽기 할당량(1분) 초과. 잠시 후 "동기화"를 눌러 다시 시도해 주세요.', icon="⏳")
+            except Exception: pass
             return pd.DataFrame(columns=EVAL_ITEM_HEADERS)
         raise
     if df.empty: return pd.DataFrame(columns=EVAL_ITEM_HEADERS)
