@@ -1919,20 +1919,19 @@ def tab_job_desc(emp_df: pd.DataFrame):
     try:
         _jd = _jd_latest_for(str(target_sabun), int(year)) or {}
         _sub_ts = (str(_jd.get('제출시각','')).strip() or '미제출')
+        _sub_ts = (str(_jd.get('제출시각','')).strip() or '미제출')
         latest_ver = _jd_latest_version_for(str(target_sabun), int(year))
-        appr_df = read_jd_approval_df(st.session_state.get('appr_rev', 0))
+        # Fast path: use cached approval map to avoid full DataFrame reads
         _appr_stat = '미제출'
         _appr_ts = ''
-        if latest_ver > 0 and not appr_df.empty:
-            _rows = appr_df[(appr_df['연도'] == int(year)) & (appr_df['사번'].astype(str) == str(target_sabun)) & (appr_df['버전'].astype(int) == int(latest_ver))]
-            if not _rows.empty:
-                try:
-                    _rows = _rows.sort_values(['승인시각'], ascending=[False])
-                except Exception:
-                    pass
-                _appr_stat = str(_rows.iloc[0].get('상태','')).strip() or '미제출'
-                _appr_ts   = str(_rows.iloc[0].get('승인시각','')).strip()
-        # Optimistic override
+        try:
+            _appr_map = get_jd_approval_map_cached(int(year), st.session_state.get('appr_rev', 0))
+            key = (str(target_sabun), int(latest_ver)) if latest_ver else None
+            if key and key in _appr_map:
+                _appr_stat, _appr_ts = _appr_map[key][0], _appr_map[key][1]
+        except Exception:
+            pass
+        # Optimistic override (if just approved/rejected in this session)
         _opt = st.session_state.get('jd_appr_last', {}).get((str(target_sabun), int(year), int(latest_ver)))
         if _opt:
             _appr_stat, _appr_ts = _opt[0], _opt[1]
@@ -2096,7 +2095,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
     # ===== (관리자/부서장) 승인 처리 =====
     if am_admin_or_mgr:
         st.markdown("### 부서장 승인")
-        appr_df = read_jd_approval_df(st.session_state.get("appr_rev", 0))
+        appr_df = get_jd_approval_map_cached  # cached map used instead of df(st.session_state.get("appr_rev", 0))
         latest_ver = _jd_latest_version_for(target_sabun, int(year))
         _approved = False
         if latest_ver > 0 and not appr_df.empty:
@@ -2148,7 +2147,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
                         )
                         st.session_state["appr_rev"] = st.session_state.get("appr_rev", 0) + 1
                     st.success(f"{status} 처리되었습니다. ({res.get('action')})", icon="✅")
-                    appr_df = read_jd_approval_df(st.session_state.get("appr_rev", 0))
+                    appr_df = get_jd_approval_map_cached  # cached map used instead of df(st.session_state.get("appr_rev", 0))
                 base["사번"] = base["사번"].astype(str)
             base = base[base["사번"].isin({str(s) for s in allowed})]
             if "재직여부" in base.columns:
@@ -2327,7 +2326,7 @@ def tab_competency(emp_df: pd.DataFrame):
     except Exception:
         pass
 
-    with st.expander("직무기술서 요약", expanded=True):
+    with st.expander("직무기술서 요약", expanded=False):
         jd=_jd_latest_for_comp(sel_sab, int(year))
         if jd:
             def V(key): return (_html_escape((jd.get(key,"") or "").strip()) or "—")
