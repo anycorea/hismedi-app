@@ -2095,22 +2095,26 @@ def tab_job_desc(emp_df: pd.DataFrame):
     # ===== (관리자/부서장) 승인 처리 =====
     if am_admin_or_mgr:
         st.markdown("### 부서장 승인")
-        appr_df = get_jd_approval_map_cached  # cached map used instead of df(st.session_state.get("appr_rev", 0))
         latest_ver = _jd_latest_version_for(target_sabun, int(year))
         _approved = False
-        if latest_ver > 0 and not appr_df.empty:
-            _ok = appr_df[(appr_df['연도'] == int(year)) & (appr_df['사번'].astype(str) == str(target_sabun)) & (appr_df['버전'] == int(latest_ver)) & (appr_df['상태'].astype(str) == '승인')]
-            _approved = not _ok.empty
-        cur_status = ""
-        cur_when = ""
-        cur_who = ""
-        if latest_ver > 0 and not appr_df.empty:
-            sub = appr_df[(appr_df["연도"]==int(year)) & (appr_df["사번"].astype(str)==str(target_sabun)) & (appr_df["버전"]==int(latest_ver))]
-            if not sub.empty:
-                srow = sub.sort_values(["승인시각"], ascending=[False]).iloc[0].to_dict()
-                cur_status = str(srow.get("상태",""))
-                cur_when = str(srow.get("승인시각",""))
-                cur_who = str(srow.get("승인자이름",""))
+        cur_status = ''
+        cur_when = ''
+        cur_who = ''
+        try:
+            _appr_map = get_jd_approval_map_cached(int(year), st.session_state.get('appr_rev', 0))
+            key = (str(target_sabun), int(latest_ver)) if latest_ver and int(latest_ver) > 0 else None
+            if key and key in _appr_map:
+                cur_status = str(_appr_map[key][0] or '')
+                cur_when = str(_appr_map[key][1] or '')
+                try: cur_who = str(_appr_map[key][2] or '')
+                except Exception: cur_who = ''
+                _approved = (cur_status == '승인')
+        except Exception:
+            pass
+
+
+
+
         # 의견/핀 입력 (의견을 좌측에 크게)
         c_remark, c_pin = st.columns([4,1])
         with c_remark:
@@ -2147,12 +2151,12 @@ def tab_job_desc(emp_df: pd.DataFrame):
                         )
                         st.session_state["appr_rev"] = st.session_state.get("appr_rev", 0) + 1
                     st.success(f"{status} 처리되었습니다. ({res.get('action')})", icon="✅")
-                    appr_df = get_jd_approval_map_cached  # cached map used instead of df(st.session_state.get("appr_rev", 0))
-                base["사번"] = base["사번"].astype(str)
-            base = base[base["사번"].isin({str(s) for s in allowed})]
-            if "재직여부" in base.columns:
-                base = base[base["재직여부"] == True]
-            base = base.sort_values(["사번"]).reset_index(drop=True)
+        _appr_map = get_jd_approval_map_cached(int(year), st.session_state.get('appr_rev', 0))
+
+
+
+
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # 직무능력평가 + JD 요약 스크롤
