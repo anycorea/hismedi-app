@@ -584,7 +584,7 @@ def read_sheet_df(sheet_name: str) -> pd.DataFrame:
 
     except APIError as e:
         if _is_quota_429(e):
-            try: st.toast('구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 "동기화"를 눌러 다시 시도해 주세요.', icon='⏳'); st.session_state['read_cooldown_until']=time.time()+10
+            try: st.warning("구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 '동기화'를 눌러 다시 시도해 주세요.", icon="⏳")
             except Exception: pass
             return pd.DataFrame()
         if sheet_name in LAST_GOOD:
@@ -980,73 +980,91 @@ def _eval_sheet_name(year: int | str) -> str: return f"{EVAL_RESP_SHEET_PREFIX}{
 
 
 def ensure_eval_items_sheet():
-    """Ensure 평가항목 시트가 존재하고 헤더가 갖춰져 있도록 보정."""
-    wb = get_book()
+    wb=get_book()
     try:
-        ws = _retry(wb.worksheet, EVAL_ITEMS_SHEET)
+        ws=_retry(wb.worksheet, EVAL_ITEMS_SHEET)
     except WorksheetNotFound:
-        ws = _retry(wb.add_worksheet, title=EVAL_ITEMS_SHEET, rows=200, cols=10)
-        _retry(ws.update, "1:1", [EVAL_ITEM_HEADERS])
-        return
+        ws=_retry(wb.add_worksheet, title=EVAL_ITEMS_SHEET, rows=200, cols=10)
+        _retry(ws.update, "A1", [EVAL_ITEM_HEADERS]); return
     except Exception as e:
+        # Non-WorksheetNotFound errors (e.g., transient APIError)
         if _is_quota_429(e):
-            try:
-                st.toast('구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 "동기화"를 눌러 다시 시도해 주세요.', icon='⏳')
-                st.session_state['read_cooldown_until'] = time.time() + 10
-            except Exception:
-                pass
+            try: st.warning('구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 "동기화"를 눌러 다시 시도해 주세요.', icon='⏳')
+            except Exception: pass
             return
         raise
-
-    # Header ensure
+        ws=_retry(wb.add_worksheet, title=EVAL_ITEMS_SHEET, rows=200, cols=10)
+        _retry(ws.update, "A1", [EVAL_ITEM_HEADERS]); return
     try:
-        header = _retry(ws.row_values, 1) or []
+        header=_retry(ws.row_values, 1) or []
     except Exception as e:
         if _is_quota_429(e):
-            try:
-                st.toast('구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 "동기화"를 눌러 다시 시도해 주세요.', icon='⏳')
-                st.session_state['read_cooldown_until'] = time.time() + 10
-            except Exception:
-                pass
+            try: st.warning('구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 "동기화"를 눌러 다시 시도해 주세요.', icon='⏳')
+            except Exception: pass
             return
         raise
-
-    need = [h for h in EVAL_ITEM_HEADERS if h not in header]
+    need=[h for h in EVAL_ITEM_HEADERS if h not in header]
     if need:
         try:
-            _retry(ws.update, "1:1", [header + need])
+            _retry(ws.update, "1:1", [header+need])
         except Exception as e:
             if _is_quota_429(e):
-                try:
-                    st.toast('구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 "동기화"를 눌러 다시 시도해 주세요.', icon='⏳')
-                    st.session_state['read_cooldown_until'] = time.time() + 10
-                except Exception:
-                    pass
+                try: st.warning('구글시트 쓰기 할당량(1분) 초과. 잠시 후 좌측 "동기화" 후 다시 시도해 주세요.', icon='⏳')
+                except Exception: pass
                 return
             raise
-    return
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def read_eval_items_df(only_active: bool = True) -> pd.DataFrame:
+    ensure_eval_items_sheet()
+    ws=_ws(EVAL_ITEMS_SHEET)
+    try:
+        df=pd.DataFrame(_ws_get_all_records(ws))
+    except Exception as e:
+        if _is_quota_429(e):
+            try: st.warning('구글시트 읽기 할당량(1분) 초과. 잠시 후 "동기화"를 눌러 다시 시도해 주세요.', icon="⏳")
+            except Exception: pass
+            return pd.DataFrame(columns=EVAL_ITEM_HEADERS)
+        raise
+    if df.empty: return pd.DataFrame(columns=EVAL_ITEM_HEADERS)
+    if "순서" in df.columns:
+        def _i(x):
+            try: return int(float(str(x).strip()))
+            except: return 0
+        df["순서"]=df["순서"].apply(_i)
+    if "활성" in df.columns: df["활성"]=df["활성"].map(_to_bool)
+    cols=[c for c in ["순서","항목"] if c in df.columns]
+    if cols: df=df.sort_values(cols).reset_index(drop=True)
+    if only_active and "활성" in df.columns: df=df[df["활성"]==True]
+    return df
+
 
 def _ensure_eval_resp_sheet(year:int, item_ids:list[str]):
     name=_eval_sheet_name(year)
     wb=get_book()
-    # create or open sheet
     try:
         ws=_ws(name)
     except WorksheetNotFound:
-        # create with enough columns for base headers + items
-        cols = max(50, len(item_ids) + 16)
-        ws=_retry(wb.add_worksheet, title=name, rows=5000, cols=cols)
-    # ensure headers
+        ws=_retry(wb.add_worksheet, title=EVAL_ITEMS_SHEET, rows=200, cols=10)
+        _retry(ws.update, "A1", [EVAL_ITEM_HEADERS]); return
+    except Exception as e:
+        # Non-WorksheetNotFound errors (e.g., transient APIError)
+        if _is_quota_429(e):
+            try: st.warning('구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 "동기화"를 눌러 다시 시도해 주세요.', icon='⏳')
+            except Exception: pass
+            return
+        raise
+        ws=_retry(wb.add_worksheet, title=name, rows=5000, cols=max(50, len(item_ids)+16))
+        _WS_CACHE[name]=(time.time(), ws)
     need=list(EVAL_BASE_HEADERS)+[f"점수_{iid}" for iid in item_ids]
     header,_=_hdr(ws, name)
     if not header:
-        _retry(ws.update, "1:1", [need])
-        _HDR_CACHE[name]=(time.time(), need, {n:i+1 for i,n in enumerate(need)})
+        _retry(ws.update, "1:1", [need]); _HDR_CACHE[name]=(time.time(), need, {n:i+1 for i,n in enumerate(need)})
     else:
         miss=[h for h in need if h not in header]
         if miss:
-            new=header+miss
-            _retry(ws.update, "1:1", [new])
+            new=header+miss; _retry(ws.update, "1:1", [new])
             _HDR_CACHE[name]=(time.time(), new, {n:i+1 for i,n in enumerate(new)})
     return ws
 
@@ -1089,7 +1107,7 @@ def upsert_eval_response(emp_df: pd.DataFrame, year: int, eval_type: str,
             if c: buf[c-1]=sc
         _retry(ws.append_row, buf, value_input_option="USER_ENTERED")
         st.cache_data.clear()
-        return {"action":"insert", "total": total, "ts": now}
+        return {"action":"insert","total":total}
     else:
         payload={"총점": total, "상태": status, "제출시각": now, "평가대상이름": tname, "평가자이름": ename}
         for iid, sc in zip(item_ids, scores_list): payload[f"점수_{iid}"]=sc
@@ -1103,7 +1121,7 @@ def upsert_eval_response(emp_df: pd.DataFrame, year: int, eval_type: str,
             if upd: _retry(ws.batch_update, upd)
         _batch_row(ws, row_idx, hmap, payload)
         st.cache_data.clear()
-        return {"action":"update", "total": total, "ts": now}
+        return {"action":"update","total":total}
 
 @st.cache_data(ttl=300, show_spinner=False)
 def read_my_eval_rows(year: int, sabun: str) -> pd.DataFrame:
@@ -1116,53 +1134,6 @@ def read_my_eval_rows(year: int, sabun: str) -> pd.DataFrame:
     sort_cols=[c for c in ["평가유형","평가대상사번","제출시각"] if c in df.columns]
     if sort_cols: df=df.sort_values(sort_cols, ascending=[True,True,False]).reset_index(drop=True)
     return df
-
-# --- Compatibility shim: ensure read_eval_items_df exists ---
-def read_eval_items_df(only_active: bool=True) -> pd.DataFrame:
-    """평가 항목 시트를 읽어 DataFrame 반환.
-    - only_active=True: '활성'이 True인 항목만
-    - 정렬: '순서' 오름차순 → '항목ID' 오름차순
-    """
-    ensure_eval_items_sheet()
-    try:
-        df = read_sheet_df(EVAL_ITEMS_SHEET).copy()
-    except Exception:
-        return pd.DataFrame(columns=EVAL_ITEM_HEADERS)
-
-    # 컬럼 보정
-    for c in EVAL_ITEM_HEADERS:
-        if c not in df.columns:
-            df[c] = ""
-
-    # 타입 정규화
-    try:
-        df["항목ID"] = df["항목ID"].astype(str)
-    except Exception:
-        pass
-    try:
-        df["순서"] = pd.to_numeric(df["순서"], errors="coerce").fillna(0).astype(int)
-    except Exception:
-        df["순서"] = 0
-    # 활성: 문자열/숫자/불리언을 모두 수용
-    def _to_bool_local(v):
-        s = str(v).strip().lower()
-        if s in ("1","y","yes","true","t","on","사용","활성","o"):
-            return True
-        if s in ("0","n","no","false","f","off","미사용","비활성","x"):
-            return False
-        return bool(v)  # fallback
-    try:
-        df["활성"] = df["활성"].map(_to_bool_local)
-    except Exception:
-        df["활성"] = True
-
-    if only_active:
-        df = df[df["활성"] == True].copy()
-
-    # 정렬
-    df = df.sort_values(["순서","항목ID"], ascending=[True, True]).reset_index(drop=True)
-    return df[EVAL_ITEM_HEADERS if set(EVAL_ITEM_HEADERS).issubset(df.columns) else df.columns.tolist()]
-
 
 def tab_eval(emp_df: pd.DataFrame):
     """인사평가 탭 (심플·자동 라우팅)
@@ -1316,9 +1287,6 @@ def tab_eval(emp_df: pd.DataFrame):
         _emap = get_eval_summary_map_cached(int(year), st.session_state.get('eval_rev', 0))
         def _b(stage:str) -> str:
             try:
-                _opt = (st.session_state.get('eval_last_ts', {}) or {}).get((str(target_sabun), stage), '')
-                if _opt:
-                    return _opt
                 return (str(_emap.get((str(target_sabun), stage), ("",""))[1]).strip() or "미제출")
             except Exception:
                 return "미제출"
@@ -1582,8 +1550,7 @@ def tab_eval(emp_df: pd.DataFrame):
                 )
                 st.session_state["eval2_edit_mode"] = False
                 st.session_state['eval_rev'] = st.session_state.get('eval_rev', 0) + 1
-                st.session_state.setdefault('eval_last_ts', {})
-                st.session_state['eval_last_ts'][(str(target_sabun), str(eval_type))] = rep.get('ts', kst_now_str())
+                st.rerun()
             except Exception as e:
                 st.exception(e)
 
@@ -1713,11 +1680,11 @@ def upsert_jobdesc(rec: dict, as_new_version: bool = False) -> dict:
     if row_idx == 0:
         _retry(ws.append_row, build_row(), value_input_option="USER_ENTERED")
         st.cache_data.clear()
-        return {"action":"insert", "version": ver, "ts": rec.get('제출시각','')}
+        return {"action": "insert", "version": ver}
     else:
         _ws_batch_row(ws, row_idx, hmap, rec)
         st.cache_data.clear()
-        return {"action":"update", "version": ver, "ts": rec.get('제출시각','')}
+        return {"action": "update", "version": ver}
 
 # ────────────────────────────────────────────────────────────────────────────
 # 인쇄용 HTML (심플 · 모든 섹션 포함 · 첫 페이지부터 연속 인쇄)
@@ -1880,20 +1847,20 @@ def ensure_jd_approval_sheet():
     wb = get_book()
     try:
         _ = _retry(wb.worksheet, JD_APPROVAL_SHEET)
-        return
     except WorksheetNotFound:
+        ws=_retry(wb.add_worksheet, title=EVAL_ITEMS_SHEET, rows=200, cols=10)
+        _retry(ws.update, "A1", [EVAL_ITEM_HEADERS]); return
+    except Exception as e:
+        # Non-WorksheetNotFound errors (e.g., transient APIError)
+        if _is_quota_429(e):
+            try: st.warning('구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 "동기화"를 눌러 다시 시도해 주세요.', icon='⏳')
+            except Exception: pass
+            return
+        raise
         ws = _retry(wb.add_worksheet, title=JD_APPROVAL_SHEET, rows=3000, cols=20)
         _retry(ws.update, "1:1", [JD_APPROVAL_HEADERS])
-        return
-    except Exception as e:
-        # if transient quota errors, surface a gentle toast and return
-        if _is_quota_429(e):
-            try:
-                st.toast('구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 "동기화"를 눌러 다시 시도해 주세요.', icon='⏳')
-            except Exception:
-                pass
-        return
 
+@st.cache_data(ttl=300, show_spinner=False)
 def read_jd_approval_df(_rev: int = 0) -> pd.DataFrame:
     ensure_jd_approval_sheet()
     try:
@@ -2048,8 +2015,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
     try:
         _jd = _jd_latest_for(str(target_sabun), int(year)) or {}
         _sub_ts = (str(_jd.get('제출시각','')).strip() or '미제출')
-        # optimistic override from recent save
-        _sub_ts = (st.session_state.get('jd_last_ts', {}).get(str(target_sabun)) or _sub_ts)
+        _sub_ts = (str(_jd.get('제출시각','')).strip() or '미제출')
         try:
             _ver_map = get_jobdesc_latest_version_map_cached(int(year), st.session_state.get('jobdesc_rev', 0))
             latest_ver = int(_ver_map.get(str(target_sabun), 0))
@@ -2206,8 +2172,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
                 rep = upsert_jobdesc(rec, as_new_version=(version == 0))
                 st.success(f"저장 완료 (버전 {rep['version']})", icon="✅")
                 st.session_state['jobdesc_rev'] = st.session_state.get('jobdesc_rev', 0) + 1
-                st.session_state.setdefault('jd_last_ts', {})
-                st.session_state['jd_last_ts'][str(target_sabun)] = rep.get('ts', kst_now_str())
+                st.rerun()
             except Exception as e:
                 st.exception(e)
 
@@ -2284,7 +2249,6 @@ def tab_job_desc(emp_df: pd.DataFrame):
                         )
                         st.session_state["appr_rev"] = st.session_state.get("appr_rev", 0) + 1
                     st.success(f"{status} 처리되었습니다. ({res.get('action')})", icon="✅")
-        
                     st.session_state.setdefault('jd_appr_last', {})
                     st.session_state['jd_appr_last'][(str(target_sabun), int(year), int(latest_ver))] = (status, kst_now_str())
 # ═════════════════════════════════════════════════════════════════════════════
@@ -2303,21 +2267,20 @@ def _ensure_comp_simple_sheet(year:int):
     try:
         ws=_retry(wb.worksheet, name)
     except WorksheetNotFound:
-        ws=_retry(wb.add_worksheet, title=name, rows=2000, cols=50)
-        _retry(ws.update, "1:1", [COMP_SIMPLE_HEADERS])
-        return ws
+        ws=_retry(wb.add_worksheet, title=EVAL_ITEMS_SHEET, rows=200, cols=10)
+        _retry(ws.update, "A1", [EVAL_ITEM_HEADERS]); return
     except Exception as e:
+        # Non-WorksheetNotFound errors (e.g., transient APIError)
         if _is_quota_429(e):
-            try: st.toast('구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 "동기화"를 눌러 다시 시도해 주세요.', icon='⏳')
+            try: st.warning('구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 "동기화"를 눌러 다시 시도해 주세요.', icon='⏳')
             except Exception: pass
-            # fallback: attempt to open again quickly next run
-            return ws if 'ws' in locals() else None
+            return
         raise
-    # ensure headers
+        ws=_retry(wb.add_worksheet, title=name, rows=1000, cols=50)
+        _retry(ws.update, "1:1", [COMP_SIMPLE_HEADERS]); return ws
     header=_retry(ws.row_values,1) or []
     need=[h for h in COMP_SIMPLE_HEADERS if h not in header]
-    if need:
-        _retry(ws.update, "1:1", [header+need])
+    if need: _retry(ws.update, "1:1", [header+need])
     return ws
 
 def _jd_latest_for_comp(sabun:str, year:int)->dict:
@@ -2368,7 +2331,7 @@ def upsert_comp_simple_response(emp_df: pd.DataFrame, year:int, target_sabun:str
         _retry(ws.append_row, buf, value_input_option="USER_ENTERED")
         try: read_my_comp_simple_rows.clear()
         except Exception: pass
-        return {"action":"insert", "ts": now}
+        return {"action":"insert"}
     else:
         _ws_batch_row(ws, row_idx, hmap, {
             "평가일자": eval_date,
@@ -2382,7 +2345,7 @@ def upsert_comp_simple_response(emp_df: pd.DataFrame, year:int, target_sabun:str
         })
         try: read_my_comp_simple_rows.clear()
         except Exception: pass
-        return {"action":"update", "ts": now}
+        return {"action":"update"}
 
 @st.cache_data(ttl=300, show_spinner=False)
 def read_my_comp_simple_rows(year:int, sabun:str)->pd.DataFrame:
@@ -3093,7 +3056,9 @@ def main():
 if __name__ == "__main__":
     main()
 
-# --- PATCHED helpers (gs batch queue) ---
+# --- PATCH 2025-10-17: robust get_jd_approval_map_cached (append-only) -------------------------------
+@st.cache_data(ttl=120, show_spinner=False)
+
 def _gs_queue_init():
     if "gs_queue" not in st.session_state:
         st.session_state.gs_queue = []
