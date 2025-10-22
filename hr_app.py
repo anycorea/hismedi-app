@@ -35,6 +35,7 @@ def _ensure_capacity(ws, min_row: int, min_col: int):
 # Imports
 # ═════════════════════════════════════════════════════════════════════════════
 import re, time, random, hashlib, secrets as pysecrets
+import time
 from datetime import datetime, timedelta
 from typing import Any, Tuple
 import pandas as pd
@@ -482,6 +483,21 @@ LAST_GOOD: dict[str, pd.DataFrame] = {}
 def read_sheet_df(sheet_name: str) -> pd.DataFrame:
     """구글시트 → DataFrame (빈칸 재직여부=True로 해석, 호환 유지)"""
     try:
+        # --- Quota cooldown guard (non-blocking) ---
+        try:
+            _until = float(st.session_state.get('read_cooldown_until', 0))
+        except Exception:
+            _until = 0.0
+        if time.time() < _until:
+            if sheet_name in LAST_GOOD:
+                try: st.toast('⏳ 최근 1분 내 읽기 쿼터 초과 — 캐시 표시 중', icon='⏳')
+                except Exception: pass
+                return LAST_GOOD[sheet_name]
+            import pandas as pd
+            try: st.toast('⏳ 읽기 쿼터 초과 — 임시 빈 화면', icon='⏳')
+            except Exception: pass
+            return pd.DataFrame()
+
         ws = _ws(sheet_name)
         df = pd.DataFrame(_ws_get_all_records(ws))
         if df.empty:
@@ -502,8 +518,14 @@ def read_sheet_df(sheet_name: str) -> pd.DataFrame:
 
     except APIError as e:
         if _is_quota_429(e):
-            try: st.warning("구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 '동기화'를 눌러 다시 시도해 주세요.", icon="⏳")
-            except Exception: pass
+            try:
+                st.session_state['read_cooldown_until'] = time.time() + 15
+                st.toast("⏳ 구글시트 읽기 할당량(1분) 초과 — 캐시 표시 중", icon="⏳")
+            except Exception:
+                pass
+            if sheet_name in LAST_GOOD:
+                return LAST_GOOD[sheet_name]
+            import pandas as pd
             return pd.DataFrame()
         if sheet_name in LAST_GOOD:
             st.info(f"네트워크 혼잡으로 캐시 데이터를 표시합니다: {sheet_name}")
