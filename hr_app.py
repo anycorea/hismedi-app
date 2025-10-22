@@ -2536,6 +2536,13 @@ def tab_competency(emp_df: pd.DataFrame):
                 emp_df, int(year), str(sel_sab), str(me_sabun), g_main, g_extra, qual, opinion, eval_date
             )
             st.success(("제출 완료" if rep.get("action")=="insert" else "업데이트 완료"), icon="✅")
+
+            # Optimistic banner override for immediate UI feedback
+            try:
+                st.session_state.setdefault('comp_last_ts', {})
+                st.session_state['comp_last_ts'][str(sel_sab)] = rep.get('ts', kst_now_str())
+            except Exception:
+                pass
         st.session_state['comp_rev'] = st.session_state.get('comp_rev', 0) + 1
 
 # ═════════════════════════════════════════════════════════════════════════════
