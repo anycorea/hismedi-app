@@ -2092,6 +2092,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
                             remark=appr_remark
                         )
                         st.session_state["appr_rev"] = st.session_state.get("appr_rev", 0) + 1
+                        st.rerun()
                     st.success(f"{status} 처리되었습니다. ({res.get('action')})", icon="✅")
                     appr_df = read_jd_approval_df(st.session_state.get("appr_rev", 0))
                 base["사번"] = base["사번"].astype(str)
@@ -2325,6 +2326,7 @@ def tab_competency(emp_df: pd.DataFrame):
             st.success(("제출 완료" if rep.get("action")=="insert" else "업데이트 완료"), icon="✅")
         st.session_state['comp_rev'] = st.session_state.get('comp_rev', 0) + 1
 
+        st.rerun()
 # ═════════════════════════════════════════════════════════════════════════════
 # 관리자: 직원/ PIN 관리 / 인사평가 항목 관리 / 권한 관리
 # ═════════════════════════════════════════════════════════════════════════════
