@@ -1117,6 +1117,18 @@ def read_my_eval_rows(year: int, sabun: str) -> pd.DataFrame:
     if sort_cols: df=df.sort_values(sort_cols, ascending=[True,True,False]).reset_index(drop=True)
     return df
 
+# --- Compatibility shim: ensure read_eval_items_df exists ---
+def read_eval_items_df(*args, **kwargs):
+    """Return evaluation items DataFrame (cached). Keeps legacy signature read_eval_items_df(True)."""
+    try:
+        return get_eval_items_df_cached(st.session_state.get('eval_items_rev', 0))
+    except Exception:
+        # Fallback: if a non-cached builder exists
+        try:
+            return build_eval_items_df()
+        except Exception:
+            return pd.DataFrame()
+
 def tab_eval(emp_df: pd.DataFrame):
     """인사평가 탭 (심플·자동 라우팅)
     - 역할: employee / manager / admin
