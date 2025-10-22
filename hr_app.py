@@ -1887,6 +1887,10 @@ def tab_job_desc(emp_df: pd.DataFrame):
                     pass
                 _appr_stat = str(_rows.iloc[0].get('상태','')).strip() or '미제출'
                 _appr_ts   = str(_rows.iloc[0].get('승인시각','')).strip()
+        # Optimistic override
+        _opt = st.session_state.get('jd_appr_last', {}).get((str(target_sabun), int(year), int(latest_ver)))
+        if _opt:
+            _appr_stat, _appr_ts = _opt[0], _opt[1]
         show_submit_banner(f"🕒 제출시각  |  {_sub_ts if _sub_ts else '미제출'}  |  [부서장 승인여부] {_appr_stat}{(' ' + _appr_ts) if _appr_ts else ''}")
     except Exception:
         pass
@@ -2098,7 +2102,6 @@ def tab_job_desc(emp_df: pd.DataFrame):
                             remark=appr_remark
                         )
                         st.session_state["appr_rev"] = st.session_state.get("appr_rev", 0) + 1
-                        st.rerun()
                     st.success(f"{status} 처리되었습니다. ({res.get('action')})", icon="✅")
                     appr_df = read_jd_approval_df(st.session_state.get("appr_rev", 0))
                 base["사번"] = base["사번"].astype(str)
@@ -2254,7 +2257,8 @@ def tab_competency(emp_df: pd.DataFrame):
     comp_locked = False
     try:
         _cmap = get_comp_summary_map_cached(int(year), st.session_state.get('comp_rev', 0))
-        _cts = (str(_cmap.get(str(sel_sab), ("","","",""))[3]).strip())
+        _optim = (st.session_state.get("comp_last_ts", {}) or {}).get(str(sel_sab), "")
+        _cts = _optim or (str(_cmap.get(str(sel_sab), ("","","",""))[3]).strip())
         show_submit_banner(f"🕒 제출시각  |  {_cts if _cts else '미제출'}")
         comp_locked = bool(_cts)
     except Exception:
@@ -2331,7 +2335,6 @@ def tab_competency(emp_df: pd.DataFrame):
             )
             st.success(("제출 완료" if rep.get("action")=="insert" else "업데이트 완료"), icon="✅")
         st.session_state['comp_rev'] = st.session_state.get('comp_rev', 0) + 1
-        st.rerun()
 
 # ═════════════════════════════════════════════════════════════════════════════
 # 관리자: 직원/ PIN 관리 / 인사평가 항목 관리 / 권한 관리
