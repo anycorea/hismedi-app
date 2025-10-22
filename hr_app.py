@@ -1873,15 +1873,21 @@ def tab_job_desc(emp_df: pd.DataFrame):
         st.success(f"대상자: {target_name} ({target_sabun})", icon="✅")
     try:
         _jd = _jd_latest_for(str(target_sabun), int(year)) or {}
-        _sub_ts = (str(_jd.get('제출시각','')).strip() or "미제출")
+        _sub_ts = (str(_jd.get('제출시각','')).strip() or '미제출')
         latest_ver = _jd_latest_version_for(str(target_sabun), int(year))
         appr_df = read_jd_approval_df(st.session_state.get('appr_rev', 0))
-        _appr = "미제출"
+        _appr_stat = '미제출'
+        _appr_ts = ''
         if latest_ver > 0 and not appr_df.empty:
-            _ok = appr_df[(appr_df['연도'] == int(year)) & (appr_df['사번'].astype(str) == str(target_sabun)) & (appr_df['버전'] == int(latest_ver)) & (appr_df['상태'].astype(str) == '승인')]
-            if not _ok.empty:
-                _appr = "승인"
-        show_submit_banner(f"🕒 제출시각  |  {_sub_ts if _sub_ts else '미제출'}  |  [부서장 제출시각] {_appr}")
+            _rows = appr_df[(appr_df['연도'] == int(year)) & (appr_df['사번'].astype(str) == str(target_sabun)) & (appr_df['버전'].astype(int) == int(latest_ver))]
+            if not _rows.empty:
+                try:
+                    _rows = _rows.sort_values(['승인시각'], ascending=[False])
+                except Exception:
+                    pass
+                _appr_stat = str(_rows.iloc[0].get('상태','')).strip() or '미제출'
+                _appr_ts   = str(_rows.iloc[0].get('승인시각','')).strip()
+        show_submit_banner(f"🕒 제출시각  |  {_sub_ts if _sub_ts else '미제출'}  |  [부서장 승인여부] {_appr_stat}{(' ' + _appr_ts) if _appr_ts else ''}")
     except Exception:
         pass
 
@@ -2325,6 +2331,7 @@ def tab_competency(emp_df: pd.DataFrame):
             )
             st.success(("제출 완료" if rep.get("action")=="insert" else "업데이트 완료"), icon="✅")
         st.session_state['comp_rev'] = st.session_state.get('comp_rev', 0) + 1
+        st.rerun()
 
 # ═════════════════════════════════════════════════════════════════════════════
 # 관리자: 직원/ PIN 관리 / 인사평가 항목 관리 / 권한 관리
