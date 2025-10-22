@@ -2059,7 +2059,6 @@ def tab_job_desc(emp_df: pd.DataFrame):
         _appr_stat = '미제출'
         _appr_ts = ''
         try:
-            _appr_map = get_jd_approval_map_cached(int(year), st.session_state.get('appr_rev', 0))
             key = (str(target_sabun), int(latest_ver)) if latest_ver else None
             if key and key in _appr_map:
                 _appr_stat, _appr_ts = _appr_map[key][0], _appr_map[key][1]
@@ -2236,7 +2235,6 @@ def tab_job_desc(emp_df: pd.DataFrame):
         cur_when = ''
         cur_who = ''
         try:
-            _appr_map = get_jd_approval_map_cached(int(year), st.session_state.get('appr_rev', 0))
             key = (str(target_sabun), int(latest_ver)) if latest_ver and int(latest_ver) > 0 else None
             if key and key in _appr_map:
                 cur_status = str(_appr_map[key][0] or '')
@@ -2289,13 +2287,6 @@ def tab_job_desc(emp_df: pd.DataFrame):
         
                     st.session_state.setdefault('jd_appr_last', {})
                     st.session_state['jd_appr_last'][(str(target_sabun), int(year), int(latest_ver))] = (status, kst_now_str())
-_appr_map = get_jd_approval_map_cached(int(year), st.session_state.get('appr_rev', 0))
-
-
-
-
-
-
 # ═════════════════════════════════════════════════════════════════════════════
 # 직무능력평가 + JD 요약 스크롤
 # ═════════════════════════════════════════════════════════════════════════════
