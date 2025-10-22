@@ -1881,7 +1881,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
             _ok = appr_df[(appr_df['연도'] == int(year)) & (appr_df['사번'].astype(str) == str(target_sabun)) & (appr_df['버전'] == int(latest_ver)) & (appr_df['상태'].astype(str) == '승인')]
             if not _ok.empty:
                 _appr = "승인"
-        show_submit_banner(f"🕒 제출시각  |  {_sub_ts if _sub_ts else '미제출'}  |  [부서장 승인] {_appr}")
+        show_submit_banner(f"🕒 제출시각  |  {_sub_ts if _sub_ts else '미제출'}  |  [부서장 제출시각] {_appr}")
     except Exception:
         pass
 
@@ -2326,7 +2326,6 @@ def tab_competency(emp_df: pd.DataFrame):
             st.success(("제출 완료" if rep.get("action")=="insert" else "업데이트 완료"), icon="✅")
         st.session_state['comp_rev'] = st.session_state.get('comp_rev', 0) + 1
 
-        st.rerun()
 # ═════════════════════════════════════════════════════════════════════════════
 # 관리자: 직원/ PIN 관리 / 인사평가 항목 관리 / 권한 관리
 # ═════════════════════════════════════════════════════════════════════════════
