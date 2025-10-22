@@ -25,6 +25,22 @@ def _ensure_capacity(ws, min_row: int, min_col: int):
 # Imports
 # ═════════════════════════════════════════════════════════════════════════════
 import re, time, random, hashlib, secrets as pysecrets
+
+
+from contextlib import contextmanager
+import time
+
+@contextmanager
+def perf(label: str):
+    _on = bool(st.session_state.get('perf_debug', False))
+    _t = time.perf_counter()
+    try:
+        yield
+    finally:
+        if _on:
+            dt = (time.perf_counter() - _t) * 1000.0
+            st.sidebar.markdown(f"⏱️ **{label}**: {dt:.1f} ms")
+
 from datetime import datetime, timedelta
 from typing import Any, Tuple
 import pandas as pd
@@ -1553,7 +1569,7 @@ JOBDESC_HEADERS = [
 def ensure_jobdesc_sheet():
     wb = get_book()
     try:
-        ws = wb.worksheet(JOBDESC_SHEET)
+        ws = _retry(wb.worksheet, JOBDESC_SHEET)
         header = _retry(ws.row_values, 1) or []
         need = [h for h in JOBDESC_HEADERS if h not in header]
         if need:
@@ -1830,7 +1846,7 @@ JD_APPROVAL_HEADERS = ["연도","사번","이름","버전","승인자사번","�
 def ensure_jd_approval_sheet():
     wb = get_book()
     try:
-        _ = wb.worksheet(JD_APPROVAL_SHEET)
+        _ = _retry(wb.worksheet, JD_APPROVAL_SHEET)
     except WorksheetNotFound:
         ws=_retry(wb.add_worksheet, title=EVAL_ITEMS_SHEET, rows=200, cols=10)
         _retry(ws.update, "A1", [EVAL_ITEM_HEADERS]); return
@@ -2000,7 +2016,11 @@ def tab_job_desc(emp_df: pd.DataFrame):
         _jd = _jd_latest_for(str(target_sabun), int(year)) or {}
         _sub_ts = (str(_jd.get('제출시각','')).strip() or '미제출')
         _sub_ts = (str(_jd.get('제출시각','')).strip() or '미제출')
-        latest_ver = _jd_latest_version_for(str(target_sabun), int(year))
+        try:
+            _ver_map = get_jobdesc_latest_version_map_cached(int(year), st.session_state.get('jobdesc_rev', 0))
+            latest_ver = int(_ver_map.get(str(target_sabun), 0))
+        except Exception:
+            latest_ver = _jd_latest_version_for(str(target_sabun), int(year))
         # Fast path: use cached approval map to avoid full DataFrame reads
         _appr_stat = '미제출'
         _appr_ts = ''
@@ -2252,7 +2272,7 @@ def _simp_sheet_name(year:int|str)->str: return f"{COMP_SIMPLE_PREFIX}{int(year)
 def _ensure_comp_simple_sheet(year:int):
     wb=get_book(); name=_simp_sheet_name(year)
     try:
-        ws=wb.worksheet(name)
+        ws=_retry(wb.worksheet, name)
     except WorksheetNotFound:
         ws=_retry(wb.add_worksheet, title=EVAL_ITEMS_SHEET, rows=200, cols=10)
         _retry(ws.update, "A1", [EVAL_ITEM_HEADERS]); return
@@ -2956,6 +2976,42 @@ def tab_help():
 # ═════════════════════════════════════════════════════════════════════════════
 # Main App
 # ═════════════════════════════════════════════════════════════════════════════
+
+# --- Cached latest version map for Jobdesc ---
+@st.cache_data(show_spinner=False)
+def get_jobdesc_latest_version_map_cached(_year: int, _rev: int = 0) -> dict:
+    """Return {sabun(str): latest_version(int)} for the given year using minimal reads.
+    Falls back to _jd_latest_version_for per sabun if sheet schema changed.
+    """
+    try:
+        # Try using existing jobdesc table utilities if available
+        # Expect upsert/read helpers to provide a compact rows reader
+        rows = read_jobdesc_rows_for_year(_year)  # may not exist in all versions
+    except Exception:
+        rows = None
+
+    d = {}
+    if rows:
+        try:
+            # rows: list[dict] with keys including '연도','사번','버전'
+            for r in rows:
+                try:
+                    if int(r.get('연도',0)) != int(_year): 
+                        continue
+                    sab = str(r.get('사번','')).strip()
+                    ver = int(r.get('버전', 0))
+                    if sab and ver >= 0:
+                        if sab not in d or ver > d[sab]:
+                            d[sab] = ver
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+    # Fallback (slower): compute only for current target when needed.
+    return d
+
+
 def main():
     emp_df = read_emp_df()
     st.session_state["emp_df"] = emp_df.copy()
