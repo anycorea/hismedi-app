@@ -980,51 +980,51 @@ def _eval_sheet_name(year: int | str) -> str: return f"{EVAL_RESP_SHEET_PREFIX}{
 
 
 def ensure_eval_items_sheet():
-    wb=get_book()
+    """Ensure 평가항목 시트가 존재하고 헤더가 갖춰져 있도록 보정."""
+    wb = get_book()
     try:
-        ws=_retry(wb.worksheet, EVAL_ITEMS_SHEET)
+        ws = _retry(wb.worksheet, EVAL_ITEMS_SHEET)
     except WorksheetNotFound:
-        ws=_retry(wb.add_worksheet, title=EVAL_ITEMS_SHEET, rows=200, cols=10)
-        _retry(ws.update, "A1", [EVAL_ITEM_HEADERS]); return
+        ws = _retry(wb.add_worksheet, title=EVAL_ITEMS_SHEET, rows=200, cols=10)
+        _retry(ws.update, "1:1", [EVAL_ITEM_HEADERS])
+        return
     except Exception as e:
-        # Non-WorksheetNotFound errors (e.g., transient APIError)
         if _is_quota_429(e):
-            try: st.toast('구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 "동기화"를 눌러 다시 시도해 주세요.', icon='⏳'); st.session_state['read_cooldown_until']=time.time()+10
-            except Exception: pass
+            try:
+                st.toast('구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 "동기화"를 눌러 다시 시도해 주세요.', icon='⏳')
+                st.session_state['read_cooldown_until'] = time.time() + 10
+            except Exception:
+                pass
             return
         raise
-        ws=_retry(wb.add_worksheet, title=EVAL_ITEMS_SHEET, rows=200, cols=10)
-        _retry(ws.update, "A1", [EVAL_ITEM_HEADERS]); return
+
+    # Header ensure
     try:
-        header=_retry(ws.row_values, 1) or []
+        header = _retry(ws.row_values, 1) or []
     except Exception as e:
         if _is_quota_429(e):
-            try: st.toast('구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 "동기화"를 눌러 다시 시도해 주세요.', icon='⏳'); st.session_state['read_cooldown_until']=time.time()+10
-            except Exception: pass
+            try:
+                st.toast('구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 "동기화"를 눌러 다시 시도해 주세요.', icon='⏳')
+                st.session_state['read_cooldown_until'] = time.time() + 10
+            except Exception:
+                pass
             return
         raise
-    need=[h for h in EVAL_ITEM_HEADERS if h not in header]
+
+    need = [h for h in EVAL_ITEM_HEADERS if h not in header]
     if need:
         try:
-            _retry(ws.update, "1:1", [header+need])
+            _retry(ws.update, "1:1", [header + need])
         except Exception as e:
             if _is_quota_429(e):
-                try: st.toast('구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 "동기화"를 눌러 다시 시도해 주세요.', icon='⏳'); st.session_state['read_cooldown_until']=time.time()+10
-            except Exception: pass
-            return pd.DataFrame(columns=EVAL_ITEM_HEADERS)
-        raise
-    if df.empty: return pd.DataFrame(columns=EVAL_ITEM_HEADERS)
-    if "순서" in df.columns:
-        def _i(x):
-            try: return int(float(str(x).strip()))
-            except: return 0
-        df["순서"]=df["순서"].apply(_i)
-    if "활성" in df.columns: df["활성"]=df["활성"].map(_to_bool)
-    cols=[c for c in ["순서","항목"] if c in df.columns]
-    if cols: df=df.sort_values(cols).reset_index(drop=True)
-    if only_active and "활성" in df.columns: df=df[df["활성"]==True]
-    return df
-
+                try:
+                    st.toast('구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 "동기화"를 눌러 다시 시도해 주세요.', icon='⏳')
+                    st.session_state['read_cooldown_until'] = time.time() + 10
+                except Exception:
+                    pass
+                return
+            raise
+    return
 
 def _ensure_eval_resp_sheet(year:int, item_ids:list[str]):
     name=_eval_sheet_name(year)
