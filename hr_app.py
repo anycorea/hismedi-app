@@ -1874,13 +1874,27 @@ def tab_job_desc(emp_df: pd.DataFrame):
         _jd = _jd_latest_for(str(target_sabun), int(year)) or {}
         _sub_ts = (str(_jd.get('제출시각','')).strip() or "미제출")
         latest_ver = _jd_latest_version_for(str(target_sabun), int(year))
+    
         appr_df = read_jd_approval_df(st.session_state.get('appr_rev', 0))
-        _appr = "미제출"
+        _appr_status = "미제출"
+        _appr_time = ""
         if latest_ver > 0 and not appr_df.empty:
-            _ok = appr_df[(appr_df['연도'] == int(year)) & (appr_df['사번'].astype(str) == str(target_sabun)) & (appr_df['버전'] == int(latest_ver)) & (appr_df['상태'].astype(str) == '승인')]
-            if not _ok.empty:
-                _appr = "승인"
-        show_submit_banner(f"🕒 제출시각  |  {_sub_ts if _sub_ts else '미제출'}  |  [부서장 승인] {_appr}")
+            # 최신 승인/반려 레코드 한 건 선택 (승인시각 기준 내림차순)
+            sub = appr_df[(appr_df['연도'] == int(year)) &
+                          (appr_df['사번'].astype(str) == str(target_sabun)) &
+                          (appr_df['버전'] == int(latest_ver))].copy()
+            if not sub.empty:
+                if '승인시각' in sub.columns:
+                    sub = sub.sort_values(['승인시각'], ascending=[False]).reset_index(drop=True)
+                srow = sub.iloc[0].to_dict()
+                _appr_status = str(srow.get('상태','')).strip() or "미제출"     # 승인 / 반려 / (없음)
+                _appr_time   = str(srow.get('승인시각','')).strip()
+    
+        # 표기: 제출시각(직원 제출) | [부서장 승인여부] 승인/반려 (승인시각)
+        _appr_right = _appr_status if _appr_status else "미제출"
+        if _appr_time:
+            _appr_right += f" {_appr_time}"
+        show_submit_banner(f"🕒 제출시각  |  {_sub_ts if _sub_ts else '미제출'}  |  [부서장 승인여부] {_appr_right}")
     except Exception:
         pass
 
