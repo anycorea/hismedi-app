@@ -886,17 +886,8 @@ def _eval_sheet_name(year: int | str) -> str: return f"{EVAL_RESP_SHEET_PREFIX}{
 def ensure_eval_items_sheet():
     wb=get_book()
     try:
-        ws=_retry(wb.worksheet, EVAL_ITEMS_SHEET)
+        ws=wb.worksheet(EVAL_ITEMS_SHEET)
     except WorksheetNotFound:
-        ws=_retry(wb.add_worksheet, title=EVAL_ITEMS_SHEET, rows=200, cols=10)
-        _retry(ws.update, "A1", [EVAL_ITEM_HEADERS]); return
-    except Exception as e:
-        # Non-WorksheetNotFound errors (e.g., transient APIError)
-        if _is_quota_429(e):
-            try: st.warning('구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 "동기화"를 눌러 다시 시도해 주세요.', icon='⏳')
-            except Exception: pass
-            return
-        raise
         ws=_retry(wb.add_worksheet, title=EVAL_ITEMS_SHEET, rows=200, cols=10)
         _retry(ws.update, "A1", [EVAL_ITEM_HEADERS]); return
     try:
@@ -950,15 +941,6 @@ def _ensure_eval_resp_sheet(year:int, item_ids:list[str]):
     try:
         ws=_ws(name)
     except WorksheetNotFound:
-        ws=_retry(wb.add_worksheet, title=EVAL_ITEMS_SHEET, rows=200, cols=10)
-        _retry(ws.update, "A1", [EVAL_ITEM_HEADERS]); return
-    except Exception as e:
-        # Non-WorksheetNotFound errors (e.g., transient APIError)
-        if _is_quota_429(e):
-            try: st.warning('구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 "동기화"를 눌러 다시 시도해 주세요.', icon='⏳')
-            except Exception: pass
-            return
-        raise
         ws=_retry(wb.add_worksheet, title=name, rows=5000, cols=max(50, len(item_ids)+16))
         _WS_CACHE[name]=(time.time(), ws)
     need=list(EVAL_BASE_HEADERS)+[f"점수_{iid}" for iid in item_ids]
@@ -1743,15 +1725,6 @@ def ensure_jd_approval_sheet():
     try:
         _ = wb.worksheet(JD_APPROVAL_SHEET)
     except WorksheetNotFound:
-        ws=_retry(wb.add_worksheet, title=EVAL_ITEMS_SHEET, rows=200, cols=10)
-        _retry(ws.update, "A1", [EVAL_ITEM_HEADERS]); return
-    except Exception as e:
-        # Non-WorksheetNotFound errors (e.g., transient APIError)
-        if _is_quota_429(e):
-            try: st.warning('구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 "동기화"를 눌러 다시 시도해 주세요.', icon='⏳')
-            except Exception: pass
-            return
-        raise
         ws = _retry(wb.add_worksheet, title=JD_APPROVAL_SHEET, rows=3000, cols=20)
         _retry(ws.update, "1:1", [JD_APPROVAL_HEADERS])
 
@@ -2153,15 +2126,6 @@ def _ensure_comp_simple_sheet(year:int):
     try:
         ws=wb.worksheet(name)
     except WorksheetNotFound:
-        ws=_retry(wb.add_worksheet, title=EVAL_ITEMS_SHEET, rows=200, cols=10)
-        _retry(ws.update, "A1", [EVAL_ITEM_HEADERS]); return
-    except Exception as e:
-        # Non-WorksheetNotFound errors (e.g., transient APIError)
-        if _is_quota_429(e):
-            try: st.warning('구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 "동기화"를 눌러 다시 시도해 주세요.', icon='⏳')
-            except Exception: pass
-            return
-        raise
         ws=_retry(wb.add_worksheet, title=name, rows=1000, cols=50)
         _retry(ws.update, "1:1", [COMP_SIMPLE_HEADERS]); return ws
     header=_retry(ws.row_values,1) or []
@@ -2878,29 +2842,22 @@ def main():
         render_staff_picker_left(emp_df)
 
     with right:
-        tab_names = ['인사평가','직무기술서','직무능력평가','관리자','도움말']
-        active = st.radio('탭', tab_names, horizontal=True, key='__active_tab')
-        if active == '인사평가':
-            tab_eval(emp_df)
-        elif active == '직무기술서':
-            tab_job_desc(emp_df)
-        elif active == '직무능력평가':
-            tab_competency(emp_df)
-        elif active == '관리자':
-            me = str(st.session_state.get('user', {}).get('사번', ''))
+        tabs = st.tabs(["인사평가","직무기술서","직무능력평가","관리자","도움말"])
+        with tabs[0]: tab_eval(emp_df)
+        with tabs[1]: tab_job_desc(emp_df)
+        with tabs[2]: tab_competency(emp_df)
+        with tabs[3]:
+            me = str(st.session_state.get("user", {}).get("사번", ""))
             if not is_admin(me):
-                st.info('관리자 전용 메뉴입니다.')
+                st.warning("관리자 전용 메뉴입니다.", icon="🔒")
             else:
-                a1, a2 = st.tabs(['직원/기본정보', '평가항목/직무기술서/권한/서명'])
-                with a1: tab_admin_emp(emp_df)
-                with a2:
-                    aa = st.tabs(['평가항목 관리','직무기술서 관리','권한 관리','서명 관리'])
-                    with aa[0]: tab_admin_eval_items()
-                    with aa[1]: tab_admin_jobdesc(emp_df)
-                    with aa[2]: tab_admin_acl(emp_df)
-                    with aa[3]: tab_admin_sign(emp_df)
-        else:
-            tab_help()
+                a1, a2, a3, a4 = st.tabs(["직원","PIN 관리","평가 항목 관리","권한 관리"])
+                with a1: tab_staff_admin(emp_df)
+                with a2: tab_admin_pin(emp_df)
+                with a3: tab_admin_eval_items()
+                with a4: tab_admin_acl(emp_df)
+        with tabs[4]: tab_help()
+
 if __name__ == "__main__":
     main()
 
