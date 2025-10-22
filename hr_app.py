@@ -886,8 +886,17 @@ def _eval_sheet_name(year: int | str) -> str: return f"{EVAL_RESP_SHEET_PREFIX}{
 def ensure_eval_items_sheet():
     wb=get_book()
     try:
-        ws=wb.worksheet(EVAL_ITEMS_SHEET)
+        ws=_retry(wb.worksheet, EVAL_ITEMS_SHEET)
     except WorksheetNotFound:
+        ws=_retry(wb.add_worksheet, title=EVAL_ITEMS_SHEET, rows=200, cols=10)
+        _retry(ws.update, "A1", [EVAL_ITEM_HEADERS]); return
+    except Exception as e:
+        # Non-WorksheetNotFound errors (e.g., transient APIError)
+        if _is_quota_429(e):
+            try: st.warning('구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 "동기화"를 눌러 다시 시도해 주세요.', icon='⏳')
+            except Exception: pass
+            return
+        raise
         ws=_retry(wb.add_worksheet, title=EVAL_ITEMS_SHEET, rows=200, cols=10)
         _retry(ws.update, "A1", [EVAL_ITEM_HEADERS]); return
     try:
@@ -941,6 +950,15 @@ def _ensure_eval_resp_sheet(year:int, item_ids:list[str]):
     try:
         ws=_ws(name)
     except WorksheetNotFound:
+        ws=_retry(wb.add_worksheet, title=EVAL_ITEMS_SHEET, rows=200, cols=10)
+        _retry(ws.update, "A1", [EVAL_ITEM_HEADERS]); return
+    except Exception as e:
+        # Non-WorksheetNotFound errors (e.g., transient APIError)
+        if _is_quota_429(e):
+            try: st.warning('구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 "동기화"를 눌러 다시 시도해 주세요.', icon='⏳')
+            except Exception: pass
+            return
+        raise
         ws=_retry(wb.add_worksheet, title=name, rows=5000, cols=max(50, len(item_ids)+16))
         _WS_CACHE[name]=(time.time(), ws)
     need=list(EVAL_BASE_HEADERS)+[f"점수_{iid}" for iid in item_ids]
@@ -1158,6 +1176,15 @@ def tab_eval(emp_df: pd.DataFrame):
         target_name  = st.session_state["eval2_target_name"]
 
     st.success(f"대상자: {target_name} ({target_sabun})", icon="✅")
+    # --- lightweight guard to prevent background I/O ---
+    try:
+        _sel = st.session_state.get("eval2_target_sabun","")
+    except Exception:
+        _sel = ""
+    if not _sel:
+        st.info("👈 대상자를 왼쪽에서 선택하면 평가 항목을 불러옵니다.", icon="ℹ️")
+        return
+
 
     # === 제출시각 배너(인사평가) ===
     try:
@@ -1725,6 +1752,15 @@ def ensure_jd_approval_sheet():
     try:
         _ = wb.worksheet(JD_APPROVAL_SHEET)
     except WorksheetNotFound:
+        ws=_retry(wb.add_worksheet, title=EVAL_ITEMS_SHEET, rows=200, cols=10)
+        _retry(ws.update, "A1", [EVAL_ITEM_HEADERS]); return
+    except Exception as e:
+        # Non-WorksheetNotFound errors (e.g., transient APIError)
+        if _is_quota_429(e):
+            try: st.warning('구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 "동기화"를 눌러 다시 시도해 주세요.', icon='⏳')
+            except Exception: pass
+            return
+        raise
         ws = _retry(wb.add_worksheet, title=JD_APPROVAL_SHEET, rows=3000, cols=20)
         _retry(ws.update, "1:1", [JD_APPROVAL_HEADERS])
 
@@ -1871,6 +1907,15 @@ def tab_job_desc(emp_df: pd.DataFrame):
             st.session_state["jd2_target_name"] = ""
         target_sabun = st.session_state["jd2_target_sabun"]; target_name = st.session_state["jd2_target_name"]
         st.success(f"대상자: {target_name} ({target_sabun})", icon="✅")
+        # --- lightweight guard to prevent background I/O ---
+        try:
+            _sel = st.session_state.get("jd2_target_sabun","")
+        except Exception:
+            _sel = ""
+        if not _sel:
+            st.info("👈 대상자를 왼쪽에서 선택하면 직무기술서를 불러옵니다.", icon="ℹ️")
+            return
+
     try:
         _jd = _jd_latest_for(str(target_sabun), int(year)) or {}
         _sub_ts = (str(_jd.get('제출시각','')).strip() or '미제출')
@@ -2126,6 +2171,15 @@ def _ensure_comp_simple_sheet(year:int):
     try:
         ws=wb.worksheet(name)
     except WorksheetNotFound:
+        ws=_retry(wb.add_worksheet, title=EVAL_ITEMS_SHEET, rows=200, cols=10)
+        _retry(ws.update, "A1", [EVAL_ITEM_HEADERS]); return
+    except Exception as e:
+        # Non-WorksheetNotFound errors (e.g., transient APIError)
+        if _is_quota_429(e):
+            try: st.warning('구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 "동기화"를 눌러 다시 시도해 주세요.', icon='⏳')
+            except Exception: pass
+            return
+        raise
         ws=_retry(wb.add_worksheet, title=name, rows=1000, cols=50)
         _retry(ws.update, "1:1", [COMP_SIMPLE_HEADERS]); return ws
     header=_retry(ws.row_values,1) or []
@@ -2252,6 +2306,15 @@ def tab_competency(emp_df: pd.DataFrame):
     st.session_state["cmpS_target_name"]=_emp_name_by_sabun(emp_df, str(sel_sab))
 
     st.success(f"대상자: {_emp_name_by_sabun(emp_df, sel_sab)} ({sel_sab})", icon="✅")
+    # --- lightweight guard to prevent background I/O ---
+    try:
+        _sel = st.session_state.get("cmpS_target_sabun","")
+    except Exception:
+        _sel = ""
+    if not _sel:
+        st.info("👈 대상자를 왼쪽에서 선택하면 직무능력평가를 불러옵니다.", icon="ℹ️")
+        return
+
 
     # === 제출시각 배너(직무능력평가) ===
     comp_locked = False
