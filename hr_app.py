@@ -1,13 +1,3 @@
-#
-# ======= 자동 생성된 섹션 인덱스 (2025-10-22 06:52:31 생성) =======
-#   - 라인 번호는 대략적인 섹션 시작 위치입니다.
-#   [HR-SEC] 1) 로그인  @line 178
-#   [HR-SEC] 3-1) 인사평가 탭  @line 1023
-#   [HR-SEC] 3-2) 직무기술서 탭  @line 1823
-#   [HR-SEC] 3-3) 직무능력평가 탭  @line 2200
-#   [HR-SEC] 3-5) 도움말 탭  @line 2776
-# =============================================
-
 # -*- coding: utf-8 -*-
 
 def _ensure_capacity(ws, min_row: int, min_col: int):
@@ -35,7 +25,6 @@ def _ensure_capacity(ws, min_row: int, min_col: int):
 # Imports
 # ═════════════════════════════════════════════════════════════════════════════
 import re, time, random, hashlib, secrets as pysecrets
-import time
 from datetime import datetime, timedelta
 from typing import Any, Tuple
 import pandas as pd
@@ -186,10 +175,6 @@ except Exception:
 
 
 def force_sync():
-
-# =============================================
-# [HR-SEC] 1) 로그인
-# =============================================
     """데이터/편집 캐시만 비우고 즉시 리런 (로그인 세션/인증 키는 유지)."""
     # Streamlit 캐시
     try:
@@ -483,21 +468,6 @@ LAST_GOOD: dict[str, pd.DataFrame] = {}
 def read_sheet_df(sheet_name: str) -> pd.DataFrame:
     """구글시트 → DataFrame (빈칸 재직여부=True로 해석, 호환 유지)"""
     try:
-        # --- Quota cooldown guard (non-blocking) ---
-        try:
-            _until = float(st.session_state.get('read_cooldown_until', 0))
-        except Exception:
-            _until = 0.0
-        if time.time() < _until:
-            if sheet_name in LAST_GOOD:
-                try: st.toast('⏳ 최근 1분 내 읽기 쿼터 초과 — 캐시 표시 중', icon='⏳')
-                except Exception: pass
-                return LAST_GOOD[sheet_name]
-            import pandas as pd
-            try: st.toast('⏳ 읽기 쿼터 초과 — 임시 빈 화면', icon='⏳')
-            except Exception: pass
-            return pd.DataFrame()
-
         ws = _ws(sheet_name)
         df = pd.DataFrame(_ws_get_all_records(ws))
         if df.empty:
@@ -518,14 +488,8 @@ def read_sheet_df(sheet_name: str) -> pd.DataFrame:
 
     except APIError as e:
         if _is_quota_429(e):
-            try:
-                st.session_state['read_cooldown_until'] = time.time() + 15
-                st.toast("⏳ 구글시트 읽기 할당량(1분) 초과 — 캐시 표시 중", icon="⏳")
-            except Exception:
-                pass
-            if sheet_name in LAST_GOOD:
-                return LAST_GOOD[sheet_name]
-            import pandas as pd
+            try: st.warning("구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 '동기화'를 눌러 다시 시도해 주세요.", icon="⏳")
+            except Exception: pass
             return pd.DataFrame()
         if sheet_name in LAST_GOOD:
             st.info(f"네트워크 혼잡으로 캐시 데이터를 표시합니다: {sheet_name}")
@@ -1056,10 +1020,6 @@ def read_my_eval_rows(year: int, sabun: str) -> pd.DataFrame:
     sort_cols=[c for c in ["평가유형","평가대상사번","제출시각"] if c in df.columns]
     if sort_cols: df=df.sort_values(sort_cols, ascending=[True,True,False]).reset_index(drop=True)
     return df
-
-# =============================================
-# [HR-SEC] 3-1) 인사평가 탭
-# =============================================
 
 def tab_eval(emp_df: pd.DataFrame):
     """인사평가 탭 (심플·자동 라우팅)
@@ -1861,10 +1821,6 @@ def set_jd_approval(year: int, sabun: str, name: str, version: int,
         except Exception: pass
         return {"action": "insert", "row": len(values) + 1}
 
-# =============================================
-# [HR-SEC] 3-2) 직무기술서 탭
-# =============================================
-
 def tab_job_desc(emp_df: pd.DataFrame):
     """JD editor with 2-row header and 4-row education layout + print button order handled by _jd_print_html()."""
     this_year = current_year()
@@ -1918,13 +1874,27 @@ def tab_job_desc(emp_df: pd.DataFrame):
         _jd = _jd_latest_for(str(target_sabun), int(year)) or {}
         _sub_ts = (str(_jd.get('제출시각','')).strip() or "미제출")
         latest_ver = _jd_latest_version_for(str(target_sabun), int(year))
+    
         appr_df = read_jd_approval_df(st.session_state.get('appr_rev', 0))
-        _appr = "미제출"
+        _appr_status = "미제출"
+        _appr_time = ""
         if latest_ver > 0 and not appr_df.empty:
-            _ok = appr_df[(appr_df['연도'] == int(year)) & (appr_df['사번'].astype(str) == str(target_sabun)) & (appr_df['버전'] == int(latest_ver)) & (appr_df['상태'].astype(str) == '승인')]
-            if not _ok.empty:
-                _appr = "승인"
-        show_submit_banner(f"🕒 제출시각  |  {_sub_ts if _sub_ts else '미제출'}  |  [부서장 승인] {_appr}")
+            # 최신 승인/반려 레코드 한 건 선택 (승인시각 기준 내림차순)
+            sub = appr_df[(appr_df['연도'] == int(year)) &
+                          (appr_df['사번'].astype(str) == str(target_sabun)) &
+                          (appr_df['버전'] == int(latest_ver))].copy()
+            if not sub.empty:
+                if '승인시각' in sub.columns:
+                    sub = sub.sort_values(['승인시각'], ascending=[False]).reset_index(drop=True)
+                srow = sub.iloc[0].to_dict()
+                _appr_status = str(srow.get('상태','')).strip() or "미제출"     # 승인 / 반려 / (없음)
+                _appr_time   = str(srow.get('승인시각','')).strip()
+    
+        # 표기: 제출시각(직원 제출) | [부서장 승인여부] 승인/반려 (승인시각)
+        _appr_right = _appr_status if _appr_status else "미제출"
+        if _appr_time:
+            _appr_right += f" {_appr_time}"
+        show_submit_banner(f"🕒 제출시각  |  {_sub_ts if _sub_ts else '미제출'}  |  [부서장 승인여부] {_appr_right}")
     except Exception:
         pass
 
@@ -2241,10 +2211,6 @@ def read_my_comp_simple_rows(year:int, sabun:str)->pd.DataFrame:
     sort_cols=[c for c in ["평가대상사번","평가일자","제출시각"] if c in df.columns]
     if sort_cols: df=df.sort_values(sort_cols, ascending=[True,False,False])
     return df.reset_index(drop=True)
-
-# =============================================
-# [HR-SEC] 3-3) 직무능력평가 탭
-# =============================================
 
 def tab_competency(emp_df: pd.DataFrame):
     # 권한 게이트: 관리자/평가권한자만 접근 가능 (일반 직원 접근 불가)
@@ -2821,10 +2787,6 @@ def tab_admin_acl(emp_df: pd.DataFrame):
             st.success(f"업데이트 완료: {len(data)}행", icon="✅")
         except Exception as e:
             st.exception(e)
-
-# =============================================
-# [HR-SEC] 3-5) 도움말 탭
-# =============================================
 
 def tab_help():
     st.markdown("""
