@@ -2665,15 +2665,20 @@ def tab_admin_eval_items():
 def tab_admin_acl(emp_df: pd.DataFrame):
     """권한 관리(간소/고속): 편집 시 시트 접근 없음, 저장 시 전체 반영."""
     me = st.session_state.get("user", {})
-    am_admin = is_admin(str(me.get("사번","")))
+    am_admin = is_admin(str(me.get("사번", "")))
     if not am_admin:
         st.error("Master만 저장할 수 있습니다. (표/저장 모두 비활성화)", icon="🛡️")
 
-    # 직원 라벨/룩업
-    base = emp_df[["사번","이름","부서1","부서2"]].copy() if not emp_df.empty else pd.DataFrame(columns=["사번","이름","부서1","부서2"])
+    # ── 직원 라벨/룩업 만들기 ───────────────────────────────────────────
+    base = (
+        emp_df[["사번", "이름", "부서1", "부서2"]].copy()
+        if not emp_df.empty
+        else pd.DataFrame(columns=["사번", "이름", "부서1", "부서2"])
+    )
     base["사번"] = base["사번"].astype(str).str.strip()
-    emp_lookup = {str(r["사번"]).strip(): str(r.get("이름","")).strip() for _, r in base.iterrows()}
+    emp_lookup = {str(r["사번"]).strip(): str(r.get("이름", "")).strip() for _, r in base.iterrows()}
     sabuns = sorted(emp_lookup.keys())
+
     labels, label_by_sabun, sabun_by_label = [], {}, {}
     for s in sabuns:
         nm = emp_lookup[s]
@@ -2682,7 +2687,7 @@ def tab_admin_acl(emp_df: pd.DataFrame):
         label_by_sabun[s] = lab
         sabun_by_label[lab] = s
 
-    # 최초 1회만 시트 → 세션 로드
+    # ── 최초 1회만: 권한 시트 → 세션 로드(표시는 '사번-이름' 라벨) ─────────────────
     if "acl_df" not in st.session_state:
         try:
             ws = get_book().worksheet(AUTH_SHEET)
@@ -2693,25 +2698,30 @@ def tab_admin_acl(emp_df: pd.DataFrame):
         except Exception:
             header = AUTH_HEADERS
             df_auth = pd.DataFrame(columns=header)
-        # 표시용 사번 라벨 변환
+
         df_disp = df_auth.copy()
         if "사번" in df_disp.columns:
             df_disp["사번"] = df_disp["사번"].map(lambda v: label_by_sabun.get(str(v).strip(), str(v).strip()))
+
         st.session_state["acl_header"] = header
         st.session_state["acl_df"] = df_disp
 
-    header = st.session_state["acl_header"]
+    header = list(st.session_state["acl_header"])
     work = st.session_state["acl_df"].copy()
 
-    # 드롭다운 옵션(직원 시트 유니크)
-    dept1_options = [""] + sorted({str(x).strip() for x in base.get("부서1", pd.Series(dtype=str)).dropna().unique().tolist() if str(x).strip()})
-    dept2_options = [""] + sorted({str(x).strip() for x in base.get("부서2", pd.Series(dtype=str)).dropna().unique().tolist() if str(x).strip()})
+    # ── 드롭다운 옵션(직원 시트 유니크) ───────────────────────────────────────────
+    dept1_options = [""] + sorted(
+        {str(x).strip() for x in base.get("부서1", pd.Series(dtype=str)).dropna().unique().tolist() if str(x).strip()}
+    )
+    dept2_options = [""] + sorted(
+        {str(x).strip() for x in base.get("부서2", pd.Series(dtype=str)).dropna().unique().tolist() if str(x).strip()}
+    )
 
-    # 컬럼 구성: '이름'은 에디터에서 제외
+    # ── 에디터 구성(이름은 에디터 제외, 저장 직전에 파생) ─────────────────────────
     column_config = {
         "사번": st.column_config.SelectboxColumn("사번 - 이름", options=labels),
-        "역할": st.column_config.SelectboxColumn("역할", options=["admin","manager"]),
-        "범위유형": st.column_config.SelectboxColumn("범위유형", options=["","부서","개별"]),
+        "역할": st.column_config.SelectboxColumn("역할", options=["admin", "manager"]),
+        "범위유형": st.column_config.SelectboxColumn("범위유형", options=["", "부서", "개별"]),
         "부서1": st.column_config.SelectboxColumn("부서1", options=dept1_options),
         "부서2": st.column_config.SelectboxColumn("부서2", options=dept2_options),
         "대상사번": st.column_config.TextColumn("대상사번"),
@@ -2731,17 +2741,47 @@ def tab_admin_acl(emp_df: pd.DataFrame):
         column_config=column_config,
     )
 
-    # ✅ 새 행/삭제까지 정확히 반영: 부분 대입 대신 "전체 교체"
+    # ── 편집 반영: 부분대입 대신 '전체 교체'(행 추가/삭제 정확 반영) ────────────────
     if not edited.equals(work[edit_cols]):
         new_df = edited.copy().reset_index(drop=True)
-        # 누락 컬럼 채움(저장 시 '이름'은 파생하므로 비워둬도 됨)
+        # 누락 컬럼 채움(저장 시 '이름'은 파생하므로 비워둬도 OK)
         for col in header:
             if col not in new_df.columns:
                 new_df[col] = ""
         # 세션 저장(표시는 편집 컬럼 중심으로 유지)
-        st.session_state["acl_df"] = new_df[[c for c in work.columns if c in new_df.columns]].copy()
+        # 다음 렌더에서 edit_cols 재계산되므로 header 기반으로 유지하는 게 안전
+        st.session_state["acl_df"] = new_df.reindex(columns=work.columns, fill_value="")
 
-    # 저장 버튼(전체 반영: 헤더+모든 행 덮어쓰기, '이름'은 저장 직전에 파생)
+    # ── 유틸 버튼들(미리보기/백업복원/리로드) ─────────────────────────────────────
+    c1, c2, c3 = st.columns([1, 1, 1])
+    with c1:
+        preview = st.checkbox("저장 전 미리보기(드라이런)", value=False, disabled=not am_admin)
+    with c2:
+        restore_clicked = st.button("되돌리기(직전 저장본)", disabled=not am_admin)
+    with c3:
+        reload_clicked = st.button("시트로부터 다시 불러오기")
+
+    if reload_clicked:
+        st.session_state.pop("acl_df", None)
+        st.rerun()
+
+    if restore_clicked:
+        try:
+            ws = get_book().worksheet(AUTH_SHEET)
+            vals = st.session_state.get("acl_backup") or []
+            if vals:
+                _retry(ws.clear)
+                _retry(ws.update, "A1", vals, value_input_option="USER_ENTERED")
+                st.success("직전 저장본으로 복원 완료")
+                # 복원 후 세션 리로드
+                st.session_state.pop("acl_df", None)
+                st.rerun()
+            else:
+                st.info("복원 가능한 백업이 없습니다.")
+        except Exception as e:
+            st.exception(e)
+
+    # ── 저장 버튼: 헤더+본문 전체 덮어쓰기 ────────────────────────────────────────
     if st.button("권한 전체 반영", type="primary", use_container_width=True, disabled=not am_admin):
         try:
             ws = get_book().worksheet(AUTH_SHEET)
@@ -2750,58 +2790,95 @@ def tab_admin_acl(emp_df: pd.DataFrame):
             # 1) 헤더 덮어쓰기
             _retry(ws.update, "1:1", [header], value_input_option="USER_ENTERED")
 
-            # 2) 편집본에서 저장용 DF 생성: '사번'은 라벨→실사번, '이름'은 사번으로부터 파생
+            # 2) 저장용 DF 준비
             save_df = st.session_state["acl_df"].copy()
 
             def _sab_from_label(v: str):
                 s = str(v).strip()
                 return sabun_by_label.get(s) or (s.split(" - ", 1)[0].strip() if " - " in s else s)
 
+            # 라벨 → 실사번
             if "사번" in save_df.columns:
-                save_df["사번"] = save_df["사번"].map(_sab_from_label)
+                save_df["사번"] = save_df["사번"].map(_sab_from_label).astype(str).str.strip()
 
-            # 이름 파생(저장 직전)
+            # 이름 파생(사번 기준)
             if "이름" not in save_df.columns:
                 save_df.insert(1, "이름", "")
             save_df["이름"] = save_df["사번"].map(lambda s: emp_lookup.get(str(s).strip(), "")).fillna("").astype(str)
 
-            # 저장 순서 헤더 정렬
+            # 저장 순서 헤더 정렬 및 누락 컬럼 채움
             for col in header:
                 if col not in save_df.columns:
                     save_df[col] = ""
             save_df = save_df[header]
 
-            # 체크박스 보장
+            # ✅ 안전장치들: 중복/무효/빈행 제거
+            # (1) 체크박스 보정
             if "활성" in save_df.columns:
                 def _to_bool_local(x):
-                    if isinstance(x, bool): return x
+                    if isinstance(x, bool):
+                        return x
                     s = str(x).strip().lower()
-                    return s in ("true","1","y","yes","t","on","checked")
+                    return s in ("true", "1", "y", "yes", "t", "on", "checked")
                 save_df["활성"] = save_df["활성"].map(_to_bool_local)
 
-            # 완전 빈 행 제거
+            # (2) 사번 필수
+            save_df = save_df[save_df["사번"].astype(str).str.strip() != ""]
+
+            # (3) 사번 라벨 검증(직원목록에 없는 사번은 제외)
+            valid_mask = save_df["사번"].isin(emp_lookup.keys())
+            invalid_cnt = int((~valid_mask).sum())
+            if invalid_cnt:
+                st.warning(f"사번 라벨 매핑 실패 {invalid_cnt}건 제외됨")
+
+            save_df = save_df[valid_mask]
+
+            # (4) (사번, 역할) 기준 중복 마지막만 유지
+            if {"사번", "역할"} <= set(save_df.columns):
+                save_df = save_df.drop_duplicates(subset=["사번", "역할"], keep="last")
+
+            # (5) 완전 빈 행 제거
             save_df = save_df[
                 save_df.astype(str).apply(lambda r: "".join(r.values).strip() != "", axis=1)
             ]
 
-            # 3) 본문 전부 덮어쓰기 (기존 행 깨끗이 정리)
+            # 드라이런: 쓰기 전 미리보기
             data = save_df.fillna("").values.tolist()
+            if preview:
+                st.info(f"저장 예정 행 수: {len(data)}")
+                st.dataframe(save_df, use_container_width=True)
+                st.stop()
 
-            # 시트를 데이터 크기에 맞춰 정리(남는 행 제거)
+            # 3) 실제 쓰기 전 백업 저장
             try:
-                # 먼저 충분히 키우고
+                st.session_state["acl_backup"] = _retry(ws.get_all_values) or []
+            except Exception:
+                st.session_state["acl_backup"] = []
+
+            # 4) 본문 전부 덮어쓰기(사이즈 정리)
+            try:
+                # 용량 보장 후 본문 업데이트
                 _ensure_capacity(ws, (len(data) + 1) if data else 1, max(1, len(header)))
-                # 본문 덮어쓰기
                 if data:
                     _retry(ws.update, "A2", data, value_input_option="USER_ENTERED")
-                # 남는 행 잘라내기(헤더 포함 총 len(data)+1행만 유지)
+                else:
+                    # 데이터가 없으면 본문 비우기
+                    _retry(ws.batch_clear, ["2:100000"])
+                # 남는 행 정리(헤더 + 데이터행만 남김)
                 _retry(ws.resize, rows=max(1, len(data) + 1))
+            except NameError:
+                # _ensure_capacity 미정의 환경 대비: 최소한 값만은 쓰기
+                if data:
+                    _retry(ws.update, "A2", data, value_input_option="USER_ENTERED")
+                else:
+                    _retry(ws.batch_clear, ["2:100000"])
             except Exception:
-                # 최소 보루: 그래도 값만은 쓰기
+                # 최소 보루
                 if data:
                     _retry(ws.update, "A2", data, value_input_option="USER_ENTERED")
 
             st.success(f"업데이트 완료: {len(data)}행", icon="✅")
+
         except Exception as e:
             st.exception(e)
 
