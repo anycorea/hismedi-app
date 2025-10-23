@@ -2741,15 +2741,14 @@ def tab_admin_acl(emp_df: pd.DataFrame):
         column_config=column_config,
     )
 
-    # ── 편집 반영: 부분대입 대신 '전체 교체'(행 추가/삭제 정확 반영) ────────────────
+    # ── 편집 반영: **index를 유지**해서 플리커 방지 (reset_index 금지) ───────────────
     if not edited.equals(work[edit_cols]):
-        new_df = edited.copy().reset_index(drop=True)
+        new_df = edited.copy()  # ✨ reset_index(drop=True) 제거!
         # 누락 컬럼 채움(저장 시 '이름'은 파생하므로 비워둬도 OK)
         for col in header:
             if col not in new_df.columns:
                 new_df[col] = ""
         # 세션 저장(표시는 편집 컬럼 중심으로 유지)
-        # 다음 렌더에서 edit_cols 재계산되므로 header 기반으로 유지하는 게 안전
         st.session_state["acl_df"] = new_df.reindex(columns=work.columns, fill_value="")
 
     # ── 유틸 버튼들(미리보기/백업복원/리로드) ─────────────────────────────────────
@@ -2773,7 +2772,6 @@ def tab_admin_acl(emp_df: pd.DataFrame):
                 _retry(ws.clear)
                 _retry(ws.update, "A1", vals, value_input_option="USER_ENTERED")
                 st.success("직전 저장본으로 복원 완료")
-                # 복원 후 세션 리로드
                 st.session_state.pop("acl_df", None)
                 st.rerun()
             else:
@@ -2812,8 +2810,7 @@ def tab_admin_acl(emp_df: pd.DataFrame):
                     save_df[col] = ""
             save_df = save_df[header]
 
-            # ✅ 안전장치들: 중복/무효/빈행 제거
-            # (1) 체크박스 보정
+            # 안전장치들
             if "활성" in save_df.columns:
                 def _to_bool_local(x):
                     if isinstance(x, bool):
@@ -2822,58 +2819,45 @@ def tab_admin_acl(emp_df: pd.DataFrame):
                     return s in ("true", "1", "y", "yes", "t", "on", "checked")
                 save_df["활성"] = save_df["활성"].map(_to_bool_local)
 
-            # (2) 사번 필수
             save_df = save_df[save_df["사번"].astype(str).str.strip() != ""]
-
-            # (3) 사번 라벨 검증(직원목록에 없는 사번은 제외)
             valid_mask = save_df["사번"].isin(emp_lookup.keys())
             invalid_cnt = int((~valid_mask).sum())
             if invalid_cnt:
                 st.warning(f"사번 라벨 매핑 실패 {invalid_cnt}건 제외됨")
-
             save_df = save_df[valid_mask]
 
-            # (4) (사번, 역할) 기준 중복 마지막만 유지
             if {"사번", "역할"} <= set(save_df.columns):
                 save_df = save_df.drop_duplicates(subset=["사번", "역할"], keep="last")
 
-            # (5) 완전 빈 행 제거
-            save_df = save_df[
-                save_df.astype(str).apply(lambda r: "".join(r.values).strip() != "", axis=1)
-            ]
+            save_df = save_df[save_df.astype(str).apply(lambda r: "".join(r.values).strip() != "", axis=1)]
 
-            # 드라이런: 쓰기 전 미리보기
+            # 드라이런
             data = save_df.fillna("").values.tolist()
             if preview:
                 st.info(f"저장 예정 행 수: {len(data)}")
                 st.dataframe(save_df, use_container_width=True)
                 st.stop()
 
-            # 3) 실제 쓰기 전 백업 저장
+            # 백업 저장
             try:
                 st.session_state["acl_backup"] = _retry(ws.get_all_values) or []
             except Exception:
                 st.session_state["acl_backup"] = []
 
-            # 4) 본문 전부 덮어쓰기(사이즈 정리)
+            # 본문 덮어쓰기
             try:
-                # 용량 보장 후 본문 업데이트
                 _ensure_capacity(ws, (len(data) + 1) if data else 1, max(1, len(header)))
                 if data:
                     _retry(ws.update, "A2", data, value_input_option="USER_ENTERED")
                 else:
-                    # 데이터가 없으면 본문 비우기
                     _retry(ws.batch_clear, ["2:100000"])
-                # 남는 행 정리(헤더 + 데이터행만 남김)
                 _retry(ws.resize, rows=max(1, len(data) + 1))
             except NameError:
-                # _ensure_capacity 미정의 환경 대비: 최소한 값만은 쓰기
                 if data:
                     _retry(ws.update, "A2", data, value_input_option="USER_ENTERED")
                 else:
                     _retry(ws.batch_clear, ["2:100000"])
             except Exception:
-                # 최소 보루
                 if data:
                     _retry(ws.update, "A2", data, value_input_option="USER_ENTERED")
 
