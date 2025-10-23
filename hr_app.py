@@ -2731,32 +2731,39 @@ def tab_admin_acl(emp_df: pd.DataFrame):
         column_config=column_config,
     )
 
-    # 세션 반영(편집 반영만, 자동 채움/기본값 없음)
+    # ✅ 새 행/삭제까지 정확히 반영: 부분 대입 대신 "전체 교체"
     if not edited.equals(work[edit_cols]):
-        new_df = work.copy()
-        new_df[edit_cols] = edited
-        st.session_state["acl_df"] = new_df
+        new_df = edited.copy().reset_index(drop=True)
+        # 누락 컬럼 채움(저장 시 '이름'은 파생하므로 비워둬도 됨)
+        for col in header:
+            if col not in new_df.columns:
+                new_df[col] = ""
+        # 세션 저장(표시는 편집 컬럼 중심으로 유지)
+        st.session_state["acl_df"] = new_df[[c for c in work.columns if c in new_df.columns]].copy()
 
     # 저장 버튼(전체 반영: 헤더+모든 행 덮어쓰기, '이름'은 저장 직전에 파생)
-    if st.button("권한 전체 반영", type="primary", use_container_width=True):
+    if st.button("권한 전체 반영", type="primary", use_container_width=True, disabled=not am_admin):
         try:
             ws = get_book().worksheet(AUTH_SHEET)
-            header = st.session_state.get("acl_header", AUTH_HEADERS)
+            header = [*st.session_state.get("acl_header", AUTH_HEADERS)] or AUTH_HEADERS
+
             # 1) 헤더 덮어쓰기
             _retry(ws.update, "1:1", [header], value_input_option="USER_ENTERED")
 
             # 2) 편집본에서 저장용 DF 생성: '사번'은 라벨→실사번, '이름'은 사번으로부터 파생
             save_df = st.session_state["acl_df"].copy()
-            def _sab_from_label(v:str):
+
+            def _sab_from_label(v: str):
                 s = str(v).strip()
-                return sabun_by_label.get(s) or (s.split(" - ",1)[0].strip() if " - " in s else s)
+                return sabun_by_label.get(s) or (s.split(" - ", 1)[0].strip() if " - " in s else s)
+
             if "사번" in save_df.columns:
                 save_df["사번"] = save_df["사번"].map(_sab_from_label)
-            # 이름 파생(자동 채움은 UI에선 안 하지만 저장 직전만 채움)
+
+            # 이름 파생(저장 직전)
             if "이름" not in save_df.columns:
                 save_df.insert(1, "이름", "")
-            name_series = save_df["사번"].map(lambda s: emp_lookup.get(str(s).strip(), ""))
-            save_df["이름"] = name_series.fillna("").astype(str)
+            save_df["이름"] = save_df["사번"].map(lambda s: emp_lookup.get(str(s).strip(), "")).fillna("").astype(str)
 
             # 저장 순서 헤더 정렬
             for col in header:
@@ -2766,23 +2773,33 @@ def tab_admin_acl(emp_df: pd.DataFrame):
 
             # 체크박스 보장
             if "활성" in save_df.columns:
-                def _to_bool(x):
+                def _to_bool_local(x):
                     if isinstance(x, bool): return x
                     s = str(x).strip().lower()
                     return s in ("true","1","y","yes","t","on","checked")
-                save_df["활성"] = save_df["활성"].map(_to_bool)
+                save_df["활성"] = save_df["활성"].map(_to_bool_local)
 
             # 완전 빈 행 제거
-            save_df = save_df[save_df.astype(str).apply(lambda r: "".join(r.values).strip() != "", axis=1)]
+            save_df = save_df[
+                save_df.astype(str).apply(lambda r: "".join(r.values).strip() != "", axis=1)
+            ]
 
-            # 3) 본문 전부 덮어쓰기
+            # 3) 본문 전부 덮어쓰기 (기존 행 깨끗이 정리)
             data = save_df.fillna("").values.tolist()
+
+            # 시트를 데이터 크기에 맞춰 정리(남는 행 제거)
             try:
-                ws.batch_clear(["2:100000"])
+                # 먼저 충분히 키우고
+                _ensure_capacity(ws, (len(data) + 1) if data else 1, max(1, len(header)))
+                # 본문 덮어쓰기
+                if data:
+                    _retry(ws.update, "A2", data, value_input_option="USER_ENTERED")
+                # 남는 행 잘라내기(헤더 포함 총 len(data)+1행만 유지)
+                _retry(ws.resize, rows=max(1, len(data) + 1))
             except Exception:
-                pass
-            if data:
-                _retry(ws.update, "A2", data, value_input_option="USER_ENTERED")
+                # 최소 보루: 그래도 값만은 쓰기
+                if data:
+                    _retry(ws.update, "A2", data, value_input_option="USER_ENTERED")
 
             st.success(f"업데이트 완료: {len(data)}행", icon="✅")
         except Exception as e:
