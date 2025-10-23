@@ -2662,8 +2662,13 @@ def tab_admin_eval_items():
                 except Exception as e:
                     st.exception(e)
 
+
 def tab_admin_acl(emp_df: pd.DataFrame):
-    """권한 관리(간소/고속): 편집 시 시트 접근 없음, 저장 시 전체 반영."""
+    """권한 관리(간소/고속): 편집 시 세션 DF를 항상 정규화해 첫 선택이 사라지는 문제를 해결.
+    - 원인: data_editor가 새 행을 만들 때 각 셀은 NaN/None으로 시작 →
+            이전 버전에서 이 NaN이 그대로 세션에 저장되어 다음 rerun 시 'None'로 표시됨.
+    - 해결: 편집 DF를 세션에 반영하기 전에 문자열/불리언 컬럼을 강제로 정규화(fillna, dtype 일치).
+    """
     me = st.session_state.get("user", {})
     am_admin = is_admin(str(me.get("사번","")))
     if not am_admin:
@@ -2682,6 +2687,64 @@ def tab_admin_acl(emp_df: pd.DataFrame):
         label_by_sabun[s] = lab
         sabun_by_label[lab] = s
 
+    # 정규화 유틸 (표시용 DF: '사번'은 라벨 문자열)
+    def _normalize_acl_display_df(df_in: pd.DataFrame) -> pd.DataFrame:
+        headers = globals().get("AUTH_HEADERS", ["사번","이름","역할","범위유형","부서1","부서2","대상사번","활성","비고"])
+        df = (df_in.copy() if df_in is not None else pd.DataFrame(columns=headers))
+
+        # 누락 컬럼 채우기
+        for c in headers:
+            if c not in df.columns:
+                df[c] = "" if c not in ("활성",) else False
+
+        # 타입/결측값 정리
+        str_cols = [c for c in headers if c not in ("활성",)]
+        for c in str_cols:
+            df[c] = df[c].astype(object).where(pd.notna(df[c]), "")
+        if "활성" in df.columns:
+            def _to_b(x):
+                if isinstance(x, bool): return x
+                s = str(x).strip().lower()
+                return s in ("true","1","y","yes","t","on","checked")
+            df["활성"] = df["활성"].map(_to_b).fillna(False).astype(bool)
+
+        # 완전 빈 행 제거(사번/역할/범위/부서/대상사번/비고 다 공란이고 활성 False)
+        def _row_empty(r):
+            return (
+                str(r.get("사번","")).strip()=="" and
+                str(r.get("역할","")).strip()=="" and
+                str(r.get("범위유형","")).strip()=="" and
+                str(r.get("부서1","")).strip()=="" and
+                str(r.get("부서2","")).strip()=="" and
+                str(r.get("대상사번","")).strip()=="" and
+                str(r.get("비고","")).strip()=="" and
+                (bool(r.get("활성", False)) is False)
+            )
+        if len(df) > 0:
+            df = df[~df.apply(_row_empty, axis=1)].reset_index(drop=True)
+
+        # '사번' 컬럼은 "사번 - 이름" 라벨을 유지
+        if "사번" in df.columns:
+            def _labelize(v):
+                s = str(v).strip()
+                # 이미 라벨이면 보존, 아니면 라벨로 변환
+                if s in sabun_by_label:
+                    return s
+                if " - " in s:
+                    return s
+                return label_by_sabun.get(s, s)
+            df["사번"] = df["사번"].map(_labelize)
+
+        # '이름'은 표시에만 쓰이므로 비워두거나 파생 가능
+        if "이름" in df.columns:
+            df["이름"] = df["사번"].map(lambda lab: emp_lookup.get(sabun_by_label.get(str(lab).strip(), str(lab).split(" - ",1)[0].strip()), "")).fillna("").astype(str)
+
+        # 최종 컬럼 순서 맞추기
+        for c in headers:
+            if c not in df.columns:
+                df[c] = "" if c not in ("활성",) else False
+        return df[headers].copy()
+
     # 최초 1회만 시트 → 세션 로드
     if "acl_df" not in st.session_state:
         try:
@@ -2689,19 +2752,17 @@ def tab_admin_acl(emp_df: pd.DataFrame):
             header = _retry(ws.row_values, 1) or AUTH_HEADERS
             vals = _retry(ws.get_all_values) or []
             rows = vals[1:] if len(vals) > 1 else []
-            df_auth = pd.DataFrame(rows, columns=header).fillna("")
+            raw_df = pd.DataFrame(rows, columns=header).fillna("")
         except Exception:
             header = AUTH_HEADERS
-            df_auth = pd.DataFrame(columns=header)
-        # 표시용 사번 라벨 변환
-        df_disp = df_auth.copy()
-        if "사번" in df_disp.columns:
-            df_disp["사번"] = df_disp["사번"].map(lambda v: label_by_sabun.get(str(v).strip(), str(v).strip()))
+            raw_df = pd.DataFrame(columns=header)
+        # 표시용 정규화
+        disp_df = _normalize_acl_display_df(raw_df)
         st.session_state["acl_header"] = header
-        st.session_state["acl_df"] = df_disp
+        st.session_state["acl_df"] = disp_df
 
     header = st.session_state["acl_header"]
-    work = st.session_state["acl_df"].copy()
+    work = _normalize_acl_display_df(st.session_state.get("acl_df", pd.DataFrame(columns=header)))
 
     # 드롭다운 옵션(직원 시트 유니크)
     dept1_options = [""] + sorted({str(x).strip() for x in base.get("부서1", pd.Series(dtype=str)).dropna().unique().tolist() if str(x).strip()})
@@ -2719,7 +2780,6 @@ def tab_admin_acl(emp_df: pd.DataFrame):
         "비고": st.column_config.TextColumn("비고"),
     }
     edit_cols = [c for c in header if c != "이름" and c in work.columns]
-
     edited = st.data_editor(
         work[edit_cols],
         key="acl_editor",
@@ -2731,15 +2791,16 @@ def tab_admin_acl(emp_df: pd.DataFrame):
         column_config=column_config,
     )
 
-    # ✅ 새 행/삭제까지 정확히 반영: 부분 대입 대신 "전체 교체"
-    if not edited.equals(work[edit_cols]):
-        new_df = edited.copy().reset_index(drop=True)
-        # 누락 컬럼 채움(저장 시 '이름'은 파생하므로 비워둬도 됨)
-        for col in header:
-            if col not in new_df.columns:
-                new_df[col] = ""
-        # 세션 저장(표시는 편집 컬럼 중심으로 유지)
-        st.session_state["acl_df"] = new_df[[c for c in work.columns if c in new_df.columns]].copy()
+    # 변경 감지 → 정규화 후 세션 반영 (NaN/None 방지)
+    try:
+        if not edited.equals(work[edit_cols]):
+            new_df = _normalize_acl_display_df(edited)
+            # editor에는 '이름'이 없으므로 파생해서 붙여줌
+            new_df["이름"] = new_df["사번"].map(lambda lab: emp_lookup.get(sabun_by_label.get(str(lab).strip(), str(lab).split(" - ",1)[0].strip()), "")).fillna("").astype(str)
+            st.session_state["acl_df"] = new_df[[c for c in work.columns if c in new_df.columns]].copy()
+    except Exception:
+        # 안전망: 그래도 현재 편집본을 최대한 보존
+        st.session_state["acl_df"] = _normalize_acl_display_df(edited)
 
     # 저장 버튼(전체 반영: 헤더+모든 행 덮어쓰기, '이름'은 저장 직전에 파생)
     if st.button("권한 전체 반영", type="primary", use_container_width=True, disabled=not am_admin):
@@ -2750,8 +2811,8 @@ def tab_admin_acl(emp_df: pd.DataFrame):
             # 1) 헤더 덮어쓰기
             _retry(ws.update, "1:1", [header], value_input_option="USER_ENTERED")
 
-            # 2) 편집본에서 저장용 DF 생성: '사번'은 라벨→실사번, '이름'은 사번으로부터 파생
-            save_df = st.session_state["acl_df"].copy()
+            # 2) 저장용 DF 생성: '사번'은 라벨→실사번, '이름'은 파생
+            save_df = _normalize_acl_display_df(st.session_state.get("acl_df", pd.DataFrame(columns=header))).copy()
 
             def _sab_from_label(v: str):
                 s = str(v).strip()
@@ -2768,7 +2829,7 @@ def tab_admin_acl(emp_df: pd.DataFrame):
             # 저장 순서 헤더 정렬
             for col in header:
                 if col not in save_df.columns:
-                    save_df[col] = ""
+                    save_df[col] = "" if col != "활성" else False
             save_df = save_df[header]
 
             # 체크박스 보장
@@ -2777,33 +2838,28 @@ def tab_admin_acl(emp_df: pd.DataFrame):
                     if isinstance(x, bool): return x
                     s = str(x).strip().lower()
                     return s in ("true","1","y","yes","t","on","checked")
-                save_df["활성"] = save_df["활성"].map(_to_bool_local)
+                save_df["활성"] = save_df["활성"].map(_to_bool_local).fillna(False).astype(bool)
 
             # 완전 빈 행 제거
             save_df = save_df[
                 save_df.astype(str).apply(lambda r: "".join(r.values).strip() != "", axis=1)
             ]
 
-            # 3) 본문 전부 덮어쓰기 (기존 행 깨끗이 정리)
+            # 3) 본문 전부 덮어쓰기 (기존 행 정리)
             data = save_df.fillna("").values.tolist()
-
-            # 시트를 데이터 크기에 맞춰 정리(남는 행 제거)
             try:
-                # 먼저 충분히 키우고
                 _ensure_capacity(ws, (len(data) + 1) if data else 1, max(1, len(header)))
-                # 본문 덮어쓰기
                 if data:
                     _retry(ws.update, "A2", data, value_input_option="USER_ENTERED")
-                # 남는 행 잘라내기(헤더 포함 총 len(data)+1행만 유지)
                 _retry(ws.resize, rows=max(1, len(data) + 1))
             except Exception:
-                # 최소 보루: 그래도 값만은 쓰기
                 if data:
                     _retry(ws.update, "A2", data, value_input_option="USER_ENTERED")
 
             st.success(f"업데이트 완료: {len(data)}행", icon="✅")
         except Exception as e:
             st.exception(e)
+
 
 def tab_help():
     st.markdown("""
