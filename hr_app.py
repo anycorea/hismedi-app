@@ -2664,8 +2664,9 @@ def tab_admin_eval_items():
 
 
 
+
 def tab_admin_acl(emp_df: pd.DataFrame):
-    """권한 관리: 편집 첫 선택이 사라지는 문제 전면 해결(모든 셀 정규화 + 빈옵션 허용)."""
+    """권한 관리: 모든 컬럼에서 첫 선택/입력이 사라지는 현상 방지(항상 편집본 신뢰)."""
     me = st.session_state.get("user", {})
     am_admin = is_admin(str(me.get("사번","")))
     if not am_admin:
@@ -2686,17 +2687,16 @@ def tab_admin_acl(emp_df: pd.DataFrame):
     dept1_options = [""] + sorted({str(x).strip() for x in base.get("부서1", pd.Series(dtype=str)).dropna().unique().tolist() if str(x).strip()})
     dept2_options = [""] + sorted({str(x).strip() for x in base.get("부서2", pd.Series(dtype=str)).dropna().unique().tolist() if str(x).strip()})
 
-    # 표시용 DF 정규화
-    def _normalize_acl_display_df(df_in: pd.DataFrame) -> pd.DataFrame:
-        headers = globals().get("AUTH_HEADERS", ["사번","이름","역할","범위유형","부서1","부서2","대상사번","활성","비고"])
-        df = (df_in.copy() if df_in is not None else pd.DataFrame(columns=headers))
+    headers = globals().get("AUTH_HEADERS", ["사번","이름","역할","범위유형","부서1","부서2","대상사번","활성","비고"])
 
-        # 누락 컬럼 채우기
+    # 정규화(편집 중에는 행 삭제하지 않음: 저장 시만 삭제)
+    def _normalize_for_editor(df_in: pd.DataFrame) -> pd.DataFrame:
+        df = (df_in.copy() if df_in is not None else pd.DataFrame(columns=headers))
+        # 누락 컬럼
         for c in headers:
             if c not in df.columns:
-                df[c] = "" if c not in ("활성",) else False
-
-        # 문자열/불리언 정규화
+                df[c] = "" if c != "활성" else False
+        # 문자열/불리언
         for c in [x for x in headers if x != "활성"]:
             df[c] = df[c].astype(object).where(pd.notna(df[c]), "")
             df[c] = df[c].map(lambda v: "" if str(v).strip().lower() in ("none","nan") else str(v)).astype(object)
@@ -2707,28 +2707,24 @@ def tab_admin_acl(emp_df: pd.DataFrame):
                 return s in ("true","1","y","yes","t","on","checked")
             df["활성"] = df["활성"].map(_to_b).fillna(False).astype(bool)
 
-        # '사번'은 라벨화
+        # 라벨 유지
         if "사번" in df.columns:
             def _labelize(v):
                 s = str(v).strip()
-                if s in sabun_by_label: # 이미 라벨
-                    return s
-                if " - " in s:
-                    return s
+                if s in sabun_by_label or " - " in s: return s
                 return label_by_sabun.get(s, s)
             df["사번"] = df["사번"].map(_labelize)
 
-        # '이름' 파생
+        # 이름 파생
         if "이름" in df.columns:
             def _nm(lab):
                 sv = sabun_by_label.get(str(lab).strip())
                 if sv: return emp_lookup.get(sv,"")
-                # 라벨형이 아니면 "사번 - 이름" 문자열에서 앞부분 추출
                 sv = str(lab).split(" - ",1)[0].strip()
                 return emp_lookup.get(sv,"")
             df["이름"] = df["사번"].map(_nm).fillna("")
 
-        # 값 클램핑(옵션 밖 값은 "")
+        # 옵션 클램핑
         if "역할" in df.columns:
             df["역할"] = df["역할"].map(lambda x: x if x in role_options else "").astype(object)
         if "범위유형" in df.columns:
@@ -2738,7 +2734,15 @@ def tab_admin_acl(emp_df: pd.DataFrame):
         if "부서2" in df.columns:
             df["부서2"] = df["부서2"].map(lambda x: x if x in dept2_options else "").astype(object)
 
-        # 완전 빈 행 제거
+        # 순서 맞추기
+        for c in headers:
+            if c not in df.columns:
+                df[c] = "" if c != "활성" else False
+        return df[headers].copy()
+
+    def _normalize_for_save(df_in: pd.DataFrame) -> pd.DataFrame:
+        df = _normalize_for_editor(df_in)
+        # 완전 빈 행 제거(저장시에만)
         def _row_empty(r):
             return (
                 str(r.get("사번","")).strip()=="" and
@@ -2752,30 +2756,24 @@ def tab_admin_acl(emp_df: pd.DataFrame):
             )
         if len(df) > 0:
             df = df[~df.apply(_row_empty, axis=1)].reset_index(drop=True)
-
-        # 컬럼 순서
-        for c in headers:
-            if c not in df.columns:
-                df[c] = "" if c != "활성" else False
-        return df[headers].copy()
+        return df
 
     # 최초 로드
     if "acl_df" not in st.session_state:
         try:
             ws = get_book().worksheet(AUTH_SHEET)
-            header = _retry(ws.row_values, 1) or AUTH_HEADERS
+            header = _retry(ws.row_values, 1) or headers
             vals = _retry(ws.get_all_values) or []
             rows = vals[1:] if len(vals) > 1 else []
             raw_df = pd.DataFrame(rows, columns=header).fillna("")
         except Exception:
-            header = AUTH_HEADERS
+            header = headers
             raw_df = pd.DataFrame(columns=header)
-        disp_df = _normalize_acl_display_df(raw_df)
         st.session_state["acl_header"] = header
-        st.session_state["acl_df"] = disp_df
+        st.session_state["acl_df"] = _normalize_for_editor(raw_df)
 
     header = st.session_state["acl_header"]
-    work = _normalize_acl_display_df(st.session_state.get("acl_df", pd.DataFrame(columns=header)))
+    work = _normalize_for_editor(st.session_state.get("acl_df", pd.DataFrame(columns=header)))
 
     # 에디터
     column_config = {
@@ -2800,32 +2798,28 @@ def tab_admin_acl(emp_df: pd.DataFrame):
         column_config=column_config,
     )
 
-    # 변경 반영(정규화 후 저장)
-    try:
-        # equals가 dtype 차이로 오판할 수 있어 문자열 비교 보정
-        changed = True
-        try:
-            changed = not edited.fillna("").astype(str).equals(work[edit_cols].fillna("").astype(str))
-        except Exception:
-            changed = True
-        if changed:
-            new_df = _normalize_acl_display_df(edited)
-            new_df["이름"] = new_df["사번"].map(lambda lab: emp_lookup.get(sabun_by_label.get(str(lab).strip(), str(lab).split(" - ",1)[0].strip()), "")).fillna("").astype(str)
-            st.session_state["acl_df"] = _normalize_acl_display_df(new_df)
-    except Exception:
-        st.session_state["acl_df"] = _normalize_acl_display_df(edited)
+    # ⚠️ 항상 편집본을 신뢰해서 세션에 즉시 반영 (equals 비교 제거)
+    # → rerun 시에도 방금 선택한 값이 절대 사라지지 않음.
+    normalized = _normalize_for_editor(edited)
+    # '이름' 파생 보장
+    if "이름" not in normalized.columns:
+        normalized.insert(1, "이름", "")
+    normalized["이름"] = normalized["사번"].map(
+        lambda lab: emp_lookup.get(sabun_by_label.get(str(lab).strip(), str(lab).split(" - ",1)[0].strip()), "")
+    ).fillna("").astype(str)
+    st.session_state["acl_df"] = _normalize_for_editor(normalized)
 
     # 저장(전체 반영)
     if st.button("권한 전체 반영", type="primary", use_container_width=True, disabled=not am_admin):
         try:
             ws = get_book().worksheet(AUTH_SHEET)
-            header = [*st.session_state.get("acl_header", AUTH_HEADERS)] or AUTH_HEADERS
+            header = [*st.session_state.get("acl_header", headers)] or headers
 
             # 1) 헤더
             _retry(ws.update, "1:1", [header], value_input_option="USER_ENTERED")
 
             # 2) 저장용 DF: 라벨→사번, 이름 파생
-            save_df = _normalize_acl_display_df(st.session_state.get("acl_df", pd.DataFrame(columns=header))).copy()
+            save_df = _normalize_for_save(st.session_state.get("acl_df", pd.DataFrame(columns=header))).copy()
 
             def _sab_from_label(v: str):
                 s = str(v).strip()
