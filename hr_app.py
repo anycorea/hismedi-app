@@ -408,6 +408,13 @@ def mount_sync_toast():
 APP_TITLE = st.secrets.get("app", {}).get("TITLE", "HISMEDI - 인사/HR")
 st.set_page_config(page_title=APP_TITLE, layout="wide")
 
+# === Scroll behavior switch (comparison aid) ==================================
+# 'strict_top'  : Always hold at very top for ~1.2s after each render (previous behavior)
+# 'preserve'    : Restore last scrollY after rerun; no forced jump to top (recommended)
+# 'off'         : Do nothing (browser default)
+SCROLL_BEHAVIOR = 'preserve'
+# =============================================================================
+
 # st.help 출력 무력화
 if not getattr(st, "_help_disabled", False):
     def _noop_help(*_a, **_kw): return None
@@ -474,53 +481,74 @@ _CSS_GLOBAL = f"""
 st.markdown(_CSS_GLOBAL, unsafe_allow_html=True)
 
 # 스크롤 최상단 고정 (rerun 및 버튼 클릭 뒤 점프 억제: 항상 TOP)
+
+# Script to control scroll behavior (switchable)
 import streamlit.components.v1 as components
-components.html("""
+_js_strict_top = """
 <script>
 (function(){
   const d = window.parent.document;
   const s = window.sessionStorage;
-
-  // 클릭 시 다음 렌더에서 더 길게 TOP 유지
-  function arm(ms){
-    try{ s.setItem('forceTopUntil', String(Date.now()+ms)); }catch(_){}
-  }
-  function hookLabels(){
-    const labels = ['동기화','필터 초기화','검색 적용']; // 필요시 더 추가
-    const btns = Array.from(d.querySelectorAll('.stButton button'));
-    btns.forEach(b=>{
-      if(b._forceTopHooked) return;
-      b._forceTopHooked = true;
-      b.addEventListener('click', ()=> arm(2200), {capture:true});
-    });
-  }
-  hookLabels();
-  new MutationObserver(hookLabels).observe(d.body, {subtree:true, childList:true});
-
-  // 기본적으로도 매 렌더마다 일정 시간 TOP 유지
-  const now = Date.now();
+  const baseHold = Date.now() + 1200;
   const armedUntil = parseInt(s.getItem('forceTopUntil')||'0',10) || 0;
-  const baseHold  = now + 1200;                  // 기본 유지 시간
-  const holdUntil = Math.max(armedUntil, baseHold);
-
-  // 기존 복원값은 사용하지 않음 (항상 TOP을 목표)
+  const holdUntil = Math.max(baseHold, armedUntil);
   try{ s.removeItem('scrollY'); }catch(_){}
-
-  // 초기 포커스가 아래쪽 위젯으로 점프시키는 문제 방지: blur 강제
-  const blurWindow = ()=>{ try{ if(d.activeElement) d.activeElement.blur(); }catch(_){ } };
-
-  // holdUntil까지 스크롤/포커스를 반복적으로 TOP으로 유지
-  const tick = ()=>{
-    const t = Date.now();
-    blurWindow();
+  function tick(){
     try{ window.scrollTo(0,0); }catch(_){}
-    if (t < holdUntil) requestAnimationFrame(tick);
+    if (Date.now() < holdUntil) requestAnimationFrame(tick);
     else try{ s.removeItem('forceTopUntil'); }catch(_){}
-  };
+  }
   requestAnimationFrame(tick);
 })();
 </script>
-""", height=0, width=0)
+"""
+
+_js_preserve = """
+<script>
+(function(){
+  const s = window.sessionStorage;
+  let y = 0;
+  try{ y = parseInt(s.getItem('scrollY')||'0',10) || 0; }catch(_){ y = 0; }
+  // restore last scroll immediately after render
+  requestAnimationFrame(function(){ try{ window.scrollTo(0, y); }catch(_){} });
+  // save on scroll
+  window.addEventListener('scroll', function(){
+    try{ s.setItem('scrollY', String(window.scrollY||0)); }catch(_){}
+  }, {passive:true});
+  // extend hold only when specific buttons are clicked (rare)
+  (function(){
+    const d = window.parent.document;
+    const labels = ['동기화','필터 초기화','검색 적용'];
+    const btns = Array.from(d.querySelectorAll('.stButton button'));
+    btns.forEach(b=>{
+      if(b._scrollBound) return;
+      b._scrollBound = true;
+      b.addEventListener('click', ()=>{
+        try{ s.setItem('forceTopUntil', String(Date.now()+1200)); }catch(_){}
+      }, {capture:true});
+    });
+    new MutationObserver(function(m){ /* rebind as buttons appear */ 
+      const btns2 = Array.from(d.querySelectorAll('.stButton button'));
+      btns2.forEach(b=>{
+        if(b._scrollBound) return;
+        b._scrollBound = true;
+        b.addEventListener('click', ()=>{
+          try{ s.setItem('forceTopUntil', String(Date.now()+1200)); }catch(_){}
+        }, {capture:true});
+      });
+    }).observe(d.body, {childList:true, subtree:true});
+  })();
+})();
+</script>
+"""
+
+_js_off = """<script></script>"""
+
+components.html({
+  'strict_top': _js_strict_top,
+  'preserve'  : _js_preserve,
+  'off'       : _js_off,
+}.get(SCROLL_BEHAVIOR, _js_preserve), height=0, width=0)
 
 
 
