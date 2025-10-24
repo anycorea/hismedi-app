@@ -352,24 +352,39 @@ if not getattr(st, "_help_disabled", False):
     st.help = _noop_help
     st._help_disabled = True
 
-# 전역 CSS
+# 전역 CSS (상단 여백 축소 버전)
 _CSS_GLOBAL = """
 <style>
-  .block-container{padding-top:2.5rem!important}
+  /* ── Top spacing: tighter ───────────────────────────────────────── */
+  div.block-container{padding-top:.9rem!important}            /* was 2.5rem */
+  header[data-testid="stHeader"]{padding-top:0!important}     /* header 여백 살짝 정리 */
+  section[data-testid="stSidebar"] .block-container{padding-top:.6rem!important}
+  /* 숨겨진 True/False 등으로 남은 빈 단락 제거 */
+  div.block-container > p:empty{display:none!important;margin:0!important;padding:0!important}
+
+  /* ── Tabs / Badges / Titles ────────────────────────────────────── */
   .stTabs [role='tab']{padding:10px 16px!important;font-size:1.02rem!important}
   .badge{display:inline-block;padding:.25rem .5rem;border-radius:.5rem;border:1px solid #9ae6b4;background:#e6ffed;color:#0f5132;font-weight:600}
   section[data-testid="stHelp"],div[data-testid="stHelp"]{display:none!important}
   .muted{color:#6b7280}
-  .app-title-hero{font-weight:800;font-size:1.6rem;line-height:1.15;margin:.2rem 0 .6rem}
+  .app-title-hero{font-weight:800;font-size:1.6rem;line-height:1.15;margin:.1rem 0 .5rem} /* margin 살짝 축소 */
   @media (min-width:1400px){.app-title-hero{font-size:1.8rem}}
+
+  /* ── Buttons / Forms ───────────────────────────────────────────── */
   div[data-testid="stFormSubmitButton"] button[kind="secondary"]{padding:.35rem .5rem;font-size:.82rem}
+
+  /* ── JD Summary box ────────────────────────────────────────────── */
   .scrollbox{max-height:280px;overflow-y:auto;padding:.6rem .75rem;background:#fafafa;border:1px solid #e5e7eb;border-radius:.5rem}
   .scrollbox .kv{margin-bottom:.6rem}
   .scrollbox .k{font-weight:700;margin-bottom:.2rem}
   .scrollbox .v{white-space:pre-wrap;word-break:break-word;line-height:1.42}
   .jd-tight{line-height:1.42}
   .jd-tight p,.jd-tight ul,.jd-tight ol,.jd-tight li{margin:0;padding:0}
+
+  /* ── Submit banner ─────────────────────────────────────────────── */
   .submit-banner{background:#FEF3C7;border:1px solid #FDE68A;padding:.55rem .8rem;border-radius:.5rem;font-weight:600;line-height:1.35;margin:4px 0 14px;display:block}
+
+  /* ── DataFrame scroll behavior ─────────────────────────────────── */
   div[data-testid="stDataFrame"]>div{overflow-x:visible!important}
   div[data-testid="stDataFrame"] [role="grid"]{overflow-x:auto!important}
   div[data-testid="stDataFrame"]{padding-bottom:10px}
