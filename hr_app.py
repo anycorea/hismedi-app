@@ -23,6 +23,7 @@ def _ensure_capacity(ws, min_row: int, min_col: int):
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Imports
+import time
 # ═════════════════════════════════════════════════════════════════════════════
 import re, time, random, hashlib, secrets as pysecrets
 from datetime import datetime, timedelta
@@ -174,49 +175,71 @@ except Exception:
 
 
 
-def force_sync():
-    """데이터/편집 캐시만 비우고 즉시 리런 (로그인 세션/인증 키는 유지)."""
-    # Streamlit 캐시
-    try:
-        st.cache_data.clear()
-    except Exception:
-        pass
-    try:
-        st.cache_resource.clear()
-    except Exception:
-        pass
 
-    # 모듈 레벨 캐시
+def force_sync(min_interval: int = 15):
+    """빠른 연타/다중 사용자 환경에서 안전하게 동기화.
+    - 마지막 동기화 시점으로부터 min_interval초 이전엔 무시(스로틀)
+    - 중복 실행 방지 락
+    - 데이터 캐시만 비우고(빠름) 리소스 캐시는 유지(인증/세션 재생성 비용 절감)
+    """
+    now = time.time()
+    if st.session_state.get("_sync_lock", False):
+        st.info("이미 동기화 중입니다. 잠시만요…", icon="⏳")
+        return
+    last_ts = st.session_state.get("_last_sync_ts", 0.0)
+    if now - last_ts < float(min_interval):
+        st.info(f"최근 {int(now-last_ts)}초 전에 동기화됨 — 너무 잦은 동기화는 속도를 떨어뜨려요.", icon="⚠️")
+        return
+
+    st.session_state["_sync_lock"] = True
     try:
-        global _WS_CACHE, _HDR_CACHE, _VAL_CACHE
-        _WS_CACHE.clear(); _HDR_CACHE.clear(); _VAL_CACHE.clear()
-    except Exception:
+        # 데이터 캐시만 클리어
         try:
-            _WS_CACHE = {}; _HDR_CACHE = {}; _VAL_CACHE = {}
+            st.cache_data.clear()
         except Exception:
             pass
 
-    # 세션 상태: 편집/데이터 캐시만 선별 제거 (로그인/인증 관련 키는 보존)
-    SAFE_KEEP = {"user", "access_token", "refresh_token", "login_time", "login_provider"}
-    ACL_KEYS  = {"acl_df", "acl_header", "acl_editor", "auth_editor", "auth_editor_df", "__auth_sab_sig"}
-    PREFIXES  = ("__cache_", "_df_", "_cache_", "gs_")  # 데이터 캐시성 키만
-    
-    try:
+        # 모듈 레벨 캐시
+        try:
+            global _WS_CACHE, _HDR_CACHE, _VAL_CACHE
+        except Exception:
+            pass
+        try:
+            _WS_CACHE.clear()
+        except Exception:
+            pass
+        try:
+            _HDR_CACHE.clear()
+        except Exception:
+            pass
+        try:
+            _VAL_CACHE.clear()
+        except Exception:
+            pass
+
+        # 세션 키 정리 (인증/사용자/선택은 유지)
+        SAFE_KEEP = {"user","authed","auth_expires_at","_state_owner_sabun",
+                     "glob_target_sabun","glob_target_name",
+                     "left_pick","pick_q",
+                     "_last_sync_ts","_sync_lock"}
+        PREFIXES = ("eval", "jd", "cmpS", "cmpD")
+        ACL_KEYS  = {"acl_df", "acl_header", "acl_editor", "auth_editor"}
         to_del = []
-        for k in list(st.session_state.keys()):
-            if k in SAFE_KEEP:
-                continue
-            if k in ACL_KEYS:
-                to_del.append(k); continue
-            if any(k.startswith(p) for p in PREFIXES):
-                to_del.append(k); continue
-        for k in to_del:
-            del st.session_state[k]
-    except Exception:
-        pass
+        try:
+            for k in list(st.session_state.keys()):
+                if k in SAFE_KEEP: continue
+                if k in ACL_KEYS:  to_del.append(k); continue
+                if any(k.startswith(p) for p in PREFIXES): to_del.append(k); continue
+            for k in to_del:
+                del st.session_state[k]
+        except Exception:
+            pass
 
-    st.rerun()
-
+        st.session_state["_last_sync_ts"] = now
+        st.success("동기화 완료!", icon="✅")
+        st.rerun()
+    finally:
+        st.session_state["_sync_lock"] = False
 # ═════════════════════════════════════════════════════════════════════════════
 # App Config / Style
 # ═════════════════════════════════════════════════════════════════════════════
@@ -690,6 +713,20 @@ def get_allowed_sabuns(emp_df:pd.DataFrame, sabun:str, include_self:bool=True)->
     return allowed
 
 # ═════════════════════════════════════════════════════════════════════════════
+
+# ─ Debounce helper ───────────────────────────────────────────────────────────
+def _debounced(label: str, key: str, wait: float = 1.0):
+    """버튼 연타 시 첫 1회만 통과. 나머지는 무시."""
+    k = f"_debounce_{key}"
+    ts = st.session_state.get(k, 0.0)
+    now = time.time()
+    if now - ts < wait:
+        return False
+    if st.button(label, key=key, use_container_width=True):
+        st.session_state[k] = now
+        return True
+    return False
+
 # Global Target Sync
 # ═════════════════════════════════════════════════════════════════════════════
 def set_global_target(sabun:str, name:str=""):
@@ -777,7 +814,7 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
     picked = st.selectbox("**대상 선택**", ["(선택)"] + opts, index=idx0, key="left_pick")
 
     # ▼ 필터 초기화: 플래그만 세우고 즉시 rerun (다음 런 시작 시 초기화됨)
-    if st.button("필터 초기화", use_container_width=True):
+    if _debounced("필터 초기화", key="left_reset_btn", wait=1.0):
         st.session_state["_left_reset"] = True
         st.rerun()
 
@@ -2861,11 +2898,14 @@ def main():
         render_staff_picker_left(emp_df)
 
     with right:
-        tabs = st.tabs(["인사평가","직무기술서","직무능력평가","관리자","도움말"])
-        with tabs[0]: tab_eval(emp_df)
-        with tabs[1]: tab_job_desc(emp_df)
-        with tabs[2]: tab_competency(emp_df)
-        with tabs[3]:
+        tab = st.radio("탭", ["인사평가","직무기술서","직무능력평가","관리자","도움말"], horizontal=True, key="__tab__")
+        if tab == "인사평가":
+            tab_eval(emp_df)
+        elif tab == "직무기술서":
+            tab_job_desc(emp_df)
+        elif tab == "직무능력평가":
+            tab_competency(emp_df)
+        elif tab == "관리자":
             me = str(st.session_state.get("user", {}).get("사번", ""))
             if not is_admin(me):
                 st.warning("관리자 전용 메뉴입니다.", icon="🔒")
@@ -2875,9 +2915,8 @@ def main():
                 with a2: tab_admin_pin(emp_df)
                 with a3: tab_admin_eval_items()
                 with a4: tab_admin_acl(emp_df)
-        with tabs[4]: tab_help()
-
-if __name__ == "__main__":
+        else:
+            tab_help()if __name__ == "__main__":
     main()
 
 # --- PATCH 2025-10-17: robust get_jd_approval_map_cached (append-only) -------------------------------
