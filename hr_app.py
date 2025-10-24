@@ -415,7 +415,7 @@ _HDR_CACHE: dict[str, Tuple[float, list[str], dict]] = {}
 _WS_TTL, _HDR_TTL = 120, 120
 
 _VAL_CACHE: dict[str, Tuple[float, list]] = {}
-_VAL_TTL = 90
+_VAL_TTL = 200
 
 def _ws_values(ws, key: str | None = None):
     key = key or getattr(ws, 'title', '') or 'ws_values'
