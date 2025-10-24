@@ -599,14 +599,60 @@ _WS_TTL, _HDR_TTL = 120, 120
 _VAL_TTL = 200  # 조회 체감 개선(운영 중 수동 동기화 버튼과 병행)
 
 def _ws_values(ws, key: str | None = None):
-    """get_all_values 결과를 TTL 캐시."""
-    k = key or getattr(ws, "title", "") or "ws_values"
+    """
+    get_all_values 결과를 TTL 캐시(+세션 스코프)로 관리.
+    - 캐시 키에 cache_rev를 섞어 한 세션의 동기화가 타 세션 캐시에 영향 주지 않음.
+    - 429(할당량 초과) 시 마지막 정상값으로 폴백하여 UX/쿼터 보호.
+    """
+    global _VAL_CACHE, _VAL_TTL
+
+    base_key = key or getattr(ws, "title", "") or "ws_values"
+    bust = int(st.session_state.get("cache_rev", 0))  # 세션 전용 캐시버스터
+    cache_key = f"{base_key}#r{bust}"
+
+    # 마지막 정상값 저장소(없으면 생성)
+    if "_VAL_LASTGOOD" not in globals():
+        globals()["_VAL_LASTGOOD"] = {}
+    _VAL_LASTGOOD = globals()["_VAL_LASTGOOD"]
+
     now = time.time()
-    hit = _VAL_CACHE.get(k)
+
+    # 세션 스코프 캐시 히트
+    hit = _VAL_CACHE.get(cache_key)
     if hit and (now - hit[0] < _VAL_TTL):
         return hit[1]
-    vals = _retry(ws.get_all_values)
-    _VAL_CACHE[k] = (now, vals)
+
+    # 읽기
+    try:
+        vals = _retry(ws.get_all_values)
+    except APIError as e:
+        # 읽기 할당량 초과 → 마지막 정상값 폴백
+        if _is_quota_429(e):
+            try:
+                st.info("⏳구글시트 읽기 할당량(1분) 초과. 잠시 후 다시 시도해 주세요.", icon="⏳")
+            except Exception:
+                pass
+            # 1) 같은 세션 키의 직전 값
+            if hit:
+                return hit[1]
+            # 2) 베이스 키의 마지막 정상값(세션 무관)
+            prev = _VAL_LASTGOOD.get(base_key)
+            return prev if prev is not None else []
+        # 그 외 오류는 상위에서 처리
+        raise
+
+    # 캐시/라스트굿 갱신
+    _VAL_CACHE[cache_key] = (now, vals)
+    _VAL_LASTGOOD[base_key] = vals
+
+    # 같은 base_key의 오래된 리비전 엔트리 청소(메모리 보호)
+    try:
+        for k, (ts, _) in list(_VAL_CACHE.items()):
+            if k.startswith(base_key + "#") and (now - ts >= _VAL_TTL):
+                _VAL_CACHE.pop(k, None)
+    except Exception:
+        pass
+
     return vals
 
 def _ws(title: str):
@@ -620,14 +666,69 @@ def _ws(title: str):
     return ws
 
 def _hdr(ws, key: str) -> Tuple[list[str], dict]:
-    """헤더 1행과 이름→열번호 매핑(hmap) 반환(캐시)."""
+    """
+    헤더 1행과 이름→열번호 매핑(hmap) 반환(캐시, 세션 스코프).
+    - 캐시 키에 cache_rev를 섞어 한 세션의 동기화가 타 세션에 영향 주지 않음.
+    - 가능하면 _ws_values(ws, key)의 첫 행을 헤더로 재사용(추가 read 호출 회피).
+    - 429(할당량 초과) 시 마지막 정상 헤더로 폴백.
+    """
+    global _HDR_CACHE, _HDR_TTL
+
     now = time.time()
-    hit = _HDR_CACHE.get(key)
+    bust = int(st.session_state.get("cache_rev", 0))
+    cache_key = f"{key}#r{bust}"
+
+    # 세션 스코프 캐시 히트
+    hit = _HDR_CACHE.get(cache_key)
     if hit and (now - hit[0] < _HDR_TTL):
         return hit[1], hit[2]
-    header = _retry(ws.row_values, 1) or []
+
+    # 마지막 정상 헤더 저장소
+    if "_HDR_LASTGOOD" not in globals():
+        globals()["_HDR_LASTGOOD"] = {}
+    _HDR_LASTGOOD = globals()["_HDR_LASTGOOD"]
+
+    header: list[str] = []
+
+    # 1) values 캐시에서 헤더 재사용 시도
+    try:
+        vals = _ws_values(ws, key)
+        if vals:
+            header = [str(x).strip() for x in (vals[0] or [])]
+    except Exception:
+        header = []
+
+    # 2) 실패/공백 시에만 row_values(1) 호출
+    need_fallback = (not header) or all(str(x).strip() == "" for x in header)
+    if need_fallback:
+        try:
+            header = _retry(ws.row_values, 1) or []
+        except APIError as e:
+            # 429 → 마지막 정상 헤더 폴백
+            if _is_quota_429(e):
+                try:
+                    st.info("⏳구글시트 읽기 할당량(1분) 초과. 잠시 후 다시 시도해 주세요.", icon="⏳")
+                except Exception:
+                    pass
+                header = _HDR_LASTGOOD.get(key, [])
+            else:
+                raise
+        except Exception:
+            header = _HDR_LASTGOOD.get(key, [])
+
+    # 매핑 구성 및 캐시 반영
     hmap = {n: i + 1 for i, n in enumerate(header)}
-    _HDR_CACHE[key] = (now, header, hmap)
+    _HDR_CACHE[cache_key] = (now, header, hmap)
+    _HDR_LASTGOOD[key] = header
+
+    # 같은 base key의 오래된 리비전 엔트리 정리(메모리 보호)
+    try:
+        for k, (ts, _, _) in list(_HDR_CACHE.items()):
+            if k.startswith(key + "#") and (now - ts >= _HDR_TTL):
+                _HDR_CACHE.pop(k, None)
+    except Exception:
+        pass
+
     return header, hmap
 
 def _ws_get_all_records(ws):
