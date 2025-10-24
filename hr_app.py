@@ -719,47 +719,66 @@ def read_emp_df() -> pd.DataFrame:
 # ═════════════════════════════════════════════════════════════════════════════
 # Login + Session
 # ═════════════════════════════════════════════════════════════════════════════
-SESSION_TTL_MIN=30
+SESSION_TTL_MIN = 30
+_SESSION_KEYS_KEEP_ON_OWNER_SWITCH = {"authed", "user", "auth_expires_at", "_state_owner_sabun"}
 
-def _session_valid()->bool:
-    exp=st.session_state.get("auth_expires_at")
-    ok=st.session_state.get("authed", False)
-    return bool(ok and exp and time.time()<exp)
+def _session_valid() -> bool:
+    """현재 세션이 유효한가? (로그인 + 만료시간 내)"""
+    ss = st.session_state
+    if not ss.get("authed", False):
+        return False
+    exp = ss.get("auth_expires_at")
+    return bool(isinstance(exp, (int, float)) and time.time() < exp)
 
-def _start_session(user: dict):
-    st.session_state["authed"]=True
-    st.session_state["user"]=user
-    st.session_state["auth_expires_at"]=time.time()+SESSION_TTL_MIN*60
-    st.session_state["_state_owner_sabun"]=str(user.get("사번",""))
+def _start_session(user: dict) -> None:
+    """로그인 성공 시 세션 시작."""
+    ss = st.session_state
+    ss["authed"] = True
+    ss["user"] = user
+    ss["auth_expires_at"] = time.time() + SESSION_TTL_MIN * 60
+    ss["_state_owner_sabun"] = str(user.get("사번", ""))
 
-def _ensure_state_owner():
+def _ensure_state_owner() -> None:
+    """
+    세션 소유자(사번)가 바뀌면, 로그인/만료 키만 남기고 나머지 상태는 정리.
+    - 다른 사람으로 로그인 전환 시, 이전 사용자의 편집/캐시 상태 잔존 방지.
+    """
     try:
-        cur=str(st.session_state.get("user",{}).get("사번","") or "")
-        owner=str(st.session_state.get("_state_owner_sabun","") or "")
-        if owner and (owner!=cur):
-            for k in list(st.session_state.keys()):
-                if k not in ("authed","user","auth_expires_at","_state_owner_sabun"):
-                    st.session_state.pop(k, None)
-            st.session_state["_state_owner_sabun"]=cur
-    except Exception: pass
+        ss = st.session_state
+        cur = str((ss.get("user") or {}).get("사번", "") or "")
+        owner = str(ss.get("_state_owner_sabun", "") or "")
+        if owner and owner != cur:
+            to_del = [k for k in list(ss.keys()) if k not in _SESSION_KEYS_KEEP_ON_OWNER_SWITCH]
+            for k in to_del:
+                ss.pop(k, None)
+            ss["_state_owner_sabun"] = cur
+    except Exception:
+        pass
 
-def logout():
-    for k in list(st.session_state.keys()):
-        try: del st.session_state[k]
-        except Exception: pass
-    try: st.cache_data.clear()
-    except Exception: pass
-    st.rerun()
+def logout() -> None:
+    """로그아웃(세션/캐시 정리 후 리런)."""
+    try:
+        for k in list(st.session_state.keys()):
+            try:
+                del st.session_state[k]
+            except Exception:
+                pass
+        try:
+            st.cache_data.clear()
+        except Exception:
+            pass
+    finally:
+        st.rerun()
 
-# --- Enter Key Binder (사번→PIN, PIN→로그인) -------------------------------
+# ── Enter Key Binder: 사번→PIN, PIN→로그인 ─────────────────────────────────
 import streamlit.components.v1 as components
-def _inject_login_keybinder():
+def _inject_login_keybinder() -> None:
     components.html(
         """
         <script>
         (function(){
+          const doc = window.parent.document;
           function byLabelStartsWith(txt){
-            const doc = window.parent.document;
             const labels = Array.from(doc.querySelectorAll('label'));
             const lab = labels.find(l => (l.innerText||"").trim().startsWith(txt));
             if(!lab) return null;
@@ -767,7 +786,6 @@ def _inject_login_keybinder():
             return root ? root.querySelector('input') : null;
           }
           function findLoginBtn(){
-            const doc = window.parent.document;
             const btns = Array.from(doc.querySelectorAll('button'));
             return btns.find(b => (b.textContent||"").trim() === '로그인');
           }
@@ -781,6 +799,7 @@ def _inject_login_keybinder():
             const sab = byLabelStartsWith('사번');
             const pin = byLabelStartsWith('PIN');
             if(!sab || !pin) return false;
+
             if(!sab._bound){
               sab._bound = true;
               sab.addEventListener('keydown', function(e){
@@ -790,14 +809,14 @@ def _inject_login_keybinder():
             if(!pin._bound){
               pin._bound = true;
               pin.addEventListener('keydown', function(e){
-                if(e.key==='Enter'){ e.preventDefault(); commit(pin); setTimeout(()=>{ try{ (findLoginBtn()||{}).click(); }catch(_){}} ,60); }
+                if(e.key==='Enter'){ e.preventDefault(); commit(pin); setTimeout(()=>{ try{ (findLoginBtn()||{}).click(); }catch(_){}} ,50); }
               });
             }
             return true;
           }
           bind();
-          const mo = new MutationObserver(() => { bind(); });
-          mo.observe(window.parent.document.body, { childList:true, subtree:true });
+          const mo = new MutationObserver(bind);
+          mo.observe(doc.body, { childList:true, subtree:true });
           setTimeout(()=>{ try{ mo.disconnect(); }catch(e){} }, 8000);
         })();
         </script>
@@ -805,31 +824,56 @@ def _inject_login_keybinder():
         height=0, width=0
     )
 
-def show_login(emp_df: pd.DataFrame):
+def show_login(emp_df: pd.DataFrame) -> None:
+    """로그인 폼 + 검증."""
     st.markdown("### 로그인")
-    sabun = st.text_input("사번", key="login_sabun")
-    pin   = st.text_input("PIN (숫자)", type="password", key="login_pin")
+    sabun_input = st.text_input("사번", key="login_sabun")
+    pin_input   = st.text_input("PIN (숫자)", type="password", key="login_pin")
     _inject_login_keybinder()
+
     if st.button("로그인", type="primary"):
+        sabun = str(sabun_input).strip()
+        pin   = str(pin_input).strip()
         if not sabun or not pin:
             st.error("사번과 PIN을 입력하세요."); st.stop()
-        row=emp_df.loc[emp_df["사번"].astype(str)==str(sabun)]
-        if row.empty: st.error("사번을 찾을 수 없습니다."); st.stop()
-        r=row.iloc[0]
+
+        # 사번 매칭: 정수 비교(빠름) → 실패 시 문자열 비교
+        row = None
+        try:
+            if sabun.isdigit() and pd.api.types.is_integer_dtype(emp_df["사번"]):
+                m = emp_df["사번"].eq(int(sabun))
+                if m.any(): row = emp_df.loc[m]
+        except Exception:
+            row = None
+        if row is None or row.empty:
+            m = emp_df["사번"].astype(str).eq(sabun)
+            if m.any(): row = emp_df.loc[m]
+
+        if row is None or row.empty:
+            st.error("사번을 찾을 수 없습니다."); st.stop()
+
+        r = row.iloc[0]
         if not _to_bool(r.get("재직여부", True)):
             st.error("재직 상태가 아닙니다."); st.stop()
-        stored=str(r.get("PIN_hash","")).strip().lower()
-        entered_plain=_sha256_hex(pin.strip())
-        entered_salted=_pin_hash(pin.strip(), str(r.get("사번","")))
+
+        stored = str(r.get("PIN_hash", "")).strip().lower()
+        entered_plain  = _sha256_hex(pin).lower()
+        entered_salted = _pin_hash(pin, sabun).lower()
+
         if stored not in (entered_plain, entered_salted):
             st.error("PIN이 올바르지 않습니다."); st.stop()
-        _start_session({"사번":str(r.get("사번","")), "이름":str(r.get("이름",""))})
-        st.success("환영합니다!"); st.rerun()
 
-def require_login(emp_df: pd.DataFrame):
+        _start_session({"사번": sabun, "이름": str(r.get("이름", ""))})
+        st.success("환영합니다!")
+        st.rerun()
+
+def require_login(emp_df: pd.DataFrame) -> None:
+    """세션이 없으면 로그인 화면으로 전환."""
     if not _session_valid():
-        for k in ("authed","user","auth_expires_at","_state_owner_sabun"): st.session_state.pop(k, None)
-        show_login(emp_df); st.stop()
+        for k in ("authed", "user", "auth_expires_at", "_state_owner_sabun"):
+            st.session_state.pop(k, None)
+        show_login(emp_df)
+        st.stop()
     else:
         _ensure_state_owner()
 
