@@ -495,6 +495,34 @@ components.html("""
 """, height=0, width=0)
 
 
+
+# ────────────────────────────────────────────────────────────────────────────
+# Stray True/False suppressor (safely hides random boolean paragraphs)
+# ────────────────────────────────────────────────────────────────────────────
+def _suppress_magic_booleans():
+    try:
+        import streamlit.components.v1 as components
+        components.html(
+            """
+            <script>
+            (function(){
+              const doc = window.parent.document;
+              const ps = Array.from(doc.querySelectorAll('div.block-container p'));
+              for (const p of ps){
+                const t = (p.textContent||"").trim();
+                if ((t==="True"||t==="False") && !p.closest('[role="grid"]')){
+                  p.style.display = "none";
+                }
+              }
+            })();
+            </script>
+            """,
+            height=0, width=0
+        )
+    except Exception:
+        pass
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # Utils
 # ═════════════════════════════════════════════════════════════════════════════
