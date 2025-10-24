@@ -274,7 +274,7 @@ def force_sync(*, clear_resource: bool = False, clear_all_session: bool = False,
     """세션 한정 동기화(전역 캐시 보존)."""
     wait = _cooldown_remaining()
     if wait > 0:
-        # 안내는 왼쪽 패널에서 고정 배너로 렌더 → 여기서는 아무 것도 출력하지 않고 종료
+        # 안내는 전역 토스트에서 처리 → 여기서는 종료
         return
 
     # 쿨다운 시작
@@ -324,6 +324,56 @@ def force_sync(*, clear_resource: bool = False, clear_all_session: bool = False,
             except Exception: pass
 
     st.rerun()
+
+# ────────────────────────────────────────────────────────────────────────────
+# Global toast mount: 우상단 고정 쿨다운 토스트(레이아웃 영향 0)
+# ────────────────────────────────────────────────────────────────────────────
+def mount_sync_toast():
+    """세션 쿨다운 중이면 우상단에 고정 토스트를 띄워 초를 갱신한다."""
+    try:
+        import streamlit.components.v1 as components
+        cool = _cooldown_remaining()
+
+        # 쿨다운 종료 상태면 기존 토스트 제거
+        if cool <= 0:
+            components.html("""
+            <script>(function(){
+              const d = window.parent.document;
+              const el = d.getElementById('sync_toast_fixed');
+              if (el) { try{ el.remove(); }catch(e){} }
+            })();</script>
+            """, height=0, width=0)
+            return
+
+        end_ts_ms = int((float(st.session_state.get("_last_sync_ts", 0) or 0) + SYNC_THROTTLE_SEC) * 1000)
+        components.html(f"""
+        <script>
+        (function(){{
+          const d = window.parent.document;
+          let el = d.getElementById('sync_toast_fixed');
+          if(!el){{
+            el = d.createElement('div');
+            el.id = 'sync_toast_fixed';
+            d.body.appendChild(el);
+          }}
+          const end = {end_ts_ms};
+          function tick(){{
+            const now = Date.now();
+            let r = Math.ceil((end - now)/1000);
+            if (r <= 0){{
+              try{{ el.remove(); }}catch(_){{
+              }}
+              return;
+            }}
+            el.textContent = "⏳ 잠시만요… " + r + "초 후 다시 시도해 주세요.";
+            requestAnimationFrame(tick);
+          }}
+          tick();
+        }})();
+        </script>
+        """, height=0, width=0)
+    except Exception:
+        pass
 
 # ═════════════════════════════════════════════════════════════════════════════
 # App Config / Style
