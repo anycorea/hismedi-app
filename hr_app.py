@@ -473,22 +473,52 @@ _CSS_GLOBAL = f"""
 """
 st.markdown(_CSS_GLOBAL, unsafe_allow_html=True)
 
-# 스크롤 위치 보존/복원(강화판: 리런 후 900ms 반복 복원)
+
+# 스크롤 위치 보존/복원 (rerun 시 기본은 TOP, 필요할 때만 복원)
 import streamlit.components.v1 as components
 components.html("""
 <script>
 (function(){
+  const d = window.parent.document;
   const s = window.sessionStorage;
-  const prev = parseInt(s.getItem('scrollY')||'0',10) || 0;
-  let t0 = performance.now();
-  function restore(){
-    if(prev>0){ window.scrollTo(0, prev); }
-    if(performance.now() - t0 < 900){ requestAnimationFrame(restore); }
+
+  // 1) 동기화/필터초기화 클릭 시: 다음 렌더는 무조건 TOP으로
+  function hookToTop(label){
+    const btns = Array.from(d.querySelectorAll('.stButton button'));
+    const b = btns.find(b => (b.textContent||'').trim().includes(label));
+    if(!b || b._scroll_hooked) return;
+    b._scroll_hooked = true;
+    b.addEventListener('click', ()=>{
+      try{
+        s.setItem('scrollY','0');          // 예전 위치 지우기
+        s.setItem('scrollY_to_top','1');   // 다음 렌더에서 TOP 강제
+      }catch(_){}
+      try{ window.scrollTo(0,0); }catch(_){}
+    }, {capture:true});
   }
-  requestAnimationFrame(restore);
+  function bind(){ hookToTop('동기화'); hookToTop('필터 초기화'); }
+  bind();
+  new MutationObserver(bind).observe(d.body,{subtree:true,childList:true});
+
+  // 2) 이번 렌더에서 어디로 갈지 결정
+  const forceTop = s.getItem('scrollY_to_top') === '1';
+  if (forceTop){
+    s.removeItem('scrollY_to_top');
+    requestAnimationFrame(()=> window.scrollTo(0,0));
+  } else {
+    // 너무 깊은 위치는 복원하지 않음(거의 바닥이면 TOP 유지)
+    const prev = parseInt(s.getItem('scrollY')||'0',10) || 0;
+    const maxRestore = Math.max(0, (d.documentElement.scrollHeight - window.innerHeight - 120));
+    if (prev > 0 && prev < maxRestore){
+      requestAnimationFrame(()=> window.scrollTo(0, prev));
+    }
+  }
+
+  // 3) 평상시 스크롤 값 저장(과도한 쓰기 방지)
   let t=null;
   window.addEventListener('scroll', ()=>{
-    clearTimeout(t); t = setTimeout(()=>{ s.setItem('scrollY', String(window.scrollY)); }, 80);
+    clearTimeout(t);
+    t = setTimeout(()=>{ try{ s.setItem('scrollY', String(window.scrollY)); }catch(_){} } , 80);
   }, {passive:true});
 })();
 </script>
