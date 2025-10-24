@@ -2885,8 +2885,8 @@ def main():
                 logout()
         with c2:
             clicked_sync = st.button("🔄 동기화", key="sync_left", use_container_width=True, help="캐시를 비우고 구글시트에서 다시 불러옵니다.")
-if _debounce_passed("__sync_left", 1.0, clicked_sync):
-    force_sync(min_interval=15)
+            if _debounce_passed("__sync_left", 1.0, clicked_sync):
+                force_sync(min_interval=15)
 
         # 좌측 메뉴
         render_staff_picker_left(emp_df)
