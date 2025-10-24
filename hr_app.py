@@ -23,7 +23,6 @@ def _ensure_capacity(ws, min_row: int, min_col: int):
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Imports
-import time
 # ═════════════════════════════════════════════════════════════════════════════
 import re, time, random, hashlib, secrets as pysecrets
 from datetime import datetime, timedelta
@@ -175,59 +174,49 @@ except Exception:
 
 
 
-
-def force_sync(min_interval: int = 15):
-    """데이터/편집 캐시만 비우고 즉시 리런 (로그인 세션/인증 키는 유지).
-    - 연타/다중사용자: min_interval(초) 내 재호출 무시(안내)
-    - 중복 실행 방지 락
-    """
-    now = time.time()
-    # 중복 실행 락
-    if st.session_state.get("_sync_lock", False):
-        _toast_once('동기화 중', seconds=2.5, ident='toast_sync'); return
-
-    # 스로틀
-    last_ts = float(st.session_state.get("_last_sync_ts", 0.0) or 0.0)
-    if now - last_ts < float(min_interval):
-        _toast_once('동기화 중', seconds=2.5, ident='toast_sync')
-        return
-
-    st.session_state["_sync_lock"] = True
+def force_sync():
+    """데이터/편집 캐시만 비우고 즉시 리런 (로그인 세션/인증 키는 유지)."""
+    # Streamlit 캐시
     try:
-        # Streamlit 캐시: 데이터만 정리(리소스는 그대로 두어 콜드스타트 방지)
-        try: st.cache_data.clear()
-        except Exception: pass
+        st.cache_data.clear()
+    except Exception:
+        pass
+    try:
+        st.cache_resource.clear()
+    except Exception:
+        pass
 
-        # 모듈 레벨 캐시(시트/헤더/값 캐시만)
+    # 모듈 레벨 캐시
+    try:
+        global _WS_CACHE, _HDR_CACHE, _VAL_CACHE
+        _WS_CACHE.clear(); _HDR_CACHE.clear(); _VAL_CACHE.clear()
+    except Exception:
         try:
-            global _WS_CACHE, _HDR_CACHE, _VAL_CACHE
+            _WS_CACHE = {}; _HDR_CACHE = {}; _VAL_CACHE = {}
         except Exception:
             pass
-        for _c in ('_WS_CACHE','_HDR_CACHE','_VAL_CACHE'):
-            try: globals()[_c].clear()
-            except Exception: pass
 
-        # 세션 키 정리 (핵심 선택/인증은 유지)
-        SAFE_KEEP = {"user","authed","auth_expires_at","_state_owner_sabun",
-                     "glob_target_sabun","glob_target_name",
-                     "left_pick","pick_q",
-                     "_last_sync_ts","_sync_lock"}
-        PREFIXES = ("eval", "jd", "cmpS", "cmpD")
-        ACL_KEYS  = {"acl_df", "acl_header", "acl_editor", "auth_editor"}
-        try:
-            to_del = []
-            for k in list(st.session_state.keys()):
-                if k in SAFE_KEEP: continue
-                if k in ACL_KEYS:  to_del.append(k); continue
-                if any(k.startswith(p) for p in PREFIXES): to_del.append(k); continue
-            for k in to_del: del st.session_state[k]
-        except Exception: pass
+    # 세션 상태: 편집/데이터 캐시만 선별 제거 (로그인/인증 관련 키는 보존)
+    SAFE_KEEP = {"user", "access_token", "refresh_token", "login_time", "login_provider"}
+    ACL_KEYS  = {"acl_df", "acl_header", "acl_editor", "auth_editor", "auth_editor_df", "__auth_sab_sig"}
+    PREFIXES  = ("__cache_", "_df_", "_cache_", "gs_")  # 데이터 캐시성 키만
+    
+    try:
+        to_del = []
+        for k in list(st.session_state.keys()):
+            if k in SAFE_KEEP:
+                continue
+            if k in ACL_KEYS:
+                to_del.append(k); continue
+            if any(k.startswith(p) for p in PREFIXES):
+                to_del.append(k); continue
+        for k in to_del:
+            del st.session_state[k]
+    except Exception:
+        pass
 
-        st.session_state["_last_sync_ts"] = now
-        _toast_once('완료', seconds=2.0, ident='toast_sync')
-        st.rerun()
-    finally:
-        st.session_state["_sync_lock"] = False
+    st.rerun()
+
 # ═════════════════════════════════════════════════════════════════════════════
 # App Config / Style
 # ═════════════════════════════════════════════════════════════════════════════
@@ -384,40 +373,30 @@ def verify_pin(user_sabun: str, pin: str) -> bool:
 API_BACKOFF_SEC = [0.0, 0.8, 1.6, 3.2, 6.4, 9.6]
 
 def _retry(fn, *args, **kwargs):
-    """Robust retry for Google API rate limits (429/503) + quota(403) with jitter backoff."""
-    last = None
+    last=None
     for b in API_BACKOFF_SEC:
         try:
             return fn(*args, **kwargs)
         except APIError as e:
-            status = None
-            retry_after = None
-            msg = ""
+            status = None; ra = None
             try:
                 status = getattr(e, "response", None).status_code
-                headers = getattr(e, "response", None).headers or {}
-                retry_after = headers.get("Retry-After")
+                ra = getattr(e, "response", None).headers.get("Retry-After")
             except Exception:
                 pass
-            try:
-                msg = str(e).lower()
-            except Exception:
-                msg = ""
-
-            retryable = (status in (429, 503)) or (status == 403 and ("rate" in msg or "quota" in msg))
-            if not retryable and status in (400, 401, 404):
+            if status in (400, 401, 403, 404):
                 raise
-
-            wait = float(retry_after) if retry_after else (b + random.uniform(0, 0.6))
-            time.sleep(max(0.25, wait))
+            wait = float(ra) if ra else (b + random.uniform(0, 0.5))
+            time.sleep(max(0.2, wait))
             last = e
         except Exception as e:
             last = e
-            time.sleep(b + random.uniform(0, 0.6))
+            time.sleep(b + random.uniform(0, 0.5))
     if last:
         raise last
     return fn(*args, **kwargs)
 
+@st.cache_resource(show_spinner=False)
 def get_client():
     svc = dict(st.secrets["gcp_service_account"])
     svc["private_key"] = _normalize_private_key(svc.get("private_key",""))
@@ -711,80 +690,8 @@ def get_allowed_sabuns(emp_df:pd.DataFrame, sabun:str, include_self:bool=True)->
     return allowed
 
 # ═════════════════════════════════════════════════════════════════════════════
-
-# ─ Debounce helper ───────────────────────────────────────────────────────────
-def _debounced(label: str, key: str, wait: float = 1.0, **kwargs):
-    """버튼 연타 시 첫 1회만 통과. 나머지는 무시.
-    kwargs는 st.button에 그대로 전달됩니다.
-    """
-    k = f"_debounce_{key}"
-    now = time.time()
-    last = float(st.session_state.get(k, 0.0) or 0.0)
-    # st.button 렌더 자체는 해야 UI가 유지됨
-    clicked = st.button(label, key=key, **kwargs)
-    if now - last < float(wait):
-        return False
-    if clicked:
-        st.session_state[k] = now
-        return True
-    return False
-
-
-# ─ Toast (dedup, auto-hide) ───────────────────────────────────────────────────
-import streamlit.components.v1 as _components_toast
-
-# ─ Toast (dedup, auto-hide) ───────────────────────────────────────────────────
-import streamlit.components.v1 as _components_toast
-def _toast_once(msg: str, seconds: float = 2.5, ident: str = "__app_toast__"):
-    """Small ephemeral toast without icon. Replaces existing toast with same ident.
-    Uses JS only (no Python f-strings inside the HTML) to avoid brace parsing issues.
-    """
-    try:
-        # Prefer Streamlit's toast if single-instance; but it can stack duplicates,
-        # so we use JS to deduplicate reliably across reruns.
-        raise RuntimeError("use_js_toast")
-    except Exception:
-        ms = int(seconds * 1000)
-        html = """
-<div id='{ident}' style='position:fixed; bottom:24px; right:24px; z-index:999999;
-    background:rgba(0,0,0,.82); color:#fff; padding:9px 12px; border-radius:8px;
-    font-size:13px; box-shadow:0 6px 22px rgba(0,0,0,.25);'>
-    {msg}
-</div>
-<script>
-(function(){{
-  var d = window.parent.document;
-  var prev = d.getElementById('{ident}');
-  if (prev) prev.remove();
-  var el = d.getElementById('{ident}');
-  if (!el) {{
-    el = d.createElement('div');
-    el.id = '{ident}';
-    el.style.position='fixed';
-    el.style.bottom='24px';
-    el.style.right='24px';
-    el.style.zIndex='999999';
-    el.style.background='rgba(0,0,0,.82)';
-    el.style.color='#fff';
-    el.style.padding='9px 12px';
-    el.style.borderRadius='8px';
-    el.style.fontSize='13px';
-    el.style.boxShadow='0 6px 22px rgba(0,0,0,.25)';
-    el.textContent = {msg_repr};
-    d.body.appendChild(el);
-  }} else {{
-    el.textContent = {msg_repr};
-  }}
-  setTimeout(function(){{
-    var cur = d.getElementById('{ident}');
-    if (cur) cur.remove();
-  }}, {ms});
-}})();
-</script>
-""".format(ident=ident, msg=msg, msg_repr=repr(msg), ms=ms)
-        _components_toast.html(html, height=0, width=0)
-
-# Global Target Sync# ═════════════════════════════════════════════════════════════════════════════
+# Global Target Sync
+# ═════════════════════════════════════════════════════════════════════════════
 def set_global_target(sabun:str, name:str=""):
     st.session_state["glob_target_sabun"]=str(sabun).strip()
     st.session_state["glob_target_name"]=str(name).strip()
@@ -870,8 +777,7 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
     picked = st.selectbox("**대상 선택**", ["(선택)"] + opts, index=idx0, key="left_pick")
 
     # ▼ 필터 초기화: 플래그만 세우고 즉시 rerun (다음 런 시작 시 초기화됨)
-    if _debounced("필터 초기화", key="left_reset_btn", wait=1.0, use_container_width=True):
-        _toast_once("초기화", seconds=2.0, ident="toast_reset")
+    if st.button("필터 초기화", use_container_width=True):
         st.session_state["_left_reset"] = True
         st.rerun()
 
@@ -2947,8 +2853,9 @@ def main():
             if st.button("로그아웃", key="btn_logout", use_container_width=True):
                 logout()
         with c2:
-            if _debounced("🔄 동기화", key="sync_left", wait=1.0, use_container_width=True, help="캐시를 비우고 구글시트에서 다시 불러옵니다."):
-                force_sync(min_interval=15)
+            if st.button("🔄 동기화", key="sync_left", use_container_width=True,
+                         help="캐시를 비우고 구글시트에서 다시 불러옵니다."):
+                force_sync()
 
         # 좌측 메뉴
         render_staff_picker_left(emp_df)
