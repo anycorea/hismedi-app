@@ -3894,19 +3894,24 @@ def main():
     emp_df = read_emp_df()
     st.session_state["emp_df"] = emp_df
 
-    # ⬇️ 전역 토스트(쿨다운 중이면 좌상단 고정 표시, 아니면 제거)
+    # ⬇️ 전역 토스트(쿨다운 중이면 "동기화" 버튼 위에 고정 표시, 아니면 제거)
     mount_sync_toast()
 
+    # 로그인 유도
     if not _session_valid():
         st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=True)
         show_login(emp_df)
         return
 
+    # 세션 소유자 정합성
     require_login(emp_df)
 
+    # 레이아웃
     left, right = st.columns([1.35, 3.65], gap="large")
 
+    # ────────────────────────────────────────────────────────────────────────
     # Left Pane
+    # ────────────────────────────────────────────────────────────────────────
     with left:
         u = st.session_state.get("user", {}) or {}
         st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=True)
@@ -3918,7 +3923,7 @@ def main():
             if st.button("로그아웃", key="btn_logout", use_container_width=True):
                 logout()
         with c2:
-            # 동기화 버튼: 항상 활성(쿨다운은 force_sync() 내부에서 차단)
+            # 버튼만 남김(토스트는 전역 mount_sync_toast가 처리)
             if st.button("🔄 동기화", key="sync_left", use_container_width=True,
                          help="캐시를 비우고 구글시트에서 다시 불러옵니다."):
                 force_sync()
@@ -3926,32 +3931,34 @@ def main():
         # ⬇️ 반환값을 삼켜서 'False' 렌더링 방지
         _ = render_staff_picker_left(emp_df)
 
+    # ────────────────────────────────────────────────────────────────────────
     # Right Pane
+    # ────────────────────────────────────────────────────────────────────────
     with right:
-        tabs = st.tabs(["인사평가","직무기술서","직무능력평가","관리자","도움말"])
+        tabs = st.tabs(["인사평가", "직무기술서", "직무능력평가", "관리자", "도움말"])
 
         with tabs[0]:
-            _ = tab_eval(emp_df)
+            tab_eval(emp_df)
 
         with tabs[1]:
-            _ = tab_job_desc(emp_df)
+            tab_job_desc(emp_df)
 
         with tabs[2]:
-            _ = tab_competency(emp_df)
+            tab_competency(emp_df)
 
         with tabs[3]:
             me = str(st.session_state.get("user", {}).get("사번", ""))
             if not is_admin(me):
                 st.warning("관리자 전용 메뉴입니다.", icon="🔒")
             else:
-                a1, a2, a3, a4 = st.tabs(["직원","PIN 관리","평가 항목 관리","권한 관리"])
-                with a1: _ = tab_staff_admin(emp_df)
-                with a2: _ = tab_admin_pin(emp_df)
-                with a3: _ = tab_admin_eval_items()
-                with a4: _ = tab_admin_acl(emp_df)
+                a1, a2, a3, a4 = st.tabs(["직원", "PIN 관리", "평가 항목 관리", "권한 관리"])
+                with a1: tab_staff_admin(emp_df)
+                with a2: tab_admin_pin(emp_df)
+                with a3: tab_admin_eval_items()
+                with a4: tab_admin_acl(emp_df)
 
         with tabs[4]:
-            _ = tab_help()
+            tab_help()
 
 if __name__ == "__main__":
     main()
