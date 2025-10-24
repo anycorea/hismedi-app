@@ -436,7 +436,7 @@ components.html("""
   }
 
   // Build a hard "no scroll" window to neutralize Streamlit focus/scrollIntoView
-  const HOLD_MS = 3800;  // Tweak if needed
+  const HOLD_MS = 6000;  // Tweak if needed
   const until = Date.now() + HOLD_MS;
 
   // Freeze current top
