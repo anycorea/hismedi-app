@@ -880,67 +880,119 @@ def require_login(emp_df: pd.DataFrame) -> None:
 # ═════════════════════════════════════════════════════════════════════════════
 # ACL (권한) + Staff Filters (TTL↑)
 # ═════════════════════════════════════════════════════════════════════════════
-AUTH_SHEET="권한"
+AUTH_SHEET = "권한"
 
 EVAL_ITEMS_SHEET = st.secrets.get("sheets", {}).get("EVAL_ITEMS_SHEET", "평가_항목")
-EVAL_ITEM_HEADERS = ["항목ID","항목","내용","순서","활성","비고","설명","유형","구분"]
+EVAL_ITEM_HEADERS = ["항목ID", "항목", "내용", "순서", "활성", "비고", "설명", "유형", "구분"]
 EVAL_RESP_SHEET_PREFIX = "인사평가_"
-EVAL_BASE_HEADERS = ["연도","평가유형","평가대상사번","평가대상이름","평가자사번","평가자이름","총점","상태","제출시각","잠금"]
+EVAL_BASE_HEADERS = ["연도", "평가유형", "평가대상사번", "평가대상이름", "평가자사번", "평가자이름", "총점", "상태", "제출시각", "잠금"]
 
-AUTH_HEADERS=["사번","이름","역할","범위유형","부서1","부서2","대상사번","활성","비고"]
+AUTH_HEADERS = ["사번", "이름", "역할", "범위유형", "부서1", "부서2", "대상사번", "활성", "비고"]
 
 @st.cache_data(ttl=300, show_spinner=False)
-def read_auth_df()->pd.DataFrame:
+def read_auth_df() -> pd.DataFrame:
+    """권한 시트 로드 + 표준화(누락 컬럼 보강, dtype 정리)."""
     try:
-        ws=_ws(AUTH_SHEET); df=pd.DataFrame(_ws_get_all_records(ws))
+        ws = _ws(AUTH_SHEET)
+        df = pd.DataFrame(_ws_get_all_records(ws))
     except Exception:
         return pd.DataFrame(columns=AUTH_HEADERS)
-    if df.empty: return pd.DataFrame(columns=AUTH_HEADERS)
+
+    if df.empty:
+        return pd.DataFrame(columns=AUTH_HEADERS)
+
+    # 누락 컬럼 보강
     for c in AUTH_HEADERS:
-        if c not in df.columns: df[c]=""
-    df["사번"]=df["사번"].astype(str)
-    if "활성" in df.columns: df["활성"]=df["활성"].map(_to_bool)
+        if c not in df.columns:
+            df[c] = ""
+
+    # dtype 정리
+    df["사번"] = df["사번"].astype(str)
+
+    # 활성: _to_bool과 동일 의미(빈칸 False)로 벡터화 처리
+    truthy = {"true", "1", "y", "yes", "t"}
+    s = df["활성"].astype(str).str.strip().str.lower()
+    df["활성"] = s.isin(truthy)
+
     return df
 
-def is_admin(sabun:str)->bool:
+def is_admin(sabun: str) -> bool:
+    """사번이 admin 권한(+활성)인지 여부."""
     try:
-        df=read_auth_df()
-        if df.empty: return False
-        q=df[(df["사번"].astype(str)==str(sabun)) & (df["역할"].str.lower()=="admin") & (df["활성"]==True)]
-        return not q.empty
-    except Exception: return False
+        sab = str(sabun)
+        df = read_auth_df()
+        if df.empty:
+            return False
+        q = (df["사번"].eq(sab)) & (df["역할"].astype(str).str.lower().eq("admin")) & (df["활성"])
+        return bool(q.any())
+    except Exception:
+        return False
 
-def get_allowed_sabuns(emp_df:pd.DataFrame, sabun:str, include_self:bool=True)->set[str]:
-    sabun=str(sabun); allowed=set([sabun]) if include_self else set()
-    df=read_auth_df()
-    if not df.empty:
-        mine=df[(df["사번"].astype(str)==sabun) & (df["활성"]==True)]
-        # 공란 범위유형이 하나라도 있으면 전체 허용
-        if not mine.empty and any(str(x).strip()=="" for x in mine.get("범위유형", [])):
-            return set(emp_df["사번"].astype(str).tolist())
-        for _,r in mine.iterrows():
-            t=str(r.get("범위유형","")).strip()
-            if t=="부서":
-                d1=str(r.get("부서1","")).strip(); d2=str(r.get("부서2","")).strip()
-                tgt=emp_df.copy()
-                if d1: tgt=tgt[tgt["부서1"].astype(str)==d1]
-                if d2: tgt=tgt[tgt["부서2"].astype(str)==d2]
-                allowed.update(tgt["사번"].astype(str).tolist())
-            elif t=="개별":
-                for p in re.split(r"[,\s]+", str(r.get("대상사번","")).strip()):
-                    if p: allowed.add(p)
+def get_allowed_sabuns(emp_df: pd.DataFrame, sabun: str, include_self: bool = True) -> set[str]:
+    """
+    현재 사용자(sabun)가 접근 가능한 사번 집합.
+    - include_self=True면 자신의 사번 항상 포함
+    - 범위유형 공란이 1개라도 있으면 전체 허용(기존 로직 유지)
+    - 범위유형=부서 → 부서1/부서2 기준 필터
+    - 범위유형=개별 → 대상사번 목록 추가
+    """
+    sab = str(sabun)
+    allowed: set[str] = {sab} if include_self else set()
+
+    df = read_auth_df()
+    if df.empty:
+        return allowed
+
+    mine = df[(df["사번"].eq(sab)) & (df["활성"])]
+    if mine.empty:
+        return allowed
+
+    # 공란 범위유형 있으면 전체 허용
+    if (mine["범위유형"].astype(str).str.strip() == "").any():
+        return set(emp_df["사번"].astype(str).tolist())
+
+    # 부서/개별 규칙 적용
+    has_d1 = "부서1" in emp_df.columns
+    has_d2 = "부서2" in emp_df.columns
+
+    for _, r in mine.iterrows():
+        t = str(r.get("범위유형", "")).strip()
+        if t == "부서":
+            # 불필요한 df.copy() 제거 → 마스크로 필터
+            d1 = str(r.get("부서1", "")).strip()
+            d2 = str(r.get("부서2", "")).strip()
+
+            m = pd.Series(True, index=emp_df.index)
+            if has_d1 and d1:
+                m &= emp_df["부서1"].astype(str).eq(d1)
+            if has_d2 and d2:
+                m &= emp_df["부서2"].astype(str).eq(d2)
+
+            if m.any():
+                allowed.update(emp_df.loc[m, "사번"].astype(str).tolist())
+
+        elif t == "개별":
+            raw = str(r.get("대상사번", "")).strip()
+            if raw:
+                # 공백/쉼표 구분 → 공란 제거 후 추가
+                for p in re.split(r"[,\s]+", raw):
+                    if p:
+                        allowed.add(p)
+
     return allowed
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Global Target Sync
 # ═════════════════════════════════════════════════════════════════════════════
-def set_global_target(sabun:str, name:str=""):
-    st.session_state["glob_target_sabun"]=str(sabun).strip()
-    st.session_state["glob_target_name"]=str(name).strip()
+def set_global_target(sabun: str, name: str = "") -> None:
+    st.session_state["glob_target_sabun"] = str(sabun).strip()
+    st.session_state["glob_target_name"] = str(name).strip()
 
-def get_global_target()->Tuple[str,str]:
-    return (str(st.session_state.get("glob_target_sabun","") or ""),
-            str(st.session_state.get("glob_target_name","") or ""))
+def get_global_target() -> Tuple[str, str]:
+    return (
+        str(st.session_state.get("glob_target_sabun", "") or ""),
+        str(st.session_state.get("glob_target_name", "") or ""),
+    )
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Left: 직원선택 (Enter 동기화)
