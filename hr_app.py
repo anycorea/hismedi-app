@@ -337,13 +337,14 @@ def force_sync(*, clear_resource: bool = False, clear_all_session: bool = False)
 APP_TITLE = st.secrets.get("app", {}).get("TITLE", "HISMEDI - 인사/HR")
 st.set_page_config(page_title=APP_TITLE, layout="wide")
 
-# Disable st.help (최초 1회만 패치)
+# st.help 출력 무력화 (최초 1회)
 if not getattr(st, "_help_disabled", False):
-    def _noop_help(*_a, **_kw): return None
+    def _noop_help(*_a, **_kw): 
+        return None
     st.help = _noop_help
     st._help_disabled = True
 
-# CSS: 필요 스타일만 정리(가독 유지, 불필요 주석 제거)
+# 전역 CSS
 _CSS_GLOBAL = """
 <style>
   .block-container{padding-top:2.5rem!important}
@@ -354,18 +355,13 @@ _CSS_GLOBAL = """
   .app-title-hero{font-weight:800;font-size:1.6rem;line-height:1.15;margin:.2rem 0 .6rem}
   @media (min-width:1400px){.app-title-hero{font-size:1.8rem}}
   div[data-testid="stFormSubmitButton"] button[kind="secondary"]{padding:.35rem .5rem;font-size:.82rem}
-
-  /* JD Summary */
   .scrollbox{max-height:280px;overflow-y:auto;padding:.6rem .75rem;background:#fafafa;border:1px solid #e5e7eb;border-radius:.5rem}
   .scrollbox .kv{margin-bottom:.6rem}
   .scrollbox .k{font-weight:700;margin-bottom:.2rem}
   .scrollbox .v{white-space:pre-wrap;word-break:break-word;line-height:1.42}
   .jd-tight{line-height:1.42}
   .jd-tight p,.jd-tight ul,.jd-tight ol,.jd-tight li{margin:0;padding:0}
-
   .submit-banner{background:#FEF3C7;border:1px solid #FDE68A;padding:.55rem .8rem;border-radius:.5rem;font-weight:600;line-height:1.35;margin:4px 0 14px;display:block}
-
-  /* DataFrame 가로 스크롤: 표 본체에서만 노출 */
   div[data-testid="stDataFrame"]>div{overflow-x:visible!important}
   div[data-testid="stDataFrame"] [role="grid"]{overflow-x:auto!important}
   div[data-testid="stDataFrame"]{padding-bottom:10px}
@@ -376,16 +372,11 @@ st.markdown(_CSS_GLOBAL, unsafe_allow_html=True)
 # ═════════════════════════════════════════════════════════════════════════════
 # Utils
 # ═════════════════════════════════════════════════════════════════════════════
-# html.escape가 이전 블록에서 이미 있다면 재사용, 없으면 안전하게 임포트
-try:
-    _html_escape  # noqa: F821
-except NameError:  # pragma: no cover
-    from html import escape as _html_escape  # lightweight
-
-_sha256 = hashlib.sha256  # attribute lookup 미세 최적화
+from html import escape as _html_escape  # ← 직접 임포트로 고정 (화면 출력 없음)
+_sha256 = hashlib.sha256                 # 속도 미세 최적화: 룩업 캐시
 
 def current_year() -> int:
-    """KST 기준 현재 연도 반환(실패 시 시스템 연도)."""
+    """KST 기준 현재 연도(실패 시 시스템 연도)."""
     try:
         return datetime.now(tz=tz_kst()).year
     except Exception:
