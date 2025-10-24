@@ -1261,9 +1261,14 @@ def tab_eval(emp_df: pd.DataFrame):
             st.session_state[slider_key] = 3
     bulk_score = st.slider("일괄 점수(현재 편집 컬럼)", 1, 5, step=1, key=slider_key, disabled=not edit_mode)
     if st.button("일괄 적용", use_container_width=True, disabled=not edit_mode, key=f"bulk_multi_{kbase}"):
-        for _iid in item_ids:
-            st.session_state[f"eval2_seg_{_iid}_{kbase}"] = str(int(bulk_score))
+        bulk_map_key = f"eval2_bulkmap_{kbase}"
+        st.session_state[bulk_map_key] = {iid: int(bulk_score) for iid in item_ids}
         st.toast(f"모든 항목에 {bulk_score}점 적용", icon="✅")
+        st.rerun()
+    if st.button("일괄 적용 해제", use_container_width=True, key=f"clear_bulk_{kbase}", disabled=not edit_mode):
+        st.session_state.pop(f"eval2_bulkmap_{kbase}", None)
+        st.toast("일괄 적용 해제", icon="🧹")
+        st.rerun()
 
     # ◇◇ 현재 편집 대상 컬럼/표시 컬럼 결정
     editable_col_name = {"자기":"자기평가","1차":"1차평가","2차":"2차평가"}.get(str(eval_type), "자기평가")
@@ -1280,8 +1285,17 @@ def tab_eval(emp_df: pd.DataFrame):
     stage_self = _stage_scores_any_evaluator(int(year), "자기", str(target_sabun)) if "자기평가" in visible_cols else {}
     stage_1st  = _stage_scores_any_evaluator(int(year), "1차", str(target_sabun))  if "1차평가" in visible_cols else {}
 
+    bulk_map_key = f"eval2_bulkmap_{kbase}"
+
+
     def _seed_for_editable(iid: str):
-        # 기본값 공란(None)
+        # 우선순위: 일괄적용 dict → 개별 위젯 상태 → 저장된 점수 → None
+        try:
+            bulk_map = st.session_state.get(bulk_map_key, {}) or {}
+            if iid in bulk_map:
+                return int(bulk_map.get(iid))
+        except Exception:
+            pass
         rkey = f"eval2_seg_{iid}_{kbase}"
         if rkey in st.session_state:
             try:
@@ -1289,6 +1303,13 @@ def tab_eval(emp_df: pd.DataFrame):
                 return int(v) if (v is not None and str(v).strip()!="") else None
             except Exception:
                 return None
+        if iid in saved_scores:
+            try:
+                return int(saved_scores[iid])
+            except Exception:
+                return None
+        return None
+
         if iid in saved_scores:
             try:
                 return int(saved_scores[iid])
@@ -1407,6 +1428,7 @@ def tab_eval(emp_df: pd.DataFrame):
         for _iid in item_ids:
             _k = f"eval2_seg_{_iid}_{kbase}"
             if _k in st.session_state: del st.session_state[_k]
+        st.session_state.pop(f"eval2_bulkmap_{kbase}", None)
         st.rerun()
 
     if do_save:
