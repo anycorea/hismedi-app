@@ -408,92 +408,72 @@ def mount_sync_toast():
 APP_TITLE = st.secrets.get("app", {}).get("TITLE", "HISMEDI - 인사/HR")
 st.set_page_config(page_title=APP_TITLE, layout="wide")
 
-# === Anti-scroll-jump: definitive block ======================================
+# === Container-aware Top Fix (Streamlit main scroller) =======================
 import streamlit.components.v1 as components
 components.html("""
 <script>
 (function(){
   const d = window.parent?.document || document;
-  const w = window;
-  try{ if ('scrollRestoration' in w.history){ w.history.scrollRestoration = 'manual'; } }catch(_){}
 
-  // CSS hardening (no anchor-based reflow jumps, no smooth scrolling)
+  function scrollers(){
+    const arr = [];
+    try{ arr.push(d.scrollingElement); }catch(_){}
+    try{ arr.push(d.documentElement); }catch(_){}
+    try{ arr.push(d.body); }catch(_){}
+    try{ arr.push(d.querySelector('section.main [data-testid="stAppViewContainer"]')); }catch(_){}
+    try{ arr.push(d.querySelector('section.main')); }catch(_){}
+    return arr.filter(Boolean);
+  }
+
+  function toTop(){
+    const list = scrollers();
+    for (const el of list){
+      try{ el.scrollTop = 0; }catch(_){}
+      try{ el.scrollLeft = 0; }catch(_){}
+      try{ if (el.scrollTo) el.scrollTo({top:0, left:0}); }catch(_){}
+    }
+    try{ window.scrollTo(0,0); }catch(_){}
+  }
+
+  // CSS: remove top gaps and anchor jumps
   try{
     const style = d.createElement('style');
     style.textContent = `
-      html, body{ scroll-behavior:auto !important; overflow-anchor:none !important; }
-      .main{ scroll-behavior:auto !important; }
-      [autofocus]{ outline: none !important; }
+      html, body { scroll-behavior: auto !important; overflow-anchor: none !important; }
+      section.main { scroll-behavior: auto !important; }
+      section.main [data-testid="stAppViewContainer"] { scroll-behavior: auto !important; overflow-anchor: none !important; }
+      div.block-container { padding-top: 0 !important; margin-top: 0 !important; }
     `;
     d.head.appendChild(style);
   }catch(_){}
 
-  // Remove autofocus attrs that may pull viewport
-  function stripAutofocus(root){
-    try{
-      root.querySelectorAll('[autofocus]').forEach(el=>{ el.removeAttribute('autofocus'); });
-    }catch(_){}
-  }
-
-  // Build a hard "no scroll" window to neutralize Streamlit focus/scrollIntoView
-  const HOLD_MS = 3800;  // Tweak if needed
+  // Hold top for a short window after rerun
+  const HOLD_MS = 2000;
   const until = Date.now() + HOLD_MS;
 
-  // Freeze current top
-  try{ w.scrollTo(0,0); }catch(_){}
-
-  // Monkey-patch scrolling primitives during hold window
-  const _scrollTo = w.scrollTo.bind(w);
-  w.scrollTo = function(x,y){
-    if (Date.now() < until) { try{ _scrollTo(0,0); }catch(_){ } return; }
-    return _scrollTo(x,y);
-  };
-
-  const _elScrollIntoView = Element.prototype.scrollIntoView;
-  Element.prototype.scrollIntoView = function(){
-    if (Date.now() < until){ return; }
-    try{ return _elScrollIntoView.apply(this, arguments); }catch(_){}
-  };
-
-  // Kill focus-driven jumps
-  const _focus = Element.prototype.focus;
-  Element.prototype.focus = function(){
-    if (Date.now() < until){ return; }
-    try{ return _focus.apply(this, arguments); }catch(_){}
-  };
-
-  // Prevent manual attempts during hold
-  function block(e){
-    if (Date.now() < until){
-      try{ e.preventDefault(); e.stopPropagation(); }catch(_){}
-      try{ _scrollTo(0,0); }catch(_){}
-    }
+  function tick(){
+    toTop();
+    if (Date.now() < until) requestAnimationFrame(tick);
   }
-  ['wheel','touchmove','keydown'].forEach(ev => d.addEventListener(ev, block, {capture:true, passive:false}));
+  requestAnimationFrame(tick);
 
-  // Mutation observer to clean late autofocus
-  const mo = new MutationObserver(()=>{
-    if (Date.now() < until){
-      stripAutofocus(d);
-      try{ _scrollTo(0,0); }catch(_){}
-    }else{
-      try{ mo.disconnect(); }catch(_){}
-    }
-  });
-  mo.observe(d.body, {childList:true, subtree:true, attributes:true, attributeFilter:['autofocus']});
-  stripAutofocus(d);
-
-  // After hold, restore patched APIs
-  function release(){
-    if (Date.now() >= until){
-      try{ window.scrollTo = _scrollTo; }catch(_){}
-      try{ Element.prototype.scrollIntoView = _elScrollIntoView; }catch(_){}
-      try{ Element.prototype.focus = _focus; }catch(_){}
-      return;
-    }
-    requestAnimationFrame(release);
+  // Also force top when clicking sync/reset buttons
+  function hook(label){
+    const btns = Array.from(d.querySelectorAll('.stButton button'));
+    const b = btns.find(b => (b.textContent||'').includes(label));
+    if (!b || b._topHook) return;
+    b._topHook = true;
+    b.addEventListener('click', ()=>{
+      try{
+        const stopAt = Date.now() + 2500;
+        function h(){ toTop(); if (Date.now() < stopAt) requestAnimationFrame(h); }
+        requestAnimationFrame(h);
+      }catch(_){}
+    }, {capture:true});
   }
-  requestAnimationFrame(release);
+  function bind(){ ['동기화','필터 초기화','검색 적용'].forEach(hook); }
+  bind();
+  new MutationObserver(bind).observe(d.body, {childList:true, subtree:true});
 })();
 </script>
 """, height=0, width=0)
@@ -505,7 +485,7 @@ if not getattr(st, "_help_disabled", False):
     st.help = _noop_help
     st._help_disabled = True
 
-COMPACT_HEADER_H = 36  # px: 헤더 높이 (아이콘 보이도록 최소값)
+COMPACT_HEADER_H = 32  # px: 헤더 높이 (아이콘 보이도록 최소값)
 
 _CSS_GLOBAL = f"""
 <style>
