@@ -362,7 +362,7 @@ if not getattr(st, "_help_disabled", False):
 _CSS_GLOBAL = """
 <style>
   /* 상단 여백 살짝 복원: 점프 완화 */
-  div.block-container{padding-top:.6rem!important}
+  div.block-container{padding-top:.8rem!important}
   header[data-testid="stHeader"]{padding-top:0!important}
   section[data-testid="stSidebar"] .block-container{padding-top:.6rem!important}
 
