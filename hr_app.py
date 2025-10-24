@@ -408,13 +408,96 @@ def mount_sync_toast():
 APP_TITLE = st.secrets.get("app", {}).get("TITLE", "HISMEDI - 인사/HR")
 st.set_page_config(page_title=APP_TITLE, layout="wide")
 
-# === Scroll control mode =====================================================
-# 'hardlock_top' : Strongly pin to very top after each rerun; kill autofocus.
-# 'preserve'     : Restore previous position after rerun (no forced top).
-# 'off'          : Do nothing (browser default).
-SCROLL_MODE = 'hardlock_top'
-# =============================================================================
+# === Anti-scroll-jump: definitive block ======================================
+import streamlit.components.v1 as components
+components.html("""
+<script>
+(function(){
+  const d = window.parent?.document || document;
+  const w = window;
+  try{ if ('scrollRestoration' in w.history){ w.history.scrollRestoration = 'manual'; } }catch(_){}
 
+  // CSS hardening (no anchor-based reflow jumps, no smooth scrolling)
+  try{
+    const style = d.createElement('style');
+    style.textContent = `
+      html, body{ scroll-behavior:auto !important; overflow-anchor:none !important; }
+      .main{ scroll-behavior:auto !important; }
+      [autofocus]{ outline: none !important; }
+    `;
+    d.head.appendChild(style);
+  }catch(_){}
+
+  // Remove autofocus attrs that may pull viewport
+  function stripAutofocus(root){
+    try{
+      root.querySelectorAll('[autofocus]').forEach(el=>{ el.removeAttribute('autofocus'); });
+    }catch(_){}
+  }
+
+  // Build a hard "no scroll" window to neutralize Streamlit focus/scrollIntoView
+  const HOLD_MS = 3800;  // Tweak if needed
+  const until = Date.now() + HOLD_MS;
+
+  // Freeze current top
+  try{ w.scrollTo(0,0); }catch(_){}
+
+  // Monkey-patch scrolling primitives during hold window
+  const _scrollTo = w.scrollTo.bind(w);
+  w.scrollTo = function(x,y){
+    if (Date.now() < until) { try{ _scrollTo(0,0); }catch(_){ } return; }
+    return _scrollTo(x,y);
+  };
+
+  const _elScrollIntoView = Element.prototype.scrollIntoView;
+  Element.prototype.scrollIntoView = function(){
+    if (Date.now() < until){ return; }
+    try{ return _elScrollIntoView.apply(this, arguments); }catch(_){}
+  };
+
+  // Kill focus-driven jumps
+  const _focus = Element.prototype.focus;
+  Element.prototype.focus = function(){
+    if (Date.now() < until){ return; }
+    try{ return _focus.apply(this, arguments); }catch(_){}
+  };
+
+  // Prevent manual attempts during hold
+  function block(e){
+    if (Date.now() < until){
+      try{ e.preventDefault(); e.stopPropagation(); }catch(_){}
+      try{ _scrollTo(0,0); }catch(_){}
+    }
+  }
+  ['wheel','touchmove','keydown'].forEach(ev => d.addEventListener(ev, block, {capture:true, passive:false}));
+
+  // Mutation observer to clean late autofocus
+  const mo = new MutationObserver(()=>{
+    if (Date.now() < until){
+      stripAutofocus(d);
+      try{ _scrollTo(0,0); }catch(_){}
+    }else{
+      try{ mo.disconnect(); }catch(_){}
+    }
+  });
+  mo.observe(d.body, {childList:true, subtree:true, attributes:true, attributeFilter:['autofocus']});
+  stripAutofocus(d);
+
+  // After hold, restore patched APIs
+  function release(){
+    if (Date.now() >= until){
+      try{ window.scrollTo = _scrollTo; }catch(_){}
+      try{ Element.prototype.scrollIntoView = _elScrollIntoView; }catch(_){}
+      try{ Element.prototype.focus = _focus; }catch(_){}
+      return;
+    }
+    requestAnimationFrame(release);
+  }
+  requestAnimationFrame(release);
+})();
+</script>
+""", height=0, width=0)
+# =============================================================================
 
 # st.help 출력 무력화
 if not getattr(st, "_help_disabled", False):
@@ -422,7 +505,7 @@ if not getattr(st, "_help_disabled", False):
     st.help = _noop_help
     st._help_disabled = True
 
-COMPACT_HEADER_H = 44  # px: 헤더 높이 (아이콘 보이도록 최소값)
+COMPACT_HEADER_H = 36  # px: 헤더 높이 (아이콘 보이도록 최소값)
 
 _CSS_GLOBAL = f"""
 <style>
@@ -482,116 +565,6 @@ _CSS_GLOBAL = f"""
 st.markdown(_CSS_GLOBAL, unsafe_allow_html=True)
 
 # 스크롤 최상단 고정 (rerun 및 버튼 클릭 뒤 점프 억제: 항상 TOP)
-
-import streamlit.components.v1 as components
-
-_js_hardlock_top = """
-<script>
-(function(){
-  const d = window.parent.document;
-  const s = window.sessionStorage;
-
-  try{ if ('scrollRestoration' in window.history){ window.history.scrollRestoration = 'manual'; } }catch(_){}
-
-  function stripAutofocus(root){
-    const qs = root.querySelectorAll('input[autofocus], textarea[autofocus], select[autofocus], button[autofocus]');
-    qs.forEach(el=>{ try{ el.removeAttribute('autofocus'); }catch(_){ } });
-  }
-
-  const originalFocus = Element.prototype.focus;
-  let killFocusUntil = Date.now() + 4500;
-  function enableFocusKiller(ms){ killFocusUntil = Math.max(killFocusUntil, Date.now()+ms); }
-  Element.prototype.focus = function(){
-    if (Date.now() < killFocusUntil) { try{ /* no-op */ }catch(_){ } }
-    else { return originalFocus.apply(this, arguments); }
-  };
-
-  function onFocusIn(e){
-    if (Date.now() < killFocusUntil){
-      try{ e.stopPropagation(); e.preventDefault(); }catch(_){ }
-      try{ if (d.activeElement) d.activeElement.blur(); }catch(_){ }
-    }
-  }
-  d.addEventListener('focusin', onFocusIn, {capture:true});
-
-  function hookLabels(){
-    const labels = ['동기화','필터 초기화','검색 적용'];
-    const btns = Array.from(d.querySelectorAll('.stButton button'));
-    btns.forEach(b=>{
-      if (b._scrollHardHook) return;
-      b._scrollHardHook = true;
-      if (!labels.some(L => (b.textContent||'').includes(L))) return;
-      b.addEventListener('click', ()=>{ enableFocusKiller(7000); armTop(7000); }, {capture:true});
-    });
-  }
-  new MutationObserver(hookLabels).observe(d.body, {subtree:true, childList:true});
-  hookLabels();
-
-  function armTop(ms){
-    try{
-      const until = Date.now()+ms;
-      s.setItem('forceTopUntil', String(until));
-    }catch(_){}
-  }
-
-  const armedUntil = parseInt(s.getItem('forceTopUntil')||'0',10) || 0;
-  const baseHold = Date.now() + 4500;
-  const holdUntil = Math.max(baseHold, armedUntil);
-  enableFocusKiller(holdUntil - Date.now()); 
-  stripAutofocus(d);
-
-  function keepTop(){
-    const now = Date.now();
-    try{ window.scrollTo(0,0); }catch(_){}
-    if (now < holdUntil) requestAnimationFrame(keepTop);
-    else try{ s.removeItem('forceTopUntil'); Element.prototype.focus = originalFocus; }catch(_){}
-  }
-  requestAnimationFrame(keepTop);
-
-  function blockScroll(e){
-    if (Date.now() < holdUntil){
-      try{ e.preventDefault(); e.stopPropagation(); }catch(_){}
-      try{ window.scrollTo(0,0); }catch(_){}
-    }
-  }
-  ['wheel','touchmove','keydown'].forEach(ev=>{
-    d.addEventListener(ev, blockScroll, {capture:true, passive:false});
-  });
-
-  const mo = new MutationObserver(muts=>{
-    const now = Date.now();
-    if (now < holdUntil){
-      stripAutofocus(d);
-      try{ if (d.activeElement) d.activeElement.blur(); }catch(_){}
-      try{ window.scrollTo(0,0); }catch(_){}
-    }
-  });
-  mo.observe(d.body, {subtree:true, childList:true, attributes:true, attributeFilter:['autofocus']});
-
-})();
-</script>
-"""
-
-
-_js_preserve = """
-<script>
-(function(){
-  const s = window.sessionStorage;
-  let y = 0;
-  try{ y = parseInt(s.getItem('scrollY')||'0',10) || 0; }catch(_){ y = 0; }
-  requestAnimationFrame(function(){ try{ window.scrollTo(0, y); }catch(_){} });
-  window.addEventListener('scroll', function(){ try{ s.setItem('scrollY', String(window.scrollY||0)); }catch(_){} }, {passive:true});
-})();
-</script>
-"""
-
-_js_off = "<script></script>"
-
-components.html({
-  'hardlock_top': _js_hardlock_top,
-  'preserve'    : _js_preserve,
-  'off'         : _js_off,
-}.get(SCROLL_MODE, _js_hardlock_top), height=0, width=0)
 # ────────────────────────────────────────────────────────────────────────────
 # Stray True/False suppressor (safely hides random boolean paragraphs)
 # ────────────────────────────────────────────────────────────────────────────
