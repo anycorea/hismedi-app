@@ -262,27 +262,37 @@ except Exception:
 # --- end ---------------------------------------------------------------------
 
 # ═════════════════════════════════════════════════════════════════════════════
-# Sync Utility (Force refresh Google Sheets caches)
+# Sync Utility (session-scoped, throttled)
 # ═════════════════════════════════════════════════════════════════════════════
-def force_sync(*, clear_resource: bool = False, clear_all_session: bool = False):
+SYNC_THROTTLE_SEC = 8  # 연타 방지 쿨다운(초)
+
+def force_sync(*, clear_resource: bool = False, clear_all_session: bool = False, hard: bool = False):
     """
-    데이터/편집 캐시 중심의 강제 동기화.
-    - clear_resource=False(기본): resource 캐시는 보존 → 연결/클라이언트 재생성 비용 절약(빠름)
-    - clear_resource=True : st.cache_resource까지 비움
-    - clear_all_session=True : SAFE_KEEP 제외 모든 세션 키 제거
+    데이터/편집 캐시 중심의 '세션 한정' 동기화.
+    - 기본: 전역 st.cache_* 는 보존 → 타 사용자 영향 없음, 허드(429) 완화
+    - hard=True: 정말 필요한 경우에만 전역 st.cache_* 비움 (관리자 문제 해결용)
+    - clear_resource/clear_all_session: 기존 옵션 유지(가능하면 사용 자제)
     """
-    # Streamlit 캐시
-    try:
-        st.cache_data.clear()
-    except Exception:
-        pass
-    if clear_resource:
+    now = time.time()
+    last = float(st.session_state.get("_last_sync_ts", 0) or 0)
+    wait = SYNC_THROTTLE_SEC - (now - last)
+    if wait > 0:
         try:
-            st.cache_resource.clear()
+            st.info(f"⏳ 잠시만요… {int(wait)}초 후 다시 시도해 주세요.", icon="⏳")
         except Exception:
             pass
+        return
 
-    # 모듈 레벨 캐시 (존재할 때만 정리)
+    # 세션 쿨다운 갱신
+    st.session_state["_last_sync_ts"] = now
+
+    # ── 1) 전역 캐시 건드리지 않고 '세션 버스터'만 증가 ───────────────────
+    st.session_state["cache_rev"] = int(st.session_state.get("cache_rev", 0)) + 1
+    # 이미 쓰고 있는 리비전들도 같이 올려주면 즉시 반영이 쉬움
+    for k in ("jobdesc_rev", "comp_rev", "eval_rev"):
+        st.session_state[k] = int(st.session_state.get(k, 0)) + 1
+
+    # ── 2) 모듈 레벨 캐시(우리 앱 내부 딕셔너리 캐시)만 정리 ───────────────
     try:
         if "_WS_CACHE" in globals() and isinstance(globals()["_WS_CACHE"], dict):
             globals()["_WS_CACHE"].clear()
@@ -291,43 +301,41 @@ def force_sync(*, clear_resource: bool = False, clear_all_session: bool = False)
         if "_VAL_CACHE" in globals() and isinstance(globals()["_VAL_CACHE"], dict):
             globals()["_VAL_CACHE"].clear()
     except Exception:
-        # 필요 시 초기화
         globals().setdefault("_WS_CACHE", {})
         globals().setdefault("_HDR_CACHE", {})
         globals().setdefault("_VAL_CACHE", {})
 
-    # 세션 상태: 편집/데이터 캐시 위주 정리 (로그인/인증 관련 키 보존)
-    SAFE_KEEP = {"user", "access_token", "refresh_token", "login_time", "login_provider"}
+    # ── 3) 세션 상태: 데이터/편집 캐시성 키만 선별 삭제(로그인 보존) ────────
+    SAFE_KEEP = {"user", "access_token", "refresh_token", "login_time", "login_provider",
+                 "authed", "auth_expires_at", "_state_owner_sabun", "_last_sync_ts"}
     ACL_KEYS  = {"acl_df", "acl_header", "acl_editor", "auth_editor", "auth_editor_df", "__auth_sab_sig"}
-
-    # 데이터/편집 캐시 프리픽스 (여기에 eval2_bulkmap 등 추가)
-    PREFIXES  = (
-        "__cache_", "_df_", "_cache_", "gs_", "eval2_", "bulk_score_"
-    )
+    PREFIXES  = ("__cache_", "_df_", "_cache_", "gs_", "eval2_", "bulk_score_", "cmpS_", "jd2_", "adm_", "acl_")
 
     try:
-        ss = st.session_state  # 로컬 바인딩(미세가속)
+        ss = st.session_state
         if clear_all_session:
             to_del = [k for k in list(ss.keys()) if k not in SAFE_KEEP]
         else:
             to_del = []
             for k in list(ss.keys()):
-                if k in SAFE_KEEP:
+                if k in SAFE_KEEP: 
                     continue
                 if k in ACL_KEYS:
                     to_del.append(k); continue
-                # 캐시/편집성 키만 선별
-                for p in PREFIXES:
-                    if k.startswith(p):
-                        to_del.append(k)
-                        break
+                if any(k.startswith(p) for p in PREFIXES):
+                    to_del.append(k); continue
         for k in to_del:
-            try:
-                del ss[k]
-            except Exception:
-                pass
+            ss.pop(k, None)
     except Exception:
         pass
+
+    # ── 4) 정말 필요한 경우에만 '하드' 초기화 ────────────────────────────────
+    if hard:
+        try: st.cache_data.clear()
+        except Exception: pass
+        if clear_resource:
+            try: st.cache_resource.clear()
+            except Exception: pass
 
     st.rerun()
 
