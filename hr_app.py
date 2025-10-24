@@ -1935,27 +1935,44 @@ def _jd_latest_for(sabun: str, year: int) -> dict | None:
     df = read_jobdesc_df(st.session_state.get("jobdesc_rev", 0))
     if df.empty:
         return None
-    sub = df[(df["사번"].astype(str) == str(sabun)) & (df["연도"].astype(int) == int(year))]
+
+    sabun_s = str(sabun)
+    year_i  = int(year)
+
+    # ⚠️ copy()로 경고 제거
+    mask = (df["사번"].astype(str) == sabun_s) & (
+        pd.to_numeric(df["연도"], errors="coerce").fillna(0).astype(int) == year_i
+    )
+    sub = df.loc[mask].copy()
     if sub.empty:
         return None
-    try:
-        sub["버전"] = sub["버전"].astype(int)
-    except Exception:
-        pass
+
+    # 안전한 정수 변환
+    sub["버전"] = pd.to_numeric(sub["버전"], errors="coerce").fillna(0).astype(int)
+
     row = sub.sort_values(["버전"], ascending=[False]).iloc[0].to_dict()
     # 문자열화
-    for k, v in list(row.items()):
-        row[k] = "" if v is None else str(v)
-    return row
-
+    return {k: ("" if v is None else str(v)) for k, v in row.items()}
 
 def _jobdesc_next_version(sabun: str, year: int) -> int:
     """다음 버전 번호 산출 (해당 키가 없으면 1)."""
     df = read_jobdesc_df(st.session_state.get("jobdesc_rev", 0))
     if df.empty:
         return 1
-    sub = df[(df["사번"].astype(str) == str(sabun)) & (df["연도"].astype(int) == int(year))]
-    return 1 if sub.empty else int(sub["버전"].astype(int).max()) + 1
+
+    sabun_s = str(sabun)
+    year_i  = int(year)
+
+    # ⚠️ copy()로 경고 제거
+    mask = (df["사번"].astype(str) == sabun_s) & (
+        pd.to_numeric(df["연도"], errors="coerce").fillna(0).astype(int) == year_i
+    )
+    sub_ver = df.loc[mask, "버전"].copy()
+    if sub_ver.empty:
+        return 1
+
+    ver_max = pd.to_numeric(sub_ver, errors="coerce").fillna(0).astype(int).max()
+    return int(ver_max) + 1
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Write helpers (batch‑safe)
