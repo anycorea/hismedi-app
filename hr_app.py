@@ -505,7 +505,7 @@ if not getattr(st, "_help_disabled", False):
     st.help = _noop_help
     st._help_disabled = True
 
-COMPACT_HEADER_H = 32  # px: 헤더 높이 (아이콘 보이도록 최소값)
+COMPACT_HEADER_H = 36  # px: 헤더 높이 (아이콘 보이도록 최소값)
 
 _CSS_GLOBAL = f"""
 <style>
