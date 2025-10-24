@@ -264,44 +264,68 @@ except Exception:
 # ═════════════════════════════════════════════════════════════════════════════
 # Sync Utility (Force refresh Google Sheets caches)
 # ═════════════════════════════════════════════════════════════════════════════
-def force_sync():
-    """데이터/편집 캐시만 비우고 즉시 리런 (로그인 세션/인증 키는 유지)."""
+def force_sync(*, clear_resource: bool = False, clear_all_session: bool = False):
+    """
+    데이터/편집 캐시 중심의 강제 동기화.
+    - clear_resource=False(기본): resource 캐시는 보존 → 연결/클라이언트 재생성 비용 절약(빠름)
+    - clear_resource=True : st.cache_resource까지 비움
+    - clear_all_session=True : SAFE_KEEP 제외 모든 세션 키 제거
+    """
     # Streamlit 캐시
     try:
         st.cache_data.clear()
     except Exception:
         pass
-    try:
-        st.cache_resource.clear()
-    except Exception:
-        pass
-
-    # 모듈 레벨 캐시
-    try:
-        global _WS_CACHE, _HDR_CACHE, _VAL_CACHE
-        _WS_CACHE.clear(); _HDR_CACHE.clear(); _VAL_CACHE.clear()
-    except Exception:
+    if clear_resource:
         try:
-            _WS_CACHE = {}; _HDR_CACHE = {}; _VAL_CACHE = {}
+            st.cache_resource.clear()
         except Exception:
             pass
 
-    # 세션 상태: 편집/데이터 캐시만 선별 제거 (로그인/인증 관련 키는 보존)
+    # 모듈 레벨 캐시 (존재할 때만 정리)
+    try:
+        if "_WS_CACHE" in globals() and isinstance(globals()["_WS_CACHE"], dict):
+            globals()["_WS_CACHE"].clear()
+        if "_HDR_CACHE" in globals() and isinstance(globals()["_HDR_CACHE"], dict):
+            globals()["_HDR_CACHE"].clear()
+        if "_VAL_CACHE" in globals() and isinstance(globals()["_VAL_CACHE"], dict):
+            globals()["_VAL_CACHE"].clear()
+    except Exception:
+        # 필요 시 초기화
+        globals().setdefault("_WS_CACHE", {})
+        globals().setdefault("_HDR_CACHE", {})
+        globals().setdefault("_VAL_CACHE", {})
+
+    # 세션 상태: 편집/데이터 캐시 위주 정리 (로그인/인증 관련 키 보존)
     SAFE_KEEP = {"user", "access_token", "refresh_token", "login_time", "login_provider"}
     ACL_KEYS  = {"acl_df", "acl_header", "acl_editor", "auth_editor", "auth_editor_df", "__auth_sab_sig"}
-    PREFIXES  = ("__cache_", "_df_", "_cache_", "gs_")  # 데이터 캐시성 키만
-    
+
+    # 데이터/편집 캐시 프리픽스 (여기에 eval2_bulkmap 등 추가)
+    PREFIXES  = (
+        "__cache_", "_df_", "_cache_", "gs_", "eval2_", "bulk_score_"
+    )
+
     try:
-        to_del = []
-        for k in list(st.session_state.keys()):
-            if k in SAFE_KEEP:
-                continue
-            if k in ACL_KEYS:
-                to_del.append(k); continue
-            if any(k.startswith(p) for p in PREFIXES):
-                to_del.append(k); continue
+        ss = st.session_state  # 로컬 바인딩(미세가속)
+        if clear_all_session:
+            to_del = [k for k in list(ss.keys()) if k not in SAFE_KEEP]
+        else:
+            to_del = []
+            for k in list(ss.keys()):
+                if k in SAFE_KEEP:
+                    continue
+                if k in ACL_KEYS:
+                    to_del.append(k); continue
+                # 캐시/편집성 키만 선별
+                for p in PREFIXES:
+                    if k.startswith(p):
+                        to_del.append(k)
+                        break
         for k in to_del:
-            del st.session_state[k]
+            try:
+                del ss[k]
+            except Exception:
+                pass
     except Exception:
         pass
 
