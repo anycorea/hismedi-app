@@ -326,10 +326,10 @@ def force_sync(*, clear_resource: bool = False, clear_all_session: bool = False,
     st.rerun()
 
 # ────────────────────────────────────────────────────────────────────────────
-# Global toast mount: 우상단 고정 쿨다운 토스트(레이아웃 영향 0)
+# Global toast mount: 왼쪽 패널 "동기화" 버튼 위에 딱 붙는 고정 토스트
 # ────────────────────────────────────────────────────────────────────────────
 def mount_sync_toast():
-    """세션 쿨다운 중이면 우상단에 고정 토스트를 띄워 초를 갱신한다."""
+    """세션 쿨다운 중이면 '동기화' 버튼 위에 토스트를 띄우고 초를 갱신한다."""
     try:
         import streamlit.components.v1 as components
         cool = _cooldown_remaining()
@@ -350,22 +350,49 @@ def mount_sync_toast():
         <script>
         (function(){{
           const d = window.parent.document;
-          let el = d.getElementById('sync_toast_fixed');
-          if(!el){{
-            el = d.createElement('div');
-            el.id = 'sync_toast_fixed';
-            d.body.appendChild(el);
+
+          // 토스트 엘리먼트 생성/획득
+          let toast = d.getElementById('sync_toast_fixed');
+          if(!toast){{
+            toast = d.createElement('div');
+            toast.id = 'sync_toast_fixed';
+            d.body.appendChild(toast);
           }}
+
+          // "동기화" 버튼을 찾아 위치를 버튼 상단-우측으로 고정
+          function anchorToSync(){{
+            // 왼쪽 패널 안의 버튼 중 텍스트에 '동기화' 포함을 찾음
+            const btns = Array.from(d.querySelectorAll('.stButton button'));
+            const syncBtn = btns.find(b => (b.textContent||'').trim().includes('동기화'));
+            if(!syncBtn) return false;
+
+            const r = syncBtn.getBoundingClientRect();
+            // 토스트 크기 측정 후 버튼 우측 상단에 맞춤 (5px 위로 띄움)
+            const tw = toast.offsetWidth || 260;
+            const th = toast.offsetHeight || 32;
+            const top  = Math.max(8, r.top - th - 5) + window.scrollY;
+            const left = (r.left + r.width - tw) + window.scrollX;
+
+            toast.style.top  = top + 'px';
+            toast.style.left = left + 'px';
+            return true;
+          }}
+
+          // 카운트다운 + 위치 갱신 루프
           const end = {end_ts_ms};
           function tick(){{
             const now = Date.now();
             let r = Math.ceil((end - now)/1000);
+
+            // 매 프레임 위치 갱신(창 리플로우/리사이즈 대응)
+            anchorToSync() || (toast.style.top='84px', toast.style.right='22px');
+
             if (r <= 0){{
-              try{{ el.remove(); }}catch(_){{
-              }}
+              toast.style.transition = 'opacity .2s ease'; toast.style.opacity = '0';
+              setTimeout(()=>{{ try{{ toast.remove(); }}catch(_){{}} }}, 240);
               return;
             }}
-            el.textContent = "⏳ 잠시만요… " + r + "초 후 다시 시도해 주세요.";
+            toast.textContent = "⏳ 잠시만요… " + r + "초 후 다시 시도해 주세요.";
             requestAnimationFrame(tick);
           }}
           tick();
@@ -387,30 +414,19 @@ if not getattr(st, "_help_disabled", False):
     st.help = _noop_help
     st._help_disabled = True
 
-# 전역 CSS (자리차지 0 토스트 + 버튼 흔들림 방지 + 기본 스타일)
+# 전역 CSS (상단 여백 0, 버튼 흔들림 방지, 토스트 기본 스타일)
 _CSS_GLOBAL = """
 <style>
-  /* ── Top spacing (점프 완화) ───────────────────────────────────────────── */
-  div.block-container{padding-top:.6rem!important}
+  /* ── Top spacing 0 (점프 체감 최소화) ─────────────────────────────────── */
+  div.block-container{padding-top:0!important}
   header[data-testid="stHeader"]{padding-top:0!important}
-  section[data-testid="stSidebar"] .block-container{padding-top:.6rem!important}
+  section[data-testid="stSidebar"] .block-container{padding-top:0!important}
+  html, body { scroll-behavior: auto !important; } /* 스크롤 부드러움 제거 */
 
   /* 빈 단락 제거 (과거 True/False 잔상 방지) */
   div.block-container > p:empty{display:none!important;margin:0!important;padding:0!important}
 
-  /* ── 우상단 고정 토스트 (자리차지 0) ─────────────────────────────────── */
-  #sync_toast_fixed{
-    position:fixed; z-index:9999;
-    top:84px; right:22px;            /* 필요시 미세 조정 */
-    background:#eef2ff; color:#1e3a8a;
-    border:1px solid #c7d2fe; border-radius:12px;
-    padding:8px 12px; font-weight:700; line-height:1.2;
-    box-shadow:0 6px 18px rgba(0,0,0,.08);
-    pointer-events:none; white-space:nowrap;
-  }
-  @media (max-width:680px){ #sync_toast_fixed{ top:76px; right:10px; } }
-
-  /* ── 버튼 포커스/액티브 튐 방지(클릭 시 간격 벌어짐 방지) ───────────── */
+  /* ── 버튼 포커스/액티브 튐 방지 ───────────────────────────────────── */
   .stButton>button:focus, .stButton>button:focus-visible{
     outline:none!important; box-shadow:none!important;
   }
@@ -419,16 +435,17 @@ _CSS_GLOBAL = """
     transition:none!important; transform:none!important;
   }
 
-  /* (옵션) 한 줄 배너 스타일(현재 미사용) */
-  .inline-sync-info{
-    display:block; width:100%;
-    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-    padding:.55rem .8rem; border-radius:.5rem;
-    border:1px solid #bfdbfe; background:#eff6ff; color:#1e3a8a;
-    font-weight:600; line-height:1.35;
+  /* ── 토스트 기본 스타일(위치는 JS에서 버튼 위로 맞춤) ────────────── */
+  #sync_toast_fixed{
+    position:fixed; z-index:9999;
+    background:#eef2ff; color:#1e3a8a;
+    border:1px solid #c7d2fe; border-radius:12px;
+    padding:8px 12px; font-weight:700; line-height:1.2;
+    box-shadow:0 6px 18px rgba(0,0,0,.08);
+    pointer-events:none; white-space:nowrap;
   }
 
-  /* ── 기존 스타일 유지 ───────────────────────────────────────────────── */
+  /* ── 기존 스타일 유지 ─────────────────────────────────────────────── */
   .stTabs [role='tab']{padding:10px 16px!important;font-size:1.02rem!important}
   .badge{display:inline-block;padding:.25rem .5rem;border-radius:.5rem;border:1px solid #9ae6b4;background:#e6ffed;color:#0f5132;font-weight:600}
   section[data-testid="stHelp"],div[data-testid="stHelp"]{display:none!important}
@@ -3877,7 +3894,7 @@ def main():
     emp_df = read_emp_df()
     st.session_state["emp_df"] = emp_df
 
-    # ⬇️ 전역 토스트(쿨다운 중이면 우상단 고정 표시, 아니면 제거)
+    # ⬇️ 전역 토스트(쿨다운 중이면 좌상단 고정 표시, 아니면 제거)
     mount_sync_toast()
 
     if not _session_valid():
