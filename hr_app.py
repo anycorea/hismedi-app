@@ -333,7 +333,7 @@ st.set_page_config(page_title=APP_TITLE, layout="wide")
 
 # st.help 출력 무력화 (최초 1회)
 if not getattr(st, "_help_disabled", False):
-    def _noop_help(*_a, **_kw): 
+    def _noop_help(*_a, **_kw):
         return None
     st.help = _noop_help
     st._help_disabled = True
@@ -345,33 +345,32 @@ _CSS_GLOBAL = """
   div.block-container{padding-top:.8rem!important}
   header[data-testid="stHeader"]{padding-top:0!important}
   section[data-testid="stSidebar"] .block-container{padding-top:.6rem!important}
+
   /* 빈 단락 제거 (과거 True/False 잔상 방지) */
   div.block-container > p:empty{display:none!important;margin:0!important;padding:0!important}
 
-  /* ── 자리차지 0 토스트 (동기화 쿨다운 안내) ───────────────────────────── */
-  /* c2 컬럼 안에서만 떠 있게: 레이아웃 영향 없음 */
-  #sync_toast_wrap{ position:relative; height:0; margin:0; padding:0; }
-  #sync_toast{
-    position:absolute; right:0; top:-44px; z-index:10;
+  /* ── 우상단 고정 토스트 (자리차지 0, 동기화 쿨다운 안내) ──────────────── */
+  #sync_toast_fixed{
+    position:fixed; z-index:9999;
+    top:84px; right:22px; /* 필요시 미세 조정 */
     background:#eef2ff; color:#1e3a8a;
     border:1px solid #c7d2fe; border-radius:12px;
     padding:8px 12px; font-weight:700; line-height:1.2;
     box-shadow:0 6px 18px rgba(0,0,0,.08);
     pointer-events:none; white-space:nowrap;
   }
-  @media (max-width:680px){
-    #sync_toast{ top:-50px; right:8px; }
+  @media (max-width:680px){ #sync_toast_fixed{ top:76px; right:10px; } }
+
+  /* ── 버튼 포커스/액티브 튐 방지(클릭 시 간격 벌어짐 방지) ───────────── */
+  .stButton>button:focus, .stButton>button:focus-visible{
+    outline:none!important; box-shadow:none!important;
+  }
+  .stButton>button{
+    border-width:1px!important; border-color:#e5e7eb!important;
+    transition:none!important; transform:none!important;
   }
 
-  /* ── 버튼 포커스/액티브 튐 방지 ──────────────────────────────────────── */
-  .stButton>button:focus,
-  .stButton>button:focus-visible{ outline:none!important; box-shadow:none!important; }
-  .stButton>button[kind="secondary"]{ border-color:#e5e7eb!important; } /* 포커스 시 테두리색 고정 */
-  .stButton>button{ border-width:1px!important; transform:none!important; } /* 눌림 시 높이 변화 방지 */
-  /* 필요 시 기본 전환 제거 */
-  .stButton>button{ transition:none!important; }
-
-  /* ── (구) 한 줄 배너(현재 미사용 가능, 남겨둬도 무방) ───────────────── */
+  /* (옵션) 한 줄 배너 스타일(현재 미사용) */
   .inline-sync-info{
     display:block; width:100%;
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
@@ -402,29 +401,36 @@ _CSS_GLOBAL = """
 """
 st.markdown(_CSS_GLOBAL, unsafe_allow_html=True)
 
-# ── UI glitch guard: stray True/False suppressor ───────────────────────────
-import streamlit.components.v1 as components  # 이미 있으면 생략
+# (선택) 스크롤 위치 보존: 리런 시 '살짝 내려갔다 복귀' 체감 완화
+import streamlit.components.v1 as components
+components.html("""
+<script>
+(function(){
+  const s = window.sessionStorage;
+  const y = parseInt(s.getItem('scrollY')||'0', 10) || 0;
+  if (y > 0) { window.scrollTo(0, y); }
+  let t = null;
+  window.addEventListener('scroll', ()=>{
+    clearTimeout(t); t = setTimeout(()=>{ s.setItem('scrollY', String(window.scrollY)); }, 80);
+  }, {passive:true});
+})();
+</script>
+""", height=0, width=0)
 
+# ── (옵션) stray True/False 숨김 유틸 — 필요 시 한 번만 호출하세요 ──────────
 def _suppress_magic_booleans():
     components.html(
         """
         <script>
         (function(){
           const doc = window.parent.document;
-          function sweep(){
-            const ps = doc.querySelectorAll('div.block-container p');
-            for (const p of ps){
-              const t = (p.textContent || "").trim();
-              if (t === "True" || t === "False") {
-                const grid = p.closest('[role="grid"]'); if (grid) continue;
-                p.style.display = "none";
-              }
+          const ps = Array.from(doc.querySelectorAll('div.block-container p'));
+          for (const p of ps){
+            const t = (p.textContent||"").trim();
+            if ((t==="True"||t==="False") && !p.closest('[role="grid"]')){
+              p.style.display = "none";
             }
           }
-          sweep();
-          const mo = new MutationObserver(sweep);
-          mo.observe(doc.body, {childList:true, subtree:true});
-          setTimeout(()=>{ try{ mo.disconnect(); }catch(e){} }, 6000);
         })();
         </script>
         """,
@@ -3847,37 +3853,39 @@ def main():
                          help="캐시를 비우고 구글시트에서 다시 불러옵니다."):
                 force_sync()
 
-            # ▷ 버튼 '영역 내부'에 0높이 앵커를 만들고, 그 위로 떠 있는 토스트를 겹쳐서 표시합니다.
-            import math, streamlit.components.v1 as components
+            # 자리 차지 0: 우상단 고정 토스트(쿨다운 중에만 표시)
+            import math
+            import streamlit.components.v1 as components
             cool = _cooldown_remaining()
             if cool > 0:
                 end_ts_ms = int((float(st.session_state.get("_last_sync_ts", 0) or 0) + SYNC_THROTTLE_SEC) * 1000)
                 components.html(f"""
                 <style>
-                  /* 버튼 컬럼 안에서만 떠 있게: 레이아웃 차지 0, 점프 없음 */
-                  #sync_toast_wrap {{ position: relative; height: 0; margin: 0; padding: 0; }}
-                  #sync_toast {{
-                    position: absolute; right: 0; top: -44px;
+                  #sync_toast_fixed {{
+                    position: fixed; z-index: 9999;
+                    top: 84px; right: 22px;
                     background: #eef2ff; color: #1e3a8a;
                     border: 1px solid #c7d2fe; border-radius: 12px;
                     padding: 8px 12px; font-weight: 700; line-height: 1.2;
                     box-shadow: 0 6px 18px rgba(0,0,0,.08);
-                    pointer-events: none; white-space: nowrap; z-index: 10;
+                    pointer-events: none; white-space: nowrap;
+                  }}
+                  @media (max-width: 680px) {{
+                    #sync_toast_fixed {{ top: 76px; right: 10px; }}
                   }}
                 </style>
-                <div id="sync_toast_wrap"><div id="sync_toast">⏳ 잠시만요… {int(math.ceil(cool))}초 후 다시 시도해 주세요.</div></div>
+                <div id="sync_toast_fixed">⏳ 잠시만요… {int(math.ceil(cool))}초 후 다시 시도해 주세요.</div>
                 <script>
                 (function(){{
                   const doc = window.parent.document;
-                  const el  = doc.getElementById('sync_toast');
+                  const el  = doc.getElementById('sync_toast_fixed');
                   if(!el) return;
                   const end = {end_ts_ms};
                   function tick(){{
                     const now = Date.now();
                     let r = Math.ceil((end - now)/1000);
                     if (r <= 0){{
-                      el.style.transition = 'opacity .2s ease';
-                      el.style.opacity = '0';
+                      el.style.transition = 'opacity .2s ease'; el.style.opacity = '0';
                       setTimeout(()=>{{ if(el && el.parentNode) el.parentNode.remove(); }}, 240);
                       return;
                     }}
