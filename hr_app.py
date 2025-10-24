@@ -266,50 +266,55 @@ except Exception:
 # ═════════════════════════════════════════════════════════════════════════════
 SYNC_THROTTLE_SEC = 8  # 연타 방지 쿨다운(초)
 
+def _cooldown_remaining() -> float:
+    """남은 쿨다운(초). 없으면 0 이하."""
+    last = float(st.session_state.get("_last_sync_ts", 0) or 0)
+    return SYNC_THROTTLE_SEC - (time.time() - last)
+
 def force_sync(*, clear_resource: bool = False, clear_all_session: bool = False, hard: bool = False):
     """
     데이터/편집 캐시 중심의 '세션 한정' 동기화.
-    - 기본: 전역 st.cache_* 는 보존 → 타 사용자 영향 없음, 허드(429) 완화
-    - hard=True: 정말 필요한 경우에만 전역 st.cache_* 비움 (관리자 문제 해결용)
-    - clear_resource/clear_all_session: 기존 옵션 유지(가능하면 사용 자제)
+    - 기본: 전역 st.cache_* 보존 → 타 사용자 영향 없음(429 완화)
+    - hard=True: 꼭 필요할 때만 전역 캐시 비움
     """
-    now = time.time()
-    last = float(st.session_state.get("_last_sync_ts", 0) or 0)
-    wait = SYNC_THROTTLE_SEC - (now - last)
+    wait = _cooldown_remaining()
     if wait > 0:
+        # 남은 초 표시(올림) + 한 줄 배너
         try:
-            st.info(f"⏳ 잠시만요… {int(wait)}초 후 다시 시도해 주세요.", icon="⏳")
+            import math
+            remain = int(math.ceil(wait))
+            st.markdown(
+                f"<div class='inline-sync-info'>⏳ 잠시만요… {remain}초 후 다시 시도해 주세요.</div>",
+                unsafe_allow_html=True
+            )
         except Exception:
             pass
         return
 
-    # 세션 쿨다운 갱신
+    # 쿨다운 시작
+    now = time.time()
     st.session_state["_last_sync_ts"] = now
 
-    # ── 1) 전역 캐시 건드리지 않고 '세션 버스터'만 증가 ───────────────────
+    # 세션 전용 캐시 버스터 증가(나만 새로고침)
     st.session_state["cache_rev"] = int(st.session_state.get("cache_rev", 0)) + 1
-    # 이미 쓰고 있는 리비전들도 같이 올려주면 즉시 반영이 쉬움
     for k in ("jobdesc_rev", "comp_rev", "eval_rev"):
         st.session_state[k] = int(st.session_state.get(k, 0)) + 1
 
-    # ── 2) 모듈 레벨 캐시(우리 앱 내부 딕셔너리 캐시)만 정리 ───────────────
+    # 모듈 레벨 딕셔너리 캐시만 정리 (전역 st.cache_*는 건드리지 않음)
     try:
-        if "_WS_CACHE" in globals() and isinstance(globals()["_WS_CACHE"], dict):
-            globals()["_WS_CACHE"].clear()
-        if "_HDR_CACHE" in globals() and isinstance(globals()["_HDR_CACHE"], dict):
-            globals()["_HDR_CACHE"].clear()
-        if "_VAL_CACHE" in globals() and isinstance(globals()["_VAL_CACHE"], dict):
-            globals()["_VAL_CACHE"].clear()
+        if "_WS_CACHE"  in globals() and isinstance(globals()["_WS_CACHE"],  dict): globals()["_WS_CACHE"].clear()
+        if "_HDR_CACHE" in globals() and isinstance(globals()["_HDR_CACHE"], dict): globals()["_HDR_CACHE"].clear()
+        if "_VAL_CACHE" in globals() and isinstance(globals()["_VAL_CACHE"], dict): globals()["_VAL_CACHE"].clear()
     except Exception:
         globals().setdefault("_WS_CACHE", {})
         globals().setdefault("_HDR_CACHE", {})
         globals().setdefault("_VAL_CACHE", {})
 
-    # ── 3) 세션 상태: 데이터/편집 캐시성 키만 선별 삭제(로그인 보존) ────────
-    SAFE_KEEP = {"user", "access_token", "refresh_token", "login_time", "login_provider",
-                 "authed", "auth_expires_at", "_state_owner_sabun", "_last_sync_ts"}
-    ACL_KEYS  = {"acl_df", "acl_header", "acl_editor", "auth_editor", "auth_editor_df", "__auth_sab_sig"}
-    PREFIXES  = ("__cache_", "_df_", "_cache_", "gs_", "eval2_", "bulk_score_", "cmpS_", "jd2_", "adm_", "acl_")
+    # 세션 상태: 캐시/편집성 키만 선별 삭제(로그인/토큰 보존)
+    SAFE_KEEP = {"user","access_token","refresh_token","login_time","login_provider",
+                 "authed","auth_expires_at","_state_owner_sabun","_last_sync_ts"}
+    PREFIXES  = ("__cache_","_df_","_cache_","gs_","eval2_","bulk_score_","cmpS_","jd2_","adm_","acl_")
+    ACL_KEYS  = {"acl_df","acl_header","acl_editor","auth_editor","auth_editor_df","__auth_sab_sig"}
 
     try:
         ss = st.session_state
@@ -329,7 +334,7 @@ def force_sync(*, clear_resource: bool = False, clear_all_session: bool = False,
     except Exception:
         pass
 
-    # ── 4) 정말 필요한 경우에만 '하드' 초기화 ────────────────────────────────
+    # 정말 필요할 때만 전역 캐시 비우기
     if hard:
         try: st.cache_data.clear()
         except Exception: pass
@@ -337,6 +342,7 @@ def force_sync(*, clear_resource: bool = False, clear_all_session: bool = False,
             try: st.cache_resource.clear()
             except Exception: pass
 
+    # 마지막에 한 번만 리런
     st.rerun()
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -362,6 +368,15 @@ _CSS_GLOBAL = """
 
   /* 빈 단락 제거 (과거 True/False 잔상 방지) */
   div.block-container > p:empty{display:none!important;margin:0!important;padding:0!important}
+
+  /* 한 줄 동기화 안내 배너 */
+  .inline-sync-info{
+    display:block; width:100%;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    padding:.55rem .8rem; border-radius:.5rem;
+    border:1px solid #bfdbfe; background:#eff6ff; color:#1e3a8a;
+    font-weight:600; line-height:1.35;
+  }
 
   /* 이하 기존 스타일 유지 ... */
   .stTabs [role='tab']{padding:10px 16px!important;font-size:1.02rem!important}
@@ -3825,8 +3840,11 @@ def main():
             if st.button("로그아웃", key="btn_logout", use_container_width=True):
                 logout()
         with c2:
+            cool = _cooldown_remaining()
+            disabled = cool > 0
+            help_txt = "캐시를 비우고 구글시트에서 다시 불러옵니다." if not disabled else f"{int(cool)}초 후 재시도"
             if st.button("🔄 동기화", key="sync_left", use_container_width=True,
-                         help="캐시를 비우고 구글시트에서 다시 불러옵니다."):
+                         help=help_txt, disabled=disabled):
                 force_sync()
 
         # ⬇️ 반환값을 삼켜서 'False' 렌더링 방지
