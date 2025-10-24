@@ -415,7 +415,7 @@ _HDR_CACHE: dict[str, Tuple[float, list[str], dict]] = {}
 _WS_TTL, _HDR_TTL = 120, 120
 
 _VAL_CACHE: dict[str, Tuple[float, list]] = {}
-_VAL_TTL = 200
+_VAL_TTL = 90
 
 def _ws_values(ws, key: str | None = None):
     key = key or getattr(ws, 'title', '') or 'ws_values'
@@ -1252,6 +1252,9 @@ def tab_eval(emp_df: pd.DataFrame):
     _year_safe = int(st.session_state.get("eval2_year", datetime.now(tz=tz_kst()).year))
     _eval_type_safe = str(st.session_state.get("eval_type") or st.session_state.get("eval2_type") or ("자기"))
     kbase = f"E2_{_year_safe}_{_eval_type_safe}_{me_sabun}_{target_sabun}"
+    bulk_map_key = f"eval2_bulkmap_{kbase}"
+    bulk_map = st.session_state.get(bulk_map_key, {})
+
     slider_key = f"{kbase}_slider_multi"
     if slider_key not in st.session_state:
         if saved_scores:
@@ -1260,16 +1263,10 @@ def tab_eval(emp_df: pd.DataFrame):
         else:
             st.session_state[slider_key] = 3
     bulk_score = st.slider("일괄 점수(현재 편집 컬럼)", 1, 5, step=1, key=slider_key, disabled=not edit_mode)
-    if st.button("일괄 적용", use_container_width=True, disabled=not edit_mode, key=f"bulk_multi_{kbase}"):
-        bulk_map_key = f"eval2_bulkmap_{kbase}"
+    if st.button("일괄 적용", use_container_width=True, disabled=not edit_mode, key=f"apply_bulk_{kbase}"):
         st.session_state[bulk_map_key] = {iid: int(bulk_score) for iid in item_ids}
-        st.toast(f"모든 항목에 {bulk_score}점 적용", icon="✅")
+        st.toast(f"{len(item_ids)}개 항목에 {int(bulk_score)}점 적용", icon="✅")
         st.rerun()
-    if st.button("일괄 적용 해제", use_container_width=True, key=f"clear_bulk_{kbase}", disabled=not edit_mode):
-        st.session_state.pop(f"eval2_bulkmap_{kbase}", None)
-        st.toast("일괄 적용 해제", icon="🧹")
-        st.rerun()
-
     # ◇◇ 현재 편집 대상 컬럼/표시 컬럼 결정
     editable_col_name = {"자기":"자기평가","1차":"1차평가","2차":"2차평가"}.get(str(eval_type), "자기평가")
     if my_role == "employee":
@@ -1285,17 +1282,14 @@ def tab_eval(emp_df: pd.DataFrame):
     stage_self = _stage_scores_any_evaluator(int(year), "자기", str(target_sabun)) if "자기평가" in visible_cols else {}
     stage_1st  = _stage_scores_any_evaluator(int(year), "1차", str(target_sabun))  if "1차평가" in visible_cols else {}
 
-    bulk_map_key = f"eval2_bulkmap_{kbase}"
-
-
     def _seed_for_editable(iid: str):
-        # 우선순위: 일괄적용 dict → 개별 위젯 상태 → 저장된 점수 → None
-        try:
-            bulk_map = st.session_state.get(bulk_map_key, {}) or {}
-            if iid in bulk_map:
-                return int(bulk_map.get(iid))
-        except Exception:
-            pass
+        # 1) 일괄 적용 맵 우선
+        if iid in bulk_map:
+            try:
+                return int(bulk_map[iid])
+            except Exception:
+                return None
+        # 2) 개별 위젯 상태
         rkey = f"eval2_seg_{iid}_{kbase}"
         if rkey in st.session_state:
             try:
@@ -1303,13 +1297,13 @@ def tab_eval(emp_df: pd.DataFrame):
                 return int(v) if (v is not None and str(v).strip()!="") else None
             except Exception:
                 return None
+        # 3) 기존 저장값
         if iid in saved_scores:
             try:
                 return int(saved_scores[iid])
             except Exception:
                 return None
         return None
-
         if iid in saved_scores:
             try:
                 return int(saved_scores[iid])
@@ -1428,7 +1422,8 @@ def tab_eval(emp_df: pd.DataFrame):
         for _iid in item_ids:
             _k = f"eval2_seg_{_iid}_{kbase}"
             if _k in st.session_state: del st.session_state[_k]
-        st.session_state.pop(f"eval2_bulkmap_{kbase}", None)
+        # 일괄 적용 맵도 초기화
+        st.session_state.pop(bulk_map_key, None)
         st.rerun()
 
     if do_save:
