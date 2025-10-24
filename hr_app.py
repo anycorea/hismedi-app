@@ -2916,7 +2916,10 @@ def main():
                 with a3: tab_admin_eval_items()
                 with a4: tab_admin_acl(emp_df)
         else:
-            tab_help()if __name__ == "__main__":
+            tab_help()
+
+
+if __name__ == "__main__":
     main()
 
 # --- PATCH 2025-10-17: robust get_jd_approval_map_cached (append-only) -------------------------------
