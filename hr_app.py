@@ -3820,48 +3820,55 @@ def main():
             if st.button("로그아웃", key="btn_logout", use_container_width=True):
                 logout()
         with c2:
-            # 동기화 버튼: 항상 활성 (쿨다운 체크는 force_sync() 내부)
+            # 동기화 버튼: 항상 활성 (쿨다운은 force_sync() 내부에서 막음)
             if st.button("🔄 동기화", key="sync_left", use_container_width=True,
                          help="캐시를 비우고 구글시트에서 다시 불러옵니다."):
                 force_sync()
 
-            # 버튼 '바로 아래' 안내 배너(항상 렌더 → 높이 고정)
+            # 자리차지 없는 floating toast (쿨다운 중일 때만 표시)
             import math, streamlit.components.v1 as components
             cool = _cooldown_remaining()
             if cool > 0:
-                # 종료 시각(ms) 전달 → JS가 텍스트만 갱신(페이지 리로드/세션 초기화 없음)
                 end_ts_ms = int((float(st.session_state.get("_last_sync_ts", 0) or 0) + SYNC_THROTTLE_SEC) * 1000)
-                st.markdown(
-                    f"<div id='sync_cd' class='inline-sync-info' data-end='{end_ts_ms}'>"
-                    f"⏳ 잠시만요… {int(math.ceil(cool))}초 후 다시 시도해 주세요.</div>",
-                    unsafe_allow_html=True
-                )
-                components.html("""
+                components.html(f"""
+                <style>
+                  #sync_toast {{
+                    position: fixed; z-index: 9999;
+                    top: 84px; right: 22px;  /* 필요시 위치 미세조정 */
+                    background: #eef2ff; color: #1e3a8a;
+                    border: 1px solid #c7d2fe; border-radius: 12px;
+                    padding: 8px 12px; font-weight: 700; line-height: 1.2;
+                    box-shadow: 0 6px 18px rgba(0,0,0,.08);
+                    pointer-events: none;  /* 클릭 막지 않도록 */
+                    white-space: nowrap;
+                  }}
+                </style>
                 <script>
-                (function(){
+                (function(){{
                   const doc = window.parent.document;
-                  const el  = doc.getElementById('sync_cd');
-                  if(!el) return;
-                  const end = parseInt(el.getAttribute('data-end')||'0',10) || 0;
-                  function tick(){
+                  let el = doc.getElementById('sync_toast');
+                  if(!el){{
+                    el = doc.createElement('div');
+                    el.id = 'sync_toast';
+                    doc.body.appendChild(el);
+                  }}
+                  const end = {end_ts_ms};
+                  function tick(){{
                     const now = Date.now();
                     let remain = Math.ceil((end - now)/1000);
-                    if (remain <= 0){
-                      el.style.visibility = 'hidden';  // 자리 유지, 표시만 숨김
+                    if (remain <= 0){{
+                      el.style.transition = 'opacity .25s ease';
+                      el.style.opacity = '0';
+                      setTimeout(()=>{{ if(el && el.parentNode) el.parentNode.removeChild(el); }}, 280);
                       return;
-                    }
+                    }}
                     el.textContent = "⏳ 잠시만요… " + remain + "초 후 다시 시도해 주세요.";
                     requestAnimationFrame(tick);
-                  }
+                  }}
                   tick();
-                })();
+                }})();
                 </script>
                 """, height=0, width=0)
-            else:
-                st.markdown(
-                    "<div class='inline-sync-info' style='visibility:hidden'>&nbsp;</div>",
-                    unsafe_allow_html=True
-                )
 
         # ⬇️ 반환값을 삼켜서 'False' 렌더링 방지
         _ = render_staff_picker_left(emp_df)
