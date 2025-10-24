@@ -473,8 +473,7 @@ _CSS_GLOBAL = f"""
 """
 st.markdown(_CSS_GLOBAL, unsafe_allow_html=True)
 
-
-# 스크롤 위치 보존/복원 (rerun 시 기본은 TOP, 필요할 때만 복원)
+# 스크롤 최상단 고정 (rerun 및 버튼 클릭 뒤 점프 억제: 항상 TOP)
 import streamlit.components.v1 as components
 components.html("""
 <script>
@@ -482,47 +481,47 @@ components.html("""
   const d = window.parent.document;
   const s = window.sessionStorage;
 
-  // 1) 동기화/필터초기화 클릭 시: 다음 렌더는 무조건 TOP으로
-  function hookToTop(label){
+  // 클릭 시 다음 렌더에서 더 길게 TOP 유지
+  function arm(ms){
+    try{ s.setItem('forceTopUntil', String(Date.now()+ms)); }catch(_){}
+  }
+  function hookLabels(){
+    const labels = ['동기화','필터 초기화','검색 적용']; // 필요시 더 추가
     const btns = Array.from(d.querySelectorAll('.stButton button'));
-    const b = btns.find(b => (b.textContent||'').trim().includes(label));
-    if(!b || b._scroll_hooked) return;
-    b._scroll_hooked = true;
-    b.addEventListener('click', ()=>{
-      try{
-        s.setItem('scrollY','0');          // 예전 위치 지우기
-        s.setItem('scrollY_to_top','1');   // 다음 렌더에서 TOP 강제
-      }catch(_){}
-      try{ window.scrollTo(0,0); }catch(_){}
-    }, {capture:true});
+    btns.forEach(b=>{
+      if(b._forceTopHooked) return;
+      b._forceTopHooked = true;
+      b.addEventListener('click', ()=> arm(2200), {capture:true});
+    });
   }
-  function bind(){ hookToTop('동기화'); hookToTop('필터 초기화'); }
-  bind();
-  new MutationObserver(bind).observe(d.body,{subtree:true,childList:true});
+  hookLabels();
+  new MutationObserver(hookLabels).observe(d.body, {subtree:true, childList:true});
 
-  // 2) 이번 렌더에서 어디로 갈지 결정
-  const forceTop = s.getItem('scrollY_to_top') === '1';
-  if (forceTop){
-    s.removeItem('scrollY_to_top');
-    requestAnimationFrame(()=> window.scrollTo(0,0));
-  } else {
-    // 너무 깊은 위치는 복원하지 않음(거의 바닥이면 TOP 유지)
-    const prev = parseInt(s.getItem('scrollY')||'0',10) || 0;
-    const maxRestore = Math.max(0, (d.documentElement.scrollHeight - window.innerHeight - 120));
-    if (prev > 0 && prev < maxRestore){
-      requestAnimationFrame(()=> window.scrollTo(0, prev));
-    }
-  }
+  // 기본적으로도 매 렌더마다 일정 시간 TOP 유지
+  const now = Date.now();
+  const armedUntil = parseInt(s.getItem('forceTopUntil')||'0',10) || 0;
+  const baseHold  = now + 1200;                  // 기본 유지 시간
+  const holdUntil = Math.max(armedUntil, baseHold);
 
-  // 3) 평상시 스크롤 값 저장(과도한 쓰기 방지)
-  let t=null;
-  window.addEventListener('scroll', ()=>{
-    clearTimeout(t);
-    t = setTimeout(()=>{ try{ s.setItem('scrollY', String(window.scrollY)); }catch(_){} } , 80);
-  }, {passive:true});
+  // 기존 복원값은 사용하지 않음 (항상 TOP을 목표)
+  try{ s.removeItem('scrollY'); }catch(_){}
+
+  // 초기 포커스가 아래쪽 위젯으로 점프시키는 문제 방지: blur 강제
+  const blurWindow = ()=>{ try{ if(d.activeElement) d.activeElement.blur(); }catch(_){ } };
+
+  // holdUntil까지 스크롤/포커스를 반복적으로 TOP으로 유지
+  const tick = ()=>{
+    const t = Date.now();
+    blurWindow();
+    try{ window.scrollTo(0,0); }catch(_){}
+    if (t < holdUntil) requestAnimationFrame(tick);
+    else try{ s.removeItem('forceTopUntil'); }catch(_){}
+  };
+  requestAnimationFrame(tick);
 })();
 </script>
 """, height=0, width=0)
+
 
 
 
