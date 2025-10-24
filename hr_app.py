@@ -403,7 +403,7 @@ def mount_sync_toast():
         pass
 
 # ═════════════════════════════════════════════════════════════════════════════
-# App Config / Style
+# App Config / Style (ultra-tight top)
 # ═════════════════════════════════════════════════════════════════════════════
 APP_TITLE = st.secrets.get("app", {}).get("TITLE", "HISMEDI - 인사/HR")
 st.set_page_config(page_title=APP_TITLE, layout="wide")
@@ -414,14 +414,17 @@ if not getattr(st, "_help_disabled", False):
     st.help = _noop_help
     st._help_disabled = True
 
-# 전역 CSS (상단 여백 0, 버튼 흔들림 방지, 토스트 기본 스타일)
+# 전역 CSS (상단 0px, 헤더 숨김, 버튼 흔들림 방지, 토스트 기본 스타일)
 _CSS_GLOBAL = """
 <style>
-  /* ── Top spacing 0 (점프 체감 최소화) ─────────────────────────────────── */
-  div.block-container{padding-top:0!important}
-  header[data-testid="stHeader"]{padding-top:0!important}
+  /* ── Top spacing 0 + 헤더 완전 숨김 (점프 억제 최강) ───────────────────── */
+  div.block-container{padding-top:0!important;margin-top:0!important}
   section[data-testid="stSidebar"] .block-container{padding-top:0!important}
-  html, body { scroll-behavior: auto !important; } /* 스크롤 부드러움 제거 */
+  header[data-testid="stHeader"]{display:none!important;height:0!important;min-height:0!important;padding:0!important;margin:0!important}
+  div[data-testid="stDecoration"]{height:0!important}  /* 상단 장식 바 제거 */
+  html, body { scroll-behavior: auto !important; }
+  /* 첫 요소 위 마진 제거(제목 등) */
+  div.block-container > :first-child { margin-top: 0!important; }
 
   /* 빈 단락 제거 (과거 True/False 잔상 방지) */
   div.block-container > p:empty{display:none!important;margin:0!important;padding:0!important}
@@ -435,7 +438,7 @@ _CSS_GLOBAL = """
     transition:none!important; transform:none!important;
   }
 
-  /* ── 토스트 기본 스타일(위치는 JS에서 버튼 위로 맞춤) ────────────── */
+  /* ── 토스트 기본 스타일(위치는 JS에서 "동기화" 버튼 위로 고정) ─────── */
   #sync_toast_fixed{
     position:fixed; z-index:9999;
     background:#eef2ff; color:#1e3a8a;
@@ -467,15 +470,20 @@ _CSS_GLOBAL = """
 """
 st.markdown(_CSS_GLOBAL, unsafe_allow_html=True)
 
-# (선택) 스크롤 위치 보존: 리런 시 '살짝 내려갔다 복귀' 체감 완화
+# ── 스크롤 위치 보존/복원 (강화판: 리런 후 900ms 동안 반복 복원)
 import streamlit.components.v1 as components
 components.html("""
 <script>
 (function(){
   const s = window.sessionStorage;
-  const y = parseInt(s.getItem('scrollY')||'0', 10) || 0;
-  if (y > 0) { window.scrollTo(0, y); }
-  let t = null;
+  const prev = parseInt(s.getItem('scrollY')||'0',10) || 0;
+  let t0 = performance.now();
+  function restore(){
+    if(prev>0){ window.scrollTo(0, prev); }
+    if(performance.now() - t0 < 900){ requestAnimationFrame(restore); }
+  }
+  requestAnimationFrame(restore);
+  let t=null;
   window.addEventListener('scroll', ()=>{
     clearTimeout(t); t = setTimeout(()=>{ s.setItem('scrollY', String(window.scrollY)); }, 80);
   }, {passive:true});
