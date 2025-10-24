@@ -184,12 +184,12 @@ def force_sync(min_interval: int = 15):
     now = time.time()
     # 중복 실행 락
     if st.session_state.get("_sync_lock", False):
-        _toast('동기화 중')
+        _toast_once('동기화 중', seconds=2.5, ident='toast_sync'); return
 
     # 스로틀
     last_ts = float(st.session_state.get("_last_sync_ts", 0.0) or 0.0)
     if now - last_ts < float(min_interval):
-        _toast('동기화 중')
+        _toast_once('동기화 중', seconds=2.5, ident='toast_sync')
         return
 
     st.session_state["_sync_lock"] = True
@@ -224,7 +224,7 @@ def force_sync(min_interval: int = 15):
         except Exception: pass
 
         st.session_state["_last_sync_ts"] = now
-        _toast('완료')
+        _toast_once('완료', seconds=2.0, ident='toast_sync')
         st.rerun()
     finally:
         st.session_state["_sync_lock"] = False
@@ -318,7 +318,7 @@ def show_submit_banner(text: str):
     try:
         st.markdown(f"<div class='submit-banner'>{text}</div>", unsafe_allow_html=True)
     except Exception:
-        _toast('동기화 중')
+        st.info(text)
 
 # ────────────────────────────────────────────────────────────────────────────
 # PIN Utilities (clean)
@@ -384,7 +384,7 @@ def verify_pin(user_sabun: str, pin: str) -> bool:
 API_BACKOFF_SEC = [0.0, 0.8, 1.6, 3.2, 6.4, 9.6]
 
 def _retry(fn, *args, **kwargs):
-    """Robust retry for Google API rate limits (429/403 quota/503) with jitter backoff."""
+    """Robust retry for Google API rate limits (429/503) + quota(403) with jitter backoff."""
     last = None
     for b in API_BACKOFF_SEC:
         try:
@@ -404,13 +404,8 @@ def _retry(fn, *args, **kwargs):
             except Exception:
                 msg = ""
 
-            # Treat rate/quota signals as retryable
-            is_rate = (status in (429, 503)) or ("rate" in msg or "quota" in msg or "too many requests" in msg or "exceed" in msg)
-            if status == 403 and ("rate" in msg or "quota" in msg):
-                is_rate = True
-
-            if not is_rate and status in (400, 401, 404):
-                # Non-retryable client errors
+            retryable = (status in (429, 503)) or (status == 403 and ("rate" in msg or "quota" in msg))
+            if not retryable and status in (400, 401, 404):
                 raise
 
             wait = float(retry_after) if retry_after else (b + random.uniform(0, 0.6))
@@ -514,11 +509,11 @@ def read_sheet_df(sheet_name: str) -> pd.DataFrame:
 
     except APIError as e:
         if _is_quota_429(e):
-            try: st.warning("구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 '동기화'를 눌러 다시 시도해 주세요.")
+            try: st.warning("구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 '동기화'를 눌러 다시 시도해 주세요.", icon="⏳")
             except Exception: pass
             return pd.DataFrame()
         if sheet_name in LAST_GOOD:
-            _toast('동기화 중')
+            st.info(f"네트워크 혼잡으로 캐시 데이터를 표시합니다: {sheet_name}")
             return LAST_GOOD[sheet_name]
         raise
 
@@ -652,7 +647,7 @@ def show_login(emp_df: pd.DataFrame):
         if stored not in (entered_plain, entered_salted):
             st.error("PIN이 올바르지 않습니다."); st.stop()
         _start_session({"사번":str(r.get("사번","")), "이름":str(r.get("이름",""))})
-        _toast('완료')
+        st.success("환영합니다!"); st.rerun()
 
 def require_login(emp_df: pd.DataFrame):
     if not _session_valid():
@@ -735,30 +730,51 @@ def _debounced(label: str, key: str, wait: float = 1.0, **kwargs):
     return False
 
 
-# ─ Toast helper (auto-hide, no icon) ──────────────────────────────────────────
+# ─ Toast (dedup, auto-hide) ───────────────────────────────────────────────────
 import streamlit.components.v1 as _components_toast
-def _toast(msg: str, seconds: float = 2.5):
-    """Lightweight ephemeral toast. Uses st.toast if available; falls back to JS."""
+def _toast_once(msg: str, seconds: float = 2.5, ident: str = "__app_toast__"):
+    """Small ephemeral toast without icon. Replaces existing toast with same ident."""
     try:
-        # Streamlit 1.25+
-        st.toast(msg)  # no icon
-        return
+        # Streamlit >= 1.25: st.toast available, but cannot dedup => fall back to JS for dedup.
+        raise RuntimeError("use js")
     except Exception:
-        pass
-    # Fallback: simple JS toast
-    _components_toast.html(f"""
-    <div id='__x_toast__' style='position:fixed; bottom:24px; right:24px; z-index:9999;
-        background:rgba(0,0,0,.8); color:white; padding:10px 14px; border-radius:8px;
-        font-size:14px; box-shadow:0 4px 18px rgba(0,0,0,.3);'>
-        {msg}
-    </div>
-    <script>
-      setTimeout(function(){{
-        var t = window.parent.document.getElementById('__x_toast__');
-        if(t) t.remove();
-      }}, {int(1000*seconds)});
-    </script>
-    """, height=0, width=0)
+        _components_toast.html(f"""
+        <div id='{ident}' style='position:fixed; bottom:24px; right:24px; z-index:999999;
+            background:rgba(0,0,0,.82); color:#fff; padding:9px 12px; border-radius:8px;
+            font-size:13px; box-shadow:0 6px 22px rgba(0,0,0,.25);'>
+            {msg}
+        </div>
+        <script>
+          (function(){
+            var d = window.parent.document;
+            var prev = d.getElementById('{ident}');
+            if (prev) prev.remove();
+            var el = d.getElementById('{ident}');
+            if (!el) {
+              el = d.createElement('div');
+              el.id = '{ident}';
+              el.style.position='fixed';
+              el.style.bottom='24px';
+              el.style.right='24px';
+              el.style.zIndex='999999';
+              el.style.background='rgba(0,0,0,.82)';
+              el.style.color='#fff';
+              el.style.padding='9px 12px';
+              el.style.borderRadius='8px';
+              el.style.fontSize='13px';
+              el.style.boxShadow='0 6px 22px rgba(0,0,0,.25)';
+              el.textContent = {msg!r};
+              d.body.appendChild(el);
+            } else {
+              el.textContent = {msg!r};
+            }
+            setTimeout(function(){
+              var cur = d.getElementById('{ident}');
+              if (cur) cur.remove();
+            }, %d);
+          })();
+        </script>
+        """ % int(seconds*1000), height=0, width=0)
 
 # Global Target Sync
 # ═════════════════════════════════════════════════════════════════════════════
@@ -848,6 +864,7 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
 
     # ▼ 필터 초기화: 플래그만 세우고 즉시 rerun (다음 런 시작 시 초기화됨)
     if _debounced("필터 초기화", key="left_reset_btn", wait=1.0, use_container_width=True):
+        _toast_once("초기화", seconds=2.0, ident="toast_reset")
         st.session_state["_left_reset"] = True
         st.rerun()
 
@@ -988,7 +1005,7 @@ def read_eval_items_df(only_active: bool = True) -> pd.DataFrame:
         df=pd.DataFrame(_ws_get_all_records(ws))
     except Exception as e:
         if _is_quota_429(e):
-            try: st.warning('구글시트 읽기 할당량(1분) 초과. 잠시 후 "동기화"를 눌러 다시 시도해 주세요.')
+            try: st.warning('구글시트 읽기 할당량(1분) 초과. 잠시 후 "동기화"를 눌러 다시 시도해 주세요.', icon="⏳")
             except Exception: pass
             return pd.DataFrame(columns=EVAL_ITEM_HEADERS)
         raise
@@ -1110,7 +1127,7 @@ def tab_eval(emp_df: pd.DataFrame):
 
     items = read_eval_items_df(True)
     if items.empty:
-        st.warning("활성화된 평가 항목이 없습니다.")
+        st.warning("활성화된 평가 항목이 없습니다.", icon="⚠️")
         return
     items_sorted = items.sort_values(["순서", "항목"]).reset_index(drop=True)
     item_ids = [str(x) for x in items_sorted["항목ID"].tolist()]
@@ -1216,7 +1233,7 @@ def tab_eval(emp_df: pd.DataFrame):
         if _sel == "(선택)":
             st.session_state["eval2_target_sabun"] = ""
             st.session_state["eval2_target_name"]  = ""
-            _toast('동기화 중')
+            st.info("대상자를 선택하세요.", icon="👈")
             return
         _sel_sab = _sel.split(" - ",1)[0] if isinstance(_sel,str) and " - " in _sel else (_sabuns[_idx] if _sabuns else "")
         st.session_state["eval2_target_sabun"] = str(_sel_sab)
@@ -1227,7 +1244,7 @@ def tab_eval(emp_df: pd.DataFrame):
         target_sabun = st.session_state["eval2_target_sabun"]
         target_name  = st.session_state["eval2_target_name"]
 
-    _toast('완료')
+    st.success(f"대상자: {target_name} ({target_sabun})", icon="✅")
 
     # === 제출시각 배너(인사평가) ===
     try:
@@ -1250,7 +1267,7 @@ def tab_eval(emp_df: pd.DataFrame):
     else:  # admin
         eval_type = "1차" if target_role == "manager" else "2차"
 
-    _toast('동기화 중')
+    st.info(f"평가유형: **{eval_type}** (자동 결정)", icon="ℹ️")
 
 # --- 선행조건 / 잠금 -------------------------------
     prereq_ok, prereq_msg = True, ""
@@ -1268,9 +1285,9 @@ def tab_eval(emp_df: pd.DataFrame):
         is_locked = True
 
     if is_locked:
-        _toast('동기화 중')
+        st.info("이 응답은 잠겨 있습니다.", icon="🔒")
     if not prereq_ok:
-        st.warning(prereq_msg)
+        st.warning(prereq_msg, icon="🧩")
 
 # --- 보기/수정 모드 -------------------------------
     if st.button(("수정모드로 전환" if not st.session_state["eval2_edit_mode"] else "보기모드로 전환"),
@@ -1333,7 +1350,7 @@ def tab_eval(emp_df: pd.DataFrame):
     if st.button("일괄 적용", use_container_width=True, disabled=not edit_mode, key=f"bulk_multi_{kbase}"):
         for _iid in item_ids:
             st.session_state[f"eval2_seg_{_iid}_{kbase}"] = str(int(bulk_score))
-        st.toast(f"모든 항목에 {bulk_score}점 적용")
+        st.toast(f"모든 항목에 {bulk_score}점 적용", icon="✅")
 
     # ◇◇ 현재 편집 대상 컬럼/표시 컬럼 결정
     editable_col_name = {"자기":"자기평가","1차":"1차평가","2차":"2차평가"}.get(str(eval_type), "자기평가")
@@ -1492,6 +1509,7 @@ def tab_eval(emp_df: pd.DataFrame):
                 st.success(
                     ("제출 완료" if rep.get("action") == "insert" else "업데이트 완료")
                     + f" (총점 {rep.get('total','?')}점)",
+                    icon="✅",
                 )
                 st.session_state["eval2_edit_mode"] = False
                 st.session_state['eval_rev'] = st.session_state.get('eval_rev', 0) + 1
@@ -1522,7 +1540,7 @@ def ensure_jobdesc_sheet():
                 _retry(ws.update, "1:1", [header + need])
             else:
                 try:
-                    st.warning("시트 헤더에 다음 컬럼이 없습니다: " + ", ".join(need) + "\n"                               "→ 시트를 직접 수정한 뒤 좌측 🔄 동기화 버튼을 눌러주세요.")
+                    st.warning("시트 헤더에 다음 컬럼이 없습니다: " + ", ".join(need) + "\n"                               "→ 시트를 직접 수정한 뒤 좌측 🔄 동기화 버튼을 눌러주세요.", icon="⚠️")
                 except Exception:
                     pass
         return ws
@@ -1909,7 +1927,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
     # 대상자 선택
     if not am_admin_or_mgr:
         target_sabun = me_sabun; target_name = me_name
-        _toast('동기화 중')
+        st.info(f"대상자: {target_name} ({target_sabun})", icon="👤")
     else:
         base = emp_df.copy()
         base["사번"] = base["사번"].astype(str)
@@ -1929,7 +1947,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
         if _sel == "(선택)":
             st.session_state["jd2_target_sabun"] = ""
             st.session_state["jd2_target_name"]  = ""
-            _toast('동기화 중')
+            st.info("대상자를 선택하세요.", icon="👈")
             return
         _sel_sab = _sel.split(" - ", 1)[0] if isinstance(_sel, str) and " - " in _sel else (_sabuns[_idx] if _sabuns else "")
         st.session_state["jd2_target_sabun"] = str(_sel_sab)
@@ -1938,7 +1956,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
         except Exception:
             st.session_state["jd2_target_name"] = ""
         target_sabun = st.session_state["jd2_target_sabun"]; target_name = st.session_state["jd2_target_name"]
-        _toast('완료')
+        st.success(f"대상자: {target_name} ({target_sabun})", icon="✅")
     try:
         _jd = _jd_latest_for(str(target_sabun), int(year)) or {}
         _sub_ts = (str(_jd.get('제출시각','')).strip() or "미제출")
@@ -2099,7 +2117,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
             }
             try:
                 rep = upsert_jobdesc(rec, as_new_version=(version == 0))
-                _toast('완료')
+                st.success(f"저장 완료 (버전 {rep['version']})", icon="✅")
                 st.session_state['jobdesc_rev'] = st.session_state.get('jobdesc_rev', 0) + 1
                 st.rerun()
             except Exception as e:
@@ -2159,7 +2177,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
 
             if do_ok or do_rej:
                 if not verify_pin(me_sabun, appr_pin):
-                    st.error("부서장 PIN 이 올바르지 않습니다.")
+                    st.error("부서장 PIN 이 올바르지 않습니다.", icon="🚫")
                 else:
                     status = "승인" if do_ok else "반려"
                     with st.spinner("처리 중..."):
@@ -2174,7 +2192,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
                             remark=appr_remark
                         )
                         st.session_state["appr_rev"] = st.session_state.get("appr_rev", 0) + 1
-                    _toast('완료')
+                    st.success(f"{status} 처리되었습니다. ({res.get('action')})", icon="✅")
                     appr_df = read_jd_approval_df(st.session_state.get("appr_rev", 0))
                 base["사번"] = base["사번"].astype(str)
             base = base[base["사번"].isin({str(s) for s in allowed})]
@@ -2297,7 +2315,7 @@ def tab_competency(emp_df: pd.DataFrame):
     allowed=set(map(str, get_allowed_sabuns(emp_df, me_sabun, include_self=True)))
     df=emp_df.copy()
     if "사번" not in df.columns:
-        _toast('동기화 중')
+        st.info("직원 데이터에 '사번' 컬럼이 없습니다.", icon="ℹ️"); return
     df["사번"]=df["사번"].astype(str); df=df[df["사번"].isin(allowed)].copy()
     if "재직여부" in df.columns: df=df[df["재직여부"]==True]
     for c in ["이름","부서1","부서2","직급"]:
@@ -2317,13 +2335,13 @@ def tab_competency(emp_df: pd.DataFrame):
     if sel_label == "(선택)":
         st.session_state["cmpS_target_sabun"] = ""
         st.session_state["cmpS_target_name"] = ""
-        _toast('동기화 중')
+        st.info("대상자를 선택하세요.", icon="👈")
         return
     sel_sab=sel_label.split(" - ",1)[0] if isinstance(sel_label,str) else sabuns[sel_idx]
     st.session_state["cmpS_target_sabun"]=str(sel_sab)
     st.session_state["cmpS_target_name"]=_emp_name_by_sabun(emp_df, str(sel_sab))
 
-    _toast('완료')
+    st.success(f"대상자: {_emp_name_by_sabun(emp_df, sel_sab)} ({sel_sab})", icon="✅")
 
     # === 제출시각 배너(직무능력평가) ===
     comp_locked = False
@@ -2404,7 +2422,7 @@ def tab_competency(emp_df: pd.DataFrame):
             rep = upsert_comp_simple_response(
                 emp_df, int(year), str(sel_sab), str(me_sabun), g_main, g_extra, qual, opinion, eval_date
             )
-            _toast('완료')
+            st.success(("제출 완료" if rep.get("action")=="insert" else "업데이트 완료"), icon="✅")
         st.session_state['comp_rev'] = st.session_state.get('comp_rev', 0) + 1
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -2430,7 +2448,7 @@ def ensure_emp_sheet_columns():
                 _retry(ws.update, "1:1", [header + need])
             else:
                 try:
-                    st.warning("시트 헤더에 다음 컬럼이 없습니다: " + ", ".join(need) + "\n"                               "→ 시트를 직접 수정한 뒤 좌측 🔄 동기화 버튼을 눌러주세요.")
+                    st.warning("시트 헤더에 다음 컬럼이 없습니다: " + ", ".join(need) + "\n"                               "→ 시트를 직접 수정한 뒤 좌측 🔄 동기화 버튼을 눌러주세요.", icon="⚠️")
                 except Exception:
                     pass
             ws, header, hmap = _get_ws_and_headers(EMP_SHEET)
@@ -2438,7 +2456,7 @@ def ensure_emp_sheet_columns():
             try:
                 st.warning(
                     "직원 시트 헤더에 다음 컬럼이 없습니다: " + ", ".join(need) + "\n"
-                    "→ 시트를 직접 수정한 뒤 좌측 🔄 동기화 버튼을 눌러주세요."
+                    "→ 시트를 직접 수정한 뒤 좌측 🔄 동기화 버튼을 눌러주세요.", icon="⚠️"
                 )
             except Exception:
                 pass
@@ -2539,7 +2557,7 @@ def tab_staff_admin(emp_df: pd.DataFrame):
                 st.cache_data.clear()
             except Exception:
                 pass
-            _toast('완료')
+            st.success(f"저장 완료: {change_cnt}명 반영", icon="✅")
         except Exception as e:
             st.exception(e)
 
@@ -2584,14 +2602,14 @@ def tab_admin_pin(emp_df):
             hashed = _pin_hash(pin1.strip(), str(sabun))
             _retry(ws.update_cell, r, hmap["PIN_hash"], hashed)
             _retry(ws.update_cell, r, hmap["PIN_No"], pin1.strip())
-            st.cache_data.clear(); _toast('완료')
+            st.cache_data.clear(); st.success("PIN 저장 완료", icon="✅")
         if do_clear:
             if "PIN_hash" not in hmap or "PIN_No" not in hmap: st.error(f"'{EMP_SHEET}' 시트에 PIN_hash/PIN_No가 없습니다."); return
             r = _find_row_by_sabun(ws, hmap, sabun)
             if r == 0: st.error("시트에서 사번을 찾지 못했습니다."); return
             _retry(ws.update_cell, r, hmap["PIN_hash"], "")
             _retry(ws.update_cell, r, hmap["PIN_No"], "")
-            st.cache_data.clear(); _toast('완료')
+            st.cache_data.clear(); st.success("PIN 초기화 완료", icon="✅")
 
 def tab_admin_eval_items():
     df = read_eval_items_df(only_active=False).copy()
@@ -2655,7 +2673,7 @@ def tab_admin_eval_items():
                         active_values = [[ bool(edited_map_active.get(iid, False)) ] for iid in id_vals ]
                         _retry(ws.update, _col_range(col_act, 2, n+1), active_values, value_input_option="USER_ENTERED")
 
-                _toast('완료')
+                st.success("업데이트 완료", icon="✅")
                 
             except Exception as e:
                 st.exception(e)
@@ -2710,7 +2728,7 @@ def tab_admin_eval_items():
                         put("순서",int(order)); put("활성",bool(active));
                         if "비고" in hmap: put("비고", memo.strip())
                         _retry(ws.append_row, rowbuf, value_input_option="USER_ENTERED")
-                        st.cache_data.clear(); _toast('완료')
+                        st.cache_data.clear(); st.success(f"저장 완료 (항목ID: {new_id})"); st.rerun()
                     else:
                         col_id=hmap.get("항목ID"); idx=0
                         if col_id:
@@ -2726,7 +2744,7 @@ def tab_admin_eval_items():
                             if "비고" in hmap:
                                 gs_enqueue_cell(ws, idx, hmap["비고"], memo.strip(), "USER_ENTERED")
                             gs_flush()
-                            _toast('완료')
+                            st.success("업데이트 완료", icon="✅")
                             
                 except Exception as e:
                     st.exception(e)
@@ -2736,7 +2754,7 @@ def tab_admin_acl(emp_df: pd.DataFrame):
     me = st.session_state.get("user", {})
     am_admin = is_admin(str(me.get("사번","")))
     if not am_admin:
-        st.error("Master만 저장할 수 있습니다. (표/저장 모두 비활성화)")
+        st.error("Master만 저장할 수 있습니다. (표/저장 모두 비활성화)", icon="🛡️")
 
     # 직원 라벨/룩업
     base = emp_df[["사번","이름","부서1","부서2"]].copy() if not emp_df.empty else pd.DataFrame(columns=["사번","이름","부서1","부서2"])
@@ -2870,7 +2888,7 @@ def tab_admin_acl(emp_df: pd.DataFrame):
                 if data:
                     _retry(ws.update, "A2", data, value_input_option="USER_ENTERED")
 
-            _toast('완료')
+            st.success(f"업데이트 완료: {len(data)}행", icon="✅")
         except Exception as e:
             st.exception(e)
 
@@ -2936,7 +2954,7 @@ def main():
         with tabs[3]:
             me = str(st.session_state.get("user", {}).get("사번", ""))
             if not is_admin(me):
-                st.warning("관리자 전용 메뉴입니다.")
+                st.warning("관리자 전용 메뉴입니다.", icon="🔒")
             else:
                 a1, a2, a3, a4 = st.tabs(["직원","PIN 관리","평가 항목 관리","권한 관리"])
                 with a1: tab_staff_admin(emp_df)
