@@ -499,90 +499,123 @@ def verify_pin(user_sabun: str, pin: str) -> bool:
 # ═════════════════════════════════════════════════════════════════════════════
 # Google Auth / Sheets
 # ═════════════════════════════════════════════════════════════════════════════
-API_BACKOFF_SEC = [0.0, 0.8, 1.6, 3.2, 6.4, 9.6]
+
+# 지수 백오프(초) — 첫 시도는 즉시, 이후 점진 대기
+API_BACKOFF_SEC = (0.0, 0.8, 1.6, 3.2, 6.4, 9.6)
 
 def _retry(fn, *args, **kwargs):
-    last=None
-    for b in API_BACKOFF_SEC:
+    """
+    gspread API 호출용 재시도 유틸.
+    - 400/401/403/404: 즉시 예외 전파(비재시도)
+    - 429/5xx 등: Retry-After 헤더를 우선, 없으면 지수 백오프 + 지터
+    """
+    last = None
+    for base in API_BACKOFF_SEC:
         try:
             return fn(*args, **kwargs)
         except APIError as e:
-            status = None; ra = None
-            try:
-                status = getattr(e, "response", None).status_code
-                ra = getattr(e, "response", None).headers.get("Retry-After")
-            except Exception:
-                pass
+            resp = getattr(e, "response", None)
+            status = getattr(resp, "status_code", None)
+            # 클라이언트/권한/존재 오류는 재시도 무의미
             if status in (400, 401, 403, 404):
                 raise
-            wait = float(ra) if ra else (b + random.uniform(0, 0.5))
+            # 서버/쿼터 오류: 대기 후 재시도
+            try:
+                ra = resp.headers.get("Retry-After") if resp else None
+            except Exception:
+                ra = None
+            wait = float(ra) if ra else (base + random.uniform(0, 0.5))
             time.sleep(max(0.2, wait))
             last = e
         except Exception as e:
+            # 일시 네트워크 오류 등
             last = e
-            time.sleep(b + random.uniform(0, 0.5))
-    if last:
-        raise last
-    return fn(*args, **kwargs)
+            time.sleep(base + random.uniform(0, 0.5))
+    # 모든 시도 실패
+    raise last if last else RuntimeError("Retry failed without exception context")
 
 @st.cache_resource(show_spinner=False)
 def get_client():
+    """gspread 클라이언트(리소스 캐시)."""
     svc = dict(st.secrets["gcp_service_account"])
-    svc["private_key"] = _normalize_private_key(svc.get("private_key",""))
-    scopes=["https://www.googleapis.com/auth/spreadsheets","https://www.googleapis.com/auth/drive"]
-    creds=Credentials.from_service_account_info(svc, scopes=scopes)
+    svc["private_key"] = _normalize_private_key(svc.get("private_key", ""))
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive",
+    ]
+    creds = Credentials.from_service_account_info(svc, scopes=scopes)
     return gspread.authorize(creds)
 
 @st.cache_resource(show_spinner=False)
 def get_book():
+    """스프레드시트 핸들(리소스 캐시)."""
     return get_client().open_by_key(st.secrets["sheets"]["HR_SHEET_ID"])
 
 EMP_SHEET = st.secrets.get("sheets", {}).get("EMP_SHEET", "직원")
 
+# 워크시트/헤더/값 캐시(모듈 레벨)
 _WS_CACHE: dict[str, Tuple[float, Any]] = {}
 _HDR_CACHE: dict[str, Tuple[float, list[str], dict]] = {}
-_WS_TTL, _HDR_TTL = 120, 120
-
 _VAL_CACHE: dict[str, Tuple[float, list]] = {}
-_VAL_TTL = 90
+
+_WS_TTL, _HDR_TTL = 120, 120
+_VAL_TTL = 200  # 조회 체감 개선(운영 중 수동 동기화 버튼과 병행)
 
 def _ws_values(ws, key: str | None = None):
-    key = key or getattr(ws, 'title', '') or 'ws_values'
+    """get_all_values 결과를 TTL 캐시."""
+    k = key or getattr(ws, "title", "") or "ws_values"
     now = time.time()
-    hit = _VAL_CACHE.get(key)
+    hit = _VAL_CACHE.get(k)
     if hit and (now - hit[0] < _VAL_TTL):
         return hit[1]
     vals = _retry(ws.get_all_values)
-    _VAL_CACHE[key] = (now, vals)
+    _VAL_CACHE[k] = (now, vals)
     return vals
 
 def _ws(title: str):
-    now=time.time(); hit=_WS_CACHE.get(title)
-    if hit and (now-hit[0]<_WS_TTL): return hit[1]
-    ws=_retry(get_book().worksheet, title); _WS_CACHE[title]=(now,ws); return ws
+    """제목으로 워크시트 가져오기(핸들 TTL 캐시)."""
+    now = time.time()
+    hit = _WS_CACHE.get(title)
+    if hit and (now - hit[0] < _WS_TTL):
+        return hit[1]
+    ws = _retry(get_book().worksheet, title)
+    _WS_CACHE[title] = (now, ws)
+    return ws
 
 def _hdr(ws, key: str) -> Tuple[list[str], dict]:
-    now=time.time(); hit=_HDR_CACHE.get(key)
-    if hit and (now-hit[0]<_HDR_TTL): return hit[1], hit[2]
-    header=_retry(ws.row_values, 1) or []; hmap={n:i+1 for i,n in enumerate(header)}
-    _HDR_CACHE[key]=(now, header, hmap); return header, hmap
+    """헤더 1행과 이름→열번호 매핑(hmap) 반환(캐시)."""
+    now = time.time()
+    hit = _HDR_CACHE.get(key)
+    if hit and (now - hit[0] < _HDR_TTL):
+        return hit[1], hit[2]
+    header = _retry(ws.row_values, 1) or []
+    hmap = {n: i + 1 for i, n in enumerate(header)}
+    _HDR_CACHE[key] = (now, header, hmap)
+    return header, hmap
 
 def _ws_get_all_records(ws):
+    """
+    get_all_values 캐시를 활용해 dict 레코드 리스트 생성.
+    (속도 우선: 필요 최소 변환만 수행)
+    """
     try:
-        title = getattr(ws, "title", None) or ""
+        title = getattr(ws, "title", "") or ""
         vals = _ws_values(ws, title)
         if not vals:
             return []
-        header = [str(x).strip() for x in (vals[0] if vals else [])]
+        header = [str(x).strip() for x in vals[0]]
+        hlen = len(header)
         out = []
-        for i in range(1, len(vals)):
-            row = vals[i] if i < len(vals) else []
+        append = out.append  # 로컬 바인딩(미세 가속)
+        for row in vals[1:]:
             rec = {}
+            # enumerate가 zip보다 안전(행 길이 짧을 때 공백 채우기)
             for j, h in enumerate(header):
                 rec[h] = row[j] if j < len(row) else ""
-            out.append(rec)
+            append(rec)
         return out
     except Exception:
+        # gspread의 내부 변환 사용(폴백)
         try:
             return _retry(ws.get_all_records, numericise_ignore=["all"])
         except TypeError:
