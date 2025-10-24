@@ -2936,52 +2936,107 @@ def tab_competency(emp_df: pd.DataFrame):
             st.rerun()
 
 # ═════════════════════════════════════════════════════════════════════════════
-# 관리자: 직원/ PIN 관리 / 인사평가 항목 관리 / 권한 관리
+# 관리자 섹션 — 직원/ PIN / 평가항목 / 권한 관리 (성능 최적화 & 주석 표준화)
 # ═════════════════════════════════════════════════════════════════════════════
+# 이 파일은 기존 "관리자" 블럭을 통째로 교체할 수 있는 드롭인입니다.
+# - PIN 저장/초기화: 항상 배치 쓰기 사용
+# - 직원 저장: 다건 변경을 단일 values_batch_update로 처리
+# - 헤더 보강: AUTO_FIX_HEADERS 정책 준수, 중복 if 제거
+# - SettingWithCopyWarning 회피: .copy() 사용
+# 주의: 본 파일은 상위 모듈의 유틸( _ws, _hdr, _retry, _ws_values, get_book, ensure_eval_items_sheet,
+#       read_eval_items_df, _ensure_capacity, gs_enqueue_cell, gs_flush 등)을 사용합니다.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 필수 컬럼
+# ─────────────────────────────────────────────────────────────────────────────
 REQ_EMP_COLS = [
-"사번","이름","부서1","부서2","직급","직무","직군","입사일","퇴사일","기타1","기타2","재직여부","적용여부",
-    "PIN_hash","PIN_No"
+    "사번","이름","부서1","부서2","직급","직무","직군","입사일","퇴사일",
+    "기타1","기타2","재직여부","적용여부","PIN_hash","PIN_No"
 ]
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 내부 유틸
+# ─────────────────────────────────────────────────────────────────────────────
 def _get_ws_and_headers(sheet_name: str):
-    ws=_ws(sheet_name)
-    header,_h=_hdr(ws, sheet_name)
-    if not header: raise RuntimeError(f"'{sheet_name}' 헤더(1행) 없음")
-    return ws, header, _h
+    ws = _ws(sheet_name)
+    header, hmap = _hdr(ws, sheet_name)
+    if not header:
+        raise RuntimeError(f"'{sheet_name}' 헤더(1행) 없음")
+    return ws, header, hmap
+
 
 def ensure_emp_sheet_columns():
+    """직원 시트의 필수 컬럼을 보장. AUTO_FIX_HEADERS=True면 자동 보강."""
     ws, header, hmap = _get_ws_and_headers(EMP_SHEET)
     need = [c for c in REQ_EMP_COLS if c not in header]
     if need:
         if AUTO_FIX_HEADERS:
-            if AUTO_FIX_HEADERS:
-                _retry(ws.update, "1:1", [header + need])
-            else:
-                try:
-                    st.warning("시트 헤더에 다음 컬럼이 없습니다: " + ", ".join(need) + "\n"                               "→ 시트를 직접 수정한 뒤 좌측 🔄 동기화 버튼을 눌러주세요.", icon="⚠️")
-                except Exception:
-                    pass
+            _retry(ws.update, "1:1", [header + need])
+            # 보강 후 최신 헤더 재조회
             ws, header, hmap = _get_ws_and_headers(EMP_SHEET)
         else:
             try:
                 st.warning(
-                    "직원 시트 헤더에 다음 컬럼이 없습니다: " + ", ".join(need) + "\n"
-                    "→ 시트를 직접 수정한 뒤 좌측 🔄 동기화 버튼을 눌러주세요.", icon="⚠️"
+                    "직원 시트 헤더에 다음 컬럼이 없습니다: " + ", ".join(need) +
+                    "\n→ 시트를 직접 수정한 뒤 좌측 🔄 동기화 버튼을 눌러주세요.", icon="⚠️"
                 )
             except Exception:
                 pass
     return ws, header, hmap
 
+
 def _find_row_by_sabun(ws, hmap, sabun: str) -> int:
-    c=hmap.get("사번");
-    if not c: return 0
-    vals=_retry(ws.col_values, c)[1:]
-    for i,v in enumerate(vals, start=2):
-        if str(v).strip()==str(sabun).strip(): return i
+    """사번으로 행 인덱스(1‑based)를 찾음. 못 찾으면 0."""
+    c = hmap.get("사번")
+    if not c:
+        return 0
+    vals = _retry(ws.col_values, c)[1:]  # 2행부터
+    s = str(sabun).strip()
+    for i, v in enumerate(vals, start=2):
+        if str(v).strip() == s:
+            return i
     return 0
 
+
+def _ws_batch_rows(ws, hmap, row_payloads):
+    """여러 행에 대한 부분 갱신을 단일 values_batch_update로 처리.
+    row_payloads: Iterable[(row_idx:int, kv:dict[colName->value])]
+    """
+    updates = []
+    max_row = 0
+    max_col = 0
+    title = getattr(ws, "title", "")
+    for row_idx, kv in row_payloads:
+        if not kv:
+            continue
+        max_row = max(max_row, int(row_idx))
+        for k, v in kv.items():
+            c = hmap.get(k)
+            if not c:
+                continue
+            cc = int(c)
+            max_col = max(max_col, cc)
+            a1 = gspread.utils.rowcol_to_a1(int(row_idx), cc)
+            updates.append({"range": f"'{title}'!{a1}", "values": [[v]]})
+
+    if not updates:
+        return 0
+
+    # 안전하게 그리드 확장
+    try:
+        _ensure_capacity(ws, max_row, max_col)
+    except Exception:
+        pass
+
+    body = {"valueInputOption": "USER_ENTERED", "data": updates}
+    _retry(ws.spreadsheet.values_batch_update, body)
+    return len(updates)
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 직원 관리
+# ═════════════════════════════════════════════════════════════════════════════
 def tab_staff_admin(emp_df: pd.DataFrame):
-    """직원 시트 편집: 부서 드롭다운 + 체크박스 저장(부분 갱신)."""
+    """직원 시트 편집: 드롭다운 + 체크박스 저장(변경분만 일괄 갱신)."""
     # 1) 시트/헤더 확보
     ws, header, hmap = ensure_emp_sheet_columns()
     view = emp_df.copy()
@@ -2994,11 +3049,17 @@ def tab_staff_admin(emp_df: pd.DataFrame):
 
     # 3) 드롭다운 옵션(직원 시트 유니크)
     try:
-        dept1_options = [""] + sorted({str(x).strip() for x in emp_df.get("부서1", pd.Series(dtype=str)).dropna().unique().tolist() if str(x).strip()})
+        dept1_options = [""] + sorted({
+            str(x).strip() for x in emp_df.get("부서1", pd.Series(dtype=str)).dropna().unique().tolist()
+            if str(x).strip()
+        })
     except Exception:
         dept1_options = [""]
     try:
-        dept2_options = [""] + sorted({str(x).strip() for x in emp_df.get("부서2", pd.Series(dtype=str)).dropna().unique().tolist() if str(x).strip()})
+        dept2_options = [""] + sorted({
+            str(x).strip() for x in emp_df.get("부서2", pd.Series(dtype=str)).dropna().unique().tolist()
+            if str(x).strip()
+        })
     except Exception:
         dept2_options = [""]
 
@@ -3028,7 +3089,7 @@ def tab_staff_admin(emp_df: pd.DataFrame):
         column_config=colcfg,
     )
 
-    # 5) 저장(변경된 칼럼만 부분 갱신)
+    # 5) 저장(변경된 칼럼만 일괄 갱신)
     if st.button("변경사항 저장", type="primary", use_container_width=True):
         try:
             before = view.set_index("사번")
@@ -3038,12 +3099,14 @@ def tab_staff_admin(emp_df: pd.DataFrame):
             before = before[before.index.astype(str) != ""]
             after  = after[after.index.astype(str) != ""]
 
-            change_cnt = 0
+            payloads = []  # (row_idx, {col:value})
+            change_rows = 0
+
             for sabun in after.index:
                 if sabun not in before.index:
                     continue  # num_rows="fixed" 환경에서는 거의 없음
 
-                payload = {}
+                row_payload = {}
                 for c in after.columns:
                     if c not in before.columns:
                         continue
@@ -3051,39 +3114,60 @@ def tab_staff_admin(emp_df: pd.DataFrame):
                     v1 = after.loc[sabun, c]
                     if str(v0) != str(v1):
                         if c in ("재직여부", "적용여부"):
-                            payload[c] = bool(v1)
+                            row_payload[c] = bool(v1)
                         else:
-                            payload[c] = v1
+                            row_payload[c] = v1
 
-                if not payload:
+                if not row_payload:
                     continue
 
                 row_idx = _find_row_by_sabun(ws, hmap, str(sabun))
                 if row_idx > 0:
-                    _ws_batch_row(ws, row_idx, hmap, payload)
-                    change_cnt += 1
+                    payloads.append((row_idx, row_payload))
+                    change_rows += 1
+
+            if payloads:
+                _ws_batch_rows(ws, hmap, payloads)
 
             try:
                 st.cache_data.clear()
             except Exception:
                 pass
-            st.success(f"저장 완료: {change_cnt}명 반영", icon="✅")
+
+            st.success(f"저장 완료: {change_rows}명 반영", icon="✅")
         except Exception as e:
             st.exception(e)
 
+# ═════════════════════════════════════════════════════════════════════════════
+# PIN 관리
+# ═════════════════════════════════════════════════════════════════════════════
 def reissue_pin_inline(sabun: str, length: int = 4):
+    """사번의 PIN을 재발급하고 즉시 저장(배치 쓰기). 반환: 평문 PIN / 해시."""
     ws, header, hmap = ensure_emp_sheet_columns()
-    if "PIN_hash" not in hmap or "PIN_No" not in hmap: raise RuntimeError("PIN_hash/PIN_No 필요")
-    row_idx=_find_row_by_sabun(ws, hmap, str(sabun))
-    if row_idx==0: raise RuntimeError("사번을 찾지 못했습니다.")
+    if "PIN_hash" not in hmap or "PIN_No" not in hmap:
+        raise RuntimeError("PIN_hash/PIN_No 필요")
+
+    row_idx = _find_row_by_sabun(ws, hmap, str(sabun))
+    if row_idx == 0:
+        raise RuntimeError("사번을 찾지 못했습니다.")
+
     pin = "".join(pysecrets.choice("0123456789") for _ in range(length))
     ph  = _pin_hash(pin, str(sabun))
-    _retry(ws.update_cell, row_idx, hmap["PIN_hash"], ph)
-    _retry(ws.update_cell, row_idx, hmap["PIN_No"], pin)
-    st.cache_data.clear()
+
+    # ✅ 항상 배치 쓰기
+    gs_enqueue_cell(ws, row_idx, hmap["PIN_hash"], ph)
+    gs_enqueue_cell(ws, row_idx, hmap["PIN_No"],   pin)
+    gs_flush()
+
+    try:
+        st.cache_data.clear()
+    except Exception:
+        pass
     return {"PIN_No": pin, "PIN_hash": ph}
 
+
 def tab_admin_pin(emp_df):
+    """관리자 PIN 저장/초기화 — 배치 쓰기 고정."""
     ws, header, hmap = ensure_emp_sheet_columns()
     df = emp_df.copy()
 
@@ -3102,13 +3186,11 @@ def tab_admin_pin(emp_df):
         index=0,
         key="adm_pin_pick"
     )
-
     if sel == "(선택)":
         return
 
     sabun = sel.split(" - ", 1)[0]
     row   = df.loc[df["사번"].astype(str) == str(sabun)].iloc[0]
-
     st.write(f"사번: **{sabun}** / 이름: **{row.get('이름','')}**")
 
     pin1 = st.text_input("새 PIN (숫자)", type="password", key="adm_pin1")
@@ -3134,29 +3216,22 @@ def tab_admin_pin(emp_df):
     # 저장(변경): 배치 쓰기
     if do_save:
         if not pin1 or not pin2:
-            st.error("PIN을 두 번 모두 입력하세요.")
-            return
+            st.error("PIN을 두 번 모두 입력하세요."); return
         if pin1 != pin2:
-            st.error("PIN 확인이 일치하지 않습니다.")
-            return
+            st.error("PIN 확인이 일치하지 않습니다."); return
         if not pin1.isdigit():
-            st.error("PIN은 숫자만 입력하세요.")
-            return
+            st.error("PIN은 숫자만 입력하세요."); return
         if not _to_bool(row.get("재직여부", False)):
-            st.error("퇴직자는 변경할 수 없습니다.")
-            return
+            st.error("퇴직자는 변경할 수 없습니다."); return
 
         hashed = _pin_hash(pin1.strip(), str(sabun))
         gs_enqueue_cell(ws, r, hmap["PIN_hash"], hashed)
         gs_enqueue_cell(ws, r, hmap["PIN_No"],   pin1.strip())
         gs_flush()
 
-        # 캐시 및 UI 정리
         st.cache_data.clear()
         st.success("PIN 저장 완료", icon="✅")
-        # 입력칸 초기화(선택): 다음 입력 때 혼동 방지
-        st.session_state.pop("adm_pin1", None)
-        st.session_state.pop("adm_pin2", None)
+        st.session_state.pop("adm_pin1", None); st.session_state.pop("adm_pin2", None)
         st.rerun()
 
     # 초기화(비우기): 배치 쓰기
@@ -3167,66 +3242,74 @@ def tab_admin_pin(emp_df):
 
         st.cache_data.clear()
         st.success("PIN 초기화 완료", icon="🧹")
-        st.session_state.pop("adm_pin1", None)
-        st.session_state.pop("adm_pin2", None)
+        st.session_state.pop("adm_pin1", None); st.session_state.pop("adm_pin2", None)
         st.rerun()
 
+# ═════════════════════════════════════════════════════════════════════════════
+# 평가 항목 관리
+# ═════════════════════════════════════════════════════════════════════════════
 def tab_admin_eval_items():
     df = read_eval_items_df(only_active=False).copy()
     for c in ["항목ID", "항목", "내용", "비고"]:
-        if c in df.columns: df[c]=df[c].astype(str)
-    if "순서" in df.columns: df["순서"]=pd.to_numeric(df["순서"], errors="coerce").fillna(0).astype(int)
-    if "활성" in df.columns: df["활성"]=df["활성"].map(lambda x: str(x).strip().lower() in ("true","1","y","yes","t"))
+        if c in df.columns:
+            df[c] = df[c].astype(str)
+    if "순서" in df.columns:
+        df["순서"] = pd.to_numeric(df["순서"], errors="coerce").fillna(0).astype(int)
+    if "활성" in df.columns:
+        df["활성"] = df["활성"].map(lambda x: str(x).strip().lower() in ("true","1","y","yes","t"))
+
     st.write(f"현재 등록: **{len(df)}개** (활성 {df[df.get('활성', False)==True].shape[0]}개)")
+
+    # ── 목록 보기 / 일괄 편집 ──────────────────────────────────────────────
     with st.expander("목록 보기 / 순서 일괄 편집", expanded=True):
-        edit_df=df[["항목ID","항목","순서","활성"]].copy().reset_index(drop=True)
-        edited=st.data_editor(
-            edit_df,use_container_width=True,height=420,hide_index=True,
+        edit_df = df[["항목ID","항목","순서","활성"]].copy().reset_index(drop=True)
+        edited = st.data_editor(
+            edit_df, use_container_width=True, height=420, hide_index=True,
             column_order=["항목ID","항목","순서","활성"],
             column_config={
                 "항목ID": st.column_config.TextColumn(disabled=True),
-                "항목": st.column_config.TextColumn(disabled=True),
-                "활성": st.column_config.CheckboxColumn(),
-                "순서": st.column_config.NumberColumn(step=1, min_value=0),
+                "항목":   st.column_config.TextColumn(disabled=True),
+                "활성":   st.column_config.CheckboxColumn(),
+                "순서":   st.column_config.NumberColumn(step=1, min_value=0),
             },
         )
-        
+
         if st.button("순서 일괄 저장", type="primary", use_container_width=True):
             try:
                 ws = get_book().worksheet(EVAL_ITEMS_SHEET)
                 header = _retry(ws.row_values, 1) or []
-                hmap = {n: i+1 for i, n in enumerate(header)}
+                hmap   = {n: i+1 for i, n in enumerate(header)}
 
                 # 기본 컬럼 확인
-                col_id = hmap.get("항목ID")
+                col_id  = hmap.get("항목ID")
                 col_ord = hmap.get("순서")
                 col_act = hmap.get("활성")
                 if not (col_id and col_ord):
                     st.error("'항목ID' 또는 '순서' 헤더가 없습니다."); st.stop()
 
-                # 현재 시트의 항목ID 순서 읽기 (2행부터)
+                # 현재 시트의 항목ID 목록(2행부터)
                 id_vals = _retry(ws.col_values, col_id)[1:]
                 n = len(id_vals)
 
-                # 편집 결과를 dict로 준비 (iid -> 값)
+                # 편집 결과 매핑
                 def _to_bool_local(x):
                     if isinstance(x, bool): return x
                     if x is None: return False
                     s = str(x).strip().lower()
                     return s in ("1","y","yes","true","t","on","checked")
 
-                edited_map_order = { str(r["항목ID"]).strip(): int(r["순서"]) for _, r in edited.iterrows() }
+                edited_map_order  = { str(r["항목ID"]).strip(): int(r["순서"])  for _, r in edited.iterrows() }
                 edited_map_active = { str(r["항목ID"]).strip(): _to_bool_local(r["활성"]) for _, r in edited.iterrows() } if "활성" in edited.columns else {}
 
-                # 범위 문자열 생성 도우미 (주어진 컬럼 인덱스 -> 'A2:A{n+1}' 형태)
+                # 컬럼 범위 문자열
                 import re as _re_local
                 def _col_range(col_idx: int, start_row: int, end_row: int) -> str:
                     letters = _re_local.match(r"([A-Z]+)", gspread.utils.rowcol_to_a1(1, col_idx)).group(1)
                     return f"{letters}{start_row}:{letters}{end_row}"
 
-                # D열(순서), E열(활성) 일괄 덮어쓰기 — 체크박스는 bool로
+                # 일괄 덮어쓰기
                 if n > 0:
-                    order_values = [[ int(edited_map_order.get(iid, 0)) ] for iid in id_vals ]
+                    order_values  = [[ int(edited_map_order.get(iid, 0)) ] for iid in id_vals ]
                     _retry(ws.update, _col_range(col_ord, 2, n+1), order_values, value_input_option="USER_ENTERED")
 
                     if col_act:
@@ -3234,26 +3317,32 @@ def tab_admin_eval_items():
                         _retry(ws.update, _col_range(col_act, 2, n+1), active_values, value_input_option="USER_ENTERED")
 
                 st.success("업데이트 완료", icon="✅")
-                
             except Exception as e:
                 st.exception(e)
 
-
+    # ── 신규 등록 / 수정 ───────────────────────────────────────────────────
     st.divider()
     st.markdown("### 신규 등록 / 수정")
-    choices=["(신규)"] + ([f"{r['항목ID']} - {r['항목']}" for _,r in df.iterrows()] if not df.empty else [])
-    sel=st.selectbox("대상 선택", choices, index=0, key="adm_eval_pick")
+    choices = ["(신규)"] + ([f"{r['항목ID']} - {r['항목']}" for _, r in df.iterrows()] if not df.empty else [])
+    sel = st.selectbox("대상 선택", choices, index=0, key="adm_eval_pick")
 
-    item_id=None; name=""; desc=""; order=int(df["순서"].max()+1) if ("순서" in df.columns and not df.empty) else 1
-    active=True; memo=""
-    if sel!="(신규)" and not df.empty:
-        iid=sel.split(" - ",1)[0]; row=df.loc[df["항목ID"]==iid]
+    item_id = None
+    name = ""; desc = ""; memo = ""
+    order = int(df["순서"].max()+1) if ("순서" in df.columns and not df.empty) else 1
+    active = True
+
+    if sel != "(신규)" and not df.empty:
+        iid = sel.split(" - ", 1)[0]
+        row = df.loc[df["항목ID"] == iid]
         if not row.empty:
-            row=row.iloc[0]
-            item_id=str(row.get("항목ID","")); name=str(row.get("항목","")); desc=str(row.get("내용","")); memo=str(row.get("비고",""))
-            try: order=int(row.get("순서",0) or 0)
-            except Exception: order=0
-            active=(str(row.get("활성","")).strip().lower() in ("true","1","y","yes","t"))
+            row = row.iloc[0]
+            item_id = str(row.get("항목ID",""))
+            name    = str(row.get("항목",""))
+            desc    = str(row.get("내용",""))
+            memo    = str(row.get("비고",""))
+            try:    order   = int(row.get("순서",0) or 0)
+            except Exception: order = 0
+            active = (str(row.get("활성","")).strip().lower() in ("true","1","y","yes","t"))
 
     c1, c2 = st.columns([3,1])
     with c1:
@@ -3261,61 +3350,76 @@ def tab_admin_eval_items():
         desc = st.text_area("설명(문항 내용)", value=desc, height=100, key="adm_eval_desc")
         memo = st.text_input("비고(선택)", value=memo, key="adm_eval_memo")
     with c2:
-        order = st.number_input("순서", min_value=0, step=1, value=int(order), key="adm_eval_order")
+        order  = st.number_input("순서", min_value=0, step=1, value=int(order), key="adm_eval_order")
         active = st.checkbox("활성", value=bool(active), key="adm_eval_active")
+
         if st.button("저장(신규/수정)", type="primary", use_container_width=True, key="adm_eval_save_v3"):
             if not name.strip():
                 st.error("항목명을 입력하세요.")
             else:
                 try:
                     ensure_eval_items_sheet()
-                    ws = get_book().worksheet(EVAL_ITEMS_SHEET)
+                    ws     = get_book().worksheet(EVAL_ITEMS_SHEET)
                     header = _retry(ws.row_values, 1) or EVAL_ITEM_HEADERS
                     hmap   = {n: i + 1 for i, n in enumerate(header)}
+
                     if not item_id:
-                        col_id = hmap.get("항목ID"); nums=[]
+                        # 신규
+                        col_id = hmap.get("항목ID"); nums = []
                         if col_id:
-                            vals=_retry(ws.col_values, col_id)[1:]
+                            vals = _retry(ws.col_values, col_id)[1:]
                             for v in vals:
-                                s=str(v).strip()
+                                s = str(v).strip()
                                 if s.startswith("ITM"):
                                     try: nums.append(int(s[3:]))
                                     except Exception: pass
-                        new_id=f"ITM{((max(nums)+1) if nums else 1):04d}"
-                        rowbuf=[""]*len(header)
-                        def put(k,v): c=hmap.get(k); rowbuf[c-1]=v if c else ""
-                        put("항목ID",new_id); put("항목",name.strip()); put("내용",desc.strip())
-                        put("순서",int(order)); put("활성",bool(active));
+                        new_id = f"ITM{((max(nums)+1) if nums else 1):04d}"
+
+                        rowbuf = [""] * len(header)
+                        def put(k, v):
+                            c = hmap.get(k)
+                            if c: rowbuf[c-1] = v
+                        put("항목ID", new_id)
+                        put("항목",   name.strip())
+                        put("내용",   desc.strip())
+                        put("순서",   int(order))
+                        put("활성",   bool(active))
                         if "비고" in hmap: put("비고", memo.strip())
+
                         _retry(ws.append_row, rowbuf, value_input_option="USER_ENTERED")
-                        st.cache_data.clear(); st.success(f"저장 완료 (항목ID: {new_id})"); st.rerun()
+                        st.cache_data.clear()
+                        st.success(f"저장 완료 (항목ID: {new_id})")
+                        st.rerun()
                     else:
-                        col_id=hmap.get("항목ID"); idx=0
+                        # 수정 — ✅ 배치 쓰기로 변경
+                        col_id = hmap.get("항목ID"); idx = 0
                         if col_id:
-                            vals=_retry(ws.col_values, col_id)
-                            for i,v in enumerate(vals[1:], start=2):
-                                if str(v).strip()==str(item_id).strip(): idx=i; break
-                        if idx==0: st.error("대상 항목을 찾을 수 없습니다.")
+                            vals = _retry(ws.col_values, col_id)
+                            for i, v in enumerate(vals[1:], start=2):
+                                if str(v).strip() == str(item_id).strip():
+                                    idx = i; break
+                        if idx == 0:
+                            st.error("대상 항목을 찾을 수 없습니다.")
                         else:
-                            ws.update_cell(idx, hmap["항목"], name.strip())
-                            ws.update_cell(idx, hmap["내용"], desc.strip())
-                            ws.update_cell(idx, hmap["순서"], int(order))
-                            ws.update_cell(idx, hmap["활성"], bool(active))
+                            payload = {
+                                "항목": name.strip(),
+                                "내용": desc.strip(),
+                                "순서": int(order),
+                                "활성": bool(active),
+                            }
                             if "비고" in hmap:
-                                gs_enqueue_cell(ws, idx, hmap["비고"], memo.strip(), "USER_ENTERED")
-                            gs_flush()
+                                payload["비고"] = memo.strip()
+
+                            _ws_batch_rows(ws, hmap, [(idx, payload)])
                             st.success("업데이트 완료", icon="✅")
-                            
                 except Exception as e:
                     st.exception(e)
 
-
+# ═════════════════════════════════════════════════════════════════════════════
+# 권한(ACL) 관리
+# ═════════════════════════════════════════════════════════════════════════════
 def tab_admin_acl(emp_df: pd.DataFrame):
-    """권한 관리(간소/고속): 편집 시 세션 DF를 항상 정규화해 첫 선택이 사라지는 문제를 해결.
-    - 원인: data_editor가 새 행을 만들 때 각 셀은 NaN/None으로 시작 →
-            이전 버전에서 이 NaN이 그대로 세션에 저장되어 다음 rerun 시 'None'로 표시됨.
-    - 해결: 편집 DF를 세션에 반영하기 전에 문자열/불리언 컬럼을 강제로 정규화(fillna, dtype 일치).
-    """
+    """권한 관리(간소/고속): 편집 시 세션 DF 정규화로 NaN/None 문제 방지."""
     me = st.session_state.get("user", {})
     am_admin = is_admin(str(me.get("사번","")))
     if not am_admin:
@@ -3334,7 +3438,7 @@ def tab_admin_acl(emp_df: pd.DataFrame):
         label_by_sabun[s] = lab
         sabun_by_label[lab] = s
 
-    # 정규화 유틸 (표시용 DF: '사번'은 라벨 문자열)
+    # 표시용 DF 정규화 유틸
     def _normalize_acl_display_df(df_in: pd.DataFrame) -> pd.DataFrame:
         headers = globals().get("AUTH_HEADERS", ["사번","이름","역할","범위유형","부서1","부서2","대상사번","활성","비고"])
         df = (df_in.copy() if df_in is not None else pd.DataFrame(columns=headers))
@@ -3342,10 +3446,10 @@ def tab_admin_acl(emp_df: pd.DataFrame):
         # 누락 컬럼 채우기
         for c in headers:
             if c not in df.columns:
-                df[c] = "" if c not in ("활성",) else False
+                df[c] = "" if c != "활성" else False
 
         # 타입/결측값 정리
-        str_cols = [c for c in headers if c not in ("활성",)]
+        str_cols = [c for c in headers if c != "활성"]
         for c in str_cols:
             df[c] = df[c].astype(object).where(pd.notna(df[c]), "")
         if "활성" in df.columns:
@@ -3355,7 +3459,7 @@ def tab_admin_acl(emp_df: pd.DataFrame):
                 return s in ("true","1","y","yes","t","on","checked")
             df["활성"] = df["활성"].map(_to_b).fillna(False).astype(bool)
 
-        # 완전 빈 행 제거(사번/역할/범위/부서/대상사번/비고 다 공란이고 활성 False)
+        # 완전 빈 행 제거
         def _row_empty(r):
             return (
                 str(r.get("사번","")).strip()=="" and
@@ -3370,11 +3474,10 @@ def tab_admin_acl(emp_df: pd.DataFrame):
         if len(df) > 0:
             df = df[~df.apply(_row_empty, axis=1)].reset_index(drop=True)
 
-        # '사번' 컬럼은 "사번 - 이름" 라벨을 유지
+        # '사번'을 라벨형태("사번 - 이름")로 정규화
         if "사번" in df.columns:
             def _labelize(v):
                 s = str(v).strip()
-                # 이미 라벨이면 보존, 아니면 라벨로 변환
                 if s in sabun_by_label:
                     return s
                 if " - " in s:
@@ -3382,17 +3485,17 @@ def tab_admin_acl(emp_df: pd.DataFrame):
                 return label_by_sabun.get(s, s)
             df["사번"] = df["사번"].map(_labelize)
 
-        # '이름'은 표시에만 쓰이므로 비워두거나 파생 가능
+        # '이름' 파생
         if "이름" in df.columns:
             df["이름"] = df["사번"].map(lambda lab: emp_lookup.get(sabun_by_label.get(str(lab).strip(), str(lab).split(" - ",1)[0].strip()), "")).fillna("").astype(str)
 
-        # 최종 컬럼 순서 맞추기
+        # 컬럼 순서 맞추기
         for c in headers:
             if c not in df.columns:
-                df[c] = "" if c not in ("활성",) else False
+                df[c] = "" if c != "활성" else False
         return df[headers].copy()
 
-    # 최초 1회만 시트 → 세션 로드
+    # 최초 로드: 시트 → 세션
     if "acl_df" not in st.session_state:
         try:
             ws = get_book().worksheet(AUTH_SHEET)
@@ -3403,7 +3506,6 @@ def tab_admin_acl(emp_df: pd.DataFrame):
         except Exception:
             header = AUTH_HEADERS
             raw_df = pd.DataFrame(columns=header)
-        # 표시용 정규화
         disp_df = _normalize_acl_display_df(raw_df)
         st.session_state["acl_header"] = header
         st.session_state["acl_df"] = disp_df
@@ -3411,11 +3513,11 @@ def tab_admin_acl(emp_df: pd.DataFrame):
     header = st.session_state["acl_header"]
     work = _normalize_acl_display_df(st.session_state.get("acl_df", pd.DataFrame(columns=header)))
 
-    # 드롭다운 옵션(직원 시트 유니크)
+    # 드롭다운 옵션(부서)
     dept1_options = [""] + sorted({str(x).strip() for x in base.get("부서1", pd.Series(dtype=str)).dropna().unique().tolist() if str(x).strip()})
     dept2_options = [""] + sorted({str(x).strip() for x in base.get("부서2", pd.Series(dtype=str)).dropna().unique().tolist() if str(x).strip()})
 
-    # 컬럼 구성: '이름'은 에디터에서 제외
+    # 에디터 구성 ('이름'은 편집 제외)
     column_config = {
         "사번": st.column_config.SelectboxColumn("사번 - 이름", options=labels),
         "역할": st.column_config.SelectboxColumn("역할", options=["admin","manager"]),
@@ -3438,18 +3540,16 @@ def tab_admin_acl(emp_df: pd.DataFrame):
         column_config=column_config,
     )
 
-    # 변경 감지 → 정규화 후 세션 반영 (NaN/None 방지)
+    # 변경 감지 → 정규화 후 세션 반영
     try:
         if not edited.equals(work[edit_cols]):
             new_df = _normalize_acl_display_df(edited)
-            # editor에는 '이름'이 없으므로 파생해서 붙여줌
             new_df["이름"] = new_df["사번"].map(lambda lab: emp_lookup.get(sabun_by_label.get(str(lab).strip(), str(lab).split(" - ",1)[0].strip()), "")).fillna("").astype(str)
             st.session_state["acl_df"] = new_df[[c for c in work.columns if c in new_df.columns]].copy()
     except Exception:
-        # 안전망: 그래도 현재 편집본을 최대한 보존
         st.session_state["acl_df"] = _normalize_acl_display_df(edited)
 
-    # 저장 버튼(전체 반영: 헤더+모든 행 덮어쓰기, '이름'은 저장 직전에 파생)
+    # 저장 버튼(전체 반영: 헤더+모든 행 덮어쓰기)
     if st.button("권한 전체 반영", type="primary", use_container_width=True, disabled=not am_admin):
         try:
             ws = get_book().worksheet(AUTH_SHEET)
@@ -3458,7 +3558,7 @@ def tab_admin_acl(emp_df: pd.DataFrame):
             # 1) 헤더 덮어쓰기
             _retry(ws.update, "1:1", [header], value_input_option="USER_ENTERED")
 
-            # 2) 저장용 DF 생성: '사번'은 라벨→실사번, '이름'은 파생
+            # 2) 저장용 DF: 라벨→실사번, 이름 파생
             save_df = _normalize_acl_display_df(st.session_state.get("acl_df", pd.DataFrame(columns=header))).copy()
 
             def _sab_from_label(v: str):
@@ -3468,18 +3568,15 @@ def tab_admin_acl(emp_df: pd.DataFrame):
             if "사번" in save_df.columns:
                 save_df["사번"] = save_df["사번"].map(_sab_from_label)
 
-            # 이름 파생(저장 직전)
             if "이름" not in save_df.columns:
                 save_df.insert(1, "이름", "")
             save_df["이름"] = save_df["사번"].map(lambda s: emp_lookup.get(str(s).strip(), "")).fillna("").astype(str)
 
-            # 저장 순서 헤더 정렬
             for col in header:
                 if col not in save_df.columns:
                     save_df[col] = "" if col != "활성" else False
             save_df = save_df[header]
 
-            # 체크박스 보장
             if "활성" in save_df.columns:
                 def _to_bool_local(x):
                     if isinstance(x, bool): return x
@@ -3488,11 +3585,9 @@ def tab_admin_acl(emp_df: pd.DataFrame):
                 save_df["활성"] = save_df["활성"].map(_to_bool_local).fillna(False).astype(bool)
 
             # 완전 빈 행 제거
-            save_df = save_df[
-                save_df.astype(str).apply(lambda r: "".join(r.values).strip() != "", axis=1)
-            ]
+            save_df = save_df[save_df.astype(str).apply(lambda r: "".join(r.values).strip() != "", axis=1)]
 
-            # 3) 본문 전부 덮어쓰기 (기존 행 정리)
+            # 3) 본문 덮어쓰기
             data = save_df.fillna("").values.tolist()
             try:
                 _ensure_capacity(ws, (len(data) + 1) if data else 1, max(1, len(header)))
@@ -3507,27 +3602,29 @@ def tab_admin_acl(emp_df: pd.DataFrame):
         except Exception as e:
             st.exception(e)
 
-
+# ═════════════════════════════════════════════════════════════════════════════
+# 도움말
+# ═════════════════════════════════════════════════════════════════════════════
 def tab_help():
     st.markdown("""
-    **도움말**
-    - 좌측에서 `검색(사번/이름)` 후 **Enter** → 첫 번째 결과가 자동으로 선택됩니다.
-    - 대상선택(드롭다운박스)로 직원을 선택해도 됩니다.
-    - 선택된 직원은 우측 모든 탭과 동기화됩니다.
-    - 권한(ACL)에 따라 보이는 직원 범위가 달라집니다. 관리자는 전 직원이 보입니다.
-    - 로그인: `사번` 입력 후 **Enter** → `PIN` 포커스 / `PIN` 입력 후 **Enter** → 로그인.
-    - 인사평가: 평가 항목은 관리자 메뉴의 **평가 항목 관리**에서 활성/순서를 조정합니다.
-    - 직무기술서/직무능력평가: 동기화된 대상자를 기준으로 편집·제출합니다.
-    - PIN/평가항목/권한관리: 관리자 탭에서 처리합니다.
-    - 구글시트 구조
-        - 직원: `직원` 시트
-        - 권한: `권한` 시트 (역할=admin/manager, 범위유형: 공란=전체 · 부서 · 개별)
-        - 평가 항목: `평가_항목` 시트
-        - 인사평가: `인사평가_YYYY` 시트
-        - 직무기술서: `직무기술서` 시트
-        - 직무기술서(부서장 승인): `직무기술서_승인` 시트
-        - 직무능력평가: `직무능력평가_YYYY` 시트
-    """)
+**도움말**
+- 좌측에서 `검색(사번/이름)` 후 **Enter** → 첫 번째 결과가 자동으로 선택됩니다.
+- 대상선택(드롭다운박스)로 직원을 선택해도 됩니다.
+- 선택된 직원은 우측 모든 탭과 동기화됩니다.
+- 권한(ACL)에 따라 보이는 직원 범위가 달라집니다. 관리자는 전 직원이 보입니다.
+- 로그인: `사번` 입력 후 **Enter** → `PIN` 포커스 / `PIN` 입력 후 **Enter** → 로그인.
+- 인사평가: 평가 항목은 관리자 메뉴의 **평가 항목 관리**에서 활성/순서를 조정합니다.
+- 직무기술서/직무능력평가: 동기화된 대상자를 기준으로 편집·제출합니다.
+- PIN/평가항목/권한관리: 관리자 탭에서 처리합니다.
+- 구글시트 구조
+    - 직원: `직원` 시트
+    - 권한: `권한` 시트 (역할=admin/manager, 범위유형: 공란=전체 · 부서 · 개별)
+    - 평가 항목: `평가_항목` 시트
+    - 인사평가: `인사평가_YYYY` 시트
+    - 직무기술서: `직무기술서` 시트
+    - 직무기술서(부서장 승인): `직무기술서_승인` 시트
+    - 직무능력평가: `직무능력평가_YYYY` 시트
+""")
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Main App
