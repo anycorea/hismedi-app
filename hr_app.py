@@ -3650,6 +3650,7 @@ except Exception:
 # Main App
 # ═════════════════════════════════════════════════════════════════════════════
 def main():
+    _suppress_magic_booleans()
     emp_df = read_emp_df()
     st.session_state["emp_df"] = emp_df
 
