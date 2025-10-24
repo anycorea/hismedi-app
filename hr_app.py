@@ -23,6 +23,7 @@ def _ensure_capacity(ws, min_row: int, min_col: int):
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Imports
+import time
 # ═════════════════════════════════════════════════════════════════════════════
 import re, time, random, hashlib, secrets as pysecrets
 from datetime import datetime, timedelta
@@ -174,49 +175,59 @@ except Exception:
 
 
 
-def force_sync():
-    """데이터/편집 캐시만 비우고 즉시 리런 (로그인 세션/인증 키는 유지)."""
-    # Streamlit 캐시
-    try:
-        st.cache_data.clear()
-    except Exception:
-        pass
-    try:
-        st.cache_resource.clear()
-    except Exception:
-        pass
 
-    # 모듈 레벨 캐시
+def force_sync(min_interval: int = 15):
+    """데이터/편집 캐시만 비우고 즉시 리런 (로그인 세션/인증 키는 유지).
+    - 연타/다중사용자: min_interval(초) 내 재호출 무시(안내)
+    - 중복 실행 방지 락
+    """
+    now = time.time()
+    # 중복 실행 락
+    if st.session_state.get("_sync_lock", False):
+        st.info("이미 동기화 중입니다. 잠시만요…", icon="⏳"); return
+
+    # 스로틀
+    last_ts = float(st.session_state.get("_last_sync_ts", 0.0) or 0.0)
+    if now - last_ts < float(min_interval):
+        st.info(f"최근 {int(now-last_ts)}초 전에 동기화됨 — 잠시 뒤 다시 시도해 주세요.", icon="⚠️")
+        return
+
+    st.session_state["_sync_lock"] = True
     try:
-        global _WS_CACHE, _HDR_CACHE, _VAL_CACHE
-        _WS_CACHE.clear(); _HDR_CACHE.clear(); _VAL_CACHE.clear()
-    except Exception:
+        # Streamlit 캐시: 데이터만 정리(리소스는 그대로 두어 콜드스타트 방지)
+        try: st.cache_data.clear()
+        except Exception: pass
+
+        # 모듈 레벨 캐시(시트/헤더/값 캐시만)
         try:
-            _WS_CACHE = {}; _HDR_CACHE = {}; _VAL_CACHE = {}
+            global _WS_CACHE, _HDR_CACHE, _VAL_CACHE
         except Exception:
             pass
+        for _c in ('_WS_CACHE','_HDR_CACHE','_VAL_CACHE'):
+            try: globals()[_c].clear()
+            except Exception: pass
 
-    # 세션 상태: 편집/데이터 캐시만 선별 제거 (로그인/인증 관련 키는 보존)
-    SAFE_KEEP = {"user", "access_token", "refresh_token", "login_time", "login_provider"}
-    ACL_KEYS  = {"acl_df", "acl_header", "acl_editor", "auth_editor", "auth_editor_df", "__auth_sab_sig"}
-    PREFIXES  = ("__cache_", "_df_", "_cache_", "gs_")  # 데이터 캐시성 키만
-    
-    try:
-        to_del = []
-        for k in list(st.session_state.keys()):
-            if k in SAFE_KEEP:
-                continue
-            if k in ACL_KEYS:
-                to_del.append(k); continue
-            if any(k.startswith(p) for p in PREFIXES):
-                to_del.append(k); continue
-        for k in to_del:
-            del st.session_state[k]
-    except Exception:
-        pass
+        # 세션 키 정리 (핵심 선택/인증은 유지)
+        SAFE_KEEP = {"user","authed","auth_expires_at","_state_owner_sabun",
+                     "glob_target_sabun","glob_target_name",
+                     "left_pick","pick_q",
+                     "_last_sync_ts","_sync_lock"}
+        PREFIXES = ("eval", "jd", "cmpS", "cmpD")
+        ACL_KEYS  = {"acl_df", "acl_header", "acl_editor", "auth_editor"}
+        try:
+            to_del = []
+            for k in list(st.session_state.keys()):
+                if k in SAFE_KEEP: continue
+                if k in ACL_KEYS:  to_del.append(k); continue
+                if any(k.startswith(p) for p in PREFIXES): to_del.append(k); continue
+            for k in to_del: del st.session_state[k]
+        except Exception: pass
 
-    st.rerun()
-
+        st.session_state["_last_sync_ts"] = now
+        st.success("동기화 완료!", icon="✅")
+        st.rerun()
+    finally:
+        st.session_state["_sync_lock"] = False
 # ═════════════════════════════════════════════════════════════════════════════
 # App Config / Style
 # ═════════════════════════════════════════════════════════════════════════════
@@ -690,6 +701,24 @@ def get_allowed_sabuns(emp_df:pd.DataFrame, sabun:str, include_self:bool=True)->
     return allowed
 
 # ═════════════════════════════════════════════════════════════════════════════
+
+# ─ Debounce helper ───────────────────────────────────────────────────────────
+def _debounced(label: str, key: str, wait: float = 1.0, **kwargs):
+    """버튼 연타 시 첫 1회만 통과. 나머지는 무시.
+    kwargs는 st.button에 그대로 전달됩니다.
+    """
+    k = f"_debounce_{key}"
+    now = time.time()
+    last = float(st.session_state.get(k, 0.0) or 0.0)
+    # st.button 렌더 자체는 해야 UI가 유지됨
+    clicked = st.button(label, key=key, **kwargs)
+    if now - last < float(wait):
+        return False
+    if clicked:
+        st.session_state[k] = now
+        return True
+    return False
+
 # Global Target Sync
 # ═════════════════════════════════════════════════════════════════════════════
 def set_global_target(sabun:str, name:str=""):
@@ -777,7 +806,7 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
     picked = st.selectbox("**대상 선택**", ["(선택)"] + opts, index=idx0, key="left_pick")
 
     # ▼ 필터 초기화: 플래그만 세우고 즉시 rerun (다음 런 시작 시 초기화됨)
-    if st.button("필터 초기화", use_container_width=True):
+    if _debounced("필터 초기화", key="left_reset_btn", wait=1.0, use_container_width=True):
         st.session_state["_left_reset"] = True
         st.rerun()
 
@@ -2853,9 +2882,8 @@ def main():
             if st.button("로그아웃", key="btn_logout", use_container_width=True):
                 logout()
         with c2:
-            if st.button("🔄 동기화", key="sync_left", use_container_width=True,
-                         help="캐시를 비우고 구글시트에서 다시 불러옵니다."):
-                force_sync()
+            if _debounced("🔄 동기화", key="sync_left", wait=1.0, use_container_width=True, help="캐시를 비우고 구글시트에서 다시 불러옵니다."):
+                force_sync(min_interval=15)
 
         # 좌측 메뉴
         render_staff_picker_left(emp_df)
