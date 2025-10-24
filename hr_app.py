@@ -356,7 +356,7 @@ if not getattr(st, "_help_disabled", False):
 _CSS_GLOBAL = """
 <style>
   /* ── Top spacing: tighter ───────────────────────────────────────── */
-  div.block-container{padding-top:.6rem!important}            /* was 2.5rem */
+  div.block-container{padding-top:.3rem!important}            /* was 2.5rem */
   header[data-testid="stHeader"]{padding-top:0!important}     /* header 여백 살짝 정리 */
   section[data-testid="stSidebar"] .block-container{padding-top:.6rem!important}
   /* 숨겨진 True/False 등으로 남은 빈 단락 제거 */
