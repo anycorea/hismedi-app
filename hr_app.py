@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from __future__ import annotations
 
 def _ensure_capacity(ws, min_row: int | None, min_col: int | None, *, max_cells: int | None = 9_000_000) -> bool:
     """
