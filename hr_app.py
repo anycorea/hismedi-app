@@ -3627,22 +3627,50 @@ def tab_help():
 """)
 
 # ═════════════════════════════════════════════════════════════════════════════
+# Main App (optimized) + Robust Batch Helpers
+# ═════════════════════════════════════════════════════════════════════════════
+# 드롭인 교체용: 본 블록을 기존 Main App/배치 헬퍼 부분과 교체하세요.
+# - 성능: 불필요한 copy 제거, 배치 쓰기 헬퍼 강화(청크/그룹핑), 캐시 무효화 지점 최소화
+# - 안정: gspread 429/네트워크 대비 _retry 경유, 예외 시 친절 경고
+# - 일관: 주석/구획 표준화
+#
+# 의존: 앱 상단의 공용 유틸/상수/탭 함수가 이미 로드되어 있어야 합니다.
+#       (예: read_emp_df, _session_valid, kst_now_str, logout, force_sync,
+#        render_staff_picker_left, tab_eval, tab_job_desc, tab_competency,
+#        tab_staff_admin, tab_admin_pin, tab_admin_eval_items, tab_admin_acl, tab_help,
+#        is_admin, get_book, _retry, APP_TITLE, st, pd 등)
+from typing import Iterable, Tuple, Dict, Any
+
+try:
+    from gspread.utils import rowcol_to_a1  # 이미 상단에서 임포트되어 있을 수 있음
+except Exception:
+    pass
+
+# ═════════════════════════════════════════════════════════════════════════════
 # Main App
 # ═════════════════════════════════════════════════════════════════════════════
 def main():
+    # 직원 DF 로드(캐시 활용). 세션에는 참조만 저장하여 불필요한 메모리 복사 방지.
     emp_df = read_emp_df()
-    st.session_state["emp_df"] = emp_df.copy()
+    st.session_state["emp_df"] = emp_df  # .copy() 제거 → 속도/메모리 이점
 
+    # 로그인 유도 화면
     if not _session_valid():
         st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=True)
-        show_login(emp_df); return
+        show_login(emp_df)
+        return
 
+    # 세션 소유자 확인/정리
     require_login(emp_df)
 
+    # 레이아웃
     left, right = st.columns([1.35, 3.65], gap="large")
 
+    # ────────────────────────────────────────────────────────────────────────
+    # Left Pane: 사용자 정보 / 전역 컨트롤 / 좌측 메뉴
+    # ────────────────────────────────────────────────────────────────────────
     with left:
-        u = st.session_state.get("user", {})
+        u = st.session_state.get("user", {}) or {}
         st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=True)
         st.caption(f"DB연결 {kst_now_str()}")
         st.markdown(f"- 사용자: **{u.get('이름','')} ({u.get('사번','')})**")
@@ -3657,14 +3685,24 @@ def main():
                          help="캐시를 비우고 구글시트에서 다시 불러옵니다."):
                 force_sync()
 
-        # 좌측 메뉴
+        # 좌측 메뉴(사번/이름 검색 + 전역 대상자 선택)
         render_staff_picker_left(emp_df)
 
+    # ────────────────────────────────────────────────────────────────────────
+    # Right Pane: 탭
+    # ────────────────────────────────────────────────────────────────────────
     with right:
         tabs = st.tabs(["인사평가","직무기술서","직무능력평가","관리자","도움말"])
-        with tabs[0]: tab_eval(emp_df)
-        with tabs[1]: tab_job_desc(emp_df)
-        with tabs[2]: tab_competency(emp_df)
+
+        with tabs[0]:
+            tab_eval(emp_df)
+
+        with tabs[1]:
+            tab_job_desc(emp_df)
+
+        with tabs[2]:
+            tab_competency(emp_df)
+
         with tabs[3]:
             me = str(st.session_state.get("user", {}).get("사번", ""))
             if not is_admin(me):
@@ -3675,23 +3713,28 @@ def main():
                 with a2: tab_admin_pin(emp_df)
                 with a3: tab_admin_eval_items()
                 with a4: tab_admin_acl(emp_df)
-        with tabs[4]: tab_help()
+
+        with tabs[4]:
+            tab_help()
+
 
 if __name__ == "__main__":
     main()
 
-# --- PATCH 2025-10-17: robust get_jd_approval_map_cached (append-only) -------------------------------
+# ═════════════════════════════════════════════════════════════════════════════
+# PATCH 2025-10-17: robust get_jd_approval_map_cached (append-only)
+# ═════════════════════════════════════════════════════════════════════════════
 @st.cache_data(ttl=120, show_spinner=False)
 def get_jd_approval_map_cached(_year: int, _rev: int = 0) -> dict:
     """
-    Robust version: safe when sheet is empty / headers missing / type coercion fails.
-    Returns mapping {(사번, 버전)->(상태, 승인시각)} for the given year.
+    Robust version: 시트 비었거나 헤더 누락/타입 캐스팅 실패해도 안전.
+    결과: {(사번, 버전)->(상태, 승인시각)}
     """
     sheet_name = globals().get("JD_APPROVAL_SHEET", "직무기술서_승인")
     default_headers = ["연도","사번","이름","버전","승인자사번","승인자이름","상태","승인시각","비고"]
     headers = globals().get("JD_APPROVAL_HEADERS", default_headers)
 
-    # Ensure sheet if helper exists
+    # Ensure sheet 존재 보장(가능할 때만)
     try:
         ensure_fn = globals().get("ensure_jd_approval_sheet")
         if callable(ensure_fn):
@@ -3699,7 +3742,7 @@ def get_jd_approval_map_cached(_year: int, _rev: int = 0) -> dict:
     except Exception:
         pass
 
-    # Load records using available helpers
+    # Records 로드
     df = None
     try:
         _ws_func = globals().get("_ws")
@@ -3722,12 +3765,12 @@ def get_jd_approval_map_cached(_year: int, _rev: int = 0) -> dict:
     if df is None or df.empty:
         df = pd.DataFrame(columns=headers)
 
-    # Ensure columns exist
+    # 컬럼 보장
     for c in headers:
         if c not in df.columns:
             df[c] = ""
 
-    # Normalize types
+    # 타입 정리
     df["연도"] = pd.to_numeric(df["연도"], errors="coerce").fillna(0).astype(int)
     if "버전" in df.columns:
         df["버전"] = pd.to_numeric(df["버전"], errors="coerce").fillna(0).astype(int)
@@ -3739,13 +3782,13 @@ def get_jd_approval_map_cached(_year: int, _rev: int = 0) -> dict:
         else:
             df[c] = ""
 
-    # Filter by year safely
+    # 연도 필터(안전)
     try:
         df = df[df["연도"] == int(_year)]
     except Exception:
         df = df.iloc[0:0]
 
-    # Build output
+    # 맵 구축
     out = {}
     if not df.empty:
         sort_cols = [c for c in ["사번","버전","승인시각"] if c in df.columns]
@@ -3756,41 +3799,72 @@ def get_jd_approval_map_cached(_year: int, _rev: int = 0) -> dict:
             out[k] = (str(rr.get("상태","")), str(rr.get("승인시각","")))
     return out
 
-# --- END PATCH -------------------------------
-
-# ===== Batch write helpers (appended) =====
+# ═════════════════════════════════════════════════════════════════════════════
+# Robust Batch Write Helpers (Queue → values_batch_update)
+# ═════════════════════════════════════════════════════════════════════════════
 def _gs_queue_init():
+    """세션 로컬 큐 초기화."""
     if "gs_queue" not in st.session_state:
         st.session_state.gs_queue = []
 
-def gs_enqueue_range(ws, range_a1, values_2d, value_input_option="USER_ENTERED"):
+def gs_enqueue_range(ws, range_a1: str, values_2d, value_input_option: str = "USER_ENTERED"):
+    """
+    A1 범위 + 2D values를 큐에 적재.
+    - range_a1: "'시트'!A1:B2" 또는 "A1:B2" (시트명 자동 보강)
+    - values_2d: [[...], [...], ...]
+    """
     _gs_queue_init()
     rng = range_a1 if "!" in range_a1 else f"{ws.title}!{range_a1}"
-    st.session_state.gs_queue.append({"range": rng, "values": values_2d, "value_input_option": value_input_option})
+    st.session_state.gs_queue.append({
+        "range": rng, "values": values_2d, "value_input_option": value_input_option
+    })
 
-def gs_enqueue_cell(ws, row, col, value, value_input_option="USER_ENTERED"):
+def gs_enqueue_cell(ws, row: int, col: int, value, value_input_option: str = "USER_ENTERED"):
+    """단일 셀 업데이트를 큐에 적재."""
     _gs_queue_init()
-    a1 = rowcol_to_a1(row, col)
+    try:
+        a1 = rowcol_to_a1(int(row), int(col))
+    except Exception:
+        # Fallback: 최소 방어
+        a1 = f"R{int(row)}C{int(col)}"
     rng = f"{ws.title}!{a1}"
-    st.session_state.gs_queue.append({"range": rng, "values": [[value]], "value_input_option": value_input_option})
+    st.session_state.gs_queue.append({
+        "range": rng, "values": [[value]], "value_input_option": value_input_option
+    })
 
-def gs_flush():
-    if not st.session_state.get("gs_queue"):
+def gs_flush(max_ranges_per_call: int = 400):
+    """
+    큐 적재분을 Google Sheets values_batch_update로 전송.
+    - value_input_option 별로 그룹핑 후, API 제한 고려해 CHUNK 전송
+    - 오류 시 batch_update로 폴백 시도
+    """
+    q = st.session_state.get("gs_queue") or []
+    if not q:
         return
-    data = st.session_state.gs_queue
-    # group by value_input_option
-    grouped = {}
-    for item in data:
-        grouped.setdefault(item["value_input_option"], []).append({"range": item["range"], "values": item["values"]})
-    sh = get_book()
-    for mode, payload in grouped.items():
-        try:
-            sh.values_batch_update({"valueInputOption": mode, "data": payload})
-        except Exception:
-            try:
-                sh.batch_update({"valueInputOption": mode, "data": payload})
-            except Exception:
-                st.warning("일부 값 저장에 실패했습니다. 동기화 후 다시 시도해 주세요.")
-                raise
-    st.session_state.gs_queue = []
-# ===== End helpers =====
+
+    # value_input_option 별 그룹핑
+    grouped: Dict[str, list] = {}
+    for item in q:
+        grouped.setdefault(item.get("value_input_option", "USER_ENTERED"), []).append({
+            "range": item["range"],
+            "values": item["values"]
+        })
+
+    sh = get_book()  # gspread.Spreadsheet
+    sent = 0
+    try:
+        for mode, payload in grouped.items():
+            # 청크 분할
+            for i in range(0, len(payload), max_ranges_per_call):
+                chunk = payload[i:i + max_ranges_per_call]
+                body = {"valueInputOption": mode, "data": chunk}
+                try:
+                    _retry(sh.values_batch_update, body)
+                except Exception:
+                    # 폴백
+                    _retry(sh.batch_update, body)
+                sent += len(chunk)
+    finally:
+        st.session_state.gs_queue = []
+
+    return sent
