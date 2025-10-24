@@ -403,74 +403,77 @@ def mount_sync_toast():
         pass
 
 # ═════════════════════════════════════════════════════════════════════════════
-# App Config / Style (ultra-tight top)
+# App Config / Style (compact header + top 0)
 # ═════════════════════════════════════════════════════════════════════════════
 APP_TITLE = st.secrets.get("app", {}).get("TITLE", "HISMEDI - 인사/HR")
 st.set_page_config(page_title=APP_TITLE, layout="wide")
 
-# st.help 출력 무력화 (최초 1회)
+# st.help 출력 무력화
 if not getattr(st, "_help_disabled", False):
     def _noop_help(*_a, **_kw): return None
     st.help = _noop_help
     st._help_disabled = True
 
-# 전역 CSS (상단 0px, 헤더 숨김, 버튼 흔들림 방지, 토스트 기본 스타일)
-_CSS_GLOBAL = """
+COMPACT_HEADER_H = 44  # px: 헤더 높이 (아이콘 보이도록 최소값)
+
+_CSS_GLOBAL = f"""
 <style>
-  /* ── Top spacing 0 + 헤더 완전 숨김 (점프 억제 최강) ───────────────────── */
-  div.block-container{padding-top:0!important;margin-top:0!important}
-  section[data-testid="stSidebar"] .block-container{padding-top:0!important}
-  header[data-testid="stHeader"]{display:none!important;height:0!important;min-height:0!important;padding:0!important;margin:0!important}
-  div[data-testid="stDecoration"]{height:0!important}  /* 상단 장식 바 제거 */
-  html, body { scroll-behavior: auto !important; }
-  /* 첫 요소 위 마진 제거(제목 등) */
-  div.block-container > :first-child { margin-top: 0!important; }
+  /* ── Top spacing 0 ─────────────────────────────────────────────────────── */
+  div.block-container{{padding-top:0!important;margin-top:0!important}}
+  section[data-testid="stSidebar"] .block-container{{padding-top:0!important}}
+  html, body {{ scroll-behavior: auto !important; }}
+  div.block-container > :first-child {{ margin-top: 0!important; }}
+
+  /* ── Compact Header (메뉴 아이콘 유지, 높이만 최소화) ──────────────── */
+  header[data-testid="stHeader"]{{
+    display:flex!important; align-items:center!important; justify-content:flex-end!important;
+    height:{COMPACT_HEADER_H}px!important; min-height:{COMPACT_HEADER_H}px!important;
+    padding:0 10px!important; margin:0!important; background:transparent!important;
+    border:0!important; box-shadow:none!important;
+  }}
+  /* 상단 데코 바 얇게(점프 방지) */
+  div[data-testid="stDecoration"]{{height:2px!important}}
 
   /* 빈 단락 제거 (과거 True/False 잔상 방지) */
-  div.block-container > p:empty{display:none!important;margin:0!important;padding:0!important}
+  div.block-container > p:empty{{display:none!important;margin:0!important;padding:0!important}}
 
-  /* ── 버튼 포커스/액티브 튐 방지 ───────────────────────────────────── */
-  .stButton>button:focus, .stButton>button:focus-visible{
-    outline:none!important; box-shadow:none!important;
-  }
-  .stButton>button{
-    border-width:1px!important; border-color:#e5e7eb!important;
-    transition:none!important; transform:none!important;
-  }
+  /* 버튼 클릭/포커스 흔들림 방지 */
+  .stButton>button:focus, .stButton>button:focus-visible{{outline:none!important;box-shadow:none!important}}
+  .stButton>button{{border-width:1px!important;border-color:#e5e7eb!important;transition:none!important;transform:none!important}}
 
-  /* ── 토스트 기본 스타일(위치는 JS에서 "동기화" 버튼 위로 고정) ─────── */
-  #sync_toast_fixed{
+  /* 토스트(위치는 JS에서 "동기화" 버튼 위로 고정) */
+  #sync_toast_fixed{{
     position:fixed; z-index:9999;
     background:#eef2ff; color:#1e3a8a;
     border:1px solid #c7d2fe; border-radius:12px;
     padding:8px 12px; font-weight:700; line-height:1.2;
     box-shadow:0 6px 18px rgba(0,0,0,.08);
     pointer-events:none; white-space:nowrap;
-  }
+  }}
 
   /* ── 기존 스타일 유지 ─────────────────────────────────────────────── */
-  .stTabs [role='tab']{padding:10px 16px!important;font-size:1.02rem!important}
-  .badge{display:inline-block;padding:.25rem .5rem;border-radius:.5rem;border:1px solid #9ae6b4;background:#e6ffed;color:#0f5132;font-weight:600}
-  section[data-testid="stHelp"],div[data-testid="stHelp"]{display:none!important}
-  .muted{color:#6b7280}
-  .app-title-hero{font-weight:800;font-size:1.6rem;line-height:1.15;margin:.1rem 0 .5rem}
-  @media (min-width:1400px){.app-title-hero{font-size:1.8rem}}
-  div[data-testid="stFormSubmitButton"] button[kind="secondary"]{padding:.35rem .5rem;font-size:.82rem}
-  .scrollbox{max-height:280px;overflow-y:auto;padding:.6rem .75rem;background:#fafafa;border:1px solid #e5e7eb;border-radius:.5rem}
-  .scrollbox .kv{margin-bottom:.6rem}
-  .scrollbox .k{font-weight:700;margin-bottom:.2rem}
-  .scrollbox .v{white-space:pre-wrap;word-break:break-word;line-height:1.42}
-  .jd-tight{line-height:1.42}
-  .jd-tight p,.jd-tight ul,.jd-tight ol,.jd-tight li{margin:0;padding:0}
-  .submit-banner{background:#FEF3C7;border:1px solid #FDE68A;padding:.55rem .8rem;border-radius:.5rem;font-weight:600;line-height:1.35;margin:4px 0 14px;display:block}
-  div[data-testid="stDataFrame"]>div{overflow-x:visible!important}
-  div[data-testid="stDataFrame"] [role="grid"]{overflow-x:auto!important}
-  div[data-testid="stDataFrame"]{padding-bottom:10px}
+  .stTabs [role='tab']{{padding:10px 16px!important;font-size:1.02rem!important}}
+  .badge{{display:inline-block;padding:.25rem .5rem;border-radius:.5rem;border:1px solid #9ae6b4;background:#e6ffed;color:#0f5132;font-weight:600}}
+  section[data-testid="stHelp"],div[data-testid="stHelp"]{{display:none!important}}
+  .muted{{color:#6b7280}}
+  .app-title-hero{{font-weight:800;font-size:1.6rem;line-height:1.15;margin:.1rem 0 .5rem}}
+  @media (min-width:1400px){{.app-title-hero{{font-size:1.8rem}}}}
+  div[data-testid="stFormSubmitButton"] button[kind="secondary"]{{padding:.35rem .5rem;font-size:.82rem}}
+  .scrollbox{{max-height:280px;overflow-y:auto;padding:.6rem .75rem;background:#fafafa;border:1px solid #e5e7eb;border-radius:.5rem}}
+  .scrollbox .kv{{margin-bottom:.6rem}}
+  .scrollbox .k{{font-weight:700;margin-bottom:.2rem}}
+  .scrollbox .v{{white-space:pre-wrap;word-break:break-word;line-height:1.42}}
+  .jd-tight{{line-height:1.42}}
+  .jd-tight p,.jd-tight ul,.jd-tight ol,.jd-tight li{{margin:0;padding:0}}
+  .submit-banner{{background:#FEF3C7;border:1px solid #FDE68A;padding:.55rem .8rem;border-radius:.5rem;font-weight:600;line-height:1.35;margin:4px 0 14px;display:block}}
+  div[data-testid="stDataFrame"]>div{{overflow-x:visible!important}}
+  div[data-testid="stDataFrame"] [role="grid"]{{overflow-x:auto!important}}
+  div[data-testid="stDataFrame"]{{padding-bottom:10px}}
 </style>
 """
 st.markdown(_CSS_GLOBAL, unsafe_allow_html=True)
 
-# ── 스크롤 위치 보존/복원 (강화판: 리런 후 900ms 동안 반복 복원)
+# 스크롤 위치 보존/복원(강화판: 리런 후 900ms 반복 복원)
 import streamlit.components.v1 as components
 components.html("""
 <script>
@@ -491,25 +494,6 @@ components.html("""
 </script>
 """, height=0, width=0)
 
-# ── (옵션) stray True/False 숨김 유틸 — 필요 시 한 번만 호출하세요 ──────────
-def _suppress_magic_booleans():
-    components.html(
-        """
-        <script>
-        (function(){
-          const doc = window.parent.document;
-          const ps = Array.from(doc.querySelectorAll('div.block-container p'));
-          for (const p of ps){
-            const t = (p.textContent||"").trim();
-            if ((t==="True"||t==="False") && !p.closest('[role="grid"]')){
-              p.style.display = "none";
-            }
-          }
-        })();
-        </script>
-        """,
-        height=0, width=0
-    )
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Utils
