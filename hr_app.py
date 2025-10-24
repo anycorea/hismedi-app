@@ -267,28 +267,14 @@ except Exception:
 SYNC_THROTTLE_SEC = 8  # 연타 방지 쿨다운(초)
 
 def _cooldown_remaining() -> float:
-    """남은 쿨다운(초). 없으면 0 이하."""
     last = float(st.session_state.get("_last_sync_ts", 0) or 0)
     return SYNC_THROTTLE_SEC - (time.time() - last)
 
 def force_sync(*, clear_resource: bool = False, clear_all_session: bool = False, hard: bool = False):
-    """
-    데이터/편집 캐시 중심의 '세션 한정' 동기화.
-    - 기본: 전역 st.cache_* 보존 → 타 사용자 영향 없음(429 완화)
-    - hard=True: 꼭 필요할 때만 전역 캐시 비움
-    """
+    """세션 한정 동기화(전역 캐시 보존)."""
     wait = _cooldown_remaining()
     if wait > 0:
-        # 남은 초 표시(올림) + 한 줄 배너
-        try:
-            import math
-            remain = int(math.ceil(wait))
-            st.markdown(
-                f"<div class='inline-sync-info'>⏳ 잠시만요… {remain}초 후 다시 시도해 주세요.</div>",
-                unsafe_allow_html=True
-            )
-        except Exception:
-            pass
+        # 안내는 왼쪽 패널에서 고정 배너로 렌더 → 여기서는 아무 것도 출력하지 않고 종료
         return
 
     # 쿨다운 시작
@@ -300,7 +286,7 @@ def force_sync(*, clear_resource: bool = False, clear_all_session: bool = False,
     for k in ("jobdesc_rev", "comp_rev", "eval_rev"):
         st.session_state[k] = int(st.session_state.get(k, 0)) + 1
 
-    # 모듈 레벨 딕셔너리 캐시만 정리 (전역 st.cache_*는 건드리지 않음)
+    # 모듈 딕셔너리 캐시만 정리
     try:
         if "_WS_CACHE"  in globals() and isinstance(globals()["_WS_CACHE"],  dict): globals()["_WS_CACHE"].clear()
         if "_HDR_CACHE" in globals() and isinstance(globals()["_HDR_CACHE"], dict): globals()["_HDR_CACHE"].clear()
@@ -310,12 +296,11 @@ def force_sync(*, clear_resource: bool = False, clear_all_session: bool = False,
         globals().setdefault("_HDR_CACHE", {})
         globals().setdefault("_VAL_CACHE", {})
 
-    # 세션 상태: 캐시/편집성 키만 선별 삭제(로그인/토큰 보존)
+    # 세션 상태 중 캐시/편집성 키만 선별 삭제(로그인/토큰 보존)
     SAFE_KEEP = {"user","access_token","refresh_token","login_time","login_provider",
                  "authed","auth_expires_at","_state_owner_sabun","_last_sync_ts"}
     PREFIXES  = ("__cache_","_df_","_cache_","gs_","eval2_","bulk_score_","cmpS_","jd2_","adm_","acl_")
     ACL_KEYS  = {"acl_df","acl_header","acl_editor","auth_editor","auth_editor_df","__auth_sab_sig"}
-
     try:
         ss = st.session_state
         if clear_all_session:
@@ -323,14 +308,10 @@ def force_sync(*, clear_resource: bool = False, clear_all_session: bool = False,
         else:
             to_del = []
             for k in list(ss.keys()):
-                if k in SAFE_KEEP: 
-                    continue
-                if k in ACL_KEYS:
-                    to_del.append(k); continue
-                if any(k.startswith(p) for p in PREFIXES):
-                    to_del.append(k); continue
-        for k in to_del:
-            ss.pop(k, None)
+                if k in SAFE_KEEP: continue
+                if k in ACL_KEYS: to_del.append(k); continue
+                if any(k.startswith(p) for p in PREFIXES): to_del.append(k); continue
+        for k in to_del: ss.pop(k, None)
     except Exception:
         pass
 
@@ -342,7 +323,6 @@ def force_sync(*, clear_resource: bool = False, clear_all_session: bool = False,
             try: st.cache_resource.clear()
             except Exception: pass
 
-    # 마지막에 한 번만 리런
     st.rerun()
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -3840,25 +3820,30 @@ def main():
             if st.button("로그아웃", key="btn_logout", use_container_width=True):
                 logout()
         with c2:
-            import math
-            # 안내 배너: 항상 렌더해서 높이 고정(점프 방지)
-            _banner = st.empty()
-            cool = _cooldown_remaining()
-            if cool > 0:
-                _banner.markdown(
-                    f"<div class='inline-sync-info'>⏳ 잠시만요… {int(math.ceil(cool))}초 후 다시 시도해 주세요.</div>",
-                    unsafe_allow_html=True
-                )
-            else:
-                _banner.markdown(
-                    "<div class='inline-sync-info' style='visibility:hidden'>&nbsp;</div>",
-                    unsafe_allow_html=True
-                )
-
-            # 버튼은 항상 활성화, 쿨다운은 force_sync() 내부에서 처리
             if st.button("🔄 동기화", key="sync_left", use_container_width=True,
                          help="캐시를 비우고 구글시트에서 다시 불러옵니다."):
                 force_sync()
+
+        # 버튼 아래: 안내 배너(항상 렌더해 높이 고정 → 정렬 깨짐 방지)
+        import math, streamlit.components.v1 as components
+        banner = st.empty()
+        cool = _cooldown_remaining()
+        if cool > 0:
+            banner.markdown(
+                f"<div class='inline-sync-info'>⏳ 잠시만요… {int(math.ceil(cool))}초 후 다시 시도해 주세요.</div>",
+                unsafe_allow_html=True
+            )
+            # 1초마다 자동 리런(우선 순위: st_autorefresh → JS 폴백)
+            try:
+                from streamlit_autorefresh import st_autorefresh
+                st_autorefresh(interval=1000, limit=int(math.ceil(cool))+1, key="cd_tick")
+            except Exception:
+                components.html("<script>setTimeout(()=>{window.parent.location.reload()},1000);</script>", height=0, width=0)
+        else:
+            banner.markdown(
+                "<div class='inline-sync-info' style='visibility:hidden'>&nbsp;</div>",
+                unsafe_allow_html=True
+            )
 
         # ⬇️ 반환값을 삼켜서 'False' 렌더링 방지
         _ = render_staff_picker_left(emp_df)
