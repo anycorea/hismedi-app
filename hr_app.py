@@ -333,26 +333,25 @@ st.set_page_config(page_title=APP_TITLE, layout="wide")
 
 # st.help 출력 무력화 (최초 1회)
 if not getattr(st, "_help_disabled", False):
-    def _noop_help(*_a, **_kw):
-        return None
+    def _noop_help(*_a, **_kw): return None
     st.help = _noop_help
     st._help_disabled = True
 
-# 전역 CSS
+# 전역 CSS (자리차지 0 토스트 + 버튼 흔들림 방지 + 기본 스타일)
 _CSS_GLOBAL = """
 <style>
   /* ── Top spacing (점프 완화) ───────────────────────────────────────────── */
-  div.block-container{padding-top:.8rem!important}
+  div.block-container{padding-top:.6rem!important}
   header[data-testid="stHeader"]{padding-top:0!important}
   section[data-testid="stSidebar"] .block-container{padding-top:.6rem!important}
 
   /* 빈 단락 제거 (과거 True/False 잔상 방지) */
   div.block-container > p:empty{display:none!important;margin:0!important;padding:0!important}
 
-  /* ── 우상단 고정 토스트 (자리차지 0, 동기화 쿨다운 안내) ──────────────── */
+  /* ── 우상단 고정 토스트 (자리차지 0) ─────────────────────────────────── */
   #sync_toast_fixed{
     position:fixed; z-index:9999;
-    top:84px; right:22px; /* 필요시 미세 조정 */
+    top:84px; right:22px;            /* 필요시 미세 조정 */
     background:#eef2ff; color:#1e3a8a;
     border:1px solid #c7d2fe; border-radius:12px;
     padding:8px 12px; font-weight:700; line-height:1.2;
@@ -3824,8 +3823,12 @@ except Exception:
 # ═════════════════════════════════════════════════════════════════════════════
 def main():
     _suppress_magic_booleans()
+
     emp_df = read_emp_df()
     st.session_state["emp_df"] = emp_df
+
+    # ⬇️ 전역 토스트(쿨다운 중이면 우상단 고정 표시, 아니면 제거)
+    mount_sync_toast()
 
     if not _session_valid():
         st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=True)
@@ -3852,50 +3855,6 @@ def main():
             if st.button("🔄 동기화", key="sync_left", use_container_width=True,
                          help="캐시를 비우고 구글시트에서 다시 불러옵니다."):
                 force_sync()
-
-            # 자리 차지 0: 우상단 고정 토스트(쿨다운 중에만 표시)
-            import math
-            import streamlit.components.v1 as components
-            cool = _cooldown_remaining()
-            if cool > 0:
-                end_ts_ms = int((float(st.session_state.get("_last_sync_ts", 0) or 0) + SYNC_THROTTLE_SEC) * 1000)
-                components.html(f"""
-                <style>
-                  #sync_toast_fixed {{
-                    position: fixed; z-index: 9999;
-                    top: 84px; right: 22px;
-                    background: #eef2ff; color: #1e3a8a;
-                    border: 1px solid #c7d2fe; border-radius: 12px;
-                    padding: 8px 12px; font-weight: 700; line-height: 1.2;
-                    box-shadow: 0 6px 18px rgba(0,0,0,.08);
-                    pointer-events: none; white-space: nowrap;
-                  }}
-                  @media (max-width: 680px) {{
-                    #sync_toast_fixed {{ top: 76px; right: 10px; }}
-                  }}
-                </style>
-                <div id="sync_toast_fixed">⏳ 잠시만요… {int(math.ceil(cool))}초 후 다시 시도해 주세요.</div>
-                <script>
-                (function(){{
-                  const doc = window.parent.document;
-                  const el  = doc.getElementById('sync_toast_fixed');
-                  if(!el) return;
-                  const end = {end_ts_ms};
-                  function tick(){{
-                    const now = Date.now();
-                    let r = Math.ceil((end - now)/1000);
-                    if (r <= 0){{
-                      el.style.transition = 'opacity .2s ease'; el.style.opacity = '0';
-                      setTimeout(()=>{{ if(el && el.parentNode) el.parentNode.remove(); }}, 240);
-                      return;
-                    }}
-                    el.textContent = "⏳ 잠시만요… " + r + "초 후 다시 시도해 주세요.";
-                    requestAnimationFrame(tick);
-                  }}
-                  tick();
-                }})();
-                </script>
-                """, height=0, width=0)
 
         # ⬇️ 반환값을 삼켜서 'False' 렌더링 방지
         _ = render_staff_picker_left(emp_df)
