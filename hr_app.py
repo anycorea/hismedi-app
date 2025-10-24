@@ -610,6 +610,10 @@ _WS_CACHE: dict[str, Tuple[float, Any]] = {}
 _HDR_CACHE: dict[str, Tuple[float, list[str], dict]] = {}
 _VAL_CACHE: dict[str, Tuple[float, list]] = {}
 
+# 429 대비 '마지막 정상값' 폴백 저장소 (권장)
+_VAL_LASTGOOD: dict[str, list] = {}
+_HDR_LASTGOOD: dict[str, list[str]] = {}
+
 _WS_TTL, _HDR_TTL = 120, 120
 _VAL_TTL = 200  # 조회 체감 개선(운영 중 수동 동기화 버튼과 병행)
 
