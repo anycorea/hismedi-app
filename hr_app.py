@@ -337,87 +337,91 @@ def force_sync(*, clear_resource: bool = False, clear_all_session: bool = False)
 APP_TITLE = st.secrets.get("app", {}).get("TITLE", "HISMEDI - 인사/HR")
 st.set_page_config(page_title=APP_TITLE, layout="wide")
 
-# Disable st.help "No docs available"
+# Disable st.help (최초 1회만 패치)
 if not getattr(st, "_help_disabled", False):
-    def _noop_help(*args, **kwargs): return None
+    def _noop_help(*_a, **_kw): return None
     st.help = _noop_help
     st._help_disabled = True
 
-st.markdown(
-    """
-    <style>
-      .block-container{ padding-top: 2.5rem !important; }
-      .stTabs [role='tab']{ padding:10px 16px !important; font-size:1.02rem !important; }
-      .badge{display:inline-block;padding:.25rem .5rem;border-radius:.5rem;border:1px solid #9ae6b4;background:#e6ffed;color:#0f5132;font-weight:600;}
-      section[data-testid="stHelp"], div[data-testid="stHelp"]{ display:none !important; }
-      .muted{color:#6b7280;}
-      .app-title-hero{ font-weight:800; font-size:1.6rem; line-height:1.15; margin:.2rem 0 .6rem; }
-      @media (min-width:1400px){ .app-title-hero{ font-size:1.8rem; } }
-      div[data-testid="stFormSubmitButton"] button[kind="secondary"]{ padding: 0.35rem 0.5rem; font-size: .82rem; }
+# CSS: 필요 스타일만 정리(가독 유지, 불필요 주석 제거)
+_CSS_GLOBAL = """
+<style>
+  .block-container{padding-top:2.5rem!important}
+  .stTabs [role='tab']{padding:10px 16px!important;font-size:1.02rem!important}
+  .badge{display:inline-block;padding:.25rem .5rem;border-radius:.5rem;border:1px solid #9ae6b4;background:#e6ffed;color:#0f5132;font-weight:600}
+  section[data-testid="stHelp"],div[data-testid="stHelp"]{display:none!important}
+  .muted{color:#6b7280}
+  .app-title-hero{font-weight:800;font-size:1.6rem;line-height:1.15;margin:.2rem 0 .6rem}
+  @media (min-width:1400px){.app-title-hero{font-size:1.8rem}}
+  div[data-testid="stFormSubmitButton"] button[kind="secondary"]{padding:.35rem .5rem;font-size:.82rem}
 
-      /* JD Summary scroll box (Competency tab) */
-      .scrollbox{ max-height: 280px; overflow-y: auto; padding: .6rem .75rem; background: #fafafa;
-                  border: 1px solid #e5e7eb; border-radius: .5rem; }
-      .scrollbox .kv{ margin-bottom: .6rem; }
-      .scrollbox .k{ font-weight: 700; margin-bottom: .2rem; }
-      .scrollbox .v{ white-space: pre-wrap; word-break: break-word; line-height: 1.42; }
+  /* JD Summary */
+  .scrollbox{max-height:280px;overflow-y:auto;padding:.6rem .75rem;background:#fafafa;border:1px solid #e5e7eb;border-radius:.5rem}
+  .scrollbox .kv{margin-bottom:.6rem}
+  .scrollbox .k{font-weight:700;margin-bottom:.2rem}
+  .scrollbox .v{white-space:pre-wrap;word-break:break-word;line-height:1.42}
+  .jd-tight{line-height:1.42}
+  .jd-tight p,.jd-tight ul,.jd-tight ol,.jd-tight li{margin:0;padding:0}
 
-/* JD summary tight mode: keep text exactly, but tighter spacing */
-.jd-tight { line-height: 1.42; }
-.jd-tight p, .jd-tight ul, .jd-tight ol, .jd-tight li { margin: 0; padding: 0; }
+  .submit-banner{background:#FEF3C7;border:1px solid #FDE68A;padding:.55rem .8rem;border-radius:.5rem;font-weight:600;line-height:1.35;margin:4px 0 14px;display:block}
 
-      .submit-banner{
-        background:#FEF3C7; /* amber-100 */
-        border:1px solid #FDE68A; /* amber-200 */
-        padding:.55rem .8rem;
-        border-radius:.5rem;
-        font-weight:600;
-        line-height:1.35;
-        margin: 4px 0 14px 0; /* comfortable spacing below */
-        display:block;
-      }
-
-      /* ===== 좌우 스크롤 깔끔 모드 (표 구조 변경 없음) ===== */
-      /* 바깥 래퍼에서는 가로 스크롤 숨김 */
-      div[data-testid="stDataFrame"] > div { overflow-x: visible !important; }
-      /* 표 그리드(본체)에서만 가로 스크롤 */
-      div[data-testid="stDataFrame"] [role="grid"] { overflow-x: auto !important; }
-      /* 스크롤바 잡기 편하도록 표 아래쪽 여유 */
-      div[data-testid="stDataFrame"] { padding-bottom: 10px; }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+  /* DataFrame 가로 스크롤: 표 본체에서만 노출 */
+  div[data-testid="stDataFrame"]>div{overflow-x:visible!important}
+  div[data-testid="stDataFrame"] [role="grid"]{overflow-x:auto!important}
+  div[data-testid="stDataFrame"]{padding-bottom:10px}
+</style>
+"""
+st.markdown(_CSS_GLOBAL, unsafe_allow_html=True)
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Utils
+# ═════════════════════════════════════════════════════════════════════════════
+# html.escape가 이전 블록에서 이미 있다면 재사용, 없으면 안전하게 임포트
+try:
+    _html_escape  # noqa: F821
+except NameError:  # pragma: no cover
+    from html import escape as _html_escape  # lightweight
+
+_sha256 = hashlib.sha256  # attribute lookup 미세 최적화
 
 def current_year() -> int:
-    """Return KST-based current year if tz_kst() is available, otherwise system year."""
+    """KST 기준 현재 연도 반환(실패 시 시스템 연도)."""
     try:
-        return datetime.now(tz=tz_kst()).year  # tz_kst() must return a tzinfo
+        return datetime.now(tz=tz_kst()).year
     except Exception:
         return datetime.now().year
-def kst_now_str(): return datetime.now(tz=tz_kst()).strftime("%Y-%m-%d %H:%M:%S (%Z)")
+
+def kst_now_str() -> str:
+    """KST 현재 시각 문자열."""
+    try:
+        return datetime.now(tz=tz_kst()).strftime("%Y-%m-%d %H:%M:%S (%Z)")
+    except Exception:
+        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 def _jd_plain_html(text: str) -> str:
-    import html
-    if text is None:
-        text = ""
-    s = str(text).replace("\r\n","\n").replace("\r","\n")
-    # Escape HTML and convert newlines to <br> so Markdown won't turn '-' into <li>
-    return '<div class="jd-tight">' + html.escape(s).replace("\n", "<br>") + "</div>"
+    """JD 요약 HTML(개행 유지, 안전 이스케이프)."""
+    s = "" if text is None else str(text)
+    s = s.replace("\r\n", "\n").replace("\r", "\n")
+    return '<div class="jd-tight">' + _html_escape(s).replace("\n", "<br>") + "</div>"
 
-def _sha256_hex(s: str) -> str: return hashlib.sha256(str(s).encode()).hexdigest()
-def _to_bool(x) -> bool: return str(x).strip().lower() in ("true","1","y","yes","t")
+def _sha256_hex(s: str) -> str:
+    return _sha256(str(s).encode()).hexdigest()
+
+def _to_bool(x) -> bool:
+    return str(x).strip().lower() in ("true", "1", "y", "yes", "t")
+
 def _normalize_private_key(raw: str) -> str:
-    if not raw: return raw
-    return raw.replace("\\n","\n") if "\\n" in raw and "BEGIN PRIVATE KEY" in raw else raw
+    """Multiline private key 문자열에서 \\n → 개행 복원(조건부)."""
+    if not raw:
+        return raw
+    return raw.replace("\\n", "\n") if "\\n" in raw and "BEGIN PRIVATE KEY" in raw else raw
+
 def _pin_hash(pin: str, sabun: str) -> str:
-    return hashlib.sha256(f"{str(sabun).strip()}:{str(pin).strip()}".encode()).hexdigest()
+    """사번+PIN 기반 고정 솔팅 SHA-256."""
+    return _sha256(f"{str(sabun).strip()}:{str(pin).strip()}".encode()).hexdigest()
 
-
-def show_submit_banner(text: str):
+def show_submit_banner(text: str) -> None:
+    """상단 제출 안내 배너."""
     try:
         st.markdown(f"<div class='submit-banner'>{text}</div>", unsafe_allow_html=True)
     except Exception:
