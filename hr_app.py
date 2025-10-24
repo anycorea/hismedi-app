@@ -3650,32 +3650,25 @@ except Exception:
 # Main App
 # ═════════════════════════════════════════════════════════════════════════════
 def main():
-    # 직원 DF 로드(캐시 활용). 세션에는 참조만 저장하여 불필요한 메모리 복사 방지.
     emp_df = read_emp_df()
-    st.session_state["emp_df"] = emp_df  # .copy() 제거 → 속도/메모리 이점
+    st.session_state["emp_df"] = emp_df
 
-    # 로그인 유도 화면
     if not _session_valid():
         st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=True)
         show_login(emp_df)
         return
 
-    # 세션 소유자 확인/정리
     require_login(emp_df)
 
-    # 레이아웃
     left, right = st.columns([1.35, 3.65], gap="large")
 
-    # ────────────────────────────────────────────────────────────────────────
-    # Left Pane: 사용자 정보 / 전역 컨트롤 / 좌측 메뉴
-    # ────────────────────────────────────────────────────────────────────────
+    # Left Pane
     with left:
         u = st.session_state.get("user", {}) or {}
         st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=True)
         st.caption(f"DB연결 {kst_now_str()}")
         st.markdown(f"- 사용자: **{u.get('이름','')} ({u.get('사번','')})**")
 
-        # 상단 컨트롤: [로그아웃] | [동기화]
         c1, c2 = st.columns([1, 1], gap="small")
         with c1:
             if st.button("로그아웃", key="btn_logout", use_container_width=True):
@@ -3685,23 +3678,21 @@ def main():
                          help="캐시를 비우고 구글시트에서 다시 불러옵니다."):
                 force_sync()
 
-        # 좌측 메뉴(사번/이름 검색 + 전역 대상자 선택)
-        render_staff_picker_left(emp_df)
+        # ⬇️ 반환값을 삼켜서 'False' 렌더링 방지
+        _ = render_staff_picker_left(emp_df)
 
-    # ────────────────────────────────────────────────────────────────────────
-    # Right Pane: 탭
-    # ────────────────────────────────────────────────────────────────────────
+    # Right Pane
     with right:
         tabs = st.tabs(["인사평가","직무기술서","직무능력평가","관리자","도움말"])
 
         with tabs[0]:
-            tab_eval(emp_df)
+            _ = tab_eval(emp_df)
 
         with tabs[1]:
-            tab_job_desc(emp_df)
+            _ = tab_job_desc(emp_df)
 
         with tabs[2]:
-            tab_competency(emp_df)
+            _ = tab_competency(emp_df)
 
         with tabs[3]:
             me = str(st.session_state.get("user", {}).get("사번", ""))
@@ -3709,14 +3700,13 @@ def main():
                 st.warning("관리자 전용 메뉴입니다.", icon="🔒")
             else:
                 a1, a2, a3, a4 = st.tabs(["직원","PIN 관리","평가 항목 관리","권한 관리"])
-                with a1: tab_staff_admin(emp_df)
-                with a2: tab_admin_pin(emp_df)
-                with a3: tab_admin_eval_items()
-                with a4: tab_admin_acl(emp_df)
+                with a1: _ = tab_staff_admin(emp_df)
+                with a2: _ = tab_admin_pin(emp_df)
+                with a3: _ = tab_admin_eval_items()
+                with a4: _ = tab_admin_acl(emp_df)
 
         with tabs[4]:
-            tab_help()
-
+            _ = tab_help()
 
 if __name__ == "__main__":
     main()
