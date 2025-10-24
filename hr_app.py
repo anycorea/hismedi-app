@@ -808,9 +808,9 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
 
     # ▼ 필터 초기화: 플래그만 세우고 즉시 rerun (다음 런 시작 시 초기화됨)
     clicked_reset = st.button("필터 초기화", use_container_width=True)
-        if _debounce_passed("__left_reset", 1.0, clicked_reset):
-            st.session_state["_left_reset"] = True
-            st.rerun()
+if _debounce_passed("__left_reset", 1.0, clicked_reset):
+    st.session_state["_left_reset"] = True
+    st.rerun()
 
     if picked and picked != "(선택)":
         sab = picked.split(" - ", 1)[0].strip()
@@ -2885,8 +2885,8 @@ def main():
                 logout()
         with c2:
             clicked_sync = st.button("🔄 동기화", key="sync_left", use_container_width=True, help="캐시를 비우고 구글시트에서 다시 불러옵니다.")
-                if _debounce_passed("__sync_left", 1.0, clicked_sync):
-                    force_sync(min_interval=15)
+if _debounce_passed("__sync_left", 1.0, clicked_sync):
+    force_sync(min_interval=15)
 
         # 좌측 메뉴
         render_staff_picker_left(emp_df)
