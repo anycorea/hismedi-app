@@ -369,6 +369,35 @@ _CSS_GLOBAL = """
 """
 st.markdown(_CSS_GLOBAL, unsafe_allow_html=True)
 
+# ── UI glitch guard: stray True/False suppressor ───────────────────────────
+import streamlit.components.v1 as components  # 이미 있으면 생략
+
+def _suppress_magic_booleans():
+    components.html(
+        """
+        <script>
+        (function(){
+          const doc = window.parent.document;
+          function sweep(){
+            const ps = doc.querySelectorAll('div.block-container p');
+            for (const p of ps){
+              const t = (p.textContent || "").trim();
+              if (t === "True" || t === "False") {
+                const grid = p.closest('[role="grid"]'); if (grid) continue;
+                p.style.display = "none";
+              }
+            }
+          }
+          sweep();
+          const mo = new MutationObserver(sweep);
+          mo.observe(doc.body, {childList:true, subtree:true});
+          setTimeout(()=>{ try{ mo.disconnect(); }catch(e){} }, 6000);
+        })();
+        </script>
+        """,
+        height=0, width=0
+    )
+
 # ═════════════════════════════════════════════════════════════════════════════
 # Utils
 # ═════════════════════════════════════════════════════════════════════════════
