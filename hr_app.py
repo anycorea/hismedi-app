@@ -174,49 +174,58 @@ except Exception:
 
 
 
-def force_sync():
-    """데이터/편집 캐시만 비우고 즉시 리런 (로그인 세션/인증 키는 유지)."""
-    # Streamlit 캐시
-    try:
-        st.cache_data.clear()
-    except Exception:
-        pass
-    try:
-        st.cache_resource.clear()
-    except Exception:
-        pass
 
-    # 모듈 레벨 캐시
+def force_sync(min_interval: int = 15):
+    """Safely refresh data caches. Throttle & lock; keep session/auth stable.
+    - Throttle: ignore if called within min_interval seconds of last run
+    - Lock: prevent re-entrancy while running
+    - Clear only data cache (keep resource cache warm)
+    - Preserve key session values
+    """
+    now = time.time()
+    # Re-entrancy guard
+    if st.session_state.get("_sync_lock", False):
+        return
+    # Throttle
+    last_ts = float(st.session_state.get("_last_sync_ts", 0.0) or 0.0)
+    if now - last_ts < float(min_interval):
+        return
+
+    st.session_state["_sync_lock"] = True
     try:
-        global _WS_CACHE, _HDR_CACHE, _VAL_CACHE
-        _WS_CACHE.clear(); _HDR_CACHE.clear(); _VAL_CACHE.clear()
-    except Exception:
+        # Clear only data cache (avoid cold starts on resources/auth)
+        try: st.cache_data.clear()
+        except Exception: pass
+
+        # Clear module-level lightweight caches
         try:
-            _WS_CACHE = {}; _HDR_CACHE = {}; _VAL_CACHE = {}
+            global _WS_CACHE, _HDR_CACHE, _VAL_CACHE
         except Exception:
             pass
+        for _c in ('_WS_CACHE','_HDR_CACHE','_VAL_CACHE'):
+            try: globals()[_c].clear()
+            except Exception: pass
 
-    # 세션 상태: 편집/데이터 캐시만 선별 제거 (로그인/인증 관련 키는 보존)
-    SAFE_KEEP = {"user", "access_token", "refresh_token", "login_time", "login_provider"}
-    ACL_KEYS  = {"acl_df", "acl_header", "acl_editor", "auth_editor", "auth_editor_df", "__auth_sab_sig"}
-    PREFIXES  = ("__cache_", "_df_", "_cache_", "gs_")  # 데이터 캐시성 키만
-    
-    try:
-        to_del = []
-        for k in list(st.session_state.keys()):
-            if k in SAFE_KEEP:
-                continue
-            if k in ACL_KEYS:
-                to_del.append(k); continue
-            if any(k.startswith(p) for p in PREFIXES):
-                to_del.append(k); continue
-        for k in to_del:
-            del st.session_state[k]
-    except Exception:
-        pass
+        # Session pruning (keep user/auth & selections)
+        SAFE_KEEP = {"user","authed","auth_expires_at","_state_owner_sabun",
+                     "glob_target_sabun","glob_target_name",
+                     "left_pick","pick_q",
+                     "_last_sync_ts","_sync_lock"}
+        PREFIXES = ("eval", "jd", "cmpS", "cmpD")
+        ACL_KEYS  = {"acl_df", "acl_header", "acl_editor", "auth_editor"}
+        try:
+            to_del = []
+            for k in list(st.session_state.keys()):
+                if k in SAFE_KEEP: continue
+                if k in ACL_KEYS:  to_del.append(k); continue
+                if any(k.startswith(p) for p in PREFIXES): to_del.append(k); continue
+            for k in to_del: del st.session_state[k]
+        except Exception: pass
 
-    st.rerun()
-
+        st.session_state["_last_sync_ts"] = now
+        st.rerun()
+    finally:
+        st.session_state["_sync_lock"] = False
 # ═════════════════════════════════════════════════════════════════════════════
 # App Config / Style
 # ═════════════════════════════════════════════════════════════════════════════
@@ -373,30 +382,37 @@ def verify_pin(user_sabun: str, pin: str) -> bool:
 API_BACKOFF_SEC = [0.0, 0.8, 1.6, 3.2, 6.4, 9.6]
 
 def _retry(fn, *args, **kwargs):
-    last=None
+    """Retry helper: handle 429/503 and 403(rate/quota) with jittered backoff."""
+    last = None
     for b in API_BACKOFF_SEC:
         try:
             return fn(*args, **kwargs)
         except APIError as e:
-            status = None; ra = None
+            status = None; retry_after = None; msg = ""
             try:
                 status = getattr(e, "response", None).status_code
-                ra = getattr(e, "response", None).headers.get("Retry-After")
+                headers = getattr(e, "response", None).headers or {}
+                retry_after = headers.get("Retry-After")
             except Exception:
                 pass
-            if status in (400, 401, 403, 404):
+            try:
+                msg = str(e).lower()
+            except Exception:
+                msg = ""
+            retryable = (status in (429, 503)) or (status == 403 and ("rate" in msg or "quota" in msg or "too many" in msg))
+            if not retryable and status in (400, 401, 404):
+                # Non-retryable client errors
                 raise
-            wait = float(ra) if ra else (b + random.uniform(0, 0.5))
-            time.sleep(max(0.2, wait))
+            wait = float(retry_after) if retry_after else (b + random.uniform(0, 0.6))
+            time.sleep(max(0.25, wait))
             last = e
         except Exception as e:
             last = e
-            time.sleep(b + random.uniform(0, 0.5))
+            time.sleep(b + random.uniform(0, 0.6))
     if last:
         raise last
     return fn(*args, **kwargs)
 
-@st.cache_resource(show_spinner=False)
 def get_client():
     svc = dict(st.secrets["gcp_service_account"])
     svc["private_key"] = _normalize_private_key(svc.get("private_key",""))
@@ -690,6 +706,20 @@ def get_allowed_sabuns(emp_df:pd.DataFrame, sabun:str, include_self:bool=True)->
     return allowed
 
 # ═════════════════════════════════════════════════════════════════════════════
+
+# ─ Debounce (no-UI) ───────────────────────────────────────────────────────────
+def _debounce_passed(name: str, wait: float, clicked: bool) -> bool:
+    """Allow action once per 'wait' seconds per name; uses session_state only."""
+    if not clicked:
+        return False
+    now = time.time()
+    key = f"_debounce_{name}"
+    last = float(st.session_state.get(key, 0.0) or 0.0)
+    if now - last < float(wait):
+        return False
+    st.session_state[key] = now
+    return True
+
 # Global Target Sync
 # ═════════════════════════════════════════════════════════════════════════════
 def set_global_target(sabun:str, name:str=""):
@@ -777,9 +807,10 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
     picked = st.selectbox("**대상 선택**", ["(선택)"] + opts, index=idx0, key="left_pick")
 
     # ▼ 필터 초기화: 플래그만 세우고 즉시 rerun (다음 런 시작 시 초기화됨)
-    if st.button("필터 초기화", use_container_width=True):
-        st.session_state["_left_reset"] = True
-        st.rerun()
+    clicked_reset = st.button("필터 초기화", use_container_width=True)
+        if _debounce_passed("__left_reset", 1.0, clicked_reset):
+            st.session_state["_left_reset"] = True
+            st.rerun()
 
     if picked and picked != "(선택)":
         sab = picked.split(" - ", 1)[0].strip()
@@ -2853,9 +2884,9 @@ def main():
             if st.button("로그아웃", key="btn_logout", use_container_width=True):
                 logout()
         with c2:
-            if st.button("🔄 동기화", key="sync_left", use_container_width=True,
-                         help="캐시를 비우고 구글시트에서 다시 불러옵니다."):
-                force_sync()
+            clicked_sync = st.button("🔄 동기화", key="sync_left", use_container_width=True, help="캐시를 비우고 구글시트에서 다시 불러옵니다.")
+                if _debounce_passed("__sync_left", 1.0, clicked_sync):
+                    force_sync(min_interval=15)
 
         # 좌측 메뉴
         render_staff_picker_left(emp_df)
