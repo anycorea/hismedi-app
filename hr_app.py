@@ -732,52 +732,59 @@ def _debounced(label: str, key: str, wait: float = 1.0, **kwargs):
 
 # ─ Toast (dedup, auto-hide) ───────────────────────────────────────────────────
 import streamlit.components.v1 as _components_toast
-def _toast_once(msg: str, seconds: float = 2.5, ident: str = "__app_toast__"):
-    """Small ephemeral toast without icon. Replaces existing toast with same ident."""
-    try:
-        # Streamlit >= 1.25: st.toast available, but cannot dedup => fall back to JS for dedup.
-        raise RuntimeError("use js")
-    except Exception:
-        _components_toast.html(f"""
-        <div id='{ident}' style='position:fixed; bottom:24px; right:24px; z-index:999999;
-            background:rgba(0,0,0,.82); color:#fff; padding:9px 12px; border-radius:8px;
-            font-size:13px; box-shadow:0 6px 22px rgba(0,0,0,.25);'>
-            {msg}
-        </div>
-        <script>
-          (function(){
-            var d = window.parent.document;
-            var prev = d.getElementById('{ident}');
-            if (prev) prev.remove();
-            var el = d.getElementById('{ident}');
-            if (!el) {
-              el = d.createElement('div');
-              el.id = '{ident}';
-              el.style.position='fixed';
-              el.style.bottom='24px';
-              el.style.right='24px';
-              el.style.zIndex='999999';
-              el.style.background='rgba(0,0,0,.82)';
-              el.style.color='#fff';
-              el.style.padding='9px 12px';
-              el.style.borderRadius='8px';
-              el.style.fontSize='13px';
-              el.style.boxShadow='0 6px 22px rgba(0,0,0,.25)';
-              el.textContent = {msg!r};
-              d.body.appendChild(el);
-            } else {
-              el.textContent = {msg!r};
-            }
-            setTimeout(function(){
-              var cur = d.getElementById('{ident}');
-              if (cur) cur.remove();
-            }, %d);
-          })();
-        </script>
-        """ % int(seconds*1000), height=0, width=0)
 
-# Global Target Sync
-# ═════════════════════════════════════════════════════════════════════════════
+# ─ Toast (dedup, auto-hide) ───────────────────────────────────────────────────
+import streamlit.components.v1 as _components_toast
+def _toast_once(msg: str, seconds: float = 2.5, ident: str = "__app_toast__"):
+    """Small ephemeral toast without icon. Replaces existing toast with same ident.
+    Uses JS only (no Python f-strings inside the HTML) to avoid brace parsing issues.
+    """
+    try:
+        # Prefer Streamlit's toast if single-instance; but it can stack duplicates,
+        # so we use JS to deduplicate reliably across reruns.
+        raise RuntimeError("use_js_toast")
+    except Exception:
+        ms = int(seconds * 1000)
+        html = """
+<div id='{ident}' style='position:fixed; bottom:24px; right:24px; z-index:999999;
+    background:rgba(0,0,0,.82); color:#fff; padding:9px 12px; border-radius:8px;
+    font-size:13px; box-shadow:0 6px 22px rgba(0,0,0,.25);'>
+    {msg}
+</div>
+<script>
+(function(){{
+  var d = window.parent.document;
+  var prev = d.getElementById('{ident}');
+  if (prev) prev.remove();
+  var el = d.getElementById('{ident}');
+  if (!el) {{
+    el = d.createElement('div');
+    el.id = '{ident}';
+    el.style.position='fixed';
+    el.style.bottom='24px';
+    el.style.right='24px';
+    el.style.zIndex='999999';
+    el.style.background='rgba(0,0,0,.82)';
+    el.style.color='#fff';
+    el.style.padding='9px 12px';
+    el.style.borderRadius='8px';
+    el.style.fontSize='13px';
+    el.style.boxShadow='0 6px 22px rgba(0,0,0,.25)';
+    el.textContent = {msg_repr};
+    d.body.appendChild(el);
+  }} else {{
+    el.textContent = {msg_repr};
+  }}
+  setTimeout(function(){{
+    var cur = d.getElementById('{ident}');
+    if (cur) cur.remove();
+  }}, {ms});
+}})();
+</script>
+""".format(ident=ident, msg=msg, msg_repr=repr(msg), ms=ms)
+        _components_toast.html(html, height=0, width=0)
+
+# Global Target Sync# ═════════════════════════════════════════════════════════════════════════════
 def set_global_target(sabun:str, name:str=""):
     st.session_state["glob_target_sabun"]=str(sabun).strip()
     st.session_state["glob_target_name"]=str(name).strip()
