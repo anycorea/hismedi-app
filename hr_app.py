@@ -341,15 +341,37 @@ if not getattr(st, "_help_disabled", False):
 # 전역 CSS
 _CSS_GLOBAL = """
 <style>
-  /* 상단 여백 살짝 복원: 점프 완화 */
+  /* ── Top spacing (점프 완화) ───────────────────────────────────────────── */
   div.block-container{padding-top:.8rem!important}
   header[data-testid="stHeader"]{padding-top:0!important}
   section[data-testid="stSidebar"] .block-container{padding-top:.6rem!important}
-
   /* 빈 단락 제거 (과거 True/False 잔상 방지) */
   div.block-container > p:empty{display:none!important;margin:0!important;padding:0!important}
 
-  /* 한 줄 동기화 안내 배너 */
+  /* ── 자리차지 0 토스트 (동기화 쿨다운 안내) ───────────────────────────── */
+  /* c2 컬럼 안에서만 떠 있게: 레이아웃 영향 없음 */
+  #sync_toast_wrap{ position:relative; height:0; margin:0; padding:0; }
+  #sync_toast{
+    position:absolute; right:0; top:-44px; z-index:10;
+    background:#eef2ff; color:#1e3a8a;
+    border:1px solid #c7d2fe; border-radius:12px;
+    padding:8px 12px; font-weight:700; line-height:1.2;
+    box-shadow:0 6px 18px rgba(0,0,0,.08);
+    pointer-events:none; white-space:nowrap;
+  }
+  @media (max-width:680px){
+    #sync_toast{ top:-50px; right:8px; }
+  }
+
+  /* ── 버튼 포커스/액티브 튐 방지 ──────────────────────────────────────── */
+  .stButton>button:focus,
+  .stButton>button:focus-visible{ outline:none!important; box-shadow:none!important; }
+  .stButton>button[kind="secondary"]{ border-color:#e5e7eb!important; } /* 포커스 시 테두리색 고정 */
+  .stButton>button{ border-width:1px!important; transform:none!important; } /* 눌림 시 높이 변화 방지 */
+  /* 필요 시 기본 전환 제거 */
+  .stButton>button{ transition:none!important; }
+
+  /* ── (구) 한 줄 배너(현재 미사용 가능, 남겨둬도 무방) ───────────────── */
   .inline-sync-info{
     display:block; width:100%;
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
@@ -358,7 +380,7 @@ _CSS_GLOBAL = """
     font-weight:600; line-height:1.35;
   }
 
-  /* 이하 기존 스타일 유지 ... */
+  /* ── 기존 스타일 유지 ───────────────────────────────────────────────── */
   .stTabs [role='tab']{padding:10px 16px!important;font-size:1.02rem!important}
   .badge{display:inline-block;padding:.25rem .5rem;border-radius:.5rem;border:1px solid #9ae6b4;background:#e6ffed;color:#0f5132;font-weight:600}
   section[data-testid="stHelp"],div[data-testid="stHelp"]{display:none!important}
@@ -3820,49 +3842,46 @@ def main():
             if st.button("로그아웃", key="btn_logout", use_container_width=True):
                 logout()
         with c2:
-            # 동기화 버튼: 항상 활성 (쿨다운은 force_sync() 내부에서 막음)
+            # 동기화 버튼: 항상 활성(쿨다운은 force_sync() 내부에서 차단)
             if st.button("🔄 동기화", key="sync_left", use_container_width=True,
                          help="캐시를 비우고 구글시트에서 다시 불러옵니다."):
                 force_sync()
 
-            # 자리차지 없는 floating toast (쿨다운 중일 때만 표시)
+            # ▷ 버튼 '영역 내부'에 0높이 앵커를 만들고, 그 위로 떠 있는 토스트를 겹쳐서 표시합니다.
             import math, streamlit.components.v1 as components
             cool = _cooldown_remaining()
             if cool > 0:
                 end_ts_ms = int((float(st.session_state.get("_last_sync_ts", 0) or 0) + SYNC_THROTTLE_SEC) * 1000)
                 components.html(f"""
                 <style>
+                  /* 버튼 컬럼 안에서만 떠 있게: 레이아웃 차지 0, 점프 없음 */
+                  #sync_toast_wrap {{ position: relative; height: 0; margin: 0; padding: 0; }}
                   #sync_toast {{
-                    position: fixed; z-index: 9999;
-                    top: 84px; right: 22px;  /* 필요시 위치 미세조정 */
+                    position: absolute; right: 0; top: -44px;
                     background: #eef2ff; color: #1e3a8a;
                     border: 1px solid #c7d2fe; border-radius: 12px;
                     padding: 8px 12px; font-weight: 700; line-height: 1.2;
                     box-shadow: 0 6px 18px rgba(0,0,0,.08);
-                    pointer-events: none;  /* 클릭 막지 않도록 */
-                    white-space: nowrap;
+                    pointer-events: none; white-space: nowrap; z-index: 10;
                   }}
                 </style>
+                <div id="sync_toast_wrap"><div id="sync_toast">⏳ 잠시만요… {int(math.ceil(cool))}초 후 다시 시도해 주세요.</div></div>
                 <script>
                 (function(){{
                   const doc = window.parent.document;
-                  let el = doc.getElementById('sync_toast');
-                  if(!el){{
-                    el = doc.createElement('div');
-                    el.id = 'sync_toast';
-                    doc.body.appendChild(el);
-                  }}
+                  const el  = doc.getElementById('sync_toast');
+                  if(!el) return;
                   const end = {end_ts_ms};
                   function tick(){{
                     const now = Date.now();
-                    let remain = Math.ceil((end - now)/1000);
-                    if (remain <= 0){{
-                      el.style.transition = 'opacity .25s ease';
+                    let r = Math.ceil((end - now)/1000);
+                    if (r <= 0){{
+                      el.style.transition = 'opacity .2s ease';
                       el.style.opacity = '0';
-                      setTimeout(()=>{{ if(el && el.parentNode) el.parentNode.removeChild(el); }}, 280);
+                      setTimeout(()=>{{ if(el && el.parentNode) el.parentNode.remove(); }}, 240);
                       return;
                     }}
-                    el.textContent = "⏳ 잠시만요… " + remain + "초 후 다시 시도해 주세요.";
+                    el.textContent = "⏳ 잠시만요… " + r + "초 후 다시 시도해 주세요.";
                     requestAnimationFrame(tick);
                   }}
                   tick();
