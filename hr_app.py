@@ -58,145 +58,212 @@ import streamlit as st
 # ═════════════════════════════════════════════════════════════════════════════
 # Helpers
 # ═════════════════════════════════════════════════════════════════════════════
-# --- helper: detect Google Sheets quota(429) error -------------------------------
+
+# --- Google Sheets 429(quota) 감지 ------------------------------------------------
 def _is_quota_429(err) -> bool:
     try:
         from gspread.exceptions import APIError as _APIError
         if isinstance(err, _APIError):
             resp = getattr(err, "response", None)
-            code = getattr(resp, "status_code", None)
-            return code == 429
+            return getattr(resp, "status_code", None) == 429
     except Exception:
         pass
     return False
-# --- end helper -------------------------------
+# --- end ---------------------------------------------------------------------
 
 AUTO_FIX_HEADERS = False
 
-# ===== Cached summary helpers (performance) =====
+# ===== Cached summary helpers (performance) ==================================
+
 @st.cache_data(ttl=300, show_spinner=False)
 def get_eval_summary_map_cached(_year: int, _rev: int = 0) -> dict:
-    """Return {(사번, 평가유형)->(총점, 제출시각)} for the year."""
+    """
+    {(사번, 평가유형) -> (총점, 제출시각)} for given year.
+    Fast path: 필수 컬럼 확인 후, 헤더 인덱스/연도 문자열/열 인덱스를 캐싱하여
+    루프 내부 분기와 예외를 최소화.
+    """
     items = read_eval_items_df(True)
     item_ids = [str(x) for x in items["항목ID"].tolist()] if not items.empty else []
     try:
         ws = _ensure_eval_resp_sheet(int(_year), item_ids)
         header = _retry(ws.row_values, 1) or []
-        hmap = {n:i+1 for i,n in enumerate(header)}
+        hmap = {n: i + 1 for i, n in enumerate(header)}
         values = _ws_values(ws)
     except Exception:
         return {}
-    cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cTot=hmap.get("총점"); cSub=hmap.get("제출시각")
-    out = {}
-    for i in range(2, len(values)+1):
-        r = values[i-1]
-        try:
-            if str(r[cY-1]).strip() != str(_year): continue
-            k = (str(r[cTS-1]).strip(), str(r[cT-1]).strip())
-            tot = r[cTot-1] if (cTot and cTot-1 < len(r)) else ""
-            sub = r[cSub-1] if (cSub and cSub-1 < len(r)) else ""
-            if k not in out or str(out[k][1]) < str(sub):
-                out[k] = (tot, sub)
-        except Exception:
-            pass
+
+    # 필수 컬럼 확인 (연도/평가유형/평가대상사번)
+    cY = hmap.get("연도")
+    cT = hmap.get("평가유형")
+    cTS = hmap.get("평가대상사번")
+    if not (cY and cT and cTS):
+        return {}
+
+    # 인덱스·캐시
+    cy = cY - 1
+    ct = cT - 1
+    cts = cTS - 1
+    cTot = hmap.get("총점")
+    cSub = hmap.get("제출시각")
+    ctot = (cTot - 1) if cTot else None
+    csub = (cSub - 1) if cSub else None
+    year_s = str(_year)
+
+    out: dict = {}
+    # values[0]는 헤더, 데이터는 1행부터
+    for r in values[1:]:
+        # 연도 필터
+        if cy >= len(r) or str(r[cy]).strip() != year_s:
+            continue
+        # 키 구성에 필요한 열 존재 확인
+        if cts >= len(r) or ct >= len(r):
+            continue
+
+        key = (str(r[cts]).strip(), str(r[ct]).strip())
+        tot = r[ctot] if (ctot is not None and ctot < len(r)) else ""
+        sub = r[csub] if (csub is not None and csub < len(r)) else ""
+
+        prev = out.get(key)
+        # 제출시각 최신 값만 유지(문자 비교 기반: 기존 로직 유지)
+        if prev is None or str(prev[1]) < str(sub):
+            out[key] = (tot, sub)
     return out
+
 
 @st.cache_data(ttl=300, show_spinner=False)
 def get_comp_summary_map_cached(_year: int, _rev: int = 0) -> dict:
-    """Return {사번->(주업무, 기타업무, 자격유지, 제출시각)} for the year."""
+    """
+    {사번 -> (주업무, 기타업무, 자격유지, 제출시각)} for given year.
+    불필요한 예외 처리 제거, 인덱스 캐싱.
+    """
     try:
         ws = _ensure_comp_simple_sheet(int(_year))
-        header = _retry(ws.row_values,1) or []
-        hmap = {n:i+1 for i,n in enumerate(header)}
+        header = _retry(ws.row_values, 1) or []
+        hmap = {n: i + 1 for i, n in enumerate(header)}
         values = _ws_values(ws)
     except Exception:
         return {}
-    cY=hmap.get("연도"); cTS=hmap.get("평가대상사번"); cMain=hmap.get("주업무평가")
-    cExtra=hmap.get("기타업무평가"); cQual=hmap.get("자격유지"); cSub=hmap.get("제출시각")
-    out = {}
-    for i in range(2, len(values)+1):
-        r = values[i-1]
-        try:
-            if cY and str(r[cY-1]).strip()!=str(_year): continue
-            sab = str(r[cTS-1]).strip()
-            main = r[cMain-1] if cMain else ""
-            extra = r[cExtra-1] if cExtra else ""
-            qual = r[cQual-1] if cQual else ""
-            sub = r[cSub-1] if cSub else ""
-            if sab not in out or str(out[sab][3]) < str(sub):
-                out[sab] = (main, extra, qual, sub)
-        except Exception:
-            pass
+
+    cY = hmap.get("연도")
+    cTS = hmap.get("평가대상사번")
+    if not (cY and cTS):
+        return {}
+
+    cy = cY - 1
+    cts = cTS - 1
+    cMain = hmap.get("주업무평가")
+    cExtra = hmap.get("기타업무평가")
+    cQual = hmap.get("자격유지")
+    cSub = hmap.get("제출시각")
+    cmain = (cMain - 1) if cMain else None
+    cextra = (cExtra - 1) if cExtra else None
+    cqual = (cQual - 1) if cQual else None
+    csub = (cSub - 1) if cSub else None
+    year_s = str(_year)
+
+    out: dict = {}
+    for r in values[1:]:
+        if cy >= len(r) or str(r[cy]).strip() != year_s:
+            continue
+        if cts >= len(r):
+            continue
+
+        sab = str(r[cts]).strip()
+        main = r[cmain] if (cmain is not None and cmain < len(r)) else ""
+        extra = r[cextra] if (cextra is not None and cextra < len(r)) else ""
+        qual = r[cqual] if (cqual is not None and cqual < len(r)) else ""
+        sub = r[csub] if (csub is not None and csub < len(r)) else ""
+
+        prev = out.get(sab)
+        if prev is None or str(prev[3]) < str(sub):
+            out[sab] = (main, extra, qual, sub)
     return out
+
 
 @st.cache_data(ttl=120, show_spinner=False)
 def get_jd_approval_map_cached(_year: int, _rev: int = 0) -> dict:
-    """Return {(사번, 최신버전)->(상태, 승인시각)} for the year from 직무기술서_승인."""
+    """
+    {(사번, 최신버전) -> (상태, 승인시각)} from 직무기술서_승인 for the year.
+    정렬 대신 1패스(max)로 최신 승인시각만 선별하여 O(n) 처리.
+    """
     try:
         ws = _ws("직무기술서_승인")
         df = pd.DataFrame(_ws_get_all_records(ws))
     except Exception:
-        df = pd.DataFrame(columns=["연도","사번","버전","상태","승인시각"])
+        df = pd.DataFrame(columns=["연도", "사번", "버전", "상태", "승인시각"])
 
-    # 타입 정리(기존 유지)
-    for c in ["연도","버전"]:
-        if c in df.columns:
-            df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0).astype(int)
-    for c in ["사번","상태","승인시각"]:
-        if c in df.columns:
-            df[c] = df[c].astype(str)
+    # 필요한 컬럼만 유지(없으면 생성)
+    need_cols = ["연도", "사번", "버전", "상태", "승인시각"]
+    for c in need_cols:
+        if c not in df.columns:
+            df[c] = pd.Series(dtype="object")
+    df = df[need_cols]
 
-    # ✅ 핵심: 안전한 연도 필터 (기존 1줄을 아래 2줄로 교체)
-    yr = pd.to_numeric(df.get("연도", pd.Series([None]*len(df))), errors="coerce").fillna(-1).astype(int)
-    df = df[yr == int(_year)]
+    # 타입 정리
+    df["연도"] = pd.to_numeric(df["연도"], errors="coerce").fillna(-1).astype(int)
+    df["버전"] = pd.to_numeric(df["버전"], errors="coerce").fillna(0).astype(int)
+    for c in ["사번", "상태", "승인시각"]:
+        df[c] = df[c].astype(str)
 
-    out = {}
-    if not df.empty:
-        df = df.sort_values(["사번","버전","승인시각"], ascending=[True, True, True]).reset_index(drop=True)
-        for _, rr in df.iterrows():
-            k = (str(rr.get("사번","")), int(rr.get("버전",0)))
-            out[k] = (str(rr.get("상태","")), str(rr.get("승인시각","")))
+    # 연도 필터
+    df = df[df["연도"] == int(_year)]
+    if df.empty:
+        return {}
+
+    # 1패스 최신값 선택
+    out: dict = {}
+    # itertuples가 iterrows보다 빠름
+    for rr in df.itertuples(index=False, name=None):
+        # 순서: 연도, 사번, 버전, 상태, 승인시각
+        _, sab, ver, stat, when = rr
+        key = (str(sab), int(ver))
+        prev = out.get(key)
+        if prev is None or str(prev[1]) < str(when):
+            out[key] = (str(stat), str(when))
     return out
 
 from html import escape as _html_escape
 
-# Optional zoneinfo (KST)
+# --- Timezone helper (KST) ---------------------------------------------------
 try:
     from zoneinfo import ZoneInfo
-    def tz_kst(): return ZoneInfo(st.secrets.get("app", {}).get("TZ", "Asia/Seoul"))
+    def tz_kst():
+        return ZoneInfo(st.secrets.get("app", {}).get("TZ", "Asia/Seoul"))
 except Exception:
     import pytz
-    def tz_kst(): return pytz.timezone(st.secrets.get("app", {}).get("TZ", "Asia/Seoul"))
+    def tz_kst():
+        return pytz.timezone(st.secrets.get("app", {}).get("TZ", "Asia/Seoul"))
+# --- end ---------------------------------------------------------------------
 
-# gspread (배포 최적화: 자동 pip 설치 제거, 의존성 사전 설치 전제)
+# --- gspread imports ---------------------------------------------------------
 import gspread
 from google.oauth2.service_account import Credentials
 from gspread.exceptions import WorksheetNotFound, APIError
 from gspread.utils import rowcol_to_a1
+# --- end ---------------------------------------------------------------------
 
-
-# --- Safe shim for batch helpers: defined early to avoid NameError ---
+# --- Batch helper shims (fallback only; real batch utils가 없을 때 사용) -----
 try:
     _ = rowcol_to_a1  # ensure imported
-    if 'gs_enqueue_range' not in globals():
+
+    if "gs_enqueue_range" not in globals():
         def gs_enqueue_range(ws, a1, values, value_input_option="USER_ENTERED"):
             ws.update(a1, values, value_input_option=value_input_option)
-    if 'gs_enqueue_cell' not in globals():
+
+    if "gs_enqueue_cell" not in globals():
         def gs_enqueue_cell(ws, row, col, value, value_input_option="USER_ENTERED"):
             ws.update(rowcol_to_a1(int(row), int(col)), [[value]], value_input_option=value_input_option)
-    if 'gs_flush' not in globals():
+
+    if "gs_flush" not in globals():
         def gs_flush():
             return  # no-op
 except Exception:
     pass
-# --- end shim ---
+# --- end ---------------------------------------------------------------------
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Sync Utility (Force refresh Google Sheets caches)
 # ═════════════════════════════════════════════════════════════════════════════
-
-
-
 def force_sync():
     """데이터/편집 캐시만 비우고 즉시 리런 (로그인 세션/인증 키는 유지)."""
     # Streamlit 캐시
