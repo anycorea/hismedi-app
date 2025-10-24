@@ -3840,11 +3840,24 @@ def main():
             if st.button("로그아웃", key="btn_logout", use_container_width=True):
                 logout()
         with c2:
+            import math
+            # 안내 배너: 항상 렌더해서 높이 고정(점프 방지)
+            _banner = st.empty()
             cool = _cooldown_remaining()
-            disabled = cool > 0
-            help_txt = "캐시를 비우고 구글시트에서 다시 불러옵니다." if not disabled else f"{int(cool)}초 후 재시도"
+            if cool > 0:
+                _banner.markdown(
+                    f"<div class='inline-sync-info'>⏳ 잠시만요… {int(math.ceil(cool))}초 후 다시 시도해 주세요.</div>",
+                    unsafe_allow_html=True
+                )
+            else:
+                _banner.markdown(
+                    "<div class='inline-sync-info' style='visibility:hidden'>&nbsp;</div>",
+                    unsafe_allow_html=True
+                )
+
+            # 버튼은 항상 활성화, 쿨다운은 force_sync() 내부에서 처리
             if st.button("🔄 동기화", key="sync_left", use_container_width=True,
-                         help=help_txt, disabled=disabled):
+                         help="캐시를 비우고 구글시트에서 다시 불러옵니다."):
                 force_sync()
 
         # ⬇️ 반환값을 삼켜서 'False' 렌더링 방지
