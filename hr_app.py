@@ -628,55 +628,91 @@ LAST_GOOD: dict[str, pd.DataFrame] = {}
 
 @st.cache_data(ttl=600, show_spinner=False)
 def read_sheet_df(sheet_name: str) -> pd.DataFrame:
-    """구글시트 → DataFrame (빈칸 재직여부=True로 해석, 호환 유지)"""
+    """
+    구글시트 → DataFrame
+    - '사번'은 문자열 키로 고정
+    - '재직여부': 공백(빈칸)은 True, 그 외는 _to_bool 규칙과 동일 처리
+    """
     try:
         ws = _ws(sheet_name)
         df = pd.DataFrame(_ws_get_all_records(ws))
         if df.empty:
             return df
 
-        # 사번은 문자열 키로 고정
+        # 사번: 문자열 키로 고정
         if "사번" in df.columns:
             df["사번"] = df["사번"].astype(str)
 
-        # 재직여부: 빈칸은 True, 나머지는 _to_bool 규칙 적용
+        # 재직여부: 공백 True, 그 외는 토큰 집합으로 벡터화 판정
         if "재직여부" in df.columns:
-            df["재직여부"] = df["재직여부"].map(
-                lambda v: True if str(v).strip() == "" else _to_bool(v)
-            )
+            s = df["재직여부"].astype(str).str.strip()
+            # _to_bool(x) == x.lower() in {"true","1","y","yes","t"}
+            truthy = {"true", "1", "y", "yes", "t"}
+            df["재직여부"] = (s.eq("") | s.str.lower().isin(truthy)).astype(bool)
 
+        # 최신 정상값 캐시
         LAST_GOOD[sheet_name] = df.copy()
         return df
 
     except APIError as e:
+        # 429(쿼터) → 캐시 폴백 우선
         if _is_quota_429(e):
-            try: st.warning("구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 '동기화'를 눌러 다시 시도해 주세요.", icon="⏳")
-            except Exception: pass
+            if sheet_name in LAST_GOOD:
+                try:
+                    st.info(f"할당량 초과로 캐시 데이터를 표시합니다: {sheet_name}", icon="⏳")
+                except Exception:
+                    pass
+                return LAST_GOOD[sheet_name]
+            # 캐시가 없으면 안내 후 빈 DF
+            try:
+                st.warning(
+                    "구글시트 읽기 할당량(1분) 초과. 잠시 후 좌측 '동기화'를 눌러 다시 시도해 주세요.",
+                    icon="⏳",
+                )
+            except Exception:
+                pass
             return pd.DataFrame()
+
+        # 기타 네트워크/서버 이슈 → 캐시 폴백
         if sheet_name in LAST_GOOD:
-            st.info(f"네트워크 혼잡으로 캐시 데이터를 표시합니다: {sheet_name}")
+            try:
+                st.info(f"네트워크 혼잡으로 캐시 데이터를 표시합니다: {sheet_name}")
+            except Exception:
+                pass
             return LAST_GOOD[sheet_name]
         raise
 
 
 @st.cache_data(ttl=600, show_spinner=False)
 def read_emp_df() -> pd.DataFrame:
-    """직원 시트 표준화: 필수 컬럼 보강 및 dtype 정리"""
+    """
+    직원 시트 표준화:
+    - 필수 컬럼 보강: 사번/이름/PIN_hash/재직여부/적용여부
+    - dtype 정리: 사번=str, 불리언 컬럼은 공백 True + 허용 토큰 벡터화
+    """
     df = read_sheet_df(EMP_SHEET)
 
-    # 최소 컬럼 보강
-    for c in ["사번", "이름", "PIN_hash", "재직여부", "적용여부"]:
-        if c not in df.columns:
-            df[c] = "" if c != "재직여부" else True
+    # 필수 컬럼 보강(없으면 생성)
+    required_defaults = {
+        "사번": "",
+        "이름": "",
+        "PIN_hash": "",
+        "재직여부": True,
+        "적용여부": True,
+    }
+    for col, default in required_defaults.items():
+        if col not in df.columns:
+            df[col] = default
 
     # dtype 정리
     df["사번"] = df["사번"].astype(str)
-    # 재직여부는 확실히 bool로
-    for _col in ["재직여부", "적용여부"]:
-        if _col in df.columns:
-            df[_col] = df[_col].map(
-                lambda v: True if str(v).strip() == "" else _to_bool(v)
-            ).astype(bool)
+
+    # 불리언 컬럼 통일 규칙: 공백 True + {"true","1","y","yes","t"} 허용
+    truthy = {"true", "1", "y", "yes", "t"}
+    for col in ("재직여부", "적용여부"):
+        if col in df.columns:
+            s = df[col].astype(str).str.strip()
+            df[col] = (s.eq("") | s.str.lower().isin(truthy)).astype(bool)
 
     return df
 
