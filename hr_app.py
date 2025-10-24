@@ -1,22 +1,44 @@
 # -*- coding: utf-8 -*-
 
-def _ensure_capacity(ws, min_row: int, min_col: int):
-    """Ensure worksheet has at least (min_row x min_col) grid. Expands columns/rows only if needed."""
+def _ensure_capacity(ws, min_row: int | None, min_col: int | None, *, max_cells: int | None = 9_000_000) -> bool:
+    """
+    Ensure worksheet grid is at least (min_row x min_col).
+    Uses a single resize(rows=..., cols=...) call if expansion is needed.
+    Returns True if resized, False otherwise or on failure.
+    Set max_cells=None to disable the total-cells guard.
+    """
     try:
-        r_needed = int(min_row) if min_row is not None else 0
-        c_needed = int(min_col) if min_col is not None else 0
-        # gspread Worksheet has row_count / col_count
-        if hasattr(ws, "row_count") and ws.row_count < r_needed:
-            ws.add_rows(r_needed - int(ws.row_count))
-        if hasattr(ws, "col_count") and ws.col_count < c_needed:
-            ws.add_cols(c_needed - int(ws.col_count))
-    except Exception as _e:
-        # Non-fatal: if expansion fails, next API call may still error; upstream handles with _retry.
-        pass
+        r_needed = int(min_row) if min_row else 0
+        c_needed = int(min_col) if min_col else 0
 
+        cur_r = int(getattr(ws, "row_count", 0) or 0)
+        cur_c = int(getattr(ws, "col_count", 0) or 0)
 
-# Minimal tuned build (2025-10-21): label text clarified; optional defaults normalized.
-# Safe: No structural deletions. Original logic preserved.
+        new_r = max(cur_r, r_needed)
+        new_c = max(cur_c, c_needed)
+
+        # No change needed
+        if new_r == cur_r and new_c == cur_c:
+            return False
+
+        # Prevent accidental huge expansions (Google Sheets total ~10M cells limit)
+        if max_cells is not None and new_r > 0 and new_c > 0:
+            if new_r * new_c > max_cells:
+                return False
+
+        rows_arg = new_r if new_r > cur_r else None
+        cols_arg = new_c if new_c > cur_c else None
+
+        # Use retry wrapper if available
+        try:
+            _retry(ws.resize, rows=rows_arg, cols=cols_arg)  # network/429 tolerant
+        except NameError:
+            ws.resize(rows=rows_arg, cols=cols_arg)
+
+        return True
+    except Exception:
+        # Non-fatal: callers may attempt again or handle errors upstream.
+        return False
 
 # HISMEDI HR App
 # Tabs: 인사평가 / 직무기술서 / 직무능력평가 / 관리자 / 도움말
