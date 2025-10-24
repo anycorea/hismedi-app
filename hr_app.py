@@ -423,55 +423,75 @@ def show_submit_banner(text: str) -> None:
 # ────────────────────────────────────────────────────────────────────────────
 def verify_pin(user_sabun: str, pin: str) -> bool:
     """
-    제출 직전 PIN 재인증용 (로그인 로직과 동일한 허용 범위 유지).
-    - PIN 저장 형태: SHA256(pin) 또는 SHA256(sabun:pin)
-    - 우선순위:
-      1) st.session_state["pin_map"] → 평문 비교
-      2) st.session_state["pin_hash_map"] → 해시 비교 (단일 / salt 포함 둘 다 허용)
-      3) st.session_state["user"] → pin / pin_hash 필드 비교
-      4) 직원시트 데이터 기반 보조 검증
+    제출 직전 PIN 재인증 (로그인 로직과 동일한 허용 범위).
+    저장 포맷 허용:
+      - SHA256(pin)
+      - SHA256(sabun:pin)
+    우선순위:
+      1) st.session_state["pin_map"]             → 평문 비교
+      2) st.session_state["pin_hash_map"]        → 해시 비교(단일/솔트)
+      3) st.session_state["user"]                → pin / pin_hash 필드
+      4) st.session_state["emp_df"].PIN_hash     → 보조 검증
     """
     sabun = str(user_sabun).strip()
     val = str(pin).strip()
-    if not (sabun and val):
+    if not sabun or not val:
         return False
 
+    # 해시는 1회만 계산해서 재사용
+    plain_hash = _sha256_hex(val).lower()
+    salted_hash = _pin_hash(val, sabun).lower()
+
+    ss = st.session_state  # 로컬 바인딩(미세 가속)
+
     # 1) 평문 맵
-    pin_map = st.session_state.get("pin_map", {})
-    if sabun in pin_map:
-        return str(pin_map.get(sabun, "")) == val
+    pin_map = ss.get("pin_map")
+    if isinstance(pin_map, dict):
+        stored_plain = pin_map.get(sabun)
+        if stored_plain is not None and str(stored_plain) == val:
+            return True
 
     # 2) 해시 맵
-    pin_hash_map = st.session_state.get("pin_hash_map", {})
-    if sabun in pin_hash_map:
+    pin_hash_map = ss.get("pin_hash_map")
+    if isinstance(pin_hash_map, dict):
         stored_hash = str(pin_hash_map.get(sabun, "")).lower().strip()
-        try:
-            return stored_hash in (_sha256_hex(val), _pin_hash(val, sabun))
-        except Exception:
-            pass
+        if stored_hash and (stored_hash == plain_hash or stored_hash == salted_hash):
+            return True
 
-    # 3) 세션 내 사용자 객체
-    u = st.session_state.get("user", {}) or {}
+    # 3) 세션 사용자 객체
+    u = ss.get("user") or {}
     if str(u.get("사번", "")).strip() == sabun:
-        if "pin" in u:
-            return str(u.get("pin", "")) == val
-        if "pin_hash" in u:
-            stored_hash = str(u.get("pin_hash", "")).lower().strip()
-            try:
-                return stored_hash in (_sha256_hex(val), _pin_hash(val, sabun))
-            except Exception:
-                pass
+        up = u.get("pin")
+        if up is not None and str(up) == val:
+            return True
+        uph = str(u.get("pin_hash", "")).lower().strip()
+        if uph and (uph == plain_hash or uph == salted_hash):
+            return True
 
-    # 4) 직원 DF 기반 보조 검증 (직원시트 읽기)
+    # 4) 직원 DF 기반 보조 검증 (emp_df 조회)
     try:
-        emp_df = st.session_state.get("emp_df")
-        if emp_df is not None and "사번" in emp_df.columns and "PIN_hash" in emp_df.columns:
-            row = emp_df.loc[emp_df["사번"].astype(str) == sabun]
-            if not row.empty:
+        emp_df = ss.get("emp_df")
+        if emp_df is not None and "사번" in emp_df.columns:
+            row = None
+
+            # 먼저 숫자 비교(열 dtype이 숫자일 때 빠름)
+            if sabun.isdigit():
+                m_num = emp_df["사번"].eq(int(sabun))
+                if m_num.any():
+                    row = emp_df.loc[m_num]
+
+            # 실패 시 문자열 비교(폴백)
+            if row is None or row.empty:
+                m_str = emp_df["사번"].astype(str).eq(sabun)
+                if m_str.any():
+                    row = emp_df.loc[m_str]
+
+            if row is not None and not row.empty:
                 stored_hash = str(row.iloc[0].get("PIN_hash", "")).lower().strip()
-                if stored_hash in (_sha256_hex(val), _pin_hash(val, sabun)):
+                if stored_hash and (stored_hash == plain_hash or stored_hash == salted_hash):
                     return True
     except Exception:
+        # emp_df 부재/형식 이슈 등은 조용히 무시
         pass
 
     return False
