@@ -408,12 +408,13 @@ def mount_sync_toast():
 APP_TITLE = st.secrets.get("app", {}).get("TITLE", "HISMEDI - 인사/HR")
 st.set_page_config(page_title=APP_TITLE, layout="wide")
 
-# === Scroll behavior switch (comparison aid) ==================================
-# 'strict_top'  : Always hold at very top for ~1.2s after each render (previous behavior)
-# 'preserve'    : Restore last scrollY after rerun; no forced jump to top (recommended)
-# 'off'         : Do nothing (browser default)
-SCROLL_BEHAVIOR = 'preserve'
+# === Scroll control mode =====================================================
+# 'hardlock_top' : Strongly pin to very top after each rerun; kill autofocus.
+# 'preserve'     : Restore previous position after rerun (no forced top).
+# 'off'          : Do nothing (browser default).
+SCROLL_MODE = 'hardlock_top'
 # =============================================================================
+
 
 # st.help 출력 무력화
 if not getattr(st, "_help_disabled", False):
@@ -482,26 +483,95 @@ st.markdown(_CSS_GLOBAL, unsafe_allow_html=True)
 
 # 스크롤 최상단 고정 (rerun 및 버튼 클릭 뒤 점프 억제: 항상 TOP)
 
-# Script to control scroll behavior (switchable)
 import streamlit.components.v1 as components
-_js_strict_top = """
+
+_js_hardlock_top = """
 <script>
 (function(){
   const d = window.parent.document;
   const s = window.sessionStorage;
-  const baseHold = Date.now() + 1200;
-  const armedUntil = parseInt(s.getItem('forceTopUntil')||'0',10) || 0;
-  const holdUntil = Math.max(baseHold, armedUntil);
-  try{ s.removeItem('scrollY'); }catch(_){}
-  function tick(){
-    try{ window.scrollTo(0,0); }catch(_){}
-    if (Date.now() < holdUntil) requestAnimationFrame(tick);
-    else try{ s.removeItem('forceTopUntil'); }catch(_){}
+
+  try{ if ('scrollRestoration' in window.history){ window.history.scrollRestoration = 'manual'; } }catch(_){}
+
+  function stripAutofocus(root){
+    const qs = root.querySelectorAll('input[autofocus], textarea[autofocus], select[autofocus], button[autofocus]');
+    qs.forEach(el=>{ try{ el.removeAttribute('autofocus'); }catch(_){ } });
   }
-  requestAnimationFrame(tick);
+
+  const originalFocus = Element.prototype.focus;
+  let killFocusUntil = Date.now() + 4500;
+  function enableFocusKiller(ms){ killFocusUntil = Math.max(killFocusUntil, Date.now()+ms); }
+  Element.prototype.focus = function(){
+    if (Date.now() < killFocusUntil) { try{ /* no-op */ }catch(_){ } }
+    else { return originalFocus.apply(this, arguments); }
+  };
+
+  function onFocusIn(e){
+    if (Date.now() < killFocusUntil){
+      try{ e.stopPropagation(); e.preventDefault(); }catch(_){ }
+      try{ if (d.activeElement) d.activeElement.blur(); }catch(_){ }
+    }
+  }
+  d.addEventListener('focusin', onFocusIn, {capture:true});
+
+  function hookLabels(){
+    const labels = ['동기화','필터 초기화','검색 적용'];
+    const btns = Array.from(d.querySelectorAll('.stButton button'));
+    btns.forEach(b=>{
+      if (b._scrollHardHook) return;
+      b._scrollHardHook = true;
+      if (!labels.some(L => (b.textContent||'').includes(L))) return;
+      b.addEventListener('click', ()=>{ enableFocusKiller(7000); armTop(7000); }, {capture:true});
+    });
+  }
+  new MutationObserver(hookLabels).observe(d.body, {subtree:true, childList:true});
+  hookLabels();
+
+  function armTop(ms){
+    try{
+      const until = Date.now()+ms;
+      s.setItem('forceTopUntil', String(until));
+    }catch(_){}
+  }
+
+  const armedUntil = parseInt(s.getItem('forceTopUntil')||'0',10) || 0;
+  const baseHold = Date.now() + 4500;
+  const holdUntil = Math.max(baseHold, armedUntil);
+  enableFocusKiller(holdUntil - Date.now()); 
+  stripAutofocus(d);
+
+  function keepTop(){
+    const now = Date.now();
+    try{ window.scrollTo(0,0); }catch(_){}
+    if (now < holdUntil) requestAnimationFrame(keepTop);
+    else try{ s.removeItem('forceTopUntil'); Element.prototype.focus = originalFocus; }catch(_){}
+  }
+  requestAnimationFrame(keepTop);
+
+  function blockScroll(e){
+    if (Date.now() < holdUntil){
+      try{ e.preventDefault(); e.stopPropagation(); }catch(_){}
+      try{ window.scrollTo(0,0); }catch(_){}
+    }
+  }
+  ['wheel','touchmove','keydown'].forEach(ev=>{
+    d.addEventListener(ev, blockScroll, {capture:true, passive:false});
+  });
+
+  const mo = new MutationObserver(muts=>{
+    const now = Date.now();
+    if (now < holdUntil){
+      stripAutofocus(d);
+      try{ if (d.activeElement) d.activeElement.blur(); }catch(_){}
+      try{ window.scrollTo(0,0); }catch(_){}
+    }
+  });
+  mo.observe(d.body, {subtree:true, childList:true, attributes:true, attributeFilter:['autofocus']});
+
 })();
 </script>
 """
+
 
 _js_preserve = """
 <script>
@@ -509,50 +579,19 @@ _js_preserve = """
   const s = window.sessionStorage;
   let y = 0;
   try{ y = parseInt(s.getItem('scrollY')||'0',10) || 0; }catch(_){ y = 0; }
-  // restore last scroll immediately after render
   requestAnimationFrame(function(){ try{ window.scrollTo(0, y); }catch(_){} });
-  // save on scroll
-  window.addEventListener('scroll', function(){
-    try{ s.setItem('scrollY', String(window.scrollY||0)); }catch(_){}
-  }, {passive:true});
-  // extend hold only when specific buttons are clicked (rare)
-  (function(){
-    const d = window.parent.document;
-    const labels = ['동기화','필터 초기화','검색 적용'];
-    const btns = Array.from(d.querySelectorAll('.stButton button'));
-    btns.forEach(b=>{
-      if(b._scrollBound) return;
-      b._scrollBound = true;
-      b.addEventListener('click', ()=>{
-        try{ s.setItem('forceTopUntil', String(Date.now()+1200)); }catch(_){}
-      }, {capture:true});
-    });
-    new MutationObserver(function(m){ /* rebind as buttons appear */ 
-      const btns2 = Array.from(d.querySelectorAll('.stButton button'));
-      btns2.forEach(b=>{
-        if(b._scrollBound) return;
-        b._scrollBound = true;
-        b.addEventListener('click', ()=>{
-          try{ s.setItem('forceTopUntil', String(Date.now()+1200)); }catch(_){}
-        }, {capture:true});
-      });
-    }).observe(d.body, {childList:true, subtree:true});
-  })();
+  window.addEventListener('scroll', function(){ try{ s.setItem('scrollY', String(window.scrollY||0)); }catch(_){} }, {passive:true});
 })();
 </script>
 """
 
-_js_off = """<script></script>"""
+_js_off = "<script></script>"
 
 components.html({
-  'strict_top': _js_strict_top,
-  'preserve'  : _js_preserve,
-  'off'       : _js_off,
-}.get(SCROLL_BEHAVIOR, _js_preserve), height=0, width=0)
-
-
-
-
+  'hardlock_top': _js_hardlock_top,
+  'preserve'    : _js_preserve,
+  'off'         : _js_off,
+}.get(SCROLL_MODE, _js_hardlock_top), height=0, width=0)
 # ────────────────────────────────────────────────────────────────────────────
 # Stray True/False suppressor (safely hides random boolean paragraphs)
 # ────────────────────────────────────────────────────────────────────────────
