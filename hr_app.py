@@ -2506,40 +2506,90 @@ def reissue_pin_inline(sabun: str, length: int = 4):
 def tab_admin_pin(emp_df):
     ws, header, hmap = ensure_emp_sheet_columns()
     df = emp_df.copy()
-    # 적용여부가 체크된 직원만 선택 대상으로 노출
+
+    # 적용여부 필터
     if "적용여부" in df.columns:
-        df = df[df["적용여부"]==True].copy()
+        df = df[df["적용여부"] == True].copy()
+
+    # 표시용 라벨
     df["표시"] = df.apply(lambda r: f"{str(r.get('사번',''))} - {str(r.get('이름',''))}", axis=1)
-    df = df.sort_values(["사번"]) if "사번" in df.columns else df
-    sel = st.selectbox("직원 선택(사번 - 이름)", ["(선택)"] + df.get("표시", pd.Series(dtype=str)).tolist(), index=0, key="adm_pin_pick")
-    if sel != "(선택)":
-        sabun = sel.split(" - ", 1)[0]
-        row   = df.loc[df["사번"].astype(str) == str(sabun)].iloc[0]
-        st.write(f"사번: **{sabun}** / 이름: **{row.get('이름','')}**")
-        pin1 = st.text_input("새 PIN (숫자)", type="password", key="adm_pin1")
-        pin2 = st.text_input("새 PIN 확인", type="password", key="adm_pin2")
-        col = st.columns([1, 1, 2])
-        with col[0]: do_save = st.button("PIN 저장/변경", type="primary", use_container_width=True, key="adm_pin_save")
-        with col[1]: do_clear = st.button("PIN 비우기", use_container_width=True, key="adm_pin_clear")
-        if do_save:
-            if not pin1 or not pin2: st.error("PIN을 두 번 모두 입력하세요."); return
-            if pin1 != pin2: st.error("PIN 확인이 일치하지 않습니다."); return
-            if not pin1.isdigit(): st.error("PIN은 숫자만 입력하세요."); return
-            if not _to_bool(row.get("재직여부", False)): st.error("퇴직자는 변경할 수 없습니다."); return
-            if "PIN_hash" not in hmap or "PIN_No" not in hmap: st.error(f"'{EMP_SHEET}' 시트에 PIN_hash/PIN_No가 없습니다."); return
-            r = _find_row_by_sabun(ws, hmap, sabun)
-            if r == 0: st.error("시트에서 사번을 찾지 못했습니다."); return
-            hashed = _pin_hash(pin1.strip(), str(sabun))
-            _retry(ws.update_cell, r, hmap["PIN_hash"], hashed)
-            _retry(ws.update_cell, r, hmap["PIN_No"], pin1.strip())
-            st.cache_data.clear(); st.success("PIN 저장 완료", icon="✅")
-        if do_clear:
-            if "PIN_hash" not in hmap or "PIN_No" not in hmap: st.error(f"'{EMP_SHEET}' 시트에 PIN_hash/PIN_No가 없습니다."); return
-            r = _find_row_by_sabun(ws, hmap, sabun)
-            if r == 0: st.error("시트에서 사번을 찾지 못했습니다."); return
-            _retry(ws.update_cell, r, hmap["PIN_hash"], "")
-            _retry(ws.update_cell, r, hmap["PIN_No"], "")
-            st.cache_data.clear(); st.success("PIN 초기화 완료", icon="✅")
+    if "사번" in df.columns:
+        df = df.sort_values(["사번"])
+
+    sel = st.selectbox(
+        "직원 선택(사번 - 이름)",
+        ["(선택)"] + df.get("표시", pd.Series(dtype=str)).tolist(),
+        index=0,
+        key="adm_pin_pick"
+    )
+
+    if sel == "(선택)":
+        return
+
+    sabun = sel.split(" - ", 1)[0]
+    row   = df.loc[df["사번"].astype(str) == str(sabun)].iloc[0]
+
+    st.write(f"사번: **{sabun}** / 이름: **{row.get('이름','')}**")
+
+    pin1 = st.text_input("새 PIN (숫자)", type="password", key="adm_pin1")
+    pin2 = st.text_input("새 PIN 확인", type="password", key="adm_pin2")
+
+    col = st.columns([1, 1, 2])
+    with col[0]:
+        do_save = st.button("PIN 저장/변경", type="primary", use_container_width=True, key="adm_pin_save")
+    with col[1]:
+        do_clear = st.button("PIN 비우기", use_container_width=True, key="adm_pin_clear")
+
+    # 공통 컬럼 체크
+    if "PIN_hash" not in hmap or "PIN_No" not in hmap:
+        st.error(f"'{EMP_SHEET}' 시트에 PIN_hash/PIN_No가 없습니다.")
+        return
+
+    # 대상 행 찾기
+    r = _find_row_by_sabun(ws, hmap, sabun)
+    if r == 0:
+        st.error("시트에서 사번을 찾지 못했습니다.")
+        return
+
+    # 저장(변경): 배치 쓰기
+    if do_save:
+        if not pin1 or not pin2:
+            st.error("PIN을 두 번 모두 입력하세요.")
+            return
+        if pin1 != pin2:
+            st.error("PIN 확인이 일치하지 않습니다.")
+            return
+        if not pin1.isdigit():
+            st.error("PIN은 숫자만 입력하세요.")
+            return
+        if not _to_bool(row.get("재직여부", False)):
+            st.error("퇴직자는 변경할 수 없습니다.")
+            return
+
+        hashed = _pin_hash(pin1.strip(), str(sabun))
+        gs_enqueue_cell(ws, r, hmap["PIN_hash"], hashed)
+        gs_enqueue_cell(ws, r, hmap["PIN_No"],   pin1.strip())
+        gs_flush()
+
+        # 캐시 및 UI 정리
+        st.cache_data.clear()
+        st.success("PIN 저장 완료", icon="✅")
+        # 입력칸 초기화(선택): 다음 입력 때 혼동 방지
+        st.session_state.pop("adm_pin1", None)
+        st.session_state.pop("adm_pin2", None)
+        st.rerun()
+
+    # 초기화(비우기): 배치 쓰기
+    if do_clear:
+        gs_enqueue_cell(ws, r, hmap["PIN_hash"], "")
+        gs_enqueue_cell(ws, r, hmap["PIN_No"],   "")
+        gs_flush()
+
+        st.cache_data.clear()
+        st.success("PIN 초기화 완료", icon="🧹")
+        st.session_state.pop("adm_pin1", None)
+        st.session_state.pop("adm_pin2", None)
+        st.rerun()
 
 def tab_admin_eval_items():
     df = read_eval_items_df(only_active=False).copy()
