@@ -1129,7 +1129,7 @@ def _ensure_eval_resp_sheet(year:int, item_ids:list[str]):
     score_cols = []
     for iid in item_ids or []:
         s = str(iid).strip()
-        if re.match(r"^S\d{2}$", s):
+        if _re.match(r"^S\\d{2}$", s):
             score_cols.append(s)  # prefer plain 'Sxx'
         else:
             score_cols.append(f"점수_{s}")
@@ -1664,13 +1664,13 @@ def tab_eval(emp_df: pd.DataFrame):
         else:
             try:
                 # Map scores to storage keys if S-only schema is active
-scores_for_save = {}
-for _iid, _val in (scores or {}).items():
-    _k = id2col.get(_iid, _iid) if _s_only else _iid
-    scores_for_save[_k] = _val
-rep = upsert_eval_response(
-                    emp_df, int(year), eval_type, str(target_sabun), str(me_sabun), scores_for_save, "제출"
-                )
+                scores_for_save = {}
+                for _iid, _val in (scores or {}).items():
+                    _k = id2col.get(_iid, _iid) if _s_only else _iid
+                    scores_for_save[_k] = _val
+                rep = upsert_eval_response(
+                                emp_df, int(year), eval_type, str(target_sabun), str(me_sabun), scores_for_save, "제출"
+                            )
                 st.success(
                     ("제출 완료" if rep.get("action") == "insert" else "업데이트 완료")
                     + f" (총점 {rep.get('total','?')}점)",
