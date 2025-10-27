@@ -3219,3 +3219,87 @@ def get_book():
 # ============================================================================
 # END PROXY REDIRECT
 # ============================================================================
+
+
+# ============================================================================
+# ENHANCED PROXY 2025-10-27 — normalize ranges inside values_batch_update too,
+# and ensure Worksheet.spreadsheet refers to the proxy (so ws.spreadsheet.*
+# also gets normalized). This covers the code path using
+# ws.spreadsheet.values_batch_update(... {"data":[{"range":"인사평가_2025!A1", ...}] })
+# ============================================================================
+import re as _re_proxy2
+
+def _normalize_title2(title: str) -> str:
+    t = str(title)
+    if _re_proxy2.match(r"^인사평가_\d{4}$", t):
+        return "인사평가_raw"
+    if _re_proxy2.match(r"^직무능력평가_\d{4}$", t):
+        return "직무능력평가_raw"
+    return t
+
+def _normalize_range_notation(r: str) -> str:
+    # "'인사평가_2025'!A1", "인사평가_2025!A1:B2"
+    s = str(r)
+    # strip quotes for detection
+    if "!" in s:
+        sheet, rest = s.split("!", 1)
+        sh = sheet.strip().strip("'").strip('"')
+        sh2 = _normalize_title2(sh)
+        if sh2 != sh:
+            # restore quoting if existed
+            if sheet.strip().startswith(("'", '"')):
+                if sheet.strip().startswith("'"):
+                    sheet_out = f"'{sh2}'"
+                else:
+                    sheet_out = f'"{sh2}"'
+            else:
+                sheet_out = sh2
+            return f"{sheet_out}!{rest}"
+    return s
+
+_ORIG_get_book2 = get_book
+
+class _SpreadsheetProxy2:
+    def __init__(self, real):
+        self._real = real
+    def worksheet(self, title):
+        t = _normalize_title2(title)
+        try:
+            ws_real = self._real.worksheet(t)
+        except Exception:
+            if t in ("인사평가_raw","직무능력평가_raw"):
+                ws_real = self._real.add_worksheet(title=t, rows=5000, cols=120)
+            else:
+                raise
+        return _WorksheetProxy2(ws_real, self)
+    def add_worksheet(self, title, *args, **kwargs):
+        t = _normalize_title2(title)
+        ws_real = self._real.add_worksheet(title=t, *args, **kwargs)
+        return _WorksheetProxy2(ws_real, self)
+    def values_batch_update(self, body: dict):
+        body = dict(body or {})
+        data = body.get("data", [])
+        new_data = []
+        for item in data:
+            item = dict(item)
+            if "range" in item:
+                item["range"] = _normalize_range_notation(item["range"])
+            new_data.append(item)
+        body["data"] = new_data
+        return self._real.values_batch_update(body)
+    # delegate other attributes/methods
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+class _WorksheetProxy2:
+    def __init__(self, real_ws, parent_proxy_spreadsheet):
+        self._real_ws = real_ws
+        self.spreadsheet = parent_proxy_spreadsheet  # critical: proxy, not real
+    def __getattr__(self, name):
+        return getattr(self._real_ws, name)
+
+def get_book():
+    return _SpreadsheetProxy2(_ORIG_get_book2())
+# ============================================================================
+# END ENHANCED PROXY
+# ============================================================================
