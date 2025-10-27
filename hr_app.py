@@ -1120,7 +1120,7 @@ def _ensure_eval_resp_sheet(year:int, item_ids:list[str]):
     except WorksheetNotFound:
         ws=_retry(wb.add_worksheet, title=name, rows=5000, cols=max(50, len(item_ids)+16))
         _WS_CACHE[name]=(time.time(), ws)
-    need=list(EVAL_BASE_HEADERS)+[f"점수_{iid}" for iid in item_ids]
+    need=list(EVAL_BASE_HEADERS)+[sname for iid in item_ids]
     header,_=_hdr(ws, name)
     if not header:
         _retry(ws.update, "1:1", [need]); _HDR_CACHE[name]=(time.time(), need, {n:i+1 for i,n in enumerate(need)})
@@ -1166,14 +1166,14 @@ def upsert_eval_response(emp_df: pd.DataFrame, year: int, eval_type: str,
         put("평가자사번", str(evaluator_sabun)); put("평가자이름", ename)
         put("총점", total); put("상태", status); put("제출시각", now)
         for iid, sc in zip(item_ids, scores_list):
-            c=hmap.get(f"점수_{iid}")
+            c=hmap.get(sname)
             if c: buf[c-1]=sc
         _retry(ws.append_row, buf, value_input_option="USER_ENTERED")
         st.cache_data.clear()
         return {"action":"insert","total":total}
     else:
         payload={"총점": total, "상태": status, "제출시각": now, "평가대상이름": tname, "평가자이름": ename}
-        for iid, sc in zip(item_ids, scores_list): payload[f"점수_{iid}"]=sc
+        for iid, sc in zip(item_ids, scores_list): payload[sname]=sc
         def _batch_row(ws, idx, hmap, kv):
             upd=[]
             for k,v in kv.items():
@@ -1217,7 +1217,7 @@ def tab_eval(emp_df: pd.DataFrame):
 
     items = read_eval_items_df(True)
     if items.empty:
-        st.warning("활성화된 평가 항목이 없습니다.", icon=⚠️")
+        st.warning("활성화된 평가 항목이 없습니다.", icon="⚠️"
         return
     items_sorted = items.sort_values(["순서", "항목"]).reset_index(drop=True)
     item_ids = [str(x) for x in items_sorted["항목ID"].tolist()]
@@ -1301,7 +1301,7 @@ def tab_eval(emp_df: pd.DataFrame):
             scores = {}
             for i, iid in enumerate(item_ids):
             sname = f"S{str(i+1).zfill(2)}"
-            col = hmap.get(f"점수_{iid}") or hmap.get(sname) or hmap.get(f"점수_{sname}")
+            col = hmap.get(sname)
                 if not col: continue
                 if col-1 < len(row):
                     v = str(row[col-1]).strip()
@@ -1336,7 +1336,7 @@ def tab_eval(emp_df: pd.DataFrame):
             out: dict[str,int] = {}
             for i, iid in enumerate(item_ids):
             sname = f"S{str(i+1).zfill(2)}"
-            col = hmap.get(f"점수_{iid}") or hmap.get(sname) or hmap.get(f"점수_{sname}")
+            col = hmap.get(sname)
                 if col and col-1 < len(picked):
                     try:
                         v = int(float(str(picked[col-1]).strip() or "0"))
@@ -1548,7 +1548,7 @@ def ensure_jobdesc_sheet():
                 _retry(ws.update, "1:1", [header + need])
             else:
                 try:
-                    st.warning("시트 헤더에 다음 컬럼이 없습니다: " + ", ".join(need) + "\n"                               "→ 시트를 직접 수정한 뒤 좌측 🔄 동기화 버튼을 눌러주세요.", icon="⚠️")
+                    st.warning("시트 헤더에 다음 컬럼이 없습니다: " + ", ".join(need) + "\n"                               "→ 시트를 직접 수정한 뒤 좌측 🔄 동기화 버튼을 눌러주세요.", icon="⚠️"
                 except Exception:
                     pass
         return ws
@@ -2456,7 +2456,7 @@ def ensure_emp_sheet_columns():
                 _retry(ws.update, "1:1", [header + need])
             else:
                 try:
-                    st.warning("시트 헤더에 다음 컬럼이 없습니다: " + ", ".join(need) + "\n"                               "→ 시트를 직접 수정한 뒤 좌측 🔄 동기화 버튼을 눌러주세요.", icon="⚠️")
+                    st.warning("시트 헤더에 다음 컬럼이 없습니다: " + ", ".join(need) + "\n"                               "→ 시트를 직접 수정한 뒤 좌측 🔄 동기화 버튼을 눌러주세요.", icon="⚠️"
                 except Exception:
                     pass
             ws, header, hmap = _get_ws_and_headers(EMP_SHEET)
