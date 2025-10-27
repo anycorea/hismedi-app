@@ -1,4 +1,155 @@
 # -*- coding: utf-8 -*-
+# ========================= RAW_ENFORCER_PATCH (self-contained) =========================
+# Redirect legacy/annual sheet names to *_raw, protect header row for eval/comp,
+# and prevent creating new spreadsheets/tabs except the fixed *_raw tabs.
+import re as _re
+import gspread as _gs
+
+# Fixed Google Sheet ID (from user)
+SHEET_ID = "1Z4OrSwqVXsCBnCaa_eUPDGmNqMpgm6twR9o_D9Hnfzk"
+
+RAW_TITLES = {"인사평가_raw", "직무능력평가_raw", "직무기술서_raw", "직무기술서_승인_raw"}
+
+def _norm_title(t: str) -> str:
+    s = str(t).strip().strip("'").strip('"')
+    if _re.match(r"^인사평가_\d{4}$", s): return "인사평가_raw"
+    if _re.match(r"^직무능력평가_\d{4}$", s): return "직무능력평가_raw"
+    if _re.match(r"^인사평가_raw\d{4}$", s): return "인사평가_raw"
+    if _re.match(r"^직무능력평가_raw\d{4}$", s): return "직무능력평가_raw"
+    if s == "직무기술서": return "직무기술서_raw"
+    if s == "직무기술서_승인": return "직무기술서_승인_raw"
+    if s == "인사평가": return "인사평가_raw"
+    if s == "직무능력평가": return "직무능력평가_raw"
+    return s
+
+def _norm_range(r: str) -> str:
+    s = str(r)
+    if "!" not in s: return s
+    sheet, rest = s.split("!", 1)
+    sh = sheet.strip().strip("'").strip('"')
+    sh2 = _norm_title(sh)
+    if sh2 != sh:
+        if sheet.strip().startswith("'"):
+            sheet = f"'{sh2}'"
+        elif sheet.strip().startswith('"'):
+            sheet = f'"{sh2}"'
+        else:
+            sheet = sh2
+        return f"{sheet}!{rest}"
+    return s
+
+class _WSProxy:
+    def __init__(self, ws, parent_ss):
+        self._ws = ws
+        self.spreadsheet = parent_ss
+    def update(self, *args, **kwargs):
+        title = getattr(self._ws, "title", "")
+        rng = kwargs.get("range_name")
+        if args and isinstance(args[0], str):
+            rng = rng or args[0]
+        if title in ("인사평가_raw", "직무능력평가_raw"):
+            if rng and ("1:1" in rng or rng.strip() in ("1:1","A1:1","A1:Z1")):
+                return  # protect header/row_key
+        return self._ws.update(*args, **kwargs)
+    def __getattr__(self, name):
+        return getattr(self._ws, name)
+
+class _SSProxy:
+    def __init__(self, real):
+        self._real = real
+    def worksheet(self, title):
+        t = _norm_title(title)
+        try:
+            ws = self._real.worksheet(t)
+        except Exception:
+            # Redirect creation to raw target instead of making legacy/annual
+            t2 = _norm_title(t)
+            try:
+                ws = self._real.worksheet(t2)
+            except Exception:
+                ws = self._real.add_worksheet(title=t2, rows=5000, cols=120)
+        return _WSProxy(ws, self)
+    def add_worksheet(self, title, *args, **kwargs):
+        t = _norm_title(title)
+        if t not in RAW_TITLES:
+            t = _norm_title(t)
+        ws = self._real.add_worksheet(title=t, *args, **kwargs)
+        return _WSProxy(ws, self)
+    def values_batch_update(self, body: dict):
+        try:
+            body = dict(body or {})
+            data = []
+            for item in body.get("data", []):
+                item = dict(item)
+                if "range" in item:
+                    item["range"] = _norm_range(item["range"])
+                data.append(item)
+            body["data"] = data
+        except Exception:
+            pass
+        return self._real.values_batch_update(body)
+    def values_update(self, range_name: str, params: dict, body: dict):
+        try:
+            range_name = _norm_range(range_name)
+        except Exception:
+            pass
+        return self._real.values_update(range_name, params, body)
+    def batch_update(self, request_body: dict):
+        try:
+            req = dict(request_body or {})
+            new_reqs = []
+            for r in req.get("requests", []):
+                if "addSheet" in r:
+                    continue  # drop addSheet to avoid rogue creations
+                new_reqs.append(r)
+            req["requests"] = new_reqs
+        except Exception:
+            req = request_body
+        return self._real.batch_update(req)
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+def _wrap_ss(ss):
+    if isinstance(ss, _SSProxy):
+        return ss
+    return _SSProxy(ss)
+
+# Monkeypatch gspread.Client
+_ORIG_open_by_key = getattr(_gs.Client, "open_by_key", None)
+_ORIG_open_by_url = getattr(_gs.Client, "open_by_url", None)
+_ORIG_create      = getattr(_gs.Client, "create", None)
+
+if _ORIG_open_by_key:
+    def open_by_key(self, key):
+        return _wrap_ss(_ORIG_open_by_key(self, key))
+    _gs.Client.open_by_key = open_by_key
+
+if _ORIG_open_by_url:
+    def open_by_url(self, url):
+        return _wrap_ss(_ORIG_open_by_url(self, url))
+    _gs.Client.open_by_url = open_by_url
+
+if _ORIG_create:
+    def create(self, title, *args, **kwargs):
+        # redirect to existing fixed doc instead of creating new
+        return _wrap_ss(self.open_by_key(SHEET_ID))
+    _gs.Client.create = create
+
+# Provide a get_book() that always opens the fixed doc.
+def get_book():
+    gc = _gs.service_account()
+    return _wrap_ss(gc.open_by_key(SHEET_ID))
+
+# Hard-lock helper names for evaluation/competency
+def _eval_sheet_name(year):  # 인사평가
+    return "인사평가_raw"
+def _simp_sheet_name(year):  # 직무능력평가
+    return "직무능력평가_raw"
+# ======================= END RAW_ENFORCER_PATCH =======================
+
+
+
+# -*- coding: utf-8 -*-
 
 def _ensure_capacity(ws, min_row: int, min_col: int):
     """Ensure worksheet has at least (min_row x min_col) grid. Expands columns/rows only if needed."""
@@ -3025,342 +3176,3 @@ def gs_flush():
                 raise
     st.session_state.gs_queue = []
 # ===== End helpers =====
-
-
-
-# ============================================================================
-# RAW FIX v3 — lock sheet names, no header writes, S-codes only, drop 평가일자
-# ============================================================================
-def _eval_sheet_name(year: int | str) -> str:
-    return "인사평가_raw"
-
-def _simp_sheet_name(year: int | str) -> str:
-    return "직무능력평가_raw"
-
-_ORIG_get_book_v3 = get_book
-import re as __re_v3
-
-class __WSProxyV3:
-    def __init__(self, ws, parent_spreadsheet):
-        self.__ws = ws
-        self.spreadsheet = parent_spreadsheet
-    def update(self, *args, **kwargs):
-        if args:
-            first = args[0]
-            rng = kwargs.get("range_name", None)
-            if isinstance(first, str):
-                rng = rng or first
-            if rng and ("1:1" in rng or rng.strip() in ("1:1","A1:1","A1:Z1")):
-                try:
-                    if self.__ws.title in ("인사평가_raw","직무능력평가_raw"):
-                        return
-                except Exception:
-                    pass
-        return self.__ws.update(*args, **kwargs)
-    def __getattr__(self, name):
-        return getattr(self.__ws, name)
-
-class __SSProxyV3:
-    def __init__(self, real):
-        self.__real = real
-    def __norm_title(self, s:str)->str:
-        t = str(s).strip().strip("'").strip('"')
-        if __re_v3.match(r"^인사평가_\d{4}$", t): return "인사평가_raw"
-        if __re_v3.match(r"^직무능력평가_\d{4}$", t): return "직무능력평가_raw"
-        if __re_v3.match(r"^인사평가_raw\d{4}$", t): return "인사평가_raw"
-        if __re_v3.match(r"^직무능력평가_raw\d{4}$", t): return "직무능력평가_raw"
-        if t == "직무기술서": return "직무기술서_raw"
-        if t == "직무기술서_승인": return "직무기술서_승인_raw"
-        return t
-    def worksheet(self, title):
-        t = self.__norm_title(title)
-        try:
-            ws = self.__real.worksheet(t)
-        except Exception:
-            if t in ("인사평가_raw","직무능력평가_raw","직무기술서_raw","직무기술서_승인_raw"):
-                ws = self.__real.add_worksheet(title=t, rows=5000, cols=120)
-            else:
-                raise
-        return __WSProxyV3(ws, self)
-    def add_worksheet(self, title, *args, **kwargs):
-        t = self.__norm_title(title)
-        ws = self.__real.add_worksheet(title=t, *args, **kwargs)
-        return __WSProxyV3(ws, self)
-    def values_batch_update(self, body: dict):
-        try:
-            body = dict(body or {})
-            arr = []
-            for item in body.get("data", []):
-                item = dict(item)
-                if "range" in item:
-                    s = str(item["range"])
-                    if "!" in s:
-                        sheet, rest = s.split("!",1)
-                        sh = sheet.strip().strip("'").strip('"')
-                        sh2 = self.__norm_title(sh)
-                        if sh2 != sh:
-                            if sheet.strip().startswith("'"):
-                                sheet = f"'{sh2}'"
-                            elif sheet.strip().startswith('"'):
-                                sheet = f'"{sh2}"'
-                            else:
-                                sheet = sh2
-                            item["range"] = f"{sheet}!{rest}"
-                arr.append(item)
-            body["data"] = arr
-        except Exception:
-            pass
-        return self.__real.values_batch_update(body)
-    def values_update(self, range_name: str, params: dict, body: dict):
-        try:
-            s = str(range_name)
-            if "!" in s:
-                sheet, rest = s.split("!",1)
-                sh = sheet.strip().strip("'").strip('"')
-                sh2 = self.__norm_title(sh)
-                if sh2 != sh:
-                    if sheet.strip().startswith("'"):
-                        sheet = f"'{sh2}'"
-                    elif sheet.strip().startswith('"'):
-                        sheet = f'"{sh2}"'
-                    else:
-                        sheet = sh2
-                    range_name = f"{sheet}!{rest}"
-        except Exception:
-            pass
-        return self.__real.values_update(range_name, params, body)
-    def __getattr__(self, name):
-        return getattr(self.__real, name)
-
-def get_book():
-    return __SSProxyV3(_ORIG_get_book_v3())
-
-def _ensure_eval_resp_sheet(year:int, item_ids:list[str]):
-    wb = get_book(); ws = wb.worksheet(_eval_sheet_name(year)); return ws
-
-def _ensure_comp_simple_sheet(year:int):
-    wb = get_book(); ws = wb.worksheet(_simp_sheet_name(year)); return ws
-
-def upsert_eval_response(emp_df, year:int, eval_type:str, target_sabun:str, evaluator_sabun:str, scores:dict, status="제출")->dict:
-    import gspread, pandas as pd
-    ws = _ensure_eval_resp_sheet(year, list(scores.keys()))
-    header = _retry(ws.row_values, 1) or []
-    hmap = {n:i+1 for i,n in enumerate(header)}
-    s_cols = sorted([c for c in header if __re_v3.match(r"^S\d{2}$", str(c))])
-    items = read_eval_items_df(True)
-    item_ids = items["항목ID"].astype(str).tolist() if items is not None and not items.empty and "항목ID" in items.columns else list(scores.keys())
-    scores_list = []
-    for idx in range(len(s_cols)):
-        v = None
-        if idx < len(item_ids): 
-            try: v = int(scores.get(str(item_ids[idx]), None))
-            except: v = None
-        scores_list.append(v)
-    valid = [v for v in scores_list if isinstance(v, int)]
-    total = round(sum(valid) * (100.0 / max(1, len(s_cols) * 5)), 1) if s_cols else 0.0
-    tname = _emp_name_by_sabun(emp_df, target_sabun); ename = _emp_name_by_sabun(emp_df, evaluator_sabun); now = kst_now_str()
-    values = _ws_values(ws); cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
-    row_idx=0
-    for i in range(2, len(values)+1):
-        r=values[i-1]
-        try:
-            if (str(r[cY-1]).strip()==str(year) and str(r[cT-1]).strip()==str(eval_type)
-                and str(r[cTS-1]).strip()==str(target_sabun) and str(r[cES-1]).strip()==str(evaluator_sabun)):
-                row_idx=i; break
-        except: pass
-    payload={"연도":int(year),"평가유형":str(eval_type),
-             "평가대상사번":str(target_sabun),"평가대상이름":tname,
-             "평가자사번":str(evaluator_sabun),"평가자이름":ename,
-             "총점":total,"상태":status,"제출시각":now}
-    for i, v in enumerate(scores_list, start=1):
-        col=f"S{i:02d}"
-        if v is not None and col in hmap: payload[col]=int(v)
-    if row_idx==0:
-        buf=[""]*len(header)
-        for k,v in payload.items():
-            c=hmap.get(k); 
-            if c: buf[c-1]=v
-        _retry(ws.append_row, buf, value_input_option="USER_ENTERED")
-        try: st.cache_data.clear()
-        except Exception: pass
-        return {"action":"insert","total":total}
-    else:
-        updates=[]; max_c=0
-        for k,v in payload.items():
-            c=hmap.get(k); 
-            if not c: continue
-            a1=gspread.utils.rowcol_to_a1(int(row_idx), int(c))
-            updates.append({"range": f"'{ws.title}'!{a1}", "values": [[v]]})
-            if c>max_c: max_c=c
-        if updates:
-            _ensure_capacity(ws, int(row_idx), int(max_c))
-            _retry(ws.spreadsheet.values_batch_update, {"valueInputOption":"USER_ENTERED","data":updates})
-        try: st.cache_data.clear()
-        except Exception: pass
-        return {"action":"update","total":total}
-
-def upsert_comp_simple_response(emp_df: pd.DataFrame, year:int, target_sabun:str,
-                                evaluator_sabun:str, main_grade:str, extra_grade:str,
-                                qual_status:str, opinion:str, eval_date:str)->dict:
-    import gspread
-    ws=_ensure_comp_simple_sheet(year)
-    header=_retry(ws.row_values,1) or []
-    hmap={n:i+1 for i,n in enumerate(header)}
-    jd=_jd_latest_for_comp(target_sabun, int(year)); edu_status=_edu_completion_from_jd(jd)
-    t_name=_emp_name_by_sabun(emp_df, target_sabun); e_name=_emp_name_by_sabun(emp_df, evaluator_sabun)
-    now=kst_now_str()
-    values = _ws_values(ws); cY=hmap.get("연도"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
-    row_idx=0
-    for i in range(2, len(values)+1):
-        r=values[i-1]
-        try:
-            if (str(r[cY-1]).strip()==str(year) and str(r[cTS-1]).strip()==str(target_sabun)
-                and str(r[cES-1]).strip()==str(evaluator_sabun)):
-                row_idx=i; break
-        except: pass
-    payload={"연도":int(year),
-             "평가대상사번":str(target_sabun),"평가대상이름":t_name,
-             "평가자사번":str(evaluator_sabun),"평가자이름":e_name,
-             "주업무평가":str(main_grade),"기타업무평가":str(extra_grade),
-             "교육이수":str(edu_status),"자격유지":str(qual_status),
-             "종합의견":str(opinion or ""),"상태":"제출","제출시각":now}
-    if row_idx==0:
-        buf=[""]*len(header)
-        for k,v in payload.items():
-            c=hmap.get(k)
-            if c: buf[c-1]=v
-        _retry(ws.append_row, buf, value_input_option="USER_ENTERED")
-        try: read_my_comp_simple_rows.clear()
-        except Exception: pass
-        return {"action":"insert"}
-    else:
-        updates=[]; max_c=0
-        for k,v in payload.items():
-            c=hmap.get(k); 
-            if not c: continue
-            a1=gspread.utils.rowcol_to_a1(int(row_idx), int(c))
-            updates.append({"range": f"'{ws.title}'!{a1}", "values": [[v]]})
-            if c>max_c: max_c=c
-        if updates:
-            _ensure_capacity(ws, int(row_idx), int(max_c))
-            _retry(ws.spreadsheet.values_batch_update, {"valueInputOption":"USER_ENTERED","data":updates})
-        try: read_my_comp_simple_rows.clear()
-        except Exception: pass
-        return {"action":"update"}
-# ============================================================================
-# END RAW FIX v3
-# ============================================================================
-
-
-# ============================================================================
-# SOLID RAW ENFORCER — global gspread client monkeypatch (final lock)
-# ============================================================================
-import re as __re_solid
-import gspread as __gs
-
-__ORIG_open_by_key = getattr(__gs.Client, "open_by_key", None)
-__ORIG_open_by_url = getattr(__gs.Client, "open_by_url", None)
-
-def __solid_norm(title: str) -> str:
-    t = str(title).strip().strip("'").strip('"')
-    if __re_solid.match(r"^인사평가_\d{4}$", t): return "인사평가_raw"
-    if __re_solid.match(r"^직무능력평가_\d{4}$", t): return "직무능력평가_raw"
-    if __re_solid.match(r"^인사평가_raw\d{4}$", t): return "인사평가_raw"
-    if __re_solid.match(r"^직무능력평가_raw\d{4}$", t): return "직무능력평가_raw"
-    if t == "직무기술서": return "직무기술서_raw"
-    if t == "직무기술서_승인": return "직무기술서_승인_raw"
-    if t == "인사평가": return "인사평가_raw"
-    if t == "직무능력평가": return "직무능력평가_raw"
-    return t
-
-def __solid_norm_range(r: str) -> str:
-    s = str(r)
-    if "!" in s:
-        sheet, rest = s.split("!", 1)
-        sh = sheet.strip().strip("'").strip('"')
-        sh2 = __solid_norm(sh)
-        if sh2 != sh:
-            if sheet.strip().startswith(("'", '"')):
-                sheet = f"'{sh2}'" if sheet.strip().startswith("'") else f'"{sh2}"'
-            else:
-                sheet = sh2
-            return f"{sheet}!{rest}"
-    return s
-
-class __SolidWS:
-    def __init__(self, ws, parent_ss):
-        self.__ws = ws
-        self.spreadsheet = parent_ss
-    def update(self, *args, **kwargs):
-        title = getattr(self.__ws, "title", "")
-        rng = kwargs.get("range_name")
-        if args and isinstance(args[0], str):
-            rng = rng or args[0]
-        if title in ("인사평가_raw","직무능력평가_raw"):
-            if rng and ("1:1" in rng or rng.strip() in ("1:1","A1:1","A1:Z1")):
-                return
-        return self.__ws.update(*args, **kwargs)
-    def __getattr__(self, name):
-        return getattr(self.__ws, name)
-
-class __SolidSS:
-    def __init__(self, real):
-        self.__real = real
-    def worksheet(self, title):
-        t = __solid_norm(title)
-        try:
-            ws = self.__real.worksheet(t)
-        except Exception:
-            if t in ("인사평가_raw","직무능력평가_raw","직무기술서_raw","직무기술서_승인_raw"):
-                ws = self.__real.add_worksheet(title=t, rows=5000, cols=120)
-            else:
-                raise
-        return __SolidWS(ws, self)
-    def add_worksheet(self, title, *args, **kwargs):
-        t = __solid_norm(title)
-        ws = self.__real.add_worksheet(title=t, *args, **kwargs)
-        return __SolidWS(ws, self)
-    def values_batch_update(self, body: dict):
-        try:
-            body = dict(body or {})
-            data = []
-            for item in body.get("data", []):
-                item = dict(item)
-                if "range" in item:
-                    item["range"] = __solid_norm_range(item["range"])
-                data.append(item)
-            body["data"] = data
-        except Exception:
-            pass
-        return self.__real.values_batch_update(body)
-    def values_update(self, range_name: str, params: dict, body: dict):
-        try:
-            range_name = __solid_norm_range(range_name)
-        except Exception:
-            pass
-        return self.__real.values_update(range_name, params, body)
-    def __getattr__(self, name):
-        return getattr(self.__real, name)
-
-def __wrap_ss(ss):
-    if isinstance(ss, __SolidSS):
-        return ss
-    return __SolidSS(ss)
-
-if __ORIG_open_by_key:
-    def open_by_key(self, key):
-        return __wrap_ss(__ORIG_open_by_key(self, key))
-    __gs.Client.open_by_key = open_by_key
-
-if __ORIG_open_by_url:
-    def open_by_url(self, url):
-        return __wrap_ss(__ORIG_open_by_url(self, url))
-    __gs.Client.open_by_url = open_by_url
-
-_ORIG_get_book_solid = get_book
-def get_book():
-    ss = _ORIG_get_book_solid()
-    return __wrap_ss(ss)
-# ============================================================================
-# END SOLID RAW ENFORCER
-# ============================================================================
