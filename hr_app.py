@@ -3174,3 +3174,50 @@ def upsert_eval_response(emp_df, year:int, eval_type:str, target_sabun:str, eval
 # ============================================================================
 # END HOTFIX
 # ============================================================================
+
+
+# ============================================================================
+# SUPER HOTFIX 2025-10-27 — Global redirect to *_raw for any gspread usage
+# Rationale: some legacy code paths call wb.worksheet(f"인사평가_{year}") directly.
+# We patch gspread.models.Spreadsheet.worksheet / add_worksheet so that any
+# yearly name is transparently mapped to the new *_raw tabs.
+# ============================================================================
+try:
+    import re as _re2, gspread as _gs2
+    _ORIG_gs_worksheet = _gs2.models.Spreadsheet.worksheet
+    _ORIG_gs_add_ws    = _gs2.models.Spreadsheet.add_worksheet
+
+    def _normalize_title(_t:str)->str:
+        t = str(_t)
+        if _re2.match(r"^인사평가_\d{4}$", t):
+            return "인사평가_raw"
+        if _re2.match(r"^직무능력평가_\d{4}$", t):
+            return "직무능력평가_raw"
+        return t
+
+    def _patched_spreadsheet_worksheet(self, title):
+        t = _normalize_title(title)
+        try:
+            return _ORIG_gs_worksheet(self, t)
+        except _gs2.exceptions.WorksheetNotFound:
+            # If _raw is requested but doesn't exist yet, create it
+            if t in ("인사평가_raw","직무능력평가_raw"):
+                ws = _ORIG_gs_add_ws(self, title=t, rows=5000, cols=120)
+                return ws
+            raise
+
+    def _patched_spreadsheet_add_worksheet(self, title, *args, **kwargs):
+        t = _normalize_title(title)
+        return _ORIG_gs_add_ws(self, t, *args, **kwargs)
+
+    _gs2.models.Spreadsheet.worksheet = _patched_spreadsheet_worksheet
+    _gs2.models.Spreadsheet.add_worksheet = _patched_spreadsheet_add_worksheet
+except Exception as _e_superhotfix:
+    try:
+        import streamlit as _st
+        _st.warning(f"gspread redirect hotfix failed: {_e_superhotfix}", icon="⚠️")
+    except Exception:
+        pass
+# ============================================================================
+# END SUPER HOTFIX
+# ============================================================================
