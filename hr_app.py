@@ -3177,47 +3177,45 @@ def upsert_eval_response(emp_df, year:int, eval_type:str, target_sabun:str, eval
 
 
 # ============================================================================
-# SUPER HOTFIX 2025-10-27 — Global redirect to *_raw for any gspread usage
-# Rationale: some legacy code paths call wb.worksheet(f"인사평가_{year}") directly.
-# We patch gspread.models.Spreadsheet.worksheet / add_worksheet so that any
-# yearly name is transparently mapped to the new *_raw tabs.
+# PROXY REDIRECT 2025-10-27 — wrap get_book() to force *_raw usage everywhere
+# This avoids touching gspread internals (no .models dependency).
+# Any call to get_book().worksheet(...) / add_worksheet(...) will be normalized.
 # ============================================================================
-try:
-    import re as _re2, gspread as _gs2
-    _ORIG_gs_worksheet = _gs2.models.Spreadsheet.worksheet
-    _ORIG_gs_add_ws    = _gs2.models.Spreadsheet.add_worksheet
+import re as _re_proxy
 
-    def _normalize_title(_t:str)->str:
-        t = str(_t)
-        if _re2.match(r"^인사평가_\d{4}$", t):
+_ORIG_get_book = get_book
+class _SpreadsheetProxy:
+    def __init__(self, real):
+        self._real = real
+    def _norm(self, title:str)->str:
+        t = str(title)
+        if _re_proxy.match(r"^인사평가_\d{4}$", t):
             return "인사평가_raw"
-        if _re2.match(r"^직무능력평가_\d{4}$", t):
+        if _re_proxy.match(r"^직무능력평가_\d{4}$", t):
             return "직무능력평가_raw"
         return t
-
-    def _patched_spreadsheet_worksheet(self, title):
-        t = _normalize_title(title)
+    # intercept
+    def worksheet(self, title):
+        t = self._norm(title)
         try:
-            return _ORIG_gs_worksheet(self, t)
-        except _gs2.exceptions.WorksheetNotFound:
-            # If _raw is requested but doesn't exist yet, create it
+            return self._real.worksheet(t)
+        except Exception as e:
+            # create raw sheet on demand
             if t in ("인사평가_raw","직무능력평가_raw"):
-                ws = _ORIG_gs_add_ws(self, title=t, rows=5000, cols=120)
-                return ws
+                try:
+                    return self._real.add_worksheet(title=t, rows=5000, cols=120)
+                except Exception:
+                    pass
             raise
+    def add_worksheet(self, title, *args, **kwargs):
+        t = self._norm(title)
+        return self._real.add_worksheet(title=t, *args, **kwargs)
+    # delegate everything else
+    def __getattr__(self, name):
+        return getattr(self._real, name)
 
-    def _patched_spreadsheet_add_worksheet(self, title, *args, **kwargs):
-        t = _normalize_title(title)
-        return _ORIG_gs_add_ws(self, t, *args, **kwargs)
-
-    _gs2.models.Spreadsheet.worksheet = _patched_spreadsheet_worksheet
-    _gs2.models.Spreadsheet.add_worksheet = _patched_spreadsheet_add_worksheet
-except Exception as _e_superhotfix:
-    try:
-        import streamlit as _st
-        _st.warning(f"gspread redirect hotfix failed: {_e_superhotfix}", icon="⚠️")
-    except Exception:
-        pass
+def get_book():
+    return _SpreadsheetProxy(_ORIG_get_book())
 # ============================================================================
-# END SUPER HOTFIX
+# END PROXY REDIRECT
 # ============================================================================
