@@ -1199,14 +1199,11 @@ def read_my_eval_rows(year: int, sabun: str) -> pd.DataFrame:
     return df
 
 def tab_eval(emp_df: pd.DataFrame):
-    # --- Safe defaults to avoid NameError ---
+    # --- UI/session defaults (safe against NameError) ---
     import streamlit as st
     st.session_state.setdefault('eval2_edit_mode', False)
-    st.session_state.setdefault('eval2_editable_col_name', '자기평가')
-    edit_mode = bool(st.session_state['eval2_edit_mode'])
-    editable_col_name = str(st.session_state['eval2_editable_col_name'])
-    col_cfg = {}
-
+    st.session_state.setdefault('glob_target_sabun', None)
+    st.session_state.setdefault('glob_target_name', None)
     """인사평가 탭 (심플·자동 라우팅)
     - 역할: employee / manager / admin
     - 유형 자동결정:
@@ -1375,6 +1372,48 @@ def tab_eval(emp_df: pd.DataFrame):
     else:
         editable_col_name = "1차평가" if is_manager_role(me_sabun) else "2차평가"
         eval_type = "1차" if editable_col_name == "1차평가" else "2차"
+    # --- Control Bar: 대상자 선택 / 제출시각 / 수정모드 ---
+    # Build target options based on role
+    sabun_to_name = {str(row['사번']): str(row['이름']) for _, row in emp_df.iterrows() if '사번' in row and '이름' in row}
+    allowed = set()
+    try:
+        # Admin: everyone; Manager: subordinates + self; Employee: self only
+        if role == 'admin':
+            allowed = set(sabun_to_name.keys())
+        elif role == 'manager':
+            allowed = get_allowed_sabuns(emp_df, me_sabun, include_self=True)
+        else:
+            allowed = {me_sabun}
+    except Exception:
+        allowed = {me_sabun}
+    opts = [(s, sabun_to_name.get(s, s)) for s in sorted(allowed)]
+    if not opts:
+        opts = [(me_sabun, sabun_to_name.get(me_sabun, me_name))]
+    # Determine current index
+    cur = st.session_state.get('glob_target_sabun') or target_sabun
+    try:
+        idx = next((i for i,(s,_) in enumerate(opts) if s == cur), 0)
+    except Exception:
+        idx = 0
+    c1, c2, c3 = st.columns([1, 1, 1])
+    with c1:
+        year = st.number_input('연도', min_value=2000, max_value=2100, value=int(year), step=1, key='eval2_year')
+    with c2:
+        sel = st.selectbox('대상자', options=list(range(len(opts))),
+                           format_func=lambda i: f"{opts[i][1]}({opts[i][0]})", index=idx, key='eval2_target_idx')
+        target_sabun, target_name = opts[sel]
+        st.session_state['glob_target_sabun'] = target_sabun
+        st.session_state['glob_target_name'] = target_name
+    with c3:
+        st.session_state['eval2_edit_mode'] = st.toggle('수정모드', value=st.session_state.get('eval2_edit_mode', False), key='eval2_toggle')
+        edit_mode = bool(st.session_state['eval2_edit_mode'])
+    # 제출시각 표시
+    try:
+        _saved_scores, _saved_meta = read_eval_saved_scores(int(year), eval_type, target_sabun, me_sabun)
+        _ts = str(_saved_meta.get('제출시각') or '-')
+        st.caption(f"제출시각: {_ts}")
+    except Exception:
+        pass
 
     # Visible columns (minimal)
     visible_cols = ["자기평가","1차평가","2차평가"]
@@ -1438,7 +1477,7 @@ def tab_eval(emp_df: pd.DataFrame):
         "내용": st.column_config.TextColumn("내용", disabled=True),
     }
     if "자기평가" in visible_cols:
-        col_cfg["자기평가"] = st.column_config.NumberColumn("자기평가", min_value=1, max_value=5, step=1, help="자기평가 1~5점", disabled=(editable_col_name != "자기평가" or not edit_mode))
+        col_cfg["자기평가"] = st.column_config.NumberColumn("자기평가", min_value=1, max_value=5, step=1, help="자기평가 1~5점", disabled=(editable_col_name!="자기평가" or not edit_mode))
     if "1차평가" in visible_cols:
         col_cfg["1차평가"] = st.column_config.NumberColumn("1차평가", min_value=1, max_value=5, step=1, help="1차평가 1~5점", disabled=(editable_col_name!="1차평가" or not edit_mode))
     if "2차평가" in visible_cols:
