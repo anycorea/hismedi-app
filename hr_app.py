@@ -433,6 +433,68 @@ _WS_TTL, _HDR_TTL = 120, 120
 _VAL_CACHE: dict[str, Tuple[float, list]] = {}
 _VAL_TTL = 90
 
+# ===== ENHANCED PROXY 2025-10-27 — normalize *_raw everywhere =====
+import re as _re_proxy2
+def _normalize_title2(title: str) -> str:
+    t = str(title)
+    if _re_proxy2.match(r"^인사평가_\d{4}$", t):
+        return "인사평가_raw"
+    if _re_proxy2.match(r"^직무능력평가_\d{4}$", t):
+        return "직무능력평가_raw"
+    return t
+def _normalize_range_notation(r: str) -> str:
+    s = str(r)
+    if "!" in s:
+        sheet, rest = s.split("!", 1)
+        sh = sheet.strip().strip("'").strip('"')
+        sh2 = _normalize_title2(sh)
+        if sh2 != sh:
+            if sheet.strip().startswith(("'", '"')):
+                sheet_out = f"'{sh2}'" if sheet.strip().startswith("'") else f'"{sh2}"'
+            else:
+                sheet_out = sh2
+            return f"{sheet_out}!{rest}"
+    return s
+_ORIG_get_book2 = get_book
+class _SpreadsheetProxy2:
+    def __init__(self, real):
+        self._real = real
+    def worksheet(self, title):
+        t = _normalize_title2(title)
+        try:
+            ws_real = self._real.worksheet(t)
+        except Exception:
+            if t in ("인사평가_raw","직무능력평가_raw"):
+                ws_real = self._real.add_worksheet(title=t, rows=5000, cols=120)
+            else:
+                raise
+        return _WorksheetProxy2(ws_real, self)
+    def add_worksheet(self, title, *args, **kwargs):
+        t = _normalize_title2(title)
+        ws_real = self._real.add_worksheet(title=t, *args, **kwargs)
+        return _WorksheetProxy2(ws_real, self)
+    def values_batch_update(self, body: dict):
+        body = dict(body or {})
+        data = body.get("data", [])
+        new_data = []
+        for item in data:
+            item = dict(item)
+            if "range" in item:
+                item["range"] = _normalize_range_notation(item["range"])
+            new_data.append(item)
+        body["data"] = new_data
+        return self._real.values_batch_update(body)
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+class _WorksheetProxy2:
+    def __init__(self, real_ws, parent_proxy_spreadsheet):
+        self._real_ws = real_ws
+        self.spreadsheet = parent_proxy_spreadsheet
+    def __getattr__(self, name):
+        return getattr(self._real_ws, name)
+def get_book():
+    return _SpreadsheetProxy2(_ORIG_get_book2())
+# ===== END ENHANCED PROXY =====
 def _ws_values(ws, key: str | None = None):
     key = key or getattr(ws, 'title', '') or 'ws_values'
     now = time.time()
@@ -658,7 +720,7 @@ AUTH_SHEET="권한"
 
 EVAL_ITEMS_SHEET = st.secrets.get("sheets", {}).get("EVAL_ITEMS_SHEET", "평가_항목")
 EVAL_ITEM_HEADERS = ["항목ID","항목","내용","순서","활성","비고","설명","유형","구분"]
-EVAL_RESP_SHEET_PREFIX = "인사평가_"
+EVAL_RESP_SHEET_PREFIX = "인사평가_raw"
 EVAL_BASE_HEADERS = ["연도","평가유형","평가대상사번","평가대상이름","평가자사번","평가자이름","총점","상태","제출시각","잠금"]
 
 AUTH_HEADERS=["사번","이름","역할","범위유형","부서1","부서2","대상사번","활성","비고"]
@@ -912,8 +974,7 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
         st.dataframe(view[cols], use_container_width=True, height=(360 if not show_dashboard_cols else 420), hide_index=True)
 
 def _eval_sheet_name(year: int | str) -> str: return f"{EVAL_RESP_SHEET_PREFIX}{int(year)}"
-
-
+    return "인사평가_raw"
 def ensure_eval_items_sheet():
     wb=get_book()
     try:
@@ -2154,7 +2215,7 @@ COMP_SIMPLE_HEADERS = [
     "상태","제출시각","잠금"
 ]
 def _simp_sheet_name(year:int|str)->str: return f"{COMP_SIMPLE_PREFIX}{int(year)}"
-
+    return "직무능력평가_raw"
 def _ensure_comp_simple_sheet(year:int):
     wb=get_book(); name=_simp_sheet_name(year)
     try:
@@ -3025,281 +3086,3 @@ def gs_flush():
                 raise
     st.session_state.gs_queue = []
 # ===== End helpers =====
-
-
-# ============================================================================
-# HOTFIX 2025-10-27 — Force *_raw sheet usage + backward-compatible score write
-# This block redirects any dynamic yearly sheet names to the new *_raw tabs
-# and ensures eval scores write to both S-codes (S01..) and legacy 점수_ITM### if present.
-# ============================================================================
-
-# --- 0) Redirect dynamic titles to *_raw (affects all _ws() usages) ---
-_ORIG__ws = _ws
-def _ws(title: str):
-    import re as _re
-    t = str(title)
-    if _re.match(r"^인사평가_\d{4}$", t):
-        t = "인사평가_raw"
-    elif _re.match(r"^직무능력평가_\d{4}$", t):
-        t = "직무능력평가_raw"
-    return _ORIG__ws(t)
-
-# Also override the name builders so add_worksheet() never creates yearly tabs.
-def _eval_sheet_name(year: int | str) -> str:
-    return "인사평가_raw"
-
-def _simp_sheet_name(year: int | str) -> str:
-    return "직무능력평가_raw"
-
-# --- 1) 인사평가: ensure header includes S01.. and write both formats if present ---
-def _s_codes_for_items():
-    items = read_eval_items_df(True)
-    if items is None or items.empty:
-        return [], [], items
-    if "순서" in items.columns:
-        items = items.sort_values(["순서","항목"]).reset_index(drop=True)
-    else:
-        items = items.sort_values(["항목"]).reset_index(drop=True)
-    s_codes = [f"S{i+1:02d}" for i in range(len(items))]
-    item_ids = [str(x) for x in items["항목ID"].tolist()] if "항목ID" in items.columns else []
-    return s_codes, item_ids, items
-
-def _ensure_eval_resp_sheet(year:int, item_ids:list[str]):
-    name=_eval_sheet_name(year)  # -> 인사평가_raw
-    wb=get_book()
-    try:
-        ws=_ws(name)
-    except WorksheetNotFound:
-        ws=_retry(wb.add_worksheet, title=name, rows=5000, cols=120)
-        _retry(ws.update, "A1", [["연도","평가유형","평가대상사번","평가대상이름","평가자사번","평가자이름","총점","상태","잠금","제출시각","row_key"]])
-    header=_retry(ws.row_values,1) or []
-    hset=set(header)
-    base = ["연도","평가유형","평가대상사번","평가대상이름","평가자사번","평가자이름","총점","상태","잠금","제출시각","row_key"]
-    need = [c for c in base if c not in hset]
-
-    s_codes, item_ids2, _ = _s_codes_for_items()
-    # prefer S-codes
-    for s in s_codes:
-        if s not in hset:
-            need.append(s)
-
-    if need:
-        _retry(ws.update, "1:1", [header + need])
-        header = header + need
-    _HDR_CACHE[name] = (time.time(), header, {n: i+1 for i, n in enumerate(header)})
-    return ws
-
-def upsert_eval_response(emp_df, year:int, eval_type:str, target_sabun:str, evaluator_sabun:str, scores:dict, status="제출")->dict:
-    # scores: {항목ID: 점수}
-    s_codes, item_ids, _ = _s_codes_for_items()
-    ws = _ensure_eval_resp_sheet(year, item_ids)
-    header = _retry(ws.row_values, 1) or []
-    hmap = {n: i+1 for i, n in enumerate(header)}
-
-    def _clip(v):
-        try: v = int(v)
-        except: v = 3
-        return max(1, min(5, v))
-
-    # order by eval_items
-    scores_list = []
-    for iid in item_ids:
-        v = scores.get(iid, None)
-        scores_list.append(_clip(v) if v is not None else None)
-
-    # total (100 scale), ignore None
-    valid = [v for v in scores_list if isinstance(v, int)]
-    total = round(sum(valid) * (100.0 / max(1, len(item_ids) * 5)), 1) if item_ids else 0.0
-
-    tname = _emp_name_by_sabun(emp_df, target_sabun)
-    ename = _emp_name_by_sabun(emp_df, evaluator_sabun)
-    now = kst_now_str()
-
-    values = _ws_values(ws)
-    cY  = hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
-
-    row_idx = 0
-    for i in range(2, len(values)+1):
-        r = values[i-1]
-        try:
-            if (str(r[cY-1]).strip()==str(year) and str(r[cT-1]).strip()==str(eval_type)
-                and str(r[cTS-1]).strip()==str(target_sabun) and str(r[cES-1]).strip()==str(evaluator_sabun)):
-                row_idx = i; break
-        except Exception: pass
-
-    # Prepare payload dict of per-column updates
-    payload = {
-        "연도": int(year), "평가유형": str(eval_type),
-        "평가대상사번": str(target_sabun), "평가대상이름": tname,
-        "평가자사번": str(evaluator_sabun), "평가자이름": ename,
-        "총점": total, "상태": status, "제출시각": now
-    }
-    # S-codes if present
-    for idx, v in enumerate(scores_list, start=1):
-        if v is not None:
-            col = f"S{idx:02d}"
-            if col in hmap:
-                payload[col] = int(v)
-    # Legacy '점수_ITM###' if present
-    for iid, v in zip(item_ids, scores_list):
-        if v is not None:
-            col = f"점수_{iid}"
-            if col in hmap:
-                payload[col] = int(v)
-
-    if row_idx == 0:
-        buf=[""]*len(header)
-        for k,v in payload.items():
-            c=hmap.get(k)
-            if c: buf[c-1]=v
-        _retry(ws.append_row, buf, value_input_option="USER_ENTERED")
-        try: st.cache_data.clear()
-        except Exception: pass
-        return {"action":"insert","total":total}
-    else:
-        updates=[]
-        max_c=0
-        for k,v in payload.items():
-            c=hmap.get(k)
-            if not c: continue
-            a1=gspread.utils.rowcol_to_a1(int(row_idx), int(c))
-            updates.append({"range": f"'{ws.title}'!{a1}", "values": [[v]]})
-            if c>max_c: max_c=c
-        if updates:
-            _ensure_capacity(ws, int(row_idx), int(max_c))
-            _retry(ws.spreadsheet.values_batch_update, {"valueInputOption":"USER_ENTERED","data":updates})
-        try: st.cache_data.clear()
-        except Exception: pass
-        return {"action":"update","total":total}
-# ============================================================================
-# END HOTFIX
-# ============================================================================
-
-
-# ============================================================================
-# PROXY REDIRECT 2025-10-27 — wrap get_book() to force *_raw usage everywhere
-# This avoids touching gspread internals (no .models dependency).
-# Any call to get_book().worksheet(...) / add_worksheet(...) will be normalized.
-# ============================================================================
-import re as _re_proxy
-
-_ORIG_get_book = get_book
-class _SpreadsheetProxy:
-    def __init__(self, real):
-        self._real = real
-    def _norm(self, title:str)->str:
-        t = str(title)
-        if _re_proxy.match(r"^인사평가_\d{4}$", t):
-            return "인사평가_raw"
-        if _re_proxy.match(r"^직무능력평가_\d{4}$", t):
-            return "직무능력평가_raw"
-        return t
-    # intercept
-    def worksheet(self, title):
-        t = self._norm(title)
-        try:
-            return self._real.worksheet(t)
-        except Exception as e:
-            # create raw sheet on demand
-            if t in ("인사평가_raw","직무능력평가_raw"):
-                try:
-                    return self._real.add_worksheet(title=t, rows=5000, cols=120)
-                except Exception:
-                    pass
-            raise
-    def add_worksheet(self, title, *args, **kwargs):
-        t = self._norm(title)
-        return self._real.add_worksheet(title=t, *args, **kwargs)
-    # delegate everything else
-    def __getattr__(self, name):
-        return getattr(self._real, name)
-
-def get_book():
-    return _SpreadsheetProxy(_ORIG_get_book())
-# ============================================================================
-# END PROXY REDIRECT
-# ============================================================================
-
-
-# ============================================================================
-# ENHANCED PROXY 2025-10-27 — normalize ranges inside values_batch_update too,
-# and ensure Worksheet.spreadsheet refers to the proxy (so ws.spreadsheet.*
-# also gets normalized). This covers the code path using
-# ws.spreadsheet.values_batch_update(... {"data":[{"range":"인사평가_2025!A1", ...}] })
-# ============================================================================
-import re as _re_proxy2
-
-def _normalize_title2(title: str) -> str:
-    t = str(title)
-    if _re_proxy2.match(r"^인사평가_\d{4}$", t):
-        return "인사평가_raw"
-    if _re_proxy2.match(r"^직무능력평가_\d{4}$", t):
-        return "직무능력평가_raw"
-    return t
-
-def _normalize_range_notation(r: str) -> str:
-    # "'인사평가_2025'!A1", "인사평가_2025!A1:B2"
-    s = str(r)
-    # strip quotes for detection
-    if "!" in s:
-        sheet, rest = s.split("!", 1)
-        sh = sheet.strip().strip("'").strip('"')
-        sh2 = _normalize_title2(sh)
-        if sh2 != sh:
-            # restore quoting if existed
-            if sheet.strip().startswith(("'", '"')):
-                if sheet.strip().startswith("'"):
-                    sheet_out = f"'{sh2}'"
-                else:
-                    sheet_out = f'"{sh2}"'
-            else:
-                sheet_out = sh2
-            return f"{sheet_out}!{rest}"
-    return s
-
-_ORIG_get_book2 = get_book
-
-class _SpreadsheetProxy2:
-    def __init__(self, real):
-        self._real = real
-    def worksheet(self, title):
-        t = _normalize_title2(title)
-        try:
-            ws_real = self._real.worksheet(t)
-        except Exception:
-            if t in ("인사평가_raw","직무능력평가_raw"):
-                ws_real = self._real.add_worksheet(title=t, rows=5000, cols=120)
-            else:
-                raise
-        return _WorksheetProxy2(ws_real, self)
-    def add_worksheet(self, title, *args, **kwargs):
-        t = _normalize_title2(title)
-        ws_real = self._real.add_worksheet(title=t, *args, **kwargs)
-        return _WorksheetProxy2(ws_real, self)
-    def values_batch_update(self, body: dict):
-        body = dict(body or {})
-        data = body.get("data", [])
-        new_data = []
-        for item in data:
-            item = dict(item)
-            if "range" in item:
-                item["range"] = _normalize_range_notation(item["range"])
-            new_data.append(item)
-        body["data"] = new_data
-        return self._real.values_batch_update(body)
-    # delegate other attributes/methods
-    def __getattr__(self, name):
-        return getattr(self._real, name)
-
-class _WorksheetProxy2:
-    def __init__(self, real_ws, parent_proxy_spreadsheet):
-        self._real_ws = real_ws
-        self.spreadsheet = parent_proxy_spreadsheet  # critical: proxy, not real
-    def __getattr__(self, name):
-        return getattr(self._real_ws, name)
-
-def get_book():
-    return _SpreadsheetProxy2(_ORIG_get_book2())
-# ============================================================================
-# END ENHANCED PROXY
-# ============================================================================
