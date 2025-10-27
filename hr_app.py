@@ -1199,6 +1199,14 @@ def read_my_eval_rows(year: int, sabun: str) -> pd.DataFrame:
     return df
 
 def tab_eval(emp_df: pd.DataFrame):
+    # --- Safe defaults to avoid NameError ---
+    import streamlit as st
+    st.session_state.setdefault('eval2_edit_mode', False)
+    st.session_state.setdefault('eval2_editable_col_name', '자기평가')
+    edit_mode = bool(st.session_state['eval2_edit_mode'])
+    editable_col_name = str(st.session_state['eval2_editable_col_name'])
+    col_cfg = {}
+
     """인사평가 탭 (심플·자동 라우팅)
     - 역할: employee / manager / admin
     - 유형 자동결정:
@@ -1292,7 +1300,7 @@ def tab_eval(emp_df: pd.DataFrame):
             scores = {}
             for i, iid in enumerate(item_ids):
                 sname = f"S{str(i+1).zfill(2)}"
-                col = hmap.get(sname)
+                col = hmap.get(sname) or hmap.get(f"점수_{sname}")
                 if not col: continue
                 if col-1 < len(row):
                     v = str(row[col-1]).strip()
@@ -1327,7 +1335,7 @@ def tab_eval(emp_df: pd.DataFrame):
             out: dict[str,int] = {}
             for i, iid in enumerate(item_ids):
                 sname = f"S{str(i+1).zfill(2)}"
-                col = hmap.get(sname)
+                col = hmap.get(sname) or hmap.get(f"점수_{sname}")
                 if col and col-1 < len(picked):
                     try:
                         v = int(float(str(picked[col-1]).strip() or "0"))
@@ -1430,7 +1438,7 @@ def tab_eval(emp_df: pd.DataFrame):
         "내용": st.column_config.TextColumn("내용", disabled=True),
     }
     if "자기평가" in visible_cols:
-        col_cfg["자기평가"] = st.column_config.NumberColumn("자기평가", min_value=1, max_value=5, step=1, help="자기평가 1~5점", disabled=(editable_col_name!="자기평가" or not edit_mode))
+        col_cfg["자기평가"] = st.column_config.NumberColumn("자기평가", min_value=1, max_value=5, step=1, help="자기평가 1~5점", disabled=(editable_col_name != "자기평가" or not edit_mode))
     if "1차평가" in visible_cols:
         col_cfg["1차평가"] = st.column_config.NumberColumn("1차평가", min_value=1, max_value=5, step=1, help="1차평가 1~5점", disabled=(editable_col_name!="1차평가" or not edit_mode))
     if "2차평가" in visible_cols:
