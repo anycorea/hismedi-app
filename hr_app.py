@@ -1864,18 +1864,20 @@ def ensure_jobdesc_sheet():
         need = [h for h in JOBDESC_HEADERS if h not in header]
         if need:
             if AUTO_FIX_HEADERS:
-                _retry(ws.update, '1:1', [header + need])
+                _retry(ws.update, "1:1", [header + need])
             else:
                 try:
-                    st.warning('직무기술서 시트 헤더에 다음 컬럼이 없습니다: ' + ', '.join(need) + '
-→ 시트를 직접 수정한 뒤 좌측 동기화(🔄) 버튼을 눌러주세요.', icon='⚠️')
+                    st.warning(
+                        "직무기술서 시트 헤더에 다음 컬럼이 없습니다: " + ", ".join(need) + "\n"
+                        "→ 시트를 직접 수정한 뒤 좌측 동기화(🔄) 버튼을 눌러주세요.",
+                        icon="⚠️"
+                    )
                 except Exception:
                     pass
         return ws
     except Exception:
-        # WorksheetNotFound 등
         ws = _retry(wb.add_worksheet, title=JOBDESC_SHEET, rows=2000, cols=80)
-        _retry(ws.update, 'A1', [JOBDESC_HEADERS])
+        _retry(ws.update, "A1", [JOBDESC_HEADERS])
         return ws
 
 def read_jobdesc_df(_rev: int = 0) -> pd.DataFrame:
