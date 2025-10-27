@@ -1271,9 +1271,8 @@ def tab_eval(emp_df: pd.DataFrame):
         except: pass
         return False
 
-
     def read_eval_saved_scores(year: int, eval_type: str, target_sabun: str, evaluator_sabun: str) -> Tuple[dict, dict]:
-        """현 평가자 기준 저장된 점수/메타 로드 (S-only)"""
+        """현 평가자 기준 저장된 점수/메타 로드"""
         try:
             ws = _ensure_eval_resp_sheet(int(year), item_ids)
             header = _retry(ws.row_values, 1) or []; hmap = {n: i+1 for i, n in enumerate(header)}
@@ -1290,15 +1289,12 @@ def tab_eval(emp_df: pd.DataFrame):
             if row_idx == 0: return {}, {}
             row = values[row_idx-1]
             scores = {}
-            for i, iid in enumerate(item_ids):
-                sname = f"S{str(i+1).zfill(2)}"
-                col = hmap.get(sname) or hmap.get(f"점수_{sname}")
-                if not col: continue
-                if col-1 < len(row):
-                    v = str(row[col-1]).strip()
-                    if v != "" and v.lower() != "none":
-                        try: scores[iid] = int(float(v))
-                        except: pass
+            for iid in item_ids:
+                col = hmap.get(f"점수_{iid}")
+                if col:
+                    try: v = int(str(row[col-1]).strip() or "0")
+                    except: v = 0
+                    if v: scores[iid] = v
             meta = {}
             for k in ["상태","잠금","제출시각","총점"]:
                 c = hmap.get(k)
@@ -1306,12 +1302,104 @@ def tab_eval(emp_df: pd.DataFrame):
             return scores, meta
         except Exception:
             return {}, {}
+
+# --- 대상 선택 + 유형 자동결정 -------------------------------
+    glob_sab, glob_name = get_global_target()
+    st.session_state.setdefault("eval2_target_sabun", (glob_sab if my_role!="employee" else me_sabun))
+    st.session_state.setdefault("eval2_target_name",  (glob_name if my_role!="employee" else me_name))
+    st.session_state.setdefault("eval2_edit_mode",    False)
+
+    if my_role == "employee":
+        target_sabun, target_name = me_sabun, me_name
+    else:
+        _sabuns = view["사번"].astype(str).tolist()
+        _names  = view["이름"].astype(str).tolist()
+        _d2     = view["부서2"].astype(str).tolist() if "부서2" in view.columns else [""] * len(_sabuns)
+        _opts   = [f"{s} - {n} - {d2}" for s, n, d2 in zip(_sabuns, _names, _d2)]
+        _target = st.session_state.get("eval2_target_sabun", (_sabuns[_sabuns.index(me_sabun)] if (my_role=="manager" and me_sabun in _sabuns) else (_sabuns[0] if _sabuns else "")))
+        _idx    = _sabuns.index(_target) if _target in _sabuns else 0
+        _idx2 = (1 + _sabuns.index(_target)) if (_target in _sabuns) else 0
+        _sel = st.selectbox("대상자 선택", ["(선택)"] + _opts, index=_idx2, key="eval2_pick_editor_select")
+        if _sel == "(선택)":
+            st.session_state["eval2_target_sabun"] = ""
+            st.session_state["eval2_target_name"]  = ""
+            st.info("대상자를 선택하세요.", icon="👈")
+            return
+        _sel_sab = _sel.split(" - ",1)[0] if isinstance(_sel,str) and " - " in _sel else (_sabuns[_idx] if _sabuns else "")
+        st.session_state["eval2_target_sabun"] = str(_sel_sab)
+        try:
+            st.session_state["eval2_target_name"] = str(_names[_sabuns.index(_sel_sab)]) if _sel_sab in _sabuns else ""
+        except Exception:
+            st.session_state["eval2_target_name"] = ""
+        target_sabun = st.session_state["eval2_target_sabun"]
+        target_name  = st.session_state["eval2_target_name"]
+
+    st.success(f"대상자: {target_name} ({target_sabun})", icon="✅")
+
+    # === 제출시각 배너(인사평가) ===
+    try:
+        _emap = get_eval_summary_map_cached(int(year), st.session_state.get('eval_rev', 0))
+        def _b(stage:str) -> str:
+            try:
+                return (str(_emap.get((str(target_sabun), stage), ("",""))[1]).strip() or "미제출")
+            except Exception:
+                return "미제출"
+        _banner = f"🕒 제출시각  |  [자기] {_b('자기')}  |  [1차] {_b('1차')}  |  [2차] {_b('2차')}"
+        show_submit_banner(_banner)
+    except Exception:
+        pass
+
+    target_role = role_of(target_sabun)
+    if my_role == "employee":
+        eval_type = "자기"
+    elif my_role == "manager":
+        eval_type = "자기" if target_sabun == me_sabun else "1차"
+    else:  # admin
+        eval_type = "1차" if target_role == "manager" else "2차"
+
+    st.info(f"평가유형: **{eval_type}** (자동 결정)", icon="ℹ️")
+
+# --- 선행조건 / 잠금 -------------------------------
+    prereq_ok, prereq_msg = True, ""
+    if eval_type == "1차":
+        if not has_submitted(year, "자기", target_sabun):
+            prereq_ok = False; prereq_msg = "대상자의 '자기평가'가 제출되어야 1차평가를 입력할 수 있습니다."
+    elif eval_type == "2차":
+        if not has_submitted(year, "1차", target_sabun):
+            prereq_ok = False; prereq_msg = "대상자의 '1차평가'가 제출되어야 2차평가를 입력할 수 있습니다."
+
+    saved_scores, saved_meta = read_eval_saved_scores(int(year), eval_type, target_sabun, me_sabun)
+    is_locked = (str(saved_meta.get("잠금","")).upper()=="Y") or (str(saved_meta.get("상태","")).strip() in {"제출","완료"})
+    # 직원 자기평가: 제출되어 있으면 항상 잠금
+    if my_role=="employee" and eval_type=="자기" and has_submitted(year,"자기",me_sabun):
+        is_locked = True
+
+    if is_locked:
+        st.info("이 응답은 잠겨 있습니다.", icon="🔒")
+    if not prereq_ok:
+        st.warning(prereq_msg, icon="🧩")
+
+# --- 보기/수정 모드 -------------------------------
+    if st.button(("수정모드로 전환" if not st.session_state["eval2_edit_mode"] else "보기모드로 전환"),
+                 use_container_width=True, key="eval2_toggle"):
+        st.session_state["eval2_edit_mode"] = not st.session_state["eval2_edit_mode"]
+        st.rerun()
+    # '실제' 편집 가능 여부는 선행조건/잠금도 반영
+    requested_edit = bool(st.session_state["eval2_edit_mode"])
+    edit_mode = requested_edit and prereq_ok and (not is_locked)
+    st.caption(f"현재: **{'수정모드' if edit_mode else '보기모드'}**")
+
+# --- 점수 입력 UI: 표만 -------------------------------
+    st.markdown("#### 점수 입력 (자기/1차/2차) — 표에서 직접 수정하세요.")
+
+    # ◇◇ Helper: 특정 평가유형(자기/1차/2차)의 '대상자 기준' 최신 점수(평가자 무관) 로드
     def _stage_scores_any_evaluator(_year: int, _etype: str, _target_sabun: str) -> dict[str, int]:
         try:
             ws = _ensure_eval_resp_sheet(int(_year), item_ids)
             header = _retry(ws.row_values, 1) or []; hmap = {n: i+1 for i, n in enumerate(header)}
             values = _ws_values(ws)
             cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cDT=hmap.get("제출시각")
+            # 최신 제출시각 우선
             picked = None; picked_dt = ""
             for r in values[1:]:
                 try:
@@ -1325,18 +1413,50 @@ def tab_eval(emp_df: pd.DataFrame):
                     pass
             if not picked: return {}
             out: dict[str,int] = {}
-            for i, iid in enumerate(item_ids):
-                sname = f"S{str(i+1).zfill(2)}"
-                col = hmap.get(sname) or hmap.get(f"점수_{sname}")
+            for iid in item_ids:
+                col = hmap.get(f"점수_{iid}")
                 if col and col-1 < len(picked):
                     try:
-                        v = int(float(str(picked[col-1]).strip() or "0"))
+                        v = int(str(picked[col-1]).strip() or "0")
                         if v: out[iid] = v
                     except Exception:
                         pass
             return out
         except Exception:
             return {}
+
+    # ◇◇ 일괄 적용(현재 사용자의 '편집 대상' 컬럼에만 적용)
+    _year_safe = int(st.session_state.get("eval2_year", datetime.now(tz=tz_kst()).year))
+    _eval_type_safe = str(st.session_state.get("eval_type") or st.session_state.get("eval2_type") or ("자기"))
+    kbase = f"E2_{_year_safe}_{_eval_type_safe}_{me_sabun}_{target_sabun}"
+    slider_key = f"{kbase}_slider_multi"
+    if slider_key not in st.session_state:
+        if saved_scores:
+            avg = round(sum(saved_scores.values()) / max(1, len(saved_scores)))
+            st.session_state[slider_key] = int(min(5, max(1, avg)))
+        else:
+            st.session_state[slider_key] = 3
+    bulk_score = st.slider("일괄 점수(현재 편집 컬럼)", 1, 5, step=1, key=slider_key, disabled=not edit_mode)
+    if st.button("일괄 적용", use_container_width=True, disabled=not edit_mode, key=f"bulk_multi_{kbase}"):
+        for _iid in item_ids:
+            st.session_state[f"eval2_seg_{_iid}_{kbase}"] = str(int(bulk_score))
+        st.toast(f"모든 항목에 {bulk_score}점 적용", icon="✅")
+
+    # ◇◇ 현재 편집 대상 컬럼/표시 컬럼 결정
+    editable_col_name = {"자기":"자기평가","1차":"1차평가","2차":"2차평가"}.get(str(eval_type), "자기평가")
+    if my_role == "employee":
+        visible_cols = ["자기평가"]
+    elif eval_type == "1차":
+        visible_cols = ["자기평가","1차평가"]
+    else:  # eval_type == "2차": 자기평가도 함께 보여줌
+        visible_cols = ["자기평가","1차평가","2차평가"]
+
+    # ◇◇ 시드 데이터 구성
+    # - 편집 컬럼: 세션상태 or 현재 저장된 점수(saved_scores)
+    # - 참조 컬럼: 가장 최근 제출된 이전 단계 점수
+    stage_self = _stage_scores_any_evaluator(int(year), "자기", str(target_sabun)) if "자기평가" in visible_cols else {}
+    stage_1st  = _stage_scores_any_evaluator(int(year), "1차", str(target_sabun))  if "1차평가" in visible_cols else {}
+
     def _seed_for_editable(iid: str):
         # 기본값 공란(None)
         rkey = f"eval2_seg_{iid}_{kbase}"
