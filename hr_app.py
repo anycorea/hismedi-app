@@ -3032,62 +3032,29 @@ def gs_flush():
 # ===== End helpers =====
 
 # ============================================================================
-# JD RAW OVERRIDE 2025-10-27 — 직무기술서/승인 시트명 & 컬럼 호환
+# SIMPLE JD PATCH — no header mutations, fixed sheet names, minimal mapping
+# Author: ChatGPT
+# Date: 2025-10-27
 # ============================================================================
+
 JOBDESC_SHEET = "직무기술서_raw"
 JD_APPROVAL_SHEET = "직무기술서_승인_raw"
 
-JOBDESC_HEADERS_VER = [
-    "사번","이름","연도","ver","부서1","부서2","작성자사번","작성자이름",
-    "직군","직종","직무명","제정일","개정일","검토주기",
-    "직무개요","주업무","기타업무",
-    "필요학력","전공계열","직원공통필수교육","보수교육","기타교육","특성화교육",
-    "면허","경력(자격요건)","비고","제출시각"
-]
-
-def ensure_jobdesc_sheet():
-    wb = get_book()
-    try:
-        ws = wb.worksheet(JOBDESC_SHEET)
-        header = _retry(ws.row_values, 1) or []
-        hset = set(header)
-        has_ver = ("ver" in hset) or ("버전" in hset)
-        need = []
-        for h in JOBDESC_HEADERS_VER:
-            if h in ("ver",):
-                continue
-            if h not in hset:
-                need.append(h)
-        if not has_ver:
-            need = ["ver"] + need
-        if need:
-            _retry(ws.update, "1:1", [header + need])
-        return ws
-    except Exception:
-        ws = _retry(wb.add_worksheet, title=JOBDESC_SHEET, rows=2000, cols=80)
-        _retry(ws.update, "A1", [JOBDESC_HEADERS_VER])
-        return ws
-
 @st.cache_data(ttl=600, show_spinner=False)
 def read_jobdesc_df(_rev: int = 0) -> pd.DataFrame:
-    ensure_jobdesc_sheet()
-    ws = _ws(JOBDESC_SHEET)
+    try:
+        ws = _ws(JOBDESC_SHEET)
+    except Exception as e:
+        try: st.error(f"시트를 찾을 수 없습니다: {JOBDESC_SHEET} — {e}")
+        except Exception: pass
+        return pd.DataFrame(columns=["사번","이름","연도","ver"])
     df = pd.DataFrame(_ws_get_all_records(ws))
     if df.empty:
-        return pd.DataFrame(columns=JOBDESC_HEADERS_VER)
-    if "ver" in df.columns and "버전" not in df.columns:
-        df["버전"] = df["ver"]
-    if "버전" in df.columns and "ver" not in df.columns:
-        df["ver"] = df["버전"]
-    for c in set(JOBDESC_HEADERS_VER + ["버전","ver"]):
-        if c in df.columns:
-            df[c] = df[c].astype(str)
-    for c in ["연도","버전","ver"]:
-        if c in df.columns:
-            def _i(x):
-                try: return int(float(str(x).strip()))
-                except: return 0
-            df[c] = df[c].apply(_i)
+        return df
+    if "ver" not in df.columns and "버전" in df.columns:
+        df["ver"] = pd.to_numeric(df["버전"], errors="coerce").fillna(0).astype(int)
+    if "연도" in df.columns:
+        df["연도"] = pd.to_numeric(df["연도"], errors="coerce").fillna(0).astype(int)
     if "사번" in df.columns:
         df["사번"] = df["사번"].astype(str)
     return df
@@ -3095,150 +3062,38 @@ def read_jobdesc_df(_rev: int = 0) -> pd.DataFrame:
 def _jd_latest_for(sabun: str, year: int) -> dict | None:
     df = read_jobdesc_df(st.session_state.get("jobdesc_rev", 0))
     if df.empty: return None
-    sub = df[(df["사번"].astype(str)==str(sabun)) & (df["연도"].astype(int)==int(year))].copy()
+    sub = df[(df.get("사번","").astype(str)==str(sabun)) & (df.get("연도",0).astype(int)==int(year))].copy()
     if sub.empty: return None
-    try:
-        sub["버전"] = sub["버전"].astype(int)
-    except Exception: pass
-    sub = sub.sort_values(["버전"], ascending=[False]).reset_index(drop=True)
+    vcol = "ver" if "ver" in sub.columns else ("버전" if "버전" in sub.columns else None)
+    if vcol:
+        sub[vcol] = pd.to_numeric(sub[vcol], errors="coerce").fillna(0).astype(int)
+        sub = sub.sort_values([vcol], ascending=[False]).reset_index(drop=True)
     row = sub.iloc[0].to_dict()
     for k,v in row.items():
-        row[k] = ("" if v is None else str(v))
+        row[k] = "" if v is None else str(v)
     return row
-
-def _jobdesc_next_version(sabun: str, year: int) -> int:
-    df = read_jobdesc_df(st.session_state.get("jobdesc_rev", 0))
-    if df.empty: return 1
-    sub = df[(df["사번"]==str(sabun)) & (df["연도"].astype(int)==int(year))]
-    return 1 if sub.empty else int(sub["버전"].astype(int).max()) + 1
-
-def upsert_jobdesc(rec: dict, as_new_version: bool = False) -> dict:
-    ensure_jobdesc_sheet()
-    ws = _ws(JOBDESC_SHEET)
-    header = _retry(ws.row_values, 1)
-    hmap = {n:i+1 for i,n in enumerate(header)}
-    sabun = str(rec.get("사번","")).strip()
-    year  = int(rec.get("연도", 0))
-
-    rec["이름"] = _emp_name_by_sabun(read_emp_df(), sabun)
-
-    ver_header = "ver" if "ver" in header else ("버전" if "버전" in header else "ver")
-    if as_new_version:
-        ver = _jobdesc_next_version(sabun, year)
-    else:
-        try_ver = int(str(rec.get(ver_header, rec.get("버전", 0)) or 0))
-        if try_ver <= 0:
-            ver = _jobdesc_next_version(sabun, year)
-        else:
-            df = read_jobdesc_df(st.session_state.get("jobdesc_rev", 0))
-            exist = not df[(df["사번"] == sabun) & (df["연도"].astype(int) == year) & (df["버전"].astype(int) == int(try_ver))].empty
-            ver = try_ver if exist else 1
-
-    rec[ver_header] = int(ver)
-    rec["제출시각"] = kst_now_str()
-    rec["이름"] = _emp_name_by_sabun(read_emp_df(), sabun)
-
-    values = _ws_values(ws)
-    row_idx = 0
-    cS = hmap.get("사번")
-    cY = hmap.get("연도")
-    cV = hmap.get(ver_header, hmap.get("버전"))
-    for i in range(2, len(values)+1):
-        row = values[i-1]
-        try:
-            if str(row[cS-1]).strip()==sabun and str(row[cY-1]).strip()==str(year) and str(row[cV-1]).strip()==str(ver):
-                row_idx = i; break
-        except Exception: pass
-
-    rec_for_write = {}
-    for k, v in rec.items():
-        kk = k
-        if k == "버전": kk = ver_header
-        rec_for_write[kk] = v
-
-    def build_row():
-        buf = [""] * len(header)
-        for k, v in rec_for_write.items():
-            c = hmap.get(k)
-            if c: buf[c-1] = v
-        return buf
-
-    if row_idx == 0:
-        _retry(ws.append_row, build_row(), value_input_option="USER_ENTERED")
-        try: st.cache_data.clear()
-        except Exception: pass
-        return {"action":"insert","version": ver}
-    else:
-        _ws_batch_row(ws, row_idx, hmap, rec_for_write)
-        try: st.cache_data.clear()
-        except Exception: pass
-        return {"action":"update","version": ver}
-
-JD_APPROVAL_HEADERS_RAW = ["연도","사번","이름","ver","승인자사번","승인자이름","상태(승인/반려)","승인시각","비고"]
-
-def ensure_jd_approval_sheet():
-    wb = get_book()
-    try:
-        _ = wb.worksheet(JD_APPROVAL_SHEET)
-    except WorksheetNotFound:
-        ws = _retry(wb.add_worksheet, title=JD_APPROVAL_SHEET, rows=3000, cols=20)
-        _retry(ws.update, "1:1", [JD_APPROVAL_HEADERS_RAW])
 
 @st.cache_data(ttl=300, show_spinner=False)
 def read_jd_approval_df(_rev: int = 0) -> pd.DataFrame:
-    ensure_jd_approval_sheet()
     try:
         ws = _ws(JD_APPROVAL_SHEET)
-        df = pd.DataFrame(_ws_get_all_records(ws))
-    except Exception:
-        df = pd.DataFrame(columns=JD_APPROVAL_HEADERS_RAW)
-    for c in JD_APPROVAL_HEADERS_RAW:
-        if c not in df.columns: df[c] = ""
+    except Exception as e:
+        try: st.error(f"시트를 찾을 수 없습니다: {JD_APPROVAL_SHEET} — {e}")
+        except Exception: pass
+        return pd.DataFrame(columns=["연도","사번","이름","ver","상태","승인시각"])
+    df = pd.DataFrame(_ws_get_all_records(ws))
+    if df.empty:
+        return df
     if "상태" not in df.columns and "상태(승인/반려)" in df.columns:
         df["상태"] = df["상태(승인/반려)"]
-    if "ver" in df.columns and "버전" not in df.columns:
-        df["버전"] = df["ver"]
-    if "버전" in df.columns and "ver" not in df.columns:
-        df["ver"] = df["버전"]
-    for c in ["연도","ver","버전"]:
+    if "ver" not in df.columns and "버전" in df.columns:
+        df["ver"] = pd.to_numeric(df["버전"], errors="coerce").fillna(0).astype(int)
+    for c in ["연도","ver"]:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0).astype(int)
     if "사번" in df.columns:
         df["사번"] = df["사번"].astype(str)
     return df
-
-@st.cache_data(ttl=120, show_spinner=False)
-def get_jd_approval_map_cached(_year: int, _rev: int = 0) -> dict:
-    ensure_jd_approval_sheet()
-    try:
-        ws = _ws(JD_APPROVAL_SHEET)
-        raw = _ws_get_all_records(ws)
-        df = pd.DataFrame(raw)
-    except Exception:
-        df = pd.DataFrame(columns=JD_APPROVAL_HEADERS_RAW)
-
-    for c in JD_APPROVAL_HEADERS_RAW:
-        if c not in df.columns: df[c] = ""
-    if "상태" not in df.columns and "상태(승인/반려)" in df.columns:
-        df["상태"] = df["상태(승인/반려)"]
-    if "ver" in df.columns and "버전" not in df.columns:
-        df["버전"] = df["ver"]
-    if "버전" in df.columns and "ver" not in df.columns:
-        df["ver"] = df["버전"]
-    try:
-        df = df[df["연도"] == int(_year)]
-    except Exception:
-        df = df.iloc[0:0]
-
-    out = {}
-    if not df.empty:
-        sort_cols = [c for c in ["사번","ver","승인시각"] if c in df.columns]
-        if sort_cols:
-            df = df.sort_values(sort_cols, ascending=[True]*len(sort_cols), kind="stable").reset_index(drop=True)
-        for _, rr in df.iterrows():
-            k = (str(rr.get("사번","")), int(rr.get("ver", rr.get("버전", 0))))
-            out[k] = (str(rr.get("상태","")), str(rr.get("승인시각","")))
-    return out
 # ============================================================================
-# END JD RAW OVERRIDE
+# END SIMPLE JD PATCH
 # ============================================================================
