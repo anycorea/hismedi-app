@@ -1291,6 +1291,9 @@ def tab_eval(emp_df: pd.DataFrame):
         return
     items_sorted = items.sort_values(["순서", "항목"]).reset_index(drop=True)
     item_ids = [str(x) for x in items_sorted["항목ID"].tolist()]
+    # --- S-only mapping (force S01..Snn) ---
+    _storage_keys = [f"S{str(i+1).zfill(2)}" for i in range(len(item_ids))]
+    id2col = {iid: _storage_keys[i] for i, iid in enumerate(item_ids)}
 
 # --- 역할 판정 -------------------------------
     def is_manager_role(_sabun: str) -> bool:
