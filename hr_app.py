@@ -1173,7 +1173,9 @@ def upsert_eval_response(emp_df: pd.DataFrame, year: int, eval_type: str,
         return {"action":"insert","total":total}
     else:
         payload={"총점": total, "상태": status, "제출시각": now, "평가대상이름": tname, "평가자이름": ename}
-        for iid, sc in zip(item_ids, scores_list): payload[sname]=sc
+        for i, (iid, sc) in enumerate(zip(item_ids, scores_list), start=1):
+            sname = f"S{str(i).zfill(2)}"
+            payload[sname] = sc
         def _batch_row(ws, idx, hmap, kv):
             upd=[]
             for k,v in kv.items():
@@ -1217,7 +1219,7 @@ def tab_eval(emp_df: pd.DataFrame):
 
     items = read_eval_items_df(True)
     if items.empty:
-        st.warning("활성화된 평가 항목이 없습니다.", icon="⚠️"
+        st.warning("활성화된 평가 항목이 없습니다.", icon="⚠️")
         return
     items_sorted = items.sort_values(["순서", "항목"]).reset_index(drop=True)
     item_ids = [str(x) for x in items_sorted["항목ID"].tolist()]
@@ -3089,7 +3091,6 @@ def gs_flush():
                 raise
     st.session_state.gs_queue = []
 # ===== End helpers =====
-
 
 
 # (S-ONLY EVAL PATCH removed; unified to 항목ID 기반 열 '점수_{항목ID}' with fallbacks to Sxx if present)
