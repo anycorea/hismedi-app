@@ -110,7 +110,7 @@ def get_comp_summary_map_cached(_year: int, _rev: int = 0) -> dict:
 def get_jd_approval_map_cached(_year: int, _rev: int = 0) -> dict:
     """Return {(사번, 최신버전)->(상태, 승인시각)} for the year from 직무기술서_승인."""
     try:
-        ws = _ws("직무기술서_승인")
+        ws = _ws("직무기술서_승인_raw")
         df = pd.DataFrame(_ws_get_all_records(ws))
     except Exception:
         df = pd.DataFrame(columns=["연도","사번","버전","상태","승인시각"])
@@ -911,7 +911,7 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
     else:
         st.dataframe(view[cols], use_container_width=True, height=(360 if not show_dashboard_cols else 420), hide_index=True)
 
-def _eval_sheet_name(year: int | str) -> str: return "인사평가_raw"
+def _eval_sheet_name(year: int | str) -> str: return f"{EVAL_RESP_SHEET_PREFIX}{int(year)}"
 
 
 def ensure_eval_items_sheet():
@@ -974,8 +974,7 @@ def _ensure_eval_resp_sheet(year:int, item_ids:list[str]):
     except WorksheetNotFound:
         ws=_retry(wb.add_worksheet, title=name, rows=5000, cols=max(50, len(item_ids)+16))
         _WS_CACHE[name]=(time.time(), ws)
-    s_codes=[f"S{i+1:02d}" for i in range(len(item_ids))]
-    need=list(EVAL_BASE_HEADERS)+[f"점수_{iid}" for iid in item_ids]+s_codes
+    need=list(EVAL_BASE_HEADERS)+[f"점수_{iid}" for iid in item_ids]
     header,_=_hdr(ws, name)
     if not header:
         _retry(ws.update, "1:1", [need]); _HDR_CACHE[name]=(time.time(), need, {n:i+1 for i,n in enumerate(need)})
@@ -1020,19 +1019,15 @@ def upsert_eval_response(emp_df: pd.DataFrame, year: int, eval_type: str,
         put("평가대상사번", str(target_sabun)); put("평가대상이름", tname)
         put("평가자사번", str(evaluator_sabun)); put("평가자이름", ename)
         put("총점", total); put("상태", status); put("제출시각", now)
-        for idx, (iid, sc) in enumerate(zip(item_ids, scores_list), start=1):
+        for iid, sc in zip(item_ids, scores_list):
             c=hmap.get(f"점수_{iid}")
             if c: buf[c-1]=sc
-            cs=hmap.get(f"S{idx:02d}")
-            if cs: buf[cs-1]=sc
         _retry(ws.append_row, buf, value_input_option="USER_ENTERED")
         st.cache_data.clear()
         return {"action":"insert","total":total}
     else:
         payload={"총점": total, "상태": status, "제출시각": now, "평가대상이름": tname, "평가자이름": ename}
-        for idx, (iid, sc) in enumerate(zip(item_ids, scores_list), start=1):
-            payload[f"점수_{iid}"]=sc
-            payload[f"S{idx:02d}"]=sc
+        for iid, sc in zip(item_ids, scores_list): payload[f"점수_{iid}"]=sc
         def _batch_row(ws, idx, hmap, kv):
             upd=[]
             for k,v in kv.items():
@@ -1272,8 +1267,8 @@ def tab_eval(emp_df: pd.DataFrame):
                     pass
             if not picked: return {}
             out: dict[str,int] = {}
-            for idx, iid in enumerate(item_ids, start=1):
-                col = (hmap.get(f"S{idx:02d}") or hmap.get(f"점수_{iid}"))
+            for iid in item_ids:
+                col = hmap.get(f"점수_{iid}")
                 if col and col-1 < len(picked):
                     try:
                         v = int(str(picked[col-1]).strip() or "0")
@@ -1469,7 +1464,7 @@ def tab_eval(emp_df: pd.DataFrame):
 # ═════════════════════════════════════════════════════════════════════════════
 # 직무기술서
 # ═════════════════════════════════════════════════════════════════════════════
-JOBDESC_SHEET = "직무기술서"
+JOBDESC_SHEET = "직무기술서_raw"
 JOBDESC_HEADERS = [
     "사번","이름","연도","버전","부서1","부서2","작성자사번","작성자이름",
     "직군","직종","직무명","제정일","개정일","검토주기",
@@ -1752,7 +1747,7 @@ def _jd_print_html(jd: dict, meta: dict) -> str:
     return html
 
 # ===== JD Approval (within JD tab) =====
-JD_APPROVAL_SHEET = "직무기술서_승인"
+JD_APPROVAL_SHEET = "직무기술서_승인_raw"
 JD_APPROVAL_HEADERS = ["연도","사번","이름","버전","승인자사번","승인자이름","상태","승인시각","비고"]
 
 def ensure_jd_approval_sheet():
@@ -2158,7 +2153,7 @@ COMP_SIMPLE_HEADERS = [
     "평가일자","주업무평가","기타업무평가","교육이수","자격유지","종합의견",
     "상태","제출시각","잠금"
 ]
-def _simp_sheet_name(year:int|str)->str: return "직무능력평가_raw"
+def _simp_sheet_name(year:int|str)->str: return f"{COMP_SIMPLE_PREFIX}{int(year)}"
 
 def _ensure_comp_simple_sheet(year:int):
     wb=get_book(); name=_simp_sheet_name(year)
@@ -2897,7 +2892,7 @@ def main():
         render_staff_picker_left(emp_df)
 
     with right:
-        tabs = st.tabs(["인사평가","직무기술서","직무능력평가","관리자","도움말"])
+        tabs = st.tabs(["인사평가","직무기술서_raw","직무능력평가","관리자","도움말"])
         with tabs[0]: tab_eval(emp_df)
         with tabs[1]: tab_job_desc(emp_df)
         with tabs[2]: tab_competency(emp_df)
@@ -2923,7 +2918,7 @@ def get_jd_approval_map_cached(_year: int, _rev: int = 0) -> dict:
     Robust version: safe when sheet is empty / headers missing / type coercion fails.
     Returns mapping {(사번, 버전)->(상태, 승인시각)} for the given year.
     """
-    sheet_name = globals().get("JD_APPROVAL_SHEET", "직무기술서_승인")
+    sheet_name = globals().get("JD_APPROVAL_SHEET", "직무기술서_승인_raw")
     default_headers = ["연도","사번","이름","버전","승인자사번","승인자이름","상태","승인시각","비고"]
     headers = globals().get("JD_APPROVAL_HEADERS", default_headers)
 
@@ -3031,12 +3026,9 @@ def gs_flush():
     st.session_state.gs_queue = []
 # ===== End helpers =====
 
-# ============================================================================
-# SIMPLE JD PATCH — no header mutations, fixed sheet names, minimal mapping
-# Author: ChatGPT
-# Date: 2025-10-27
-# ============================================================================
 
+
+# ========================= SIMPLE JD READERS (appended) =========================
 JOBDESC_SHEET = "직무기술서_raw"
 JD_APPROVAL_SHEET = "직무기술서_승인_raw"
 
@@ -3049,8 +3041,7 @@ def read_jobdesc_df(_rev: int = 0) -> pd.DataFrame:
         except Exception: pass
         return pd.DataFrame(columns=["사번","이름","연도","ver"])
     df = pd.DataFrame(_ws_get_all_records(ws))
-    if df.empty:
-        return df
+    if df.empty: return df
     if "ver" not in df.columns and "버전" in df.columns:
         df["ver"] = pd.to_numeric(df["버전"], errors="coerce").fillna(0).astype(int)
     if "연도" in df.columns:
@@ -3058,20 +3049,6 @@ def read_jobdesc_df(_rev: int = 0) -> pd.DataFrame:
     if "사번" in df.columns:
         df["사번"] = df["사번"].astype(str)
     return df
-
-def _jd_latest_for(sabun: str, year: int) -> dict | None:
-    df = read_jobdesc_df(st.session_state.get("jobdesc_rev", 0))
-    if df.empty: return None
-    sub = df[(df.get("사번","").astype(str)==str(sabun)) & (df.get("연도",0).astype(int)==int(year))].copy()
-    if sub.empty: return None
-    vcol = "ver" if "ver" in sub.columns else ("버전" if "버전" in sub.columns else None)
-    if vcol:
-        sub[vcol] = pd.to_numeric(sub[vcol], errors="coerce").fillna(0).astype(int)
-        sub = sub.sort_values([vcol], ascending=[False]).reset_index(drop=True)
-    row = sub.iloc[0].to_dict()
-    for k,v in row.items():
-        row[k] = "" if v is None else str(v)
-    return row
 
 @st.cache_data(ttl=300, show_spinner=False)
 def read_jd_approval_df(_rev: int = 0) -> pd.DataFrame:
@@ -3082,8 +3059,7 @@ def read_jd_approval_df(_rev: int = 0) -> pd.DataFrame:
         except Exception: pass
         return pd.DataFrame(columns=["연도","사번","이름","ver","상태","승인시각"])
     df = pd.DataFrame(_ws_get_all_records(ws))
-    if df.empty:
-        return df
+    if df.empty: return df
     if "상태" not in df.columns and "상태(승인/반려)" in df.columns:
         df["상태"] = df["상태(승인/반려)"]
     if "ver" not in df.columns and "버전" in df.columns:
@@ -3094,97 +3070,4 @@ def read_jd_approval_df(_rev: int = 0) -> pd.DataFrame:
     if "사번" in df.columns:
         df["사번"] = df["사번"].astype(str)
     return df
-# ============================================================================
-# END SIMPLE JD PATCH
-# ============================================================================
-
-
-# ============================================================================
-# ALL-RAW ROUTER PATCH — force all legacy names to *_raw (eval/comp/JD)
-# ============================================================================
-import re as __re_allraw
-
-def __normalize_title_allraw(title: str) -> str:
-    t = str(title).strip().strip("'").strip('"')
-    if __re_allraw.match(r"^인사평가_\d{4}$", t):
-        return "인사평가_raw"
-    if __re_allraw.match(r"^직무능력평가_\d{4}$", t):
-        return "직무능력평가_raw"
-    if t in ("직무기술서", "직무기술서_raw"):
-        return "직무기술서_raw"
-    if t in ("직무기술서_승인", "직무기술서_승인_raw"):
-        return "직무기술서_승인_raw"
-    if t == "인사평가":
-        return "인사평가_raw"
-    if t == "직무능력평가":
-        return "직무능력평가_raw"
-    return t
-
-def __normalize_range_allraw(r: str) -> str:
-    s = str(r)
-    if "!" in s:
-        sheet, rest = s.split("!", 1)
-        sh = sheet.strip().strip("'").strip('"')
-        sh2 = __normalize_title_allraw(sh)
-        if sh2 != sh:
-            if sheet.strip().startswith(("'", '"')):
-                sheet_out = f"'{sh2}'" if sheet.strip().startswith("'") else f'"{sh2}"'
-            else:
-                sheet_out = sh2
-            return f"{sheet_out}!{rest}"
-    return s
-
-__ORIG_get_book_allraw = get_book
-
-class __WorksheetProxyAllRaw:
-    def __init__(self, real_ws, parent_proxy_spreadsheet):
-        self.__real_ws = real_ws
-        self.spreadsheet = parent_proxy_spreadsheet
-    def __getattr__(self, name):
-        return getattr(self.__real_ws, name)
-
-class __SpreadsheetProxyAllRaw:
-    def __init__(self, real_spreadsheet):
-        self.__real_spreadsheet = real_spreadsheet
-    def worksheet(self, title):
-        t = __normalize_title_allraw(title)
-        try:
-            ws_real = self.__real_spreadsheet.worksheet(t)
-        except Exception:
-            if t in ("인사평가_raw","직무능력평가_raw","직무기술서_raw","직무기술서_승인_raw"):
-                ws_real = self.__real_spreadsheet.add_worksheet(title=t, rows=5000, cols=120)
-            else:
-                raise
-        return __WorksheetProxyAllRaw(ws_real, self)
-    def add_worksheet(self, title, *args, **kwargs):
-        t = __normalize_title_allraw(title)
-        ws_real = self.__real_spreadsheet.add_worksheet(title=t, *args, **kwargs)
-        return __WorksheetProxyAllRaw(ws_real, self)
-    def values_batch_update(self, body: dict):
-        try:
-            body = dict(body or {})
-            data = body.get("data", [])
-            new_data = []
-            for item in data:
-                item = dict(item)
-                if "range" in item:
-                    item["range"] = __normalize_range_allraw(item["range"])
-                new_data.append(item)
-            body["data"] = new_data
-        except Exception:
-            pass
-        return self.__real_spreadsheet.values_batch_update(body)
-    def values_update(self, range_name: str, params: dict, body: dict):
-        try:
-            range_name = __normalize_range_allraw(range_name)
-        except Exception:
-            pass
-        return self.__real_spreadsheet.values_update(range_name, params, body)
-    def __getattr__(self, name):
-        return getattr(self.__real_spreadsheet, name)
-
-def get_book():
-    return __SpreadsheetProxyAllRaw(__ORIG_get_book_allraw())
-# ============================================================================
-# END ALL-RAW ROUTER PATCH
-# ============================================================================
+# ===============================================================================
