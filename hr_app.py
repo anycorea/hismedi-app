@@ -1,3 +1,4 @@
+
 # -*- coding: utf-8 -*-
 # ========================= RAW_ENFORCER_PATCH (self-contained) =========================
 # Redirect legacy/annual sheet names to *_raw, protect header row for eval/comp,
@@ -1140,57 +1141,129 @@ def _emp_name_by_sabun(emp_df: pd.DataFrame, sabun: str) -> str:
     row=emp_df.loc[emp_df["사번"].astype(str)==str(sabun)]
     return "" if row.empty else str(row.iloc[0].get("이름",""))
 
-def upsert_eval_response(emp_df: pd.DataFrame, year: int, eval_type: str,
-                         target_sabun: str, evaluator_sabun: str,
-                         scores: dict[str,int], status="제출")->dict:
-    items=read_eval_items_df(True); item_ids=[str(x) for x in items["항목ID"].tolist()]
-    ws=_ensure_eval_resp_sheet(year, item_ids)
-    header=_retry(ws.row_values, 1); hmap={n:i+1 for i,n in enumerate(header)}
-    def c5(v):
-        try: v=int(v)
-        except: v=3
-        return min(5,max(1,v))
-    scores_list=[c5(scores.get(i,3)) for i in item_ids]
-    total=round(sum(scores_list)*(100.0/max(1,len(item_ids)*5)),1)
-    tname=_emp_name_by_sabun(emp_df, target_sabun); ename=_emp_name_by_sabun(emp_df, evaluator_sabun)
-    now=kst_now_str()
-    values = _ws_values(ws); cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
-    row_idx=0
-    for i in range(2, len(values)+1):
-        r=values[i-1]
-        try:
-            if (str(r[cY-1]).strip()==str(year) and str(r[cT-1]).strip()==eval_type and
-                str(r[cTS-1]).strip()==str(target_sabun) and str(r[cES-1]).strip()==str(evaluator_sabun)):
-                row_idx=i; break
-        except: pass
-    if row_idx==0:
-        buf=[""]*len(header)
-        def put(k,v): c=hmap.get(k); buf[c-1]=v if c else ""
-        put("연도", int(year)); put("평가유형", eval_type)
-        put("평가대상사번", str(target_sabun)); put("평가대상이름", tname)
-        put("평가자사번", str(evaluator_sabun)); put("평가자이름", ename)
-        put("총점", total); put("상태", status); put("제출시각", now)
-        for iid, sc in zip(item_ids, scores_list):
-            c=hmap.get(f"점수_{iid}")
-            if c: buf[c-1]=sc
-        _retry(ws.append_row, buf, value_input_option="USER_ENTERED")
-        st.cache_data.clear()
-        return {"action":"insert","total":total}
-    else:
-        payload={"총점": total, "상태": status, "제출시각": now, "평가대상이름": tname, "평가자이름": ename}
-        for iid, sc in zip(item_ids, scores_list): payload[f"점수_{iid}"]=sc
-        def _batch_row(ws, idx, hmap, kv):
-            upd=[]
-            for k,v in kv.items():
-                c=hmap.get(k)
-                if c:
-                    a1=gspread.utils.rowcol_to_a1(idx, c)
-                    upd.append({"range": a1, "values": [[v]]})
-            if upd: _retry(ws.batch_update, upd)
-        _batch_row(ws, row_idx, hmap, payload)
-        st.cache_data.clear()
-        return {"action":"update","total":total}
+def upsert_eval_response(
+    emp_df,
+    year: int,
+    eval_type: str,
+    target_sabun: str,
+    evaluator_sabun: str,
+    scores: dict,
+    status: str = "제출",
+) -> dict:
+    """인사평가 저장: 시트에 존재하는 S01..Sxx 컬럼만 채움.
+    scores dict는 S코드(S01..) 또는 항목ID(ITM0001..) 키 모두 허용."""
+    import re, gspread
 
+    ws = _ensure_eval_resp_sheet(year, list(scores.keys()))
+    header = _retry(ws.row_values, 1) or []
+    hmap = {n: i + 1 for i, n in enumerate(header)}
+
+    # 시트에 실제 존재하는 S컬럼만 사용 (숫자 순 정렬)
+    s_cols = [c for c in header if re.fullmatch(r"S\d{2}", str(c).strip())]
+    s_cols.sort(key=lambda x: int(x[1:]))
+
+    # S코드 직접 입력 vs 항목ID 기반 입력 모두 지원
+    item_ids = []
+    try:
+        items = read_eval_items_df(True)
+        if items is not None and not items.empty and "항목ID" in items.columns:
+            item_ids = items["항목ID"].astype(str).tolist()
+    except Exception:
+        item_ids = []
+
+    # 각 S컬럼에 들어갈 값 계산
+    s_values = {}
+    for col in s_cols:
+        v = scores.get(col, None)  # 1) S코드로 바로 들어온 값 우선
+        if v is None and item_ids:
+            # 2) 항목ID로 들어온 경우, S번호-1 인덱스로 매핑
+            idx = int(col[1:]) - 1
+            if 0 <= idx < len(item_ids):
+                v = scores.get(str(item_ids[idx]))
+        if v is not None:
+            try:
+                v = int(v)
+            except Exception:
+                v = None
+        if v is not None:
+            s_values[col] = v
+
+    # 총점(100점 환산): 유효 점수만 사용
+    valid = [v for v in s_values.values() if isinstance(v, int)]
+    total = round(sum(valid) * (100.0 / max(1, len(s_cols) * 5)), 1) if s_cols else 0.0
+
+    tname = _emp_name_by_sabun(emp_df, target_sabun)
+    ename = _emp_name_by_sabun(emp_df, evaluator_sabun)
+    now = kst_now_str()
+
+    values = _ws_values(ws)
+    cY = hmap.get("연도"); cT = hmap.get("평가유형")
+    cTS = hmap.get("평가대상사번"); cES = hmap.get("평가자사번")
+    row_idx = 0
+    for i in range(2, len(values) + 1):
+        r = values[i - 1]
+        try:
+            if (
+                str(r[cY - 1]).strip() == str(year)
+                and str(r[cT - 1]).strip() == str(eval_type)
+                and str(r[cTS - 1]).strip() == str(target_sabun)
+                and str(r[cES - 1]).strip() == str(evaluator_sabun)
+            ):
+                row_idx = i
+                break
+        except Exception:
+            pass
+
+    payload = {
+        "연도": int(year),
+        "평가유형": str(eval_type),
+        "평가대상사번": str(target_sabun),
+        "평가대상이름": tname,
+        "평가자사번": str(evaluator_sabun),
+        "평가자이름": ename,
+        "총점": total,
+        "상태": status,
+        "제출시각": now,
+    }
+    # 시트에 있는 S컬럼만 채움
+    for col, v in s_values.items():
+        if col in hmap:
+            payload[col] = v
+
+    if row_idx == 0:
+        buf = [""] * len(header)
+        for k, v in payload.items():
+            c = hmap.get(k)
+            if c:
+                buf[c - 1] = v
+        _retry(ws.append_row, buf, value_input_option="USER_ENTERED")
+        try:
+            st.cache_data.clear()
+        except Exception:
+            pass
+        return {"action": "insert", "total": total}
+    else:
+        updates = []
+        max_c = 0
+        for k, v in payload.items():
+            c = hmap.get(k)
+            if not c:
+                continue
+            a1 = gspread.utils.rowcol_to_a1(int(row_idx), int(c))
+            updates.append({"range": f"'{ws.title}'!{a1}", "values": [[v]]})
+            if c > max_c:
+                max_c = c
+        if updates:
+            _ensure_capacity(ws, int(row_idx), int(max_c))
+            _retry(
+                ws.spreadsheet.values_batch_update,
+                {"valueInputOption": "USER_ENTERED", "data": updates},
+            )
+        try:
+            st.cache_data.clear()
+        except Exception:
+            pass
+        return {"action": "update", "total": total}
 @st.cache_data(ttl=300, show_spinner=False)
 def read_my_eval_rows(year: int, sabun: str) -> pd.DataFrame:
     name=_eval_sheet_name(year)
@@ -2339,49 +2412,109 @@ def _edu_completion_from_jd(jd_row:dict)->str:
     val=str(jd_row.get("직원공통필수교육","")).strip()
     return "완료" if val else "미완료"
 
-def upsert_comp_simple_response(emp_df: pd.DataFrame, year:int, target_sabun:str,
-                                evaluator_sabun:str, main_grade:str, extra_grade:str,
-                                qual_status:str, opinion:str, eval_date:str)->dict:
-    ws=_ensure_comp_simple_sheet(year)
-    header=_retry(ws.row_values,1) or COMP_SIMPLE_HEADERS; hmap={n:i+1 for i,n in enumerate(header)}
-    jd=_jd_latest_for_comp(target_sabun, int(year)); edu_status=_edu_completion_from_jd(jd)
-    t_name=_emp_name_by_sabun(emp_df, target_sabun); e_name=_emp_name_by_sabun(emp_df, evaluator_sabun)
-    now=kst_now_str()
-    values = _ws_values(ws); cY=hmap.get("연도"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
-    row_idx=0
-    for i in range(2, len(values)+1):
-        r=values[i-1]
-        try:
-            if (str(r[cY-1]).strip()==str(year) and str(r[cTS-1]).strip()==str(target_sabun) and str(r[cES-1]).strip()==str(evaluator_sabun)):
-                row_idx=i; break
-        except: pass
-    if row_idx==0:
-        buf=[""]*len(header)
-        def put(k,v): c=hmap.get(k); buf[c-1]=v if c else ""
-        put("연도",int(year)); put("평가대상사번",str(target_sabun)); put("평가대상이름",t_name)
-        put("평가자사번",str(evaluator_sabun)); put("평가자이름",e_name)
-        put("평가일자",eval_date); put("주업무평가",main_grade); put("기타업무평가",extra_grade)
-        put("교육이수",edu_status); put("자격유지",qual_status); put("종합의견",opinion)
-        put("상태","제출"); put("제출시각",now); put("잠금","")
-        _retry(ws.append_row, buf, value_input_option="USER_ENTERED")
-        try: read_my_comp_simple_rows.clear()
-        except Exception: pass
-        return {"action":"insert"}
-    else:
-        _ws_batch_row(ws, row_idx, hmap, {
-            "평가일자": eval_date,
-            "주업무평가": main_grade,
-            "기타업무평가": extra_grade,
-            "교육이수": edu_status,
-            "자격유지": qual_status,
-            "종합의견": opinion,
-            "상태": "제출",
-            "제출시각": now,
-        })
-        try: read_my_comp_simple_rows.clear()
-        except Exception: pass
-        return {"action":"update"}
+def upsert_comp_simple_response(
+    emp_df,
+    year: int,
+    target_sabun: str,
+    evaluator_sabun: str,
+    main_grade: str,
+    extra_grade: str,
+    qual_status: str,
+    opinion: str,
+    eval_date: str,
+) -> dict:
+    import gspread
 
+    ws = _ensure_comp_simple_sheet(year)
+    header = _retry(ws.row_values, 1) or []
+    hmap = {n: i + 1 for i, n in enumerate(header)}
+
+    jd = _jd_latest_for_comp(target_sabun, int(year))
+    edu_status = _edu_completion_from_jd(jd)
+
+    t_name = _emp_name_by_sabun(emp_df, target_sabun)
+    e_name = _emp_name_by_sabun(emp_df, evaluator_sabun)
+    now = kst_now_str()
+
+    values = _ws_values(ws)
+    cY = hmap.get("연도"); cTS = hmap.get("평가대상사번"); cES = hmap.get("평가자사번")
+    row_idx = 0
+    for i in range(2, len(values) + 1):
+        r = values[i - 1]
+        try:
+            if (
+                str(r[cY - 1]).strip() == str(year)
+                and str(r[cTS - 1]).strip() == str(target_sabun)
+                and str(r[cES - 1]).strip() == str(evaluator_sabun)
+            ):
+                row_idx = i
+                break
+        except Exception:
+            pass
+
+    payload = {
+        "연도": int(year),
+        "평가대상사번": str(target_sabun),
+        "평가대상이름": t_name,
+        "평가자사번": str(evaluator_sabun),
+        "평가자이름": e_name,
+        "주업무평가": str(main_grade),
+        "기타업무평가": str(extra_grade),
+        "교육이수": str(edu_status),
+        "자격유지": str(qual_status),
+        "종합의견": str(opinion or ""),
+        "상태": "제출",
+        "제출시각": now,
+    }
+
+    if row_idx == 0:
+        buf = [""] * len(header)
+
+        def put(k, v):
+            c = hmap.get(k)
+            if c:
+                buf[c - 1] = v  # 존재하는 헤더만 기록
+
+        for k, v in payload.items():
+            put(k, v)
+        if "평가일자" in hmap:
+            put("평가일자", now.split(" ")[0])
+
+        _retry(ws.append_row, buf, value_input_option="USER_ENTERED")
+        try:
+            read_my_comp_simple_rows.clear()
+        except Exception:
+            pass
+        return {"action": "insert"}
+    else:
+        updates = []
+        max_c = 0
+        for k, v in payload.items():
+            c = hmap.get(k)
+            if not c:
+                continue
+            a1 = gspread.utils.rowcol_to_a1(int(row_idx), int(c))
+            updates.append({"range": f"'{ws.title}'!{a1}", "values": [[v]]})
+            if c > max_c:
+                max_c = c
+        if "평가일자" in hmap:
+            c = hmap["평가일자"]
+            a1 = gspread.utils.rowcol_to_a1(int(row_idx), int(c))
+            updates.append({"range": f"'{ws.title}'!{a1}", "values": [[now.split(' ')[0]]]})
+            if c > max_c:
+                max_c = c
+
+        if updates:
+            _ensure_capacity(ws, int(row_idx), int(max_c))
+            _retry(
+                ws.spreadsheet.values_batch_update,
+                {"valueInputOption": "USER_ENTERED", "data": updates},
+            )
+        try:
+            read_my_comp_simple_rows.clear()
+        except Exception:
+            pass
+        return {"action": "update"}
 @st.cache_data(ttl=300, show_spinner=False)
 def read_my_comp_simple_rows(year:int, sabun:str)->pd.DataFrame:
     try:
