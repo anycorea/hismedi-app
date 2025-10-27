@@ -110,7 +110,7 @@ def get_comp_summary_map_cached(_year: int, _rev: int = 0) -> dict:
 def get_jd_approval_map_cached(_year: int, _rev: int = 0) -> dict:
     """Return {(사번, 최신버전)->(상태, 승인시각)} for the year from 직무기술서_승인."""
     try:
-        ws = _ws("직무기술서_승인_raw")
+        ws = _ws("직무기술서_승인")
         df = pd.DataFrame(_ws_get_all_records(ws))
     except Exception:
         df = pd.DataFrame(columns=["연도","사번","버전","상태","승인시각"])
@@ -658,7 +658,7 @@ AUTH_SHEET="권한"
 
 EVAL_ITEMS_SHEET = st.secrets.get("sheets", {}).get("EVAL_ITEMS_SHEET", "평가_항목")
 EVAL_ITEM_HEADERS = ["항목ID","항목","내용","순서","활성","비고","설명","유형","구분"]
-EVAL_RESP_SHEET_PREFIX = "인사평가_raw"
+EVAL_RESP_SHEET_PREFIX = "인사평가_"
 EVAL_BASE_HEADERS = ["연도","평가유형","평가대상사번","평가대상이름","평가자사번","평가자이름","총점","상태","제출시각","잠금"]
 
 AUTH_HEADERS=["사번","이름","역할","범위유형","부서1","부서2","대상사번","활성","비고"]
@@ -1464,7 +1464,7 @@ def tab_eval(emp_df: pd.DataFrame):
 # ═════════════════════════════════════════════════════════════════════════════
 # 직무기술서
 # ═════════════════════════════════════════════════════════════════════════════
-JOBDESC_SHEET = "직무기술서_raw"
+JOBDESC_SHEET = "직무기술서"
 JOBDESC_HEADERS = [
     "사번","이름","연도","버전","부서1","부서2","작성자사번","작성자이름",
     "직군","직종","직무명","제정일","개정일","검토주기",
@@ -1747,7 +1747,7 @@ def _jd_print_html(jd: dict, meta: dict) -> str:
     return html
 
 # ===== JD Approval (within JD tab) =====
-JD_APPROVAL_SHEET = "직무기술서_승인_raw"
+JD_APPROVAL_SHEET = "직무기술서_승인"
 JD_APPROVAL_HEADERS = ["연도","사번","이름","버전","승인자사번","승인자이름","상태","승인시각","비고"]
 
 def ensure_jd_approval_sheet():
@@ -2147,7 +2147,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
 # ═════════════════════════════════════════════════════════════════════════════
 # 직무능력평가 + JD 요약 스크롤
 # ═════════════════════════════════════════════════════════════════════════════
-COMP_SIMPLE_PREFIX = "직무능력평가_raw"
+COMP_SIMPLE_PREFIX = "직무능력평가_"
 COMP_SIMPLE_HEADERS = [
     "연도","평가대상사번","평가대상이름","평가자사번","평가자이름",
     "평가일자","주업무평가","기타업무평가","교육이수","자격유지","종합의견",
@@ -2892,7 +2892,7 @@ def main():
         render_staff_picker_left(emp_df)
 
     with right:
-        tabs = st.tabs(["인사평가","직무기술서_raw","직무능력평가","관리자","도움말"])
+        tabs = st.tabs(["인사평가","직무기술서","직무능력평가","관리자","도움말"])
         with tabs[0]: tab_eval(emp_df)
         with tabs[1]: tab_job_desc(emp_df)
         with tabs[2]: tab_competency(emp_df)
@@ -2918,7 +2918,7 @@ def get_jd_approval_map_cached(_year: int, _rev: int = 0) -> dict:
     Robust version: safe when sheet is empty / headers missing / type coercion fails.
     Returns mapping {(사번, 버전)->(상태, 승인시각)} for the given year.
     """
-    sheet_name = globals().get("JD_APPROVAL_SHEET", "직무기술서_승인_raw")
+    sheet_name = globals().get("JD_APPROVAL_SHEET", "직무기술서_승인")
     default_headers = ["연도","사번","이름","버전","승인자사번","승인자이름","상태","승인시각","비고"]
     headers = globals().get("JD_APPROVAL_HEADERS", default_headers)
 
@@ -3028,46 +3028,225 @@ def gs_flush():
 
 
 
-# ========================= SIMPLE JD READERS (appended) =========================
-JOBDESC_SHEET = "직무기술서_raw"
-JD_APPROVAL_SHEET = "직무기술서_승인_raw"
+# ============================================================================
+# RAW FIX v3 — lock sheet names, no header writes, S-codes only, drop 평가일자
+# ============================================================================
+def _eval_sheet_name(year: int | str) -> str:
+    return "인사평가_raw"
 
-@st.cache_data(ttl=600, show_spinner=False)
-def read_jobdesc_df(_rev: int = 0) -> pd.DataFrame:
-    try:
-        ws = _ws(JOBDESC_SHEET)
-    except Exception as e:
-        try: st.error(f"시트를 찾을 수 없습니다: {JOBDESC_SHEET} — {e}")
-        except Exception: pass
-        return pd.DataFrame(columns=["사번","이름","연도","ver"])
-    df = pd.DataFrame(_ws_get_all_records(ws))
-    if df.empty: return df
-    if "ver" not in df.columns and "버전" in df.columns:
-        df["ver"] = pd.to_numeric(df["버전"], errors="coerce").fillna(0).astype(int)
-    if "연도" in df.columns:
-        df["연도"] = pd.to_numeric(df["연도"], errors="coerce").fillna(0).astype(int)
-    if "사번" in df.columns:
-        df["사번"] = df["사번"].astype(str)
-    return df
+def _simp_sheet_name(year: int | str) -> str:
+    return "직무능력평가_raw"
 
-@st.cache_data(ttl=300, show_spinner=False)
-def read_jd_approval_df(_rev: int = 0) -> pd.DataFrame:
-    try:
-        ws = _ws(JD_APPROVAL_SHEET)
-    except Exception as e:
-        try: st.error(f"시트를 찾을 수 없습니다: {JD_APPROVAL_SHEET} — {e}")
+_ORIG_get_book_v3 = get_book
+import re as __re_v3
+
+class __WSProxyV3:
+    def __init__(self, ws, parent_spreadsheet):
+        self.__ws = ws
+        self.spreadsheet = parent_spreadsheet
+    def update(self, *args, **kwargs):
+        if args:
+            first = args[0]
+            rng = kwargs.get("range_name", None)
+            if isinstance(first, str):
+                rng = rng or first
+            if rng and ("1:1" in rng or rng.strip() in ("1:1","A1:1","A1:Z1")):
+                try:
+                    if self.__ws.title in ("인사평가_raw","직무능력평가_raw"):
+                        return
+                except Exception:
+                    pass
+        return self.__ws.update(*args, **kwargs)
+    def __getattr__(self, name):
+        return getattr(self.__ws, name)
+
+class __SSProxyV3:
+    def __init__(self, real):
+        self.__real = real
+    def __norm_title(self, s:str)->str:
+        t = str(s).strip().strip("'").strip('"')
+        if __re_v3.match(r"^인사평가_\d{4}$", t): return "인사평가_raw"
+        if __re_v3.match(r"^직무능력평가_\d{4}$", t): return "직무능력평가_raw"
+        if __re_v3.match(r"^인사평가_raw\d{4}$", t): return "인사평가_raw"
+        if __re_v3.match(r"^직무능력평가_raw\d{4}$", t): return "직무능력평가_raw"
+        if t == "직무기술서": return "직무기술서_raw"
+        if t == "직무기술서_승인": return "직무기술서_승인_raw"
+        return t
+    def worksheet(self, title):
+        t = self.__norm_title(title)
+        try:
+            ws = self.__real.worksheet(t)
+        except Exception:
+            if t in ("인사평가_raw","직무능력평가_raw","직무기술서_raw","직무기술서_승인_raw"):
+                ws = self.__real.add_worksheet(title=t, rows=5000, cols=120)
+            else:
+                raise
+        return __WSProxyV3(ws, self)
+    def add_worksheet(self, title, *args, **kwargs):
+        t = self.__norm_title(title)
+        ws = self.__real.add_worksheet(title=t, *args, **kwargs)
+        return __WSProxyV3(ws, self)
+    def values_batch_update(self, body: dict):
+        try:
+            body = dict(body or {})
+            arr = []
+            for item in body.get("data", []):
+                item = dict(item)
+                if "range" in item:
+                    s = str(item["range"])
+                    if "!" in s:
+                        sheet, rest = s.split("!",1)
+                        sh = sheet.strip().strip("'").strip('"')
+                        sh2 = self.__norm_title(sh)
+                        if sh2 != sh:
+                            if sheet.strip().startswith("'"):
+                                sheet = f"'{sh2}'"
+                            elif sheet.strip().startswith('"'):
+                                sheet = f'"{sh2}"'
+                            else:
+                                sheet = sh2
+                            item["range"] = f"{sheet}!{rest}"
+                arr.append(item)
+            body["data"] = arr
+        except Exception:
+            pass
+        return self.__real.values_batch_update(body)
+    def values_update(self, range_name: str, params: dict, body: dict):
+        try:
+            s = str(range_name)
+            if "!" in s:
+                sheet, rest = s.split("!",1)
+                sh = sheet.strip().strip("'").strip('"')
+                sh2 = self.__norm_title(sh)
+                if sh2 != sh:
+                    if sheet.strip().startswith("'"):
+                        sheet = f"'{sh2}'"
+                    elif sheet.strip().startswith('"'):
+                        sheet = f'"{sh2}"'
+                    else:
+                        sheet = sh2
+                    range_name = f"{sheet}!{rest}"
+        except Exception:
+            pass
+        return self.__real.values_update(range_name, params, body)
+    def __getattr__(self, name):
+        return getattr(self.__real, name)
+
+def get_book():
+    return __SSProxyV3(_ORIG_get_book_v3())
+
+def _ensure_eval_resp_sheet(year:int, item_ids:list[str]):
+    wb = get_book(); ws = wb.worksheet(_eval_sheet_name(year)); return ws
+
+def _ensure_comp_simple_sheet(year:int):
+    wb = get_book(); ws = wb.worksheet(_simp_sheet_name(year)); return ws
+
+def upsert_eval_response(emp_df, year:int, eval_type:str, target_sabun:str, evaluator_sabun:str, scores:dict, status="제출")->dict:
+    import gspread, pandas as pd
+    ws = _ensure_eval_resp_sheet(year, list(scores.keys()))
+    header = _retry(ws.row_values, 1) or []
+    hmap = {n:i+1 for i,n in enumerate(header)}
+    s_cols = sorted([c for c in header if __re_v3.match(r"^S\d{2}$", str(c))])
+    items = read_eval_items_df(True)
+    item_ids = items["항목ID"].astype(str).tolist() if items is not None and not items.empty and "항목ID" in items.columns else list(scores.keys())
+    scores_list = []
+    for idx in range(len(s_cols)):
+        v = None
+        if idx < len(item_ids): 
+            try: v = int(scores.get(str(item_ids[idx]), None))
+            except: v = None
+        scores_list.append(v)
+    valid = [v for v in scores_list if isinstance(v, int)]
+    total = round(sum(valid) * (100.0 / max(1, len(s_cols) * 5)), 1) if s_cols else 0.0
+    tname = _emp_name_by_sabun(emp_df, target_sabun); ename = _emp_name_by_sabun(emp_df, evaluator_sabun); now = kst_now_str()
+    values = _ws_values(ws); cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
+    row_idx=0
+    for i in range(2, len(values)+1):
+        r=values[i-1]
+        try:
+            if (str(r[cY-1]).strip()==str(year) and str(r[cT-1]).strip()==str(eval_type)
+                and str(r[cTS-1]).strip()==str(target_sabun) and str(r[cES-1]).strip()==str(evaluator_sabun)):
+                row_idx=i; break
+        except: pass
+    payload={"연도":int(year),"평가유형":str(eval_type),
+             "평가대상사번":str(target_sabun),"평가대상이름":tname,
+             "평가자사번":str(evaluator_sabun),"평가자이름":ename,
+             "총점":total,"상태":status,"제출시각":now}
+    for i, v in enumerate(scores_list, start=1):
+        col=f"S{i:02d}"
+        if v is not None and col in hmap: payload[col]=int(v)
+    if row_idx==0:
+        buf=[""]*len(header)
+        for k,v in payload.items():
+            c=hmap.get(k); 
+            if c: buf[c-1]=v
+        _retry(ws.append_row, buf, value_input_option="USER_ENTERED")
+        try: st.cache_data.clear()
         except Exception: pass
-        return pd.DataFrame(columns=["연도","사번","이름","ver","상태","승인시각"])
-    df = pd.DataFrame(_ws_get_all_records(ws))
-    if df.empty: return df
-    if "상태" not in df.columns and "상태(승인/반려)" in df.columns:
-        df["상태"] = df["상태(승인/반려)"]
-    if "ver" not in df.columns and "버전" in df.columns:
-        df["ver"] = pd.to_numeric(df["버전"], errors="coerce").fillna(0).astype(int)
-    for c in ["연도","ver"]:
-        if c in df.columns:
-            df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0).astype(int)
-    if "사번" in df.columns:
-        df["사번"] = df["사번"].astype(str)
-    return df
-# ===============================================================================
+        return {"action":"insert","total":total}
+    else:
+        updates=[]; max_c=0
+        for k,v in payload.items():
+            c=hmap.get(k); 
+            if not c: continue
+            a1=gspread.utils.rowcol_to_a1(int(row_idx), int(c))
+            updates.append({"range": f"'{ws.title}'!{a1}", "values": [[v]]})
+            if c>max_c: max_c=c
+        if updates:
+            _ensure_capacity(ws, int(row_idx), int(max_c))
+            _retry(ws.spreadsheet.values_batch_update, {"valueInputOption":"USER_ENTERED","data":updates})
+        try: st.cache_data.clear()
+        except Exception: pass
+        return {"action":"update","total":total}
+
+def upsert_comp_simple_response(emp_df: pd.DataFrame, year:int, target_sabun:str,
+                                evaluator_sabun:str, main_grade:str, extra_grade:str,
+                                qual_status:str, opinion:str, eval_date:str)->dict:
+    import gspread
+    ws=_ensure_comp_simple_sheet(year)
+    header=_retry(ws.row_values,1) or []
+    hmap={n:i+1 for i,n in enumerate(header)}
+    jd=_jd_latest_for_comp(target_sabun, int(year)); edu_status=_edu_completion_from_jd(jd)
+    t_name=_emp_name_by_sabun(emp_df, target_sabun); e_name=_emp_name_by_sabun(emp_df, evaluator_sabun)
+    now=kst_now_str()
+    values = _ws_values(ws); cY=hmap.get("연도"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
+    row_idx=0
+    for i in range(2, len(values)+1):
+        r=values[i-1]
+        try:
+            if (str(r[cY-1]).strip()==str(year) and str(r[cTS-1]).strip()==str(target_sabun)
+                and str(r[cES-1]).strip()==str(evaluator_sabun)):
+                row_idx=i; break
+        except: pass
+    payload={"연도":int(year),
+             "평가대상사번":str(target_sabun),"평가대상이름":t_name,
+             "평가자사번":str(evaluator_sabun),"평가자이름":e_name,
+             "주업무평가":str(main_grade),"기타업무평가":str(extra_grade),
+             "교육이수":str(edu_status),"자격유지":str(qual_status),
+             "종합의견":str(opinion or ""),"상태":"제출","제출시각":now}
+    if row_idx==0:
+        buf=[""]*len(header)
+        for k,v in payload.items():
+            c=hmap.get(k)
+            if c: buf[c-1]=v
+        _retry(ws.append_row, buf, value_input_option="USER_ENTERED")
+        try: read_my_comp_simple_rows.clear()
+        except Exception: pass
+        return {"action":"insert"}
+    else:
+        updates=[]; max_c=0
+        for k,v in payload.items():
+            c=hmap.get(k); 
+            if not c: continue
+            a1=gspread.utils.rowcol_to_a1(int(row_idx), int(c))
+            updates.append({"range": f"'{ws.title}'!{a1}", "values": [[v]]})
+            if c>max_c: max_c=c
+        if updates:
+            _ensure_capacity(ws, int(row_idx), int(max_c))
+            _retry(ws.spreadsheet.values_batch_update, {"valueInputOption":"USER_ENTERED","data":updates})
+        try: read_my_comp_simple_rows.clear()
+        except Exception: pass
+        return {"action":"update"}
+# ============================================================================
+# END RAW FIX v3
+# ============================================================================
