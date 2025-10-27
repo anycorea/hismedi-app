@@ -3097,3 +3097,94 @@ def read_jd_approval_df(_rev: int = 0) -> pd.DataFrame:
 # ============================================================================
 # END SIMPLE JD PATCH
 # ============================================================================
+
+
+# ============================================================================
+# ALL-RAW ROUTER PATCH — force all legacy names to *_raw (eval/comp/JD)
+# ============================================================================
+import re as __re_allraw
+
+def __normalize_title_allraw(title: str) -> str:
+    t = str(title).strip().strip("'").strip('"')
+    if __re_allraw.match(r"^인사평가_\d{4}$", t):
+        return "인사평가_raw"
+    if __re_allraw.match(r"^직무능력평가_\d{4}$", t):
+        return "직무능력평가_raw"
+    if t in ("직무기술서", "직무기술서_raw"):
+        return "직무기술서_raw"
+    if t in ("직무기술서_승인", "직무기술서_승인_raw"):
+        return "직무기술서_승인_raw"
+    if t == "인사평가":
+        return "인사평가_raw"
+    if t == "직무능력평가":
+        return "직무능력평가_raw"
+    return t
+
+def __normalize_range_allraw(r: str) -> str:
+    s = str(r)
+    if "!" in s:
+        sheet, rest = s.split("!", 1)
+        sh = sheet.strip().strip("'").strip('"')
+        sh2 = __normalize_title_allraw(sh)
+        if sh2 != sh:
+            if sheet.strip().startswith(("'", '"')):
+                sheet_out = f"'{sh2}'" if sheet.strip().startswith("'") else f'"{sh2}"'
+            else:
+                sheet_out = sh2
+            return f"{sheet_out}!{rest}"
+    return s
+
+__ORIG_get_book_allraw = get_book
+
+class __WorksheetProxyAllRaw:
+    def __init__(self, real_ws, parent_proxy_spreadsheet):
+        self.__real_ws = real_ws
+        self.spreadsheet = parent_proxy_spreadsheet
+    def __getattr__(self, name):
+        return getattr(self.__real_ws, name)
+
+class __SpreadsheetProxyAllRaw:
+    def __init__(self, real_spreadsheet):
+        self.__real_spreadsheet = real_spreadsheet
+    def worksheet(self, title):
+        t = __normalize_title_allraw(title)
+        try:
+            ws_real = self.__real_spreadsheet.worksheet(t)
+        except Exception:
+            if t in ("인사평가_raw","직무능력평가_raw","직무기술서_raw","직무기술서_승인_raw"):
+                ws_real = self.__real_spreadsheet.add_worksheet(title=t, rows=5000, cols=120)
+            else:
+                raise
+        return __WorksheetProxyAllRaw(ws_real, self)
+    def add_worksheet(self, title, *args, **kwargs):
+        t = __normalize_title_allraw(title)
+        ws_real = self.__real_spreadsheet.add_worksheet(title=t, *args, **kwargs)
+        return __WorksheetProxyAllRaw(ws_real, self)
+    def values_batch_update(self, body: dict):
+        try:
+            body = dict(body or {})
+            data = body.get("data", [])
+            new_data = []
+            for item in data:
+                item = dict(item)
+                if "range" in item:
+                    item["range"] = __normalize_range_allraw(item["range"])
+                new_data.append(item)
+            body["data"] = new_data
+        except Exception:
+            pass
+        return self.__real_spreadsheet.values_batch_update(body)
+    def values_update(self, range_name: str, params: dict, body: dict):
+        try:
+            range_name = __normalize_range_allraw(range_name)
+        except Exception:
+            pass
+        return self.__real_spreadsheet.values_update(range_name, params, body)
+    def __getattr__(self, name):
+        return getattr(self.__real_spreadsheet, name)
+
+def get_book():
+    return __SpreadsheetProxyAllRaw(__ORIG_get_book_allraw())
+# ============================================================================
+# END ALL-RAW ROUTER PATCH
+# ============================================================================
