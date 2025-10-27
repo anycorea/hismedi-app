@@ -1620,7 +1620,7 @@ def tab_eval(emp_df: pd.DataFrame):
                 continue
             st.session_state[f"eval2_seg_{iid}_{kbase}"] = str(val)
             scores[iid] = val
-#### 제출 확인")st.markdown("#### 제출 확인")
+#### 제출 확인")
     cb1, cb2 = st.columns([2, 1])
     with cb1:
         attest_ok = st.checkbox(
@@ -1663,10 +1663,10 @@ def tab_eval(emp_df: pd.DataFrame):
             st.error("PIN이 올바르지 않습니다.")
         else:
             try:
-                # Map scores to storage keys if S-only schema is active
+                # Map scores to S-only storage keys
                 scores_for_save = {}
                 for _iid, _val in (scores or {}).items():
-                    _k = id2col.get(_iid, _iid) if _s_only else _iid
+                    _k = id2col.get(_iid, _iid)  # always Sxx
                     scores_for_save[_k] = _val
                 rep = upsert_eval_response(
                                 emp_df, int(year), eval_type, str(target_sabun), str(me_sabun), scores_for_save, "제출"
