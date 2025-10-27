@@ -206,7 +206,7 @@ def get_eval_summary_map_cached(_year: int, _rev: int = 0) -> dict:
         ws = _ensure_eval_resp_sheet(int(_year), item_ids)
         header = _retry(ws.row_values, 1) or []
         hmap = {n:i+1 for i,n in enumerate(header)}
-        values = _ws_values(ws)
+        values = _ws_valuesues(ws)
     except Exception:
         return {}
     cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cTot=hmap.get("총점"); cSub=hmap.get("제출시각")
@@ -231,7 +231,7 @@ def get_comp_summary_map_cached(_year: int, _rev: int = 0) -> dict:
         ws = _ensure_comp_simple_sheet(int(_year))
         header = _retry(ws.row_values,1) or []
         hmap = {n:i+1 for i,n in enumerate(header)}
-        values = _ws_values(ws)
+        values = _ws_valuesues(ws)
     except Exception:
         return {}
     cY=hmap.get("연도"); cTS=hmap.get("평가대상사번"); cMain=hmap.get("주업무평가")
@@ -579,7 +579,7 @@ _WS_TTL, _HDR_TTL = 120, 120
 _VAL_CACHE: dict[str, Tuple[float, list]] = {}
 _VAL_TTL = 90
 
-def _ws_values(ws, key: str | None = None):
+def _ws_valuesues(ws, key: str | None = None):
     key = key or getattr(ws, 'title', '') or 'ws_values'
     now = time.time()
     hit = _VAL_CACHE.get(key)
@@ -603,7 +603,7 @@ def _hdr(ws, key: str) -> Tuple[list[str], dict]:
 def _ws_get_all_records(ws):
     try:
         title = getattr(ws, "title", None) or ""
-        vals = _ws_values(ws, title)
+        vals = _ws_valuesues(ws, title)
         if not vals:
             return []
         header = [str(x).strip() for x in (vals[0] if vals else [])]
@@ -1149,7 +1149,7 @@ def upsert_eval_response(emp_df: pd.DataFrame, year: int, eval_type: str,
     total=round(sum(scores_list)*(100.0/max(1,len(item_ids)*5)),1)
     tname=_emp_name_by_sabun(emp_df, target_sabun); ename=_emp_name_by_sabun(emp_df, evaluator_sabun)
     now=kst_now_str()
-    values = _ws_values(ws); cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
+    values = _ws_valuesues(ws); cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
     row_idx=0
     for i in range(2, len(values)+1):
         r=values[i-1]
@@ -1258,7 +1258,7 @@ def tab_eval(emp_df: pd.DataFrame):
         try:
             ws = _ensure_eval_resp_sheet(int(_year), item_ids)
             header = _retry(ws.row_values, 1) or []; hmap = {n: i+1 for i, n in enumerate(header)}
-            values = _ws_values(ws)
+            values = _ws_valuesues(ws)
             cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cS=hmap.get("상태")
             if not all([cY, cT, cTS, cS]): return False
             for r in values[1:]:
@@ -1277,7 +1277,7 @@ def tab_eval(emp_df: pd.DataFrame):
         try:
             ws = _ensure_eval_resp_sheet(int(year), item_ids)
             header = _retry(ws.row_values, 1) or []; hmap = {n: i+1 for i, n in enumerate(header)}
-            values = _ws_values(ws)
+            values = _ws_valuesues(ws)
             cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
             row_idx = 0
             for i in range(2, len(values)+1):
@@ -1310,7 +1310,7 @@ def tab_eval(emp_df: pd.DataFrame):
         try:
             ws = _ensure_eval_resp_sheet(int(_year), item_ids)
             header = _retry(ws.row_values, 1) or []; hmap = {n: i+1 for i, n in enumerate(header)}
-            values = _ws_values(ws)
+            values = _ws_valuesues(ws)
             cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cDT=hmap.get("제출시각")
             picked = None; picked_dt = ""
             for r in values[1:]:
@@ -1377,7 +1377,7 @@ def tab_eval(emp_df: pd.DataFrame):
     stage_2nd  = _stage_scores_any_evaluator(int(year), "2차", target_sabun)
 
     # Saved scores for this evaluator
-    saved_scores, saved_meta = read_eval_saved_scoresval_saved_scores(int(year), eval_type, target_sabun, me_sabun)
+    saved_scores, saved_meta = read_eval_saved_scores(int(year), eval_type, target_sabun, me_sabun)
 
     # Key base for session
     kbase = f"{int(year)}_{target_sabun}_{editable_col_name}"
@@ -1622,7 +1622,7 @@ def upsert_jobdesc(rec: dict, as_new_version: bool = False) -> dict:
     rec["제출시각"] = kst_now_str()
     rec["이름"] = _emp_name_by_sabun(read_emp_df(), sabun)
 
-    values = _ws_values(ws)
+    values = _ws_valuesues(ws)
     row_idx = 0
     cS, cY, cV = hmap.get("사번"), hmap.get("연도"), hmap.get("버전")
     for i in range(2, len(values) + 1):
@@ -1868,7 +1868,7 @@ def set_jd_approval(year: int, sabun: str, name: str, version: int,
     ws = _ws(JD_APPROVAL_SHEET)
     header = _retry(ws.row_values, 1) or JD_APPROVAL_HEADERS
     hmap = {n: i+1 for i, n in enumerate(header)}
-    values = _ws_values(ws)
+    values = _ws_valuesues(ws)
     cY = hmap.get("연도"); cS = hmap.get("사번"); cV = hmap.get("버전")
     target_row = 0
     for i in range(2, len(values)+1):
@@ -2251,7 +2251,7 @@ def upsert_comp_simple_response(emp_df: pd.DataFrame, year:int, target_sabun:str
     jd=_jd_latest_for_comp(target_sabun, int(year)); edu_status=_edu_completion_from_jd(jd)
     t_name=_emp_name_by_sabun(emp_df, target_sabun); e_name=_emp_name_by_sabun(emp_df, evaluator_sabun)
     now=kst_now_str()
-    values = _ws_values(ws); cY=hmap.get("연도"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
+    values = _ws_valuesues(ws); cY=hmap.get("연도"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
     row_idx=0
     for i in range(2, len(values)+1):
         r=values[i-1]
@@ -3101,7 +3101,7 @@ def upsert_eval_response(emp_df, year, eval_type, target_sabun, evaluator_sabun,
     ename = _emp_name_by_sabun(emp_df, evaluator_sabun)
     now = kst_now_str()
 
-    values = _ws_values(ws)
+    values = _ws_valuesues(ws)
     cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
     row_idx = 0
     for i in range(2, len(values)+1):
@@ -3151,7 +3151,7 @@ def get_eval_scores_Sonly(year: int, eval_type: str, target_sabun: str, evaluato
     ws = ss.worksheet("인사평가_raw")
     header = _retry(ws.row_values, 1) or []
     hmap = {n: i + 1 for i, n in enumerate(header)}
-    values = _ws_values(ws)
+    values = _ws_valuesues(ws)
 
     cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
     row = None
@@ -3192,7 +3192,7 @@ def upsert_comp_simple_response(emp_df, year, target_sabun, evaluator_sabun,
     ename = _emp_name_by_sabun(emp_df, evaluator_sabun)
     now = kst_now_str()
 
-    values = _ws_values(ws)
+    values = _ws_valuesues(ws)
     cY=hmap.get("연도"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
     row_idx = 0
     for i in range(2, len(values)+1):
