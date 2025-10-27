@@ -3250,3 +3250,117 @@ def upsert_comp_simple_response(emp_df: pd.DataFrame, year:int, target_sabun:str
 # ============================================================================
 # END RAW FIX v3
 # ============================================================================
+
+
+# ============================================================================
+# SOLID RAW ENFORCER — global gspread client monkeypatch (final lock)
+# ============================================================================
+import re as __re_solid
+import gspread as __gs
+
+__ORIG_open_by_key = getattr(__gs.Client, "open_by_key", None)
+__ORIG_open_by_url = getattr(__gs.Client, "open_by_url", None)
+
+def __solid_norm(title: str) -> str:
+    t = str(title).strip().strip("'").strip('"')
+    if __re_solid.match(r"^인사평가_\d{4}$", t): return "인사평가_raw"
+    if __re_solid.match(r"^직무능력평가_\d{4}$", t): return "직무능력평가_raw"
+    if __re_solid.match(r"^인사평가_raw\d{4}$", t): return "인사평가_raw"
+    if __re_solid.match(r"^직무능력평가_raw\d{4}$", t): return "직무능력평가_raw"
+    if t == "직무기술서": return "직무기술서_raw"
+    if t == "직무기술서_승인": return "직무기술서_승인_raw"
+    if t == "인사평가": return "인사평가_raw"
+    if t == "직무능력평가": return "직무능력평가_raw"
+    return t
+
+def __solid_norm_range(r: str) -> str:
+    s = str(r)
+    if "!" in s:
+        sheet, rest = s.split("!", 1)
+        sh = sheet.strip().strip("'").strip('"')
+        sh2 = __solid_norm(sh)
+        if sh2 != sh:
+            if sheet.strip().startswith(("'", '"')):
+                sheet = f"'{sh2}'" if sheet.strip().startswith("'") else f'"{sh2}"'
+            else:
+                sheet = sh2
+            return f"{sheet}!{rest}"
+    return s
+
+class __SolidWS:
+    def __init__(self, ws, parent_ss):
+        self.__ws = ws
+        self.spreadsheet = parent_ss
+    def update(self, *args, **kwargs):
+        title = getattr(self.__ws, "title", "")
+        rng = kwargs.get("range_name")
+        if args and isinstance(args[0], str):
+            rng = rng or args[0]
+        if title in ("인사평가_raw","직무능력평가_raw"):
+            if rng and ("1:1" in rng or rng.strip() in ("1:1","A1:1","A1:Z1")):
+                return
+        return self.__ws.update(*args, **kwargs)
+    def __getattr__(self, name):
+        return getattr(self.__ws, name)
+
+class __SolidSS:
+    def __init__(self, real):
+        self.__real = real
+    def worksheet(self, title):
+        t = __solid_norm(title)
+        try:
+            ws = self.__real.worksheet(t)
+        except Exception:
+            if t in ("인사평가_raw","직무능력평가_raw","직무기술서_raw","직무기술서_승인_raw"):
+                ws = self.__real.add_worksheet(title=t, rows=5000, cols=120)
+            else:
+                raise
+        return __SolidWS(ws, self)
+    def add_worksheet(self, title, *args, **kwargs):
+        t = __solid_norm(title)
+        ws = self.__real.add_worksheet(title=t, *args, **kwargs)
+        return __SolidWS(ws, self)
+    def values_batch_update(self, body: dict):
+        try:
+            body = dict(body or {})
+            data = []
+            for item in body.get("data", []):
+                item = dict(item)
+                if "range" in item:
+                    item["range"] = __solid_norm_range(item["range"])
+                data.append(item)
+            body["data"] = data
+        except Exception:
+            pass
+        return self.__real.values_batch_update(body)
+    def values_update(self, range_name: str, params: dict, body: dict):
+        try:
+            range_name = __solid_norm_range(range_name)
+        except Exception:
+            pass
+        return self.__real.values_update(range_name, params, body)
+    def __getattr__(self, name):
+        return getattr(self.__real, name)
+
+def __wrap_ss(ss):
+    if isinstance(ss, __SolidSS):
+        return ss
+    return __SolidSS(ss)
+
+if __ORIG_open_by_key:
+    def open_by_key(self, key):
+        return __wrap_ss(__ORIG_open_by_key(self, key))
+    __gs.Client.open_by_key = open_by_key
+
+if __ORIG_open_by_url:
+    def open_by_url(self, url):
+        return __wrap_ss(__ORIG_open_by_url(self, url))
+    __gs.Client.open_by_url = open_by_url
+
+_ORIG_get_book_solid = get_book
+def get_book():
+    ss = _ORIG_get_book_solid()
+    return __wrap_ss(ss)
+# ============================================================================
+# END SOLID RAW ENFORCER
+# ============================================================================
