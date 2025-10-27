@@ -658,7 +658,7 @@ AUTH_SHEET="권한"
 
 EVAL_ITEMS_SHEET = st.secrets.get("sheets", {}).get("EVAL_ITEMS_SHEET", "평가_항목")
 EVAL_ITEM_HEADERS = ["항목ID","항목","내용","순서","활성","비고","설명","유형","구분"]
-EVAL_RESP_SHEET_PREFIX = "인사평가_"
+EVAL_RESP_SHEET_PREFIX = "인사평가_raw"
 EVAL_BASE_HEADERS = ["연도","평가유형","평가대상사번","평가대상이름","평가자사번","평가자이름","총점","상태","제출시각","잠금"]
 
 AUTH_HEADERS=["사번","이름","역할","범위유형","부서1","부서2","대상사번","활성","비고"]
@@ -911,7 +911,7 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
     else:
         st.dataframe(view[cols], use_container_width=True, height=(360 if not show_dashboard_cols else 420), hide_index=True)
 
-def _eval_sheet_name(year: int | str) -> str: return f"{EVAL_RESP_SHEET_PREFIX}{int(year)}"
+def _eval_sheet_name(year: int | str) -> str: return "인사평가_raw"
 
 
 def ensure_eval_items_sheet():
@@ -974,7 +974,8 @@ def _ensure_eval_resp_sheet(year:int, item_ids:list[str]):
     except WorksheetNotFound:
         ws=_retry(wb.add_worksheet, title=name, rows=5000, cols=max(50, len(item_ids)+16))
         _WS_CACHE[name]=(time.time(), ws)
-    need=list(EVAL_BASE_HEADERS)+[f"점수_{iid}" for iid in item_ids]
+    s_codes=[f"S{i+1:02d}" for i in range(len(item_ids))]
+    need=list(EVAL_BASE_HEADERS)+[f"점수_{iid}" for iid in item_ids]+s_codes
     header,_=_hdr(ws, name)
     if not header:
         _retry(ws.update, "1:1", [need]); _HDR_CACHE[name]=(time.time(), need, {n:i+1 for i,n in enumerate(need)})
@@ -1019,15 +1020,19 @@ def upsert_eval_response(emp_df: pd.DataFrame, year: int, eval_type: str,
         put("평가대상사번", str(target_sabun)); put("평가대상이름", tname)
         put("평가자사번", str(evaluator_sabun)); put("평가자이름", ename)
         put("총점", total); put("상태", status); put("제출시각", now)
-        for iid, sc in zip(item_ids, scores_list):
+        for idx, (iid, sc) in enumerate(zip(item_ids, scores_list), start=1):
             c=hmap.get(f"점수_{iid}")
             if c: buf[c-1]=sc
+            cs=hmap.get(f"S{idx:02d}")
+            if cs: buf[cs-1]=sc
         _retry(ws.append_row, buf, value_input_option="USER_ENTERED")
         st.cache_data.clear()
         return {"action":"insert","total":total}
     else:
         payload={"총점": total, "상태": status, "제출시각": now, "평가대상이름": tname, "평가자이름": ename}
-        for iid, sc in zip(item_ids, scores_list): payload[f"점수_{iid}"]=sc
+        for idx, (iid, sc) in enumerate(zip(item_ids, scores_list), start=1):
+            payload[f"점수_{iid}"]=sc
+            payload[f"S{idx:02d}"]=sc
         def _batch_row(ws, idx, hmap, kv):
             upd=[]
             for k,v in kv.items():
@@ -1267,8 +1272,8 @@ def tab_eval(emp_df: pd.DataFrame):
                     pass
             if not picked: return {}
             out: dict[str,int] = {}
-            for iid in item_ids:
-                col = hmap.get(f"점수_{iid}")
+            for idx, iid in enumerate(item_ids, start=1):
+                col = (hmap.get(f"S{idx:02d}") or hmap.get(f"점수_{iid}"))
                 if col and col-1 < len(picked):
                     try:
                         v = int(str(picked[col-1]).strip() or "0")
@@ -2147,13 +2152,13 @@ def tab_job_desc(emp_df: pd.DataFrame):
 # ═════════════════════════════════════════════════════════════════════════════
 # 직무능력평가 + JD 요약 스크롤
 # ═════════════════════════════════════════════════════════════════════════════
-COMP_SIMPLE_PREFIX = "직무능력평가_"
+COMP_SIMPLE_PREFIX = "직무능력평가_raw"
 COMP_SIMPLE_HEADERS = [
     "연도","평가대상사번","평가대상이름","평가자사번","평가자이름",
     "평가일자","주업무평가","기타업무평가","교육이수","자격유지","종합의견",
     "상태","제출시각","잠금"
 ]
-def _simp_sheet_name(year:int|str)->str: return f"{COMP_SIMPLE_PREFIX}{int(year)}"
+def _simp_sheet_name(year:int|str)->str: return "직무능력평가_raw"
 
 def _ensure_comp_simple_sheet(year:int):
     wb=get_book(); name=_simp_sheet_name(year)
@@ -3025,99 +3030,3 @@ def gs_flush():
                 raise
     st.session_state.gs_queue = []
 # ===== End helpers =====
-
-
-# ============================================================================
-# FORCE RAW SHEETS PATCH (safe-append)
-# Date: 2025-10-27
-# Purpose:
-#   - Ensure any access to yearly sheets (인사평가_YYYY / 직무능력평가_YYYY)
-#     is redirected to the new single tabs: 인사평가_raw / 직무능력평가_raw
-#   - Normalize "range" strings used in values_batch_update()
-# Notes:
-#   - We do NOT modify existing functions. We only wrap get_book() to return
-#     a proxy that intercepts .worksheet(), .add_worksheet(), .values_batch_update().
-#   - This avoids indentation/syntax issues and is version-agnostic.
-# ============================================================================
-
-import re as __re_force_raw
-
-def __normalize_title_force_raw(title: str) -> str:
-    t = str(title)
-    if __re_force_raw.match(r"^인사평가_\d{4}$", t):
-        return "인사평가_raw"
-    if __re_force_raw.match(r"^직무능력평가_\d{4}$", t):
-        return "직무능력평가_raw"
-    return t
-
-def __normalize_range_force_raw(r: str) -> str:
-    s = str(r)
-    if "!" in s:
-        sheet, rest = s.split("!", 1)
-        sh = sheet.strip().strip("'").strip('"')
-        sh2 = __normalize_title_force_raw(sh)
-        if sh2 != sh:
-            # keep original quoting style if present
-            if sheet.strip().startswith(("'", '"')):
-                sheet_out = f"'{sh2}'" if sheet.strip().startswith("'") else f'"{sh2}"'
-            else:
-                sheet_out = sh2
-            return f"{sheet_out}!{rest}"
-    return s
-
-# Keep original get_book and return a proxy wrapper.
-__ORIG_get_book_force_raw = get_book
-
-class __WorksheetProxyForceRaw:
-    def __init__(self, real_ws, parent_proxy_spreadsheet):
-        self.__real_ws = real_ws
-        # IMPORTANT: ensure ws.spreadsheet is the proxy, not the real spreadsheet,
-        # so that ws.spreadsheet.values_batch_update(...) is also intercepted.
-        self.spreadsheet = parent_proxy_spreadsheet
-    def __getattr__(self, name):
-        return getattr(self.__real_ws, name)
-
-class __SpreadsheetProxyForceRaw:
-    def __init__(self, real_spreadsheet):
-        self.__real_spreadsheet = real_spreadsheet
-    def worksheet(self, title):
-        t = __normalize_title_force_raw(title)
-        try:
-            ws_real = self.__real_spreadsheet.worksheet(t)
-        except Exception:
-            if t in ("인사평가_raw","직무능력평가_raw"):
-                ws_real = self.__real_spreadsheet.add_worksheet(title=t, rows=5000, cols=120)
-            else:
-                raise
-        return __WorksheetProxyForceRaw(ws_real, self)
-    def add_worksheet(self, title, *args, **kwargs):
-        t = __normalize_title_force_raw(title)
-        ws_real = self.__real_spreadsheet.add_worksheet(title=t, *args, **kwargs)
-        return __WorksheetProxyForceRaw(ws_real, self)
-    def values_batch_update(self, body: dict):
-        # Normalize any ranges embedded with yearly sheet names
-        try:
-            body = dict(body or {})
-            data = body.get("data", [])
-            new_data = []
-            for item in data:
-                item = dict(item)
-                if "range" in item:
-                    item["range"] = __normalize_range_force_raw(item["range"])
-                new_data.append(item)
-            body["data"] = new_data
-        except Exception:
-            # if structure unexpected, just pass through
-            pass
-        return self.__real_spreadsheet.values_batch_update(body)
-    def __getattr__(self, name):
-        # Delegate other attrs/methods
-        return getattr(self.__real_spreadsheet, name)
-
-def get_book():
-    # Return proxy every time so that any new handles also get normalization
-    return __SpreadsheetProxyForceRaw(__ORIG_get_book_force_raw())
-
-# ============================================================================
-# END FORCE RAW SHEETS PATCH
-# ============================================================================
