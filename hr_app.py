@@ -264,7 +264,6 @@ def force_sync(min_interval: int = 25):
 # App Config / Style
 # ═════════════════════════════════════════════════════════════════════════════
 APP_TITLE = st.secrets.get("app", {}).get("TITLE", "HISMEDI - 인사/HR")
-st.set_page_config(page_title=APP_TITLE, layout="wide")
 
 # Disable st.help "No docs available"
 if not getattr(st, "_help_disabled", False):
@@ -1433,7 +1432,7 @@ def tab_eval(emp_df: pd.DataFrame):
                 continue
             st.session_state[f"eval2_seg_{iid}_{kbase}"] = str(val)
             scores[iid] = val
-#### 제출 확인")st.markdown("#### 제출 확인")
+        st.markdown("#### 제출 확인")
     cb1, cb2 = st.columns([2, 1])
     with cb1:
         attest_ok = st.checkbox(
