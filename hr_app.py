@@ -2158,7 +2158,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
 COMP_SIMPLE_PREFIX = "직무능력평가_"
 COMP_SIMPLE_HEADERS = [
     "연도","평가대상사번","평가대상이름","평가자사번","평가자이름",
-    "평가일자","주업무평가","기타업무평가","교육이수","자격유지","종합의견",
+    "주업무평가","기타업무평가","교육이수","자격유지","종합의견",
     "상태","제출시각","잠금"
 ]
 def _simp_sheet_name(year:int|str)->str: return f"{COMP_SIMPLE_PREFIX}{int(year)}"
@@ -2217,7 +2217,7 @@ def upsert_comp_simple_response(emp_df: pd.DataFrame, year:int, target_sabun:str
         def put(k,v): c=hmap.get(k); buf[c-1]=v if c else ""
         put("연도",int(year)); put("평가대상사번",str(target_sabun)); put("평가대상이름",t_name)
         put("평가자사번",str(evaluator_sabun)); put("평가자이름",e_name)
-        put("평가일자",eval_date); put("주업무평가",main_grade); put("기타업무평가",extra_grade)
+        put("주업무평가",main_grade); put("기타업무평가",extra_grade)
         put("교육이수",edu_status); put("자격유지",qual_status); put("종합의견",opinion)
         put("상태","제출"); put("제출시각",now); put("잠금","")
         _retry(ws.append_row, buf, value_input_option="USER_ENTERED")
@@ -2226,7 +2226,6 @@ def upsert_comp_simple_response(emp_df: pd.DataFrame, year:int, target_sabun:str
         return {"action":"insert"}
     else:
         _ws_batch_row(ws, row_idx, hmap, {
-            "평가일자": eval_date,
             "주업무평가": main_grade,
             "기타업무평가": extra_grade,
             "교육이수": edu_status,
@@ -2247,7 +2246,7 @@ def read_my_comp_simple_rows(year:int, sabun:str)->pd.DataFrame:
     except Exception: return pd.DataFrame(columns=COMP_SIMPLE_HEADERS)
     if df.empty: return df
     df=df[df["평가자사번"].astype(str)==str(sabun)]
-    sort_cols=[c for c in ["평가대상사번","평가일자","제출시각"] if c in df.columns]
+    sort_cols=[c for c in ["평가대상사번","제출시각"] if c in df.columns]
     if sort_cols: df=df.sort_values(sort_cols, ascending=[True,False,False])
     return df.reset_index(drop=True)
 
