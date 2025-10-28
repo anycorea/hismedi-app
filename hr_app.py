@@ -1,20 +1,408 @@
 import re, time, random, hashlib, secrets as pysecrets
 from datetime import datetime, timedelta
 from typing import Any, Tuple
+from html import escape as _html_escape
+from zoneinfo import ZoneInfo
+import html
+from typing import Tuple, Dict
+import re as _re_local
+
 import pandas as pd
 import streamlit as st
 from gspread.exceptions import APIError as _APIError
-from html import escape as _html_escape
-from zoneinfo import ZoneInfo
 import pytz
 import gspread
 from google.oauth2.service_account import Credentials
 from gspread.exceptions import WorksheetNotFound, APIError
 from gspread.utils import rowcol_to_a1
-import html
 import streamlit.components.v1 as components
-from typing import Tuple, Dict
-import re as _re_local
+
+def _is_quota_429(err) -> bool:
+    try:
+        from gspread.exceptions import APIError as _APIError
+        if isinstance(err, _APIError):
+            resp = getattr(err, 'response', None)
+            code = getattr(resp, 'status_code', None)
+            return code == 429
+    except Exception:
+        pass
+    return False
+
+def current_year() -> int:
+    """Return KST-based current year if tz_kst() is available, otherwise system year."""
+    try:
+        return datetime.now(tz=tz_kst()).year
+    except Exception:
+        return datetime.now().year
+
+def kst_now_str():
+    return datetime.now(tz=tz_kst()).strftime('%Y-%m-%d %H:%M:%S (%Z)')
+
+def _jd_plain_html(text: str) -> str:
+    import html
+    if text is None:
+        text = ''
+    s = str(text).replace('\r\n', '\n').replace('\r', '\n')
+    return '<div class="jd-tight">' + html.escape(s).replace('\n', '<br>') + '</div>'
+
+def _sha256_hex(s: str) -> str:
+    return hashlib.sha256(str(s).encode()).hexdigest()
+
+def _to_bool(x) -> bool:
+    return str(x).strip().lower() in ('true', '1', 'y', 'yes', 't')
+
+def _normalize_private_key(raw: str) -> str:
+    if not raw:
+        return raw
+    return raw.replace('\\n', '\n') if '\\n' in raw and 'BEGIN PRIVATE KEY' in raw else raw
+
+def _pin_hash(pin: str, sabun: str) -> str:
+    return hashlib.sha256(f'{str(sabun).strip()}:{str(pin).strip()}'.encode()).hexdigest()
+
+def _retry(fn, *args, **kwargs):
+    """Retry helper: handle 429/503 and 403(rate/quota) with jittered backoff."""
+    last = None
+    for b in API_BACKOFF_SEC:
+        try:
+            return fn(*args, **kwargs)
+        except APIError as e:
+            status = None
+            retry_after = None
+            msg = ''
+            try:
+                status = getattr(e, 'response', None).status_code
+                headers = getattr(e, 'response', None).headers or {}
+                retry_after = headers.get('Retry-After')
+            except Exception:
+                pass
+            try:
+                msg = str(e).lower()
+            except Exception:
+                msg = ''
+            retryable = status in (429, 503) or (status == 403 and ('rate' in msg or 'quota' in msg or 'too many' in msg))
+            if not retryable and status in (400, 401, 404):
+                raise
+            wait = float(retry_after) if retry_after else b + random.uniform(0, 0.6)
+            time.sleep(max(0.25, wait))
+            last = e
+        except Exception as e:
+            last = e
+            time.sleep(b + random.uniform(0, 0.6))
+    if last:
+        raise last
+    return fn(*args, **kwargs)
+
+def _ws_values(ws, key: str | None=None):
+    key = key or getattr(ws, 'title', '') or 'ws_values'
+    now = time.time()
+    hit = _VAL_CACHE.get(key)
+    if hit and now - hit[0] < _VAL_TTL:
+        return hit[1]
+    vals = _retry(ws.get_all_values)
+    _VAL_CACHE[key] = (now, vals)
+    return vals
+
+def _ws(title: str):
+    now = time.time()
+    hit = _WS_CACHE.get(title)
+    if hit and now - hit[0] < _WS_TTL:
+        return hit[1]
+    ws = _retry(get_book().worksheet, title)
+    _WS_CACHE[title] = (now, ws)
+    return ws
+
+def _hdr(ws, key: str) -> Tuple[list[str], dict]:
+    now = time.time()
+    hit = _HDR_CACHE.get(key)
+    if hit and now - hit[0] < _HDR_TTL:
+        return (hit[1], hit[2])
+    header = _retry(ws.row_values, 1) or []
+    hmap = {n: i + 1 for i, n in enumerate(header)}
+    _HDR_CACHE[key] = (now, header, hmap)
+    return (header, hmap)
+
+def _ws_get_all_records(ws):
+    try:
+        title = getattr(ws, 'title', None) or ''
+        vals = _ws_values(ws, title)
+        if not vals:
+            return []
+        header = [str(x).strip() for x in (vals[0] if vals else [])]
+        out = []
+        for i in range(1, len(vals)):
+            row = vals[i] if i < len(vals) else []
+            rec = {}
+            for j, h in enumerate(header):
+                rec[h] = row[j] if j < len(row) else ''
+            out.append(rec)
+        return out
+    except Exception:
+        try:
+            return _retry(ws.get_all_records, numericise_ignore=['all'])
+        except TypeError:
+            return _retry(ws.get_all_records)
+
+def _inject_login_keybinder():
+    components.html('''
+        <script>
+        (function(){
+          function byLabelStartsWith(txt){
+            const doc = window.parent.document;
+            const labels = Array.from(doc.querySelectorAll('label'));
+            const lab = labels.find(l => (l.innerText||"").trim().startsWith(txt));
+            if(!lab) return null;
+            const root = lab.closest('div[data-testid="stTextInput"]') || lab.parentElement;
+            return root ? root.querySelector('input') : null;
+          }
+          function findLoginBtn(){
+            const doc = window.parent.document;
+            const btns = Array.from(doc.querySelectorAll('button'));
+            return btns.find(b => (b.textContent||"").trim() === '로그인');
+          }
+          function commit(el){
+            if(!el) return;
+            el.dispatchEvent(new Event('input',{bubbles:true}));
+            el.dispatchEvent(new Event('change',{bubbles:true}));
+            el.blur();
+          }
+          function bind(){
+            const sab = byLabelStartsWith('사번');
+            const pin = byLabelStartsWith('PIN');
+            if(!sab || !pin) return false;
+            if(!sab._bound){
+              sab._bound = true;
+              sab.addEventListener('keydown', function(e){
+                if(e.key==='Enter'){ e.preventDefault(); commit(sab); setTimeout(()=>{ try{ pin.focus(); pin.select(); }catch(_){}} ,0); }
+              });
+            }
+            if(!pin._bound){
+              pin._bound = true;
+              pin.addEventListener('keydown', function(e){
+                if(e.key==='Enter'){ e.preventDefault(); commit(pin); setTimeout(()=>{ try{ (findLoginBtn()||{}).click(); }catch(_){}} ,60); }
+              });
+            }
+            return true;
+          }
+          bind();
+          const mo = new MutationObserver(() => { bind(); });
+          mo.observe(window.parent.document.body, { childList:true, subtree:true });
+          setTimeout(()=>{ try{ mo.disconnect(); }catch(e){} }, 8000);
+        })();
+        </script>
+        ''', height=0, width=0)
+
+def is_admin(sabun: str) -> bool:
+    try:
+        df = read_auth_df()
+        if df.empty:
+            return False
+        q = df[(df['사번'].astype(str) == str(sabun)) & (df['역할'].str.lower() == 'admin') & (df['활성'] == True)]
+        return not q.empty
+    except Exception:
+        return False
+
+def _eval_sheet_name(year: int | str) -> str:
+    return f'{EVAL_RESP_SHEET_PREFIX}{int(year)}'
+
+def _ensure_eval_resp_sheet(year: int, item_ids: list[str]):
+    name = _eval_sheet_name(year)
+    wb = get_book()
+    try:
+        ws = _ws(name)
+    except WorksheetNotFound:
+        ws = _retry(wb.add_worksheet, title=name, rows=5000, cols=max(50, len(item_ids) + 16))
+        _WS_CACHE[name] = (time.time(), ws)
+    need = list(EVAL_BASE_HEADERS) + [f'점수_{iid}' for iid in item_ids]
+    header, _ = _hdr(ws, name)
+    if not header:
+        _retry(ws.update, '1:1', [need])
+        _HDR_CACHE[name] = (time.time(), need, {n: i + 1 for i, n in enumerate(need)})
+    else:
+        miss = [h for h in need if h not in header]
+        if miss:
+            new = header + miss
+            _retry(ws.update, '1:1', [new])
+            _HDR_CACHE[name] = (time.time(), new, {n: i + 1 for i, n in enumerate(new)})
+    return ws
+
+def _emp_name_by_sabun(emp_df: pd.DataFrame, sabun: str) -> str:
+    row = emp_df.loc[emp_df['사번'].astype(str) == str(sabun)]
+    return '' if row.empty else str(row.iloc[0].get('이름', ''))
+
+def _jd_print_html(jd: dict, meta: dict) -> str:
+
+    def g(k):
+        return (str(jd.get(k, '')) or '—').strip()
+
+    def m(k):
+        return (str(meta.get(k, '')) or '—').strip()
+    dept = m('부서1')
+    if m('부서2') != '—' and m('부서2'):
+        dept = f"{dept} / {m('부서2')}" if dept and dept != '—' else m('부서2')
+    row1 = [('사번', m('사번')), ('이름', m('이름')), ('부서', dept or '—')]
+    row2 = [('직종', m('직종')), ('직군', m('직군')), ('직무명', m('직무명'))]
+    row3 = [('연도', m('연도')), ('버전', m('버전')), ('제정일', m('제정일')), ('개정일', m('개정일')), ('검토주기', m('검토주기'))]
+
+    def trow_3cols_kvk(title_pairs, wide_last=True):
+        cells = []
+        for i, (k, v) in enumerate(title_pairs):
+            wide_cls = ' wide' if wide_last and i == 2 else ''
+            cells.append(f"<td class='k'>{k}</td><td class='v{wide_cls}'>{v}</td>")
+        return '<tr>' + ''.join(cells) + '</tr>'
+
+    def trow_5cols_kvk(title_pairs):
+        cells = []
+        for k, v in title_pairs:
+            cells.append(f"<td class='k'>{k}</td><td class='v'>{v}</td>")
+        return '<tr>' + ''.join(cells) + '</tr>'
+
+    def block(title, body):
+        body_val = (body or '').strip() or '—'
+        return f'\n        <section class="blk">\n          <div class="cap">{title}</div>\n          <div class="body">{body_val}</div>\n        </section>\n        '
+    body_html = block('직무개요', g('직무개요')) + block('주요업무', g('주업무')) + block('기타업무', g('기타업무')) + block('자격교육요건', f"""\n            <div class="grid edu">\n              <div class="cell"><b>필요학력</b><div>{g('필요학력')}</div></div>\n              <div class="cell"><b>전공계열</b><div>{g('전공계열')}</div></div>\n              <div class="cell"><b>면허</b><div>{g('면허')}</div></div>\n              <div class="cell"><b>경력(자격요건)</b><div>{g('경력(자격요건)')}</div></div>\n\n              <div class="cell span2"><b>직원공통필수교육</b><div>{g('직원공통필수교육')}</div></div>\n              <div class="cell span2"><b>특성화교육</b><div>{g('특성화교육')}</div></div>\n              <div class="cell span2"><b>보수교육</b><div>{g('보수교육')}</div></div>\n              <div class="cell span2"><b>기타교육</b><div>{g('기타교육')}</div></div>\n            </div>\n        """)
+    html = f"""\n    <html>\n    <head>\n      <meta charset="utf-8" />\n      <title>직무기술서 출력</title>\n      <style>\n        :root {{ --fg:#111; --muted:#666; --line:#e5e7eb; }}\n        html, body {{\n          color: var(--fg);\n          font-family: 'Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic','Segoe UI',Roboto,system-ui,sans-serif;\n          -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;\n          orphans: 2; widows: 2; word-break: keep-all; overflow-wrap: anywhere;\n        }}\n        .print-wrap {{ max-width: 900px; margin: 0 auto; padding: 28px 24px; background:#fff; }}\n        .actionbar {{ display:flex; justify-content:flex-end; margin-bottom:12px; }}\n        .actionbar button {{ padding:6px 12px; border:1px solid var(--line); background:#fff; border-radius:6px; cursor:pointer; }}\n        header {{ border-bottom:1px solid var(--line); padding-bottom:10px; margin-bottom:18px; }}\n        header h1 {{ margin:0; font-size: 22px; }}\n\n        /* === Meta tables (3 rows) === */\n        table.meta6 {{ width:100%; border-collapse:collapse; margin-top:4px; font-size:13px; color:var(--muted); table-layout:fixed; }}\n        table.meta6 td {{ padding:4px 6px; vertical-align:top; border-bottom:1px dashed var(--line); }}\n        table.meta6 td.k {{ width:10%; color:#111; font-weight:700; white-space:nowrap; }}\n        table.meta6 td.v {{ width:20%; color:#333; overflow:hidden; text-overflow:ellipsis; }}\n        table.meta6 td.v.wide {{ width:30%; }} /* 부서/직무명 등 넓은 칸 */\n\n        table.meta10 {{ width:100%; border-collapse:collapse; margin-top:4px; font-size:13px; color:var(--muted); table-layout:fixed; }}\n        table.meta10 td {{ padding:4px 6px; vertical-align:top; border-bottom:1px dashed var(--line); }}\n        table.meta10 td.k {{ width:10%; color:#111; font-weight:700; white-space:nowrap; }}\n        table.meta10 td.v {{ width:10%; color:#333; overflow:hidden; text-overflow:ellipsis; }}\n\n        /* === Blocks with SMALL captions and 11px body === */\n        .blk {{ break-inside: auto; page-break-inside: auto; margin: 12px 0 16px; }}\n        .blk .cap {{ font-size:13px; color:#111; font-weight:700; margin: 2px 0 6px; }}\n        .blk .body {{ white-space: pre-wrap; font-size:11px; line-height: 1.55; border:1px solid var(--line); padding:10px; border-radius:8px; min-height:60px; }}\n\n        /* Education grid */\n        .grid.edu {{ display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:8px; }}\n        .grid.edu .cell {{ border:1px solid var(--line); border-radius:8px; padding:8px; }}\n        /* INNER field labels smaller than section caption (12px < 13px) */\n        .grid.edu .cell > b {{ font-size:12px; color:#111; }}\n        .grid.edu .cell > div {{ font-size:11px; line-height:1.55; color:#333; }}\n        .grid.edu .cell.span2 {{ grid-column: 1 / -1; }} /* full-width lines for long fields */\n\n        /* Signature area */\n        .sign {{ margin-top:20px; display:flex; gap:16px; }}\n        .sign > div {{ flex:1; border:1px dashed var(--line); border-radius:8px; padding:10px; min-height:70px; }}\n        .sign .cap {{ font-size:13px; color:#111; font-weight:700; margin-bottom:6px; }}\n        .sign .body {{ font-size:11px; line-height:1.55; color:#333; }}\n\n        @media print {{\n          @page {{ size: A4; margin: 18mm 14mm; }}\n          body {{ -webkit-print-color-adjust: exact; print-color-adjust: exact; }}\n          .actionbar {{ display:none !important; }}\n        }}\n      </style>\n    </head>\n    <body>\n      <div class="print-wrap">\n        <div class="actionbar"><button onclick="window.print()">인쇄</button></div>\n        <header>\n          <h1>직무기술서 (Job Description)</h1>\n          <!-- Row 1 -->\n          <table class="meta6">\n            {trow_3cols_kvk(row1, wide_last=True)}\n          </table>\n          <!-- Row 2 -->\n          <table class="meta6">\n            {trow_3cols_kvk(row2, wide_last=True)}\n          </table>\n          <!-- Row 3 -->\n          <table class="meta10">\n            {trow_5cols_kvk(row3)}\n          </table>\n        </header>\n        {body_html}\n        <div class="sign">\n          <div>\n            <div class="cap">직원 확인 서명</div>\n            <div class="body"></div>\n          </div>\n          <div>\n            <div class="cap">부서장 확인 서명</div>\n            <div class="body"></div>\n          </div>\n        </div>\n      </div>\n    </body>\n    </html>\n    """
+    return html
+
+def ensure_jd_approval_sheet():
+    wb = get_book()
+    try:
+        _ = wb.worksheet(JD_APPROVAL_SHEET)
+    except WorksheetNotFound:
+        ws = _retry(wb.add_worksheet, title=JD_APPROVAL_SHEET, rows=3000, cols=20)
+        _retry(ws.update, '1:1', [JD_APPROVAL_HEADERS])
+
+def _jd_latest_version_for(sabun: str, year: int) -> int:
+    row = _jd_latest_for(sabun, int(year)) or {}
+    try:
+        return int(row.get('버전', 0) or 0)
+    except Exception:
+        return 0
+
+def _simp_sheet_name(year: int | str) -> str:
+    return f'{COMP_SIMPLE_PREFIX}{int(year)}'
+
+def _ensure_comp_simple_sheet(year: int):
+    wb = get_book()
+    name = _simp_sheet_name(year)
+    try:
+        ws = wb.worksheet(name)
+    except WorksheetNotFound:
+        ws = _retry(wb.add_worksheet, title=name, rows=1000, cols=50)
+        _retry(ws.update, '1:1', [COMP_SIMPLE_HEADERS])
+        return ws
+    header = _retry(ws.row_values, 1) or []
+    need = [h for h in COMP_SIMPLE_HEADERS if h not in header]
+    if need:
+        _retry(ws.update, '1:1', [header + need])
+    return ws
+
+def _jd_latest_for_comp(sabun: str, year: int) -> dict:
+    try:
+        df = read_jobdesc_df()
+        if df is None or len(df) == 0:
+            return {}
+        q = df[(df['사번'].astype(str) == str(sabun)) & (df['연도'].astype(int) == int(year))]
+        if q.empty:
+            return {}
+        if '버전' in q.columns:
+            try:
+                q = q.copy()
+                q['버전'] = pd.to_numeric(q['버전'], errors='coerce').fillna(0)
+            except Exception:
+                pass
+            q = q.sort_values('버전').iloc[-1]
+        else:
+            q = q.iloc[-1]
+        return {c: q.get(c, '') for c in q.index}
+    except Exception:
+        return {}
+
+def _edu_completion_from_jd(jd_row: dict) -> str:
+    val = str(jd_row.get('직원공통필수교육', '')).strip()
+    return '완료' if val else '미완료'
+
+def upsert_comp_simple_response(
+    emp_df: pd.DataFrame,
+     year: int,
+     target_sabun: str,
+     evaluator_sabun: str,
+     main_grade: str,
+     extra_grade: str,
+     qual_status: str,
+     opinion: str,
+     eval_date: str) -> dict:
+    ws = _ensure_comp_simple_sheet(year)
+    header = _retry(ws.row_values, 1) or COMP_SIMPLE_HEADERS
+    hmap = {n: i + 1 for i, n in enumerate(header)}
+    jd = _jd_latest_for_comp(target_sabun, int(year))
+    edu_status = _edu_completion_from_jd(jd)
+    t_name = _emp_name_by_sabun(emp_df, target_sabun)
+    e_name = _emp_name_by_sabun(emp_df, evaluator_sabun)
+    now = kst_now_str()
+    values = _ws_values(ws)
+    cY = hmap.get('연도')
+    cTS = hmap.get('평가대상사번')
+    cES = hmap.get('평가자사번')
+    row_idx = 0
+    for i in range(2, len(values) + 1):
+        r = values[i - 1]
+        try:
+            if str(
+    r[cY - 1]).strip() == str(year) and str(r[cTS - 1]).strip() == str(target_sabun) and (str(r[cES - 1]).strip() == str(evaluator_sabun)):
+                row_idx = i
+                break
+        except:
+            pass
+    if row_idx == 0:
+        buf = [''] * len(header)
+
+        def put(k, v):
+            c = hmap.get(k)
+            buf[c - 1] = v if c else ''
+        put('연도', int(year))
+        put('평가대상사번', str(target_sabun))
+        put('평가대상이름', t_name)
+        put('평가자사번', str(evaluator_sabun))
+        put('평가자이름', e_name)
+        put('평가일자', eval_date)
+        put('주업무평가', main_grade)
+        put('기타업무평가', extra_grade)
+        put('교육이수', edu_status)
+        put('자격유지', qual_status)
+        put('종합의견', opinion)
+        put('상태', '제출')
+        put('제출시각', now)
+        put('잠금', '')
+        _retry(ws.append_row, buf, value_input_option='USER_ENTERED')
+        try:
+            read_my_comp_simple_rows.clear()
+        except Exception:
+            pass
+        return {'action': 'insert'}
+    else:
+        _ws_batch_row(ws, row_idx, hmap, {'평가일자': eval_date, '주업무평가': main_grade, '기타업무평가': extra_grade, '교육이수': edu_status, '자격유지': qual_status, '종합의견': opinion, '상태': '제출', '제출시각': now})
+        try:
+            read_my_comp_simple_rows.clear()
+        except Exception:
+            pass
+        return {'action': 'update'}
+
+def _get_ws_and_headers(sheet_name: str):
+    ws = _ws(sheet_name)
+    header, _h = _hdr(ws, sheet_name)
+    if not header:
+        raise RuntimeError(f"'{sheet_name}' 헤더(1행) 없음")
+    return (ws, header, _h)
+
+def _find_row_by_sabun(ws, hmap, sabun: str) -> int:
+    c = hmap.get('사번')
+    if not c:
+        return 0
+    vals = _retry(ws.col_values, c)[1:]
+    for i, v in enumerate(vals, start=2):
+        if str(v).strip() == str(sabun).strip():
+            return i
+    return 0
 
 def _ensure_capacity(ws, min_row: int, min_col: int):
     """Ensure worksheet has at least (min_row x min_col) grid. Expands columns/rows only if needed."""
@@ -27,17 +415,6 @@ def _ensure_capacity(ws, min_row: int, min_col: int):
             ws.add_cols(c_needed - int(ws.col_count))
     except Exception as _e:
         pass
-
-def _is_quota_429(err) -> bool:
-    try:
-        from gspread.exceptions import APIError as _APIError
-        if isinstance(err, _APIError):
-            resp = getattr(err, 'response', None)
-            code = getattr(resp, 'status_code', None)
-            return code == 429
-    except Exception:
-        pass
-    return False
 AUTO_FIX_HEADERS = False
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -213,38 +590,48 @@ if not getattr(st, '_help_disabled', False):
         return None
     st.help = _noop_help
     st._help_disabled = True
-st.markdown('\n    <style>\n      .block-container{ padding-top: 2.5rem !important; }\n      .stTabs [role=\'tab\']{ padding:10px 16px !important; font-size:1.02rem !important; }\n      .badge{display:inline-block;padding:.25rem .5rem;border-radius:.5rem;border:1px solid #9ae6b4;background:#e6ffed;color:#0f5132;font-weight:600;}\n      section[data-testid="stHelp"], div[data-testid="stHelp"]{ display:none !important; }\n      .muted{color:#6b7280;}\n      .app-title-hero{ font-weight:800; font-size:1.6rem; line-height:1.15; margin:.2rem 0 .6rem; }\n      @media (min-width:1400px){ .app-title-hero{ font-size:1.8rem; } }\n      div[data-testid="stFormSubmitButton"] button[kind="secondary"]{ padding: 0.35rem 0.5rem; font-size: .82rem; }\n\n      /* JD Summary scroll box (Competency tab) */\n      .scrollbox{ max-height: 280px; overflow-y: auto; padding: .6rem .75rem; background: #fafafa;\n                  border: 1px solid #e5e7eb; border-radius: .5rem; }\n      .scrollbox .kv{ margin-bottom: .6rem; }\n      .scrollbox .k{ font-weight: 700; margin-bottom: .2rem; }\n      .scrollbox .v{ white-space: pre-wrap; word-break: break-word; line-height: 1.42; }\n\n/* JD summary tight mode: keep text exactly, but tighter spacing */\n.jd-tight { line-height: 1.42; }\n.jd-tight p, .jd-tight ul, .jd-tight ol, .jd-tight li { margin: 0; padding: 0; }\n\n      .submit-banner{\n        background:#FEF3C7; /* amber-100 */\n        border:1px solid #FDE68A; /* amber-200 */\n        padding:.55rem .8rem;\n        border-radius:.5rem;\n        font-weight:600;\n        line-height:1.35;\n        margin: 4px 0 14px 0; /* comfortable spacing below */\n        display:block;\n      }\n\n      /* ===== 좌우 스크롤 깔끔 모드 (표 구조 변경 없음) ===== */\n      /* 바깥 래퍼에서는 가로 스크롤 숨김 */\n      div[data-testid="stDataFrame"] > div { overflow-x: visible !important; }\n      /* 표 그리드(본체)에서만 가로 스크롤 */\n      div[data-testid="stDataFrame"] [role="grid"] { overflow-x: auto !important; }\n      /* 스크롤바 잡기 편하도록 표 아래쪽 여유 */\n      div[data-testid="stDataFrame"] { padding-bottom: 10px; }\n    </style>\n    ', unsafe_allow_html=True)
+st.markdown('''
+    <style>
+      .block-container{ padding-top: 2.5rem !important; }
+      .stTabs [role='tab']{ padding:10px 16px !important; font-size:1.02rem !important; }
+      .badge{display:inline-block;padding:.25rem .5rem;border-radius:.5rem;border:1px solid #9ae6b4;background:#e6ffed;color:#0f5132;font-weight:600;}
+      section[data-testid="stHelp"], div[data-testid="stHelp"]{ display:none !important; }
+      .muted{color:#6b7280;}
+      .app-title-hero{ font-weight:800; font-size:1.6rem; line-height:1.15; margin:.2rem 0 .6rem; }
+      @media (min-width:1400px){ .app-title-hero{ font-size:1.8rem; } }
+      div[data-testid="stFormSubmitButton"] button[kind="secondary"]{ padding: 0.35rem 0.5rem; font-size: .82rem; }
 
-def current_year() -> int:
-    """Return KST-based current year if tz_kst() is available, otherwise system year."""
-    try:
-        return datetime.now(tz=tz_kst()).year
-    except Exception:
-        return datetime.now().year
+      /* JD Summary scroll box (Competency tab) */
+      .scrollbox{ max-height: 280px; overflow-y: auto; padding: .6rem .75rem; background: #fafafa;
+                  border: 1px solid #e5e7eb; border-radius: .5rem; }
+      .scrollbox .kv{ margin-bottom: .6rem; }
+      .scrollbox .k{ font-weight: 700; margin-bottom: .2rem; }
+      .scrollbox .v{ white-space: pre-wrap; word-break: break-word; line-height: 1.42; }
 
-def kst_now_str():
-    return datetime.now(tz=tz_kst()).strftime('%Y-%m-%d %H:%M:%S (%Z)')
+/* JD summary tight mode: keep text exactly, but tighter spacing */
+.jd-tight { line-height: 1.42; }
+.jd-tight p, .jd-tight ul, .jd-tight ol, .jd-tight li { margin: 0; padding: 0; }
 
-def _jd_plain_html(text: str) -> str:
-    import html
-    if text is None:
-        text = ''
-    s = str(text).replace('\r\n', '\n').replace('\r', '\n')
-    return '<div class="jd-tight">' + html.escape(s).replace('\n', '<br>') + '</div>'
+      .submit-banner{
+        background:#FEF3C7; /* amber-100 */
+        border:1px solid #FDE68A; /* amber-200 */
+        padding:.55rem .8rem;
+        border-radius:.5rem;
+        font-weight:600;
+        line-height:1.35;
+        margin: 4px 0 14px 0; /* comfortable spacing below */
+        display:block;
+      }
 
-def _sha256_hex(s: str) -> str:
-    return hashlib.sha256(str(s).encode()).hexdigest()
-
-def _to_bool(x) -> bool:
-    return str(x).strip().lower() in ('true', '1', 'y', 'yes', 't')
-
-def _normalize_private_key(raw: str) -> str:
-    if not raw:
-        return raw
-    return raw.replace('\\n', '\n') if '\\n' in raw and 'BEGIN PRIVATE KEY' in raw else raw
-
-def _pin_hash(pin: str, sabun: str) -> str:
-    return hashlib.sha256(f'{str(sabun).strip()}:{str(pin).strip()}'.encode()).hexdigest()
+      /* ===== 좌우 스크롤 깔끔 모드 (표 구조 변경 없음) ===== */
+      /* 바깥 래퍼에서는 가로 스크롤 숨김 */
+      div[data-testid="stDataFrame"] > div { overflow-x: visible !important; }
+      /* 표 그리드(본체)에서만 가로 스크롤 */
+      div[data-testid="stDataFrame"] [role="grid"] { overflow-x: auto !important; }
+      /* 스크롤바 잡기 편하도록 표 아래쪽 여유 */
+      div[data-testid="stDataFrame"] { padding-bottom: 10px; }
+    </style>
+    ''', unsafe_allow_html=True)
 
 def show_submit_banner(text: str):
     try:
@@ -299,39 +686,6 @@ def verify_pin(user_sabun: str, pin: str) -> bool:
     return False
 API_BACKOFF_SEC = [0.0, 0.8, 1.6, 3.2, 6.4, 9.6]
 
-def _retry(fn, *args, **kwargs):
-    """Retry helper: handle 429/503 and 403(rate/quota) with jittered backoff."""
-    last = None
-    for b in API_BACKOFF_SEC:
-        try:
-            return fn(*args, **kwargs)
-        except APIError as e:
-            status = None
-            retry_after = None
-            msg = ''
-            try:
-                status = getattr(e, 'response', None).status_code
-                headers = getattr(e, 'response', None).headers or {}
-                retry_after = headers.get('Retry-After')
-            except Exception:
-                pass
-            try:
-                msg = str(e).lower()
-            except Exception:
-                msg = ''
-            retryable = status in (429, 503) or (status == 403 and ('rate' in msg or 'quota' in msg or 'too many' in msg))
-            if not retryable and status in (400, 401, 404):
-                raise
-            wait = float(retry_after) if retry_after else b + random.uniform(0, 0.6)
-            time.sleep(max(0.25, wait))
-            last = e
-        except Exception as e:
-            last = e
-            time.sleep(b + random.uniform(0, 0.6))
-    if last:
-        raise last
-    return fn(*args, **kwargs)
-
 def get_client():
     svc = dict(st.secrets['gcp_service_account'])
     svc['private_key'] = _normalize_private_key(svc.get('private_key', ''))
@@ -348,56 +702,6 @@ _HDR_CACHE: dict[str, Tuple[float, list[str], dict]] = {}
 _WS_TTL, _HDR_TTL = (120, 120)
 _VAL_CACHE: dict[str, Tuple[float, list]] = {}
 _VAL_TTL = 90
-
-def _ws_values(ws, key: str | None=None):
-    key = key or getattr(ws, 'title', '') or 'ws_values'
-    now = time.time()
-    hit = _VAL_CACHE.get(key)
-    if hit and now - hit[0] < _VAL_TTL:
-        return hit[1]
-    vals = _retry(ws.get_all_values)
-    _VAL_CACHE[key] = (now, vals)
-    return vals
-
-def _ws(title: str):
-    now = time.time()
-    hit = _WS_CACHE.get(title)
-    if hit and now - hit[0] < _WS_TTL:
-        return hit[1]
-    ws = _retry(get_book().worksheet, title)
-    _WS_CACHE[title] = (now, ws)
-    return ws
-
-def _hdr(ws, key: str) -> Tuple[list[str], dict]:
-    now = time.time()
-    hit = _HDR_CACHE.get(key)
-    if hit and now - hit[0] < _HDR_TTL:
-        return (hit[1], hit[2])
-    header = _retry(ws.row_values, 1) or []
-    hmap = {n: i + 1 for i, n in enumerate(header)}
-    _HDR_CACHE[key] = (now, header, hmap)
-    return (header, hmap)
-
-def _ws_get_all_records(ws):
-    try:
-        title = getattr(ws, 'title', None) or ''
-        vals = _ws_values(ws, title)
-        if not vals:
-            return []
-        header = [str(x).strip() for x in (vals[0] if vals else [])]
-        out = []
-        for i in range(1, len(vals)):
-            row = vals[i] if i < len(vals) else []
-            rec = {}
-            for j, h in enumerate(header):
-                rec[h] = row[j] if j < len(row) else ''
-            out.append(rec)
-        return out
-    except Exception:
-        try:
-            return _retry(ws.get_all_records, numericise_ignore=['all'])
-        except TypeError:
-            return _retry(ws.get_all_records)
 LAST_GOOD: dict[str, pd.DataFrame] = {}
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -475,9 +779,6 @@ def logout():
         pass
     st.rerun()
 
-def _inject_login_keybinder():
-    components.html('\n        <script>\n        (function(){\n          function byLabelStartsWith(txt){\n            const doc = window.parent.document;\n            const labels = Array.from(doc.querySelectorAll(\'label\'));\n            const lab = labels.find(l => (l.innerText||"").trim().startsWith(txt));\n            if(!lab) return null;\n            const root = lab.closest(\'div[data-testid="stTextInput"]\') || lab.parentElement;\n            return root ? root.querySelector(\'input\') : null;\n          }\n          function findLoginBtn(){\n            const doc = window.parent.document;\n            const btns = Array.from(doc.querySelectorAll(\'button\'));\n            return btns.find(b => (b.textContent||"").trim() === \'로그인\');\n          }\n          function commit(el){\n            if(!el) return;\n            el.dispatchEvent(new Event(\'input\',{bubbles:true}));\n            el.dispatchEvent(new Event(\'change\',{bubbles:true}));\n            el.blur();\n          }\n          function bind(){\n            const sab = byLabelStartsWith(\'사번\');\n            const pin = byLabelStartsWith(\'PIN\');\n            if(!sab || !pin) return false;\n            if(!sab._bound){\n              sab._bound = true;\n              sab.addEventListener(\'keydown\', function(e){\n                if(e.key===\'Enter\'){ e.preventDefault(); commit(sab); setTimeout(()=>{ try{ pin.focus(); pin.select(); }catch(_){}} ,0); }\n              });\n            }\n            if(!pin._bound){\n              pin._bound = true;\n              pin.addEventListener(\'keydown\', function(e){\n                if(e.key===\'Enter\'){ e.preventDefault(); commit(pin); setTimeout(()=>{ try{ (findLoginBtn()||{}).click(); }catch(_){}} ,60); }\n              });\n            }\n            return true;\n          }\n          bind();\n          const mo = new MutationObserver(() => { bind(); });\n          mo.observe(window.parent.document.body, { childList:true, subtree:true });\n          setTimeout(()=>{ try{ mo.disconnect(); }catch(e){} }, 8000);\n        })();\n        </script>\n        ', height=0, width=0)
-
 def show_login(emp_df: pd.DataFrame):
     st.markdown('### 로그인')
     sabun = st.text_input('사번', key='login_sabun')
@@ -536,16 +837,6 @@ def read_auth_df() -> pd.DataFrame:
     if '활성' in df.columns:
         df['활성'] = df['활성'].map(_to_bool)
     return df
-
-def is_admin(sabun: str) -> bool:
-    try:
-        df = read_auth_df()
-        if df.empty:
-            return False
-        q = df[(df['사번'].astype(str) == str(sabun)) & (df['역할'].str.lower() == 'admin') & (df['활성'] == True)]
-        return not q.empty
-    except Exception:
-        return False
 
 def get_allowed_sabuns(emp_df: pd.DataFrame, sabun: str, include_self: bool=True) -> set[str]:
     sabun = str(sabun)
@@ -704,10 +995,11 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
         ext_cols = cols + ['인사평가(자기)', '인사평가(1차)', '인사평가(2차)', '직무기술서(작성)', '직무기술서(승인)', '직무능력평가(주업무)', '직무능력평가(기타업무)', '직무능력평가(자격유지)']
         st.dataframe(view2[ext_cols], use_container_width=True, height=420, hide_index=True, column_config={'인사평가(자기)': st.column_config.TextColumn('자기'), '인사평가(1차)': st.column_config.TextColumn('1차'), '인사평가(2차)': st.column_config.TextColumn('2차'), '직무기술서(작성)': st.column_config.TextColumn('JD작성'), '직무기술서(승인)': st.column_config.TextColumn('JD승인'), '직무능력평가(주업무)': st.column_config.TextColumn('주업무'), '직무능력평가(기타업무)': st.column_config.TextColumn('기타업무'), '직무능력평가(자격유지)': st.column_config.TextColumn('자격유지')})
     else:
-        st.dataframe(view[cols], use_container_width=True, height=360 if not show_dashboard_cols else 420, hide_index=True)
-
-def _eval_sheet_name(year: int | str) -> str:
-    return f'{EVAL_RESP_SHEET_PREFIX}{int(year)}'
+        st.dataframe(
+    view[cols],
+     use_container_width=True,
+     height=360 if not show_dashboard_cols else 420,
+     hide_index=True)
 
 def ensure_eval_items_sheet():
     wb = get_book()
@@ -773,31 +1065,6 @@ def read_eval_items_df(only_active: bool=True) -> pd.DataFrame:
         df = df[df['활성'] == True]
     return df
 
-def _ensure_eval_resp_sheet(year: int, item_ids: list[str]):
-    name = _eval_sheet_name(year)
-    wb = get_book()
-    try:
-        ws = _ws(name)
-    except WorksheetNotFound:
-        ws = _retry(wb.add_worksheet, title=name, rows=5000, cols=max(50, len(item_ids) + 16))
-        _WS_CACHE[name] = (time.time(), ws)
-    need = list(EVAL_BASE_HEADERS) + [f'점수_{iid}' for iid in item_ids]
-    header, _ = _hdr(ws, name)
-    if not header:
-        _retry(ws.update, '1:1', [need])
-        _HDR_CACHE[name] = (time.time(), need, {n: i + 1 for i, n in enumerate(need)})
-    else:
-        miss = [h for h in need if h not in header]
-        if miss:
-            new = header + miss
-            _retry(ws.update, '1:1', [new])
-            _HDR_CACHE[name] = (time.time(), new, {n: i + 1 for i, n in enumerate(new)})
-    return ws
-
-def _emp_name_by_sabun(emp_df: pd.DataFrame, sabun: str) -> str:
-    row = emp_df.loc[emp_df['사번'].astype(str) == str(sabun)]
-    return '' if row.empty else str(row.iloc[0].get('이름', ''))
-
 def upsert_eval_response(emp_df: pd.DataFrame, year: int, eval_type: str, target_sabun: str, evaluator_sabun: str, scores: dict[str, int], status='제출') -> dict:
     items = read_eval_items_df(True)
     item_ids = [str(x) for x in items['항목ID'].tolist()]
@@ -825,7 +1092,8 @@ def upsert_eval_response(emp_df: pd.DataFrame, year: int, eval_type: str, target
     for i in range(2, len(values) + 1):
         r = values[i - 1]
         try:
-            if str(r[cY - 1]).strip() == str(year) and str(r[cT - 1]).strip() == eval_type and (str(r[cTS - 1]).strip() == str(target_sabun)) and (str(r[cES - 1]).strip() == str(evaluator_sabun)):
+            if str(
+    r[cY - 1]).strip() == str(year) and str(r[cT - 1]).strip() == eval_type and (str(r[cTS - 1]).strip() == str(target_sabun)) and (str(r[cES - 1]).strip() == str(evaluator_sabun)):
                 row_idx = i
                 break
         except:
@@ -950,7 +1218,8 @@ def tab_eval(emp_df: pd.DataFrame):
                 return False
             for r in values[1:]:
                 try:
-                    if str(r[cY - 1]).strip() == str(_year) and str(r[cT - 1]).strip() == _type and (str(r[cTS - 1]).strip() == str(_target_sabun)):
+                    if str(
+    r[cY - 1]).strip() == str(_year) and str(r[cT - 1]).strip() == _type and (str(r[cTS - 1]).strip() == str(_target_sabun)):
                         if str(r[cS - 1]).strip() in {'제출', '완료'}:
                             return True
                 except:
@@ -974,7 +1243,8 @@ def tab_eval(emp_df: pd.DataFrame):
             for i in range(2, len(values) + 1):
                 r = values[i - 1]
                 try:
-                    if str(r[cY - 1]).strip() == str(year) and str(r[cT - 1]).strip() == str(eval_type) and (str(r[cTS - 1]).strip() == str(target_sabun)) and (str(r[cES - 1]).strip() == str(evaluator_sabun)):
+                    if str(
+    r[cY - 1]).strip() == str(year) and str(r[cT - 1]).strip() == str(eval_type) and (str(r[cTS - 1]).strip() == str(target_sabun)) and (str(r[cES - 1]).strip() == str(evaluator_sabun)):
                         row_idx = i
                         break
                 except:
@@ -1088,7 +1358,8 @@ def tab_eval(emp_df: pd.DataFrame):
             picked_dt = ''
             for r in values[1:]:
                 try:
-                    if str(r[cY - 1]).strip() == str(_year) and str(r[cT - 1]).strip() == str(_etype) and (str(r[cTS - 1]).strip() == str(_target_sabun)):
+                    if str(
+    r[cY - 1]).strip() == str(_year) and str(r[cT - 1]).strip() == str(_etype) and (str(r[cTS - 1]).strip() == str(_target_sabun)):
                         ts = str(r[cDT - 1]) if cDT and cDT - 1 < len(r) else ''
                         if ts >= (picked_dt or ''):
                             picked = r
@@ -1327,7 +1598,8 @@ def upsert_jobdesc(rec: dict, as_new_version: bool=False) -> dict:
     cS, cY, cV = (hmap.get('사번'), hmap.get('연도'), hmap.get('버전'))
     for i in range(2, len(values) + 1):
         row = values[i - 1]
-        if str(row[cS - 1]).strip() == sabun and str(row[cY - 1]).strip() == str(year) and (str(row[cV - 1]).strip() == str(ver)):
+        if str(
+    row[cS - 1]).strip() == sabun and str(row[cY - 1]).strip() == str(year) and (str(row[cV - 1]).strip() == str(ver)):
             row_idx = i
             break
 
@@ -1346,50 +1618,8 @@ def upsert_jobdesc(rec: dict, as_new_version: bool=False) -> dict:
         _ws_batch_row(ws, row_idx, hmap, rec)
         st.cache_data.clear()
         return {'action': 'update', 'version': ver}
-
-def _jd_print_html(jd: dict, meta: dict) -> str:
-
-    def g(k):
-        return (str(jd.get(k, '')) or '—').strip()
-
-    def m(k):
-        return (str(meta.get(k, '')) or '—').strip()
-    dept = m('부서1')
-    if m('부서2') != '—' and m('부서2'):
-        dept = f"{dept} / {m('부서2')}" if dept and dept != '—' else m('부서2')
-    row1 = [('사번', m('사번')), ('이름', m('이름')), ('부서', dept or '—')]
-    row2 = [('직종', m('직종')), ('직군', m('직군')), ('직무명', m('직무명'))]
-    row3 = [('연도', m('연도')), ('버전', m('버전')), ('제정일', m('제정일')), ('개정일', m('개정일')), ('검토주기', m('검토주기'))]
-
-    def trow_3cols_kvk(title_pairs, wide_last=True):
-        cells = []
-        for i, (k, v) in enumerate(title_pairs):
-            wide_cls = ' wide' if wide_last and i == 2 else ''
-            cells.append(f"<td class='k'>{k}</td><td class='v{wide_cls}'>{v}</td>")
-        return '<tr>' + ''.join(cells) + '</tr>'
-
-    def trow_5cols_kvk(title_pairs):
-        cells = []
-        for k, v in title_pairs:
-            cells.append(f"<td class='k'>{k}</td><td class='v'>{v}</td>")
-        return '<tr>' + ''.join(cells) + '</tr>'
-
-    def block(title, body):
-        body_val = (body or '').strip() or '—'
-        return f'\n        <section class="blk">\n          <div class="cap">{title}</div>\n          <div class="body">{body_val}</div>\n        </section>\n        '
-    body_html = block('직무개요', g('직무개요')) + block('주요업무', g('주업무')) + block('기타업무', g('기타업무')) + block('자격교육요건', f"""\n            <div class="grid edu">\n              <div class="cell"><b>필요학력</b><div>{g('필요학력')}</div></div>\n              <div class="cell"><b>전공계열</b><div>{g('전공계열')}</div></div>\n              <div class="cell"><b>면허</b><div>{g('면허')}</div></div>\n              <div class="cell"><b>경력(자격요건)</b><div>{g('경력(자격요건)')}</div></div>\n\n              <div class="cell span2"><b>직원공통필수교육</b><div>{g('직원공통필수교육')}</div></div>\n              <div class="cell span2"><b>특성화교육</b><div>{g('특성화교육')}</div></div>\n              <div class="cell span2"><b>보수교육</b><div>{g('보수교육')}</div></div>\n              <div class="cell span2"><b>기타교육</b><div>{g('기타교육')}</div></div>\n            </div>\n        """)
-    html = f"""\n    <html>\n    <head>\n      <meta charset="utf-8" />\n      <title>직무기술서 출력</title>\n      <style>\n        :root {{ --fg:#111; --muted:#666; --line:#e5e7eb; }}\n        html, body {{\n          color: var(--fg);\n          font-family: 'Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic','Segoe UI',Roboto,system-ui,sans-serif;\n          -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;\n          orphans: 2; widows: 2; word-break: keep-all; overflow-wrap: anywhere;\n        }}\n        .print-wrap {{ max-width: 900px; margin: 0 auto; padding: 28px 24px; background:#fff; }}\n        .actionbar {{ display:flex; justify-content:flex-end; margin-bottom:12px; }}\n        .actionbar button {{ padding:6px 12px; border:1px solid var(--line); background:#fff; border-radius:6px; cursor:pointer; }}\n        header {{ border-bottom:1px solid var(--line); padding-bottom:10px; margin-bottom:18px; }}\n        header h1 {{ margin:0; font-size: 22px; }}\n\n        /* === Meta tables (3 rows) === */\n        table.meta6 {{ width:100%; border-collapse:collapse; margin-top:4px; font-size:13px; color:var(--muted); table-layout:fixed; }}\n        table.meta6 td {{ padding:4px 6px; vertical-align:top; border-bottom:1px dashed var(--line); }}\n        table.meta6 td.k {{ width:10%; color:#111; font-weight:700; white-space:nowrap; }}\n        table.meta6 td.v {{ width:20%; color:#333; overflow:hidden; text-overflow:ellipsis; }}\n        table.meta6 td.v.wide {{ width:30%; }} /* 부서/직무명 등 넓은 칸 */\n\n        table.meta10 {{ width:100%; border-collapse:collapse; margin-top:4px; font-size:13px; color:var(--muted); table-layout:fixed; }}\n        table.meta10 td {{ padding:4px 6px; vertical-align:top; border-bottom:1px dashed var(--line); }}\n        table.meta10 td.k {{ width:10%; color:#111; font-weight:700; white-space:nowrap; }}\n        table.meta10 td.v {{ width:10%; color:#333; overflow:hidden; text-overflow:ellipsis; }}\n\n        /* === Blocks with SMALL captions and 11px body === */\n        .blk {{ break-inside: auto; page-break-inside: auto; margin: 12px 0 16px; }}\n        .blk .cap {{ font-size:13px; color:#111; font-weight:700; margin: 2px 0 6px; }}\n        .blk .body {{ white-space: pre-wrap; font-size:11px; line-height: 1.55; border:1px solid var(--line); padding:10px; border-radius:8px; min-height:60px; }}\n\n        /* Education grid */\n        .grid.edu {{ display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:8px; }}\n        .grid.edu .cell {{ border:1px solid var(--line); border-radius:8px; padding:8px; }}\n        /* INNER field labels smaller than section caption (12px < 13px) */\n        .grid.edu .cell > b {{ font-size:12px; color:#111; }}\n        .grid.edu .cell > div {{ font-size:11px; line-height:1.55; color:#333; }}\n        .grid.edu .cell.span2 {{ grid-column: 1 / -1; }} /* full-width lines for long fields */\n\n        /* Signature area */\n        .sign {{ margin-top:20px; display:flex; gap:16px; }}\n        .sign > div {{ flex:1; border:1px dashed var(--line); border-radius:8px; padding:10px; min-height:70px; }}\n        .sign .cap {{ font-size:13px; color:#111; font-weight:700; margin-bottom:6px; }}\n        .sign .body {{ font-size:11px; line-height:1.55; color:#333; }}\n\n        @media print {{\n          @page {{ size: A4; margin: 18mm 14mm; }}\n          body {{ -webkit-print-color-adjust: exact; print-color-adjust: exact; }}\n          .actionbar {{ display:none !important; }}\n        }}\n      </style>\n    </head>\n    <body>\n      <div class="print-wrap">\n        <div class="actionbar"><button onclick="window.print()">인쇄</button></div>\n        <header>\n          <h1>직무기술서 (Job Description)</h1>\n          <!-- Row 1 -->\n          <table class="meta6">\n            {trow_3cols_kvk(row1, wide_last=True)}\n          </table>\n          <!-- Row 2 -->\n          <table class="meta6">\n            {trow_3cols_kvk(row2, wide_last=True)}\n          </table>\n          <!-- Row 3 -->\n          <table class="meta10">\n            {trow_5cols_kvk(row3)}\n          </table>\n        </header>\n        {body_html}\n        <div class="sign">\n          <div>\n            <div class="cap">직원 확인 서명</div>\n            <div class="body"></div>\n          </div>\n          <div>\n            <div class="cap">부서장 확인 서명</div>\n            <div class="body"></div>\n          </div>\n        </div>\n      </div>\n    </body>\n    </html>\n    """
-    return html
 JD_APPROVAL_SHEET = '직무기술서_승인'
 JD_APPROVAL_HEADERS = ['연도', '사번', '이름', '버전', '승인자사번', '승인자이름', '상태', '승인시각', '비고']
-
-def ensure_jd_approval_sheet():
-    wb = get_book()
-    try:
-        _ = wb.worksheet(JD_APPROVAL_SHEET)
-    except WorksheetNotFound:
-        ws = _retry(wb.add_worksheet, title=JD_APPROVAL_SHEET, rows=3000, cols=20)
-        _retry(ws.update, '1:1', [JD_APPROVAL_HEADERS])
 
 @st.cache_data(ttl=300, show_spinner=False)
 def read_jd_approval_df(_rev: int=0) -> pd.DataFrame:
@@ -1430,13 +1660,6 @@ def _ws_batch_row(ws, idx, hmap, kv: dict):
         body = {'valueInputOption': 'USER_ENTERED', 'data': updates}
         _retry(ws.spreadsheet.values_batch_update, body)
 
-def _jd_latest_version_for(sabun: str, year: int) -> int:
-    row = _jd_latest_for(sabun, int(year)) or {}
-    try:
-        return int(row.get('버전', 0) or 0)
-    except Exception:
-        return 0
-
 def set_jd_approval(year: int, sabun: str, name: str, version: int, approver_sabun: str, approver_name: str, status: str, remark: str='') -> dict:
     """
     (연도, 사번, 버전) 기준 upsert. status: '승인' | '반려'
@@ -1453,7 +1676,8 @@ def set_jd_approval(year: int, sabun: str, name: str, version: int, approver_sab
     for i in range(2, len(values) + 1):
         r = values[i - 1] if i - 1 < len(values) else []
         try:
-            if str(r[cY - 1]).strip() == str(year) and str(r[cS - 1]).strip() == str(sabun) and (str(r[cV - 1]).strip() == str(version)):
+            if str(
+    r[cY - 1]).strip() == str(year) and str(r[cS - 1]).strip() == str(sabun) and (str(r[cV - 1]).strip() == str(version)):
                 target_row = i
                 break
         except Exception:
@@ -1681,7 +1905,15 @@ def tab_job_desc(emp_df: pd.DataFrame):
                 else:
                     status = '승인' if do_ok else '반려'
                     with st.spinner('처리 중...'):
-                        res = set_jd_approval(year=int(year), sabun=str(target_sabun), name=str(target_name), version=int(latest_ver), approver_sabun=str(me_sabun), approver_name=str(me_name), status=status, remark=appr_remark)
+                        res = set_jd_approval(
+    year=int(year),
+     sabun=str(target_sabun),
+     name=str(target_name),
+     version=int(latest_ver),
+     approver_sabun=str(me_sabun),
+     approver_name=str(me_name),
+     status=status,
+     remark=appr_remark)
                         st.session_state['appr_rev'] = st.session_state.get('appr_rev', 0) + 1
                     st.success(f"{status} 처리되었습니다. ({res.get('action')})", icon='✅')
                     appr_df = read_jd_approval_df(st.session_state.get('appr_rev', 0))
@@ -1692,105 +1924,6 @@ def tab_job_desc(emp_df: pd.DataFrame):
             base = base.sort_values(['사번']).reset_index(drop=True)
 COMP_SIMPLE_PREFIX = '직무능력평가_'
 COMP_SIMPLE_HEADERS = ['연도', '평가대상사번', '평가대상이름', '평가자사번', '평가자이름', '평가일자', '주업무평가', '기타업무평가', '교육이수', '자격유지', '종합의견', '상태', '제출시각', '잠금']
-
-def _simp_sheet_name(year: int | str) -> str:
-    return f'{COMP_SIMPLE_PREFIX}{int(year)}'
-
-def _ensure_comp_simple_sheet(year: int):
-    wb = get_book()
-    name = _simp_sheet_name(year)
-    try:
-        ws = wb.worksheet(name)
-    except WorksheetNotFound:
-        ws = _retry(wb.add_worksheet, title=name, rows=1000, cols=50)
-        _retry(ws.update, '1:1', [COMP_SIMPLE_HEADERS])
-        return ws
-    header = _retry(ws.row_values, 1) or []
-    need = [h for h in COMP_SIMPLE_HEADERS if h not in header]
-    if need:
-        _retry(ws.update, '1:1', [header + need])
-    return ws
-
-def _jd_latest_for_comp(sabun: str, year: int) -> dict:
-    try:
-        df = read_jobdesc_df()
-        if df is None or len(df) == 0:
-            return {}
-        q = df[(df['사번'].astype(str) == str(sabun)) & (df['연도'].astype(int) == int(year))]
-        if q.empty:
-            return {}
-        if '버전' in q.columns:
-            try:
-                q = q.copy()
-                q['버전'] = pd.to_numeric(q['버전'], errors='coerce').fillna(0)
-            except Exception:
-                pass
-            q = q.sort_values('버전').iloc[-1]
-        else:
-            q = q.iloc[-1]
-        return {c: q.get(c, '') for c in q.index}
-    except Exception:
-        return {}
-
-def _edu_completion_from_jd(jd_row: dict) -> str:
-    val = str(jd_row.get('직원공통필수교육', '')).strip()
-    return '완료' if val else '미완료'
-
-def upsert_comp_simple_response(emp_df: pd.DataFrame, year: int, target_sabun: str, evaluator_sabun: str, main_grade: str, extra_grade: str, qual_status: str, opinion: str, eval_date: str) -> dict:
-    ws = _ensure_comp_simple_sheet(year)
-    header = _retry(ws.row_values, 1) or COMP_SIMPLE_HEADERS
-    hmap = {n: i + 1 for i, n in enumerate(header)}
-    jd = _jd_latest_for_comp(target_sabun, int(year))
-    edu_status = _edu_completion_from_jd(jd)
-    t_name = _emp_name_by_sabun(emp_df, target_sabun)
-    e_name = _emp_name_by_sabun(emp_df, evaluator_sabun)
-    now = kst_now_str()
-    values = _ws_values(ws)
-    cY = hmap.get('연도')
-    cTS = hmap.get('평가대상사번')
-    cES = hmap.get('평가자사번')
-    row_idx = 0
-    for i in range(2, len(values) + 1):
-        r = values[i - 1]
-        try:
-            if str(r[cY - 1]).strip() == str(year) and str(r[cTS - 1]).strip() == str(target_sabun) and (str(r[cES - 1]).strip() == str(evaluator_sabun)):
-                row_idx = i
-                break
-        except:
-            pass
-    if row_idx == 0:
-        buf = [''] * len(header)
-
-        def put(k, v):
-            c = hmap.get(k)
-            buf[c - 1] = v if c else ''
-        put('연도', int(year))
-        put('평가대상사번', str(target_sabun))
-        put('평가대상이름', t_name)
-        put('평가자사번', str(evaluator_sabun))
-        put('평가자이름', e_name)
-        put('평가일자', eval_date)
-        put('주업무평가', main_grade)
-        put('기타업무평가', extra_grade)
-        put('교육이수', edu_status)
-        put('자격유지', qual_status)
-        put('종합의견', opinion)
-        put('상태', '제출')
-        put('제출시각', now)
-        put('잠금', '')
-        _retry(ws.append_row, buf, value_input_option='USER_ENTERED')
-        try:
-            read_my_comp_simple_rows.clear()
-        except Exception:
-            pass
-        return {'action': 'insert'}
-    else:
-        _ws_batch_row(ws, row_idx, hmap, {'평가일자': eval_date, '주업무평가': main_grade, '기타업무평가': extra_grade, '교육이수': edu_status, '자격유지': qual_status, '종합의견': opinion, '상태': '제출', '제출시각': now})
-        try:
-            read_my_comp_simple_rows.clear()
-        except Exception:
-            pass
-        return {'action': 'update'}
 
 @st.cache_data(ttl=300, show_spinner=False)
 def read_my_comp_simple_rows(year: int, sabun: str) -> pd.DataFrame:
@@ -1909,17 +2042,19 @@ def tab_competency(emp_df: pd.DataFrame):
         elif not verify_pin(me_sabun, comp_pin_input):
             st.error('PIN이 올바르지 않습니다.')
         else:
-            rep = upsert_comp_simple_response(emp_df, int(year), str(sel_sab), str(me_sabun), g_main, g_extra, qual, opinion, eval_date)
+            rep = upsert_comp_simple_response(
+    emp_df,
+     int(year),
+     str(sel_sab),
+     str(me_sabun),
+     g_main,
+     g_extra,
+     qual,
+     opinion,
+     eval_date)
             st.success('제출 완료' if rep.get('action') == 'insert' else '업데이트 완료', icon='✅')
         st.session_state['comp_rev'] = st.session_state.get('comp_rev', 0) + 1
 REQ_EMP_COLS = ['사번', '이름', '부서1', '부서2', '직급', '직무', '직군', '입사일', '퇴사일', '기타1', '기타2', '재직여부', '적용여부', 'PIN_hash', 'PIN_No']
-
-def _get_ws_and_headers(sheet_name: str):
-    ws = _ws(sheet_name)
-    header, _h = _hdr(ws, sheet_name)
-    if not header:
-        raise RuntimeError(f"'{sheet_name}' 헤더(1행) 없음")
-    return (ws, header, _h)
 
 def ensure_emp_sheet_columns():
     ws, header, hmap = _get_ws_and_headers(EMP_SHEET)
@@ -1940,16 +2075,6 @@ def ensure_emp_sheet_columns():
             except Exception:
                 pass
     return (ws, header, hmap)
-
-def _find_row_by_sabun(ws, hmap, sabun: str) -> int:
-    c = hmap.get('사번')
-    if not c:
-        return 0
-    vals = _retry(ws.col_values, c)[1:]
-    for i, v in enumerate(vals, start=2):
-        if str(v).strip() == str(sabun).strip():
-            return i
-    return 0
 
 def tab_staff_admin(emp_df: pd.DataFrame):
     """직원 시트 편집: 부서 드롭다운 + 체크박스 저장(부분 갱신)."""
