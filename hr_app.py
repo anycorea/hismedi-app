@@ -1,5 +1,31 @@
 # -*- coding: utf-8 -*-
 
+# ────────────────────────────────────────────────────────────────
+# Supabase 연결 초기화 (2025-10-28)
+# ────────────────────────────────────────────────────────────────
+import os
+import streamlit as st
+from supabase import create_client, Client
+
+def _get_supabase_cfg():
+    if "supabase" in st.secrets:
+        return st.secrets["supabase"]["url"], st.secrets["supabase"]["key"]
+    return os.environ["SUPABASE_URL"], os.environ["SUPABASE_ANON_KEY"]
+
+@st.cache_resource
+def get_supabase() -> Client:
+    url, key = _get_supabase_cfg()
+    return create_client(url, key)
+
+supabase = get_supabase()
+
+# 연결 테스트
+try:
+    st.write("✅ Supabase 연결 OK")
+except Exception as e:
+    st.error(f"❌ Supabase 연결 실패: {e}")
+# ────────────────────────────────────────────────────────────────
+
 def _ensure_capacity(ws, min_row: int, min_col: int):
     """Ensure worksheet has at least (min_row x min_col) grid. Expands columns/rows only if needed."""
     try:
