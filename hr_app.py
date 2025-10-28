@@ -61,7 +61,47 @@ def _to_bool(x) -> bool: return str(x).strip().lower() in ("true","1","y","yes",
 
 def _normalize_private_key(raw: str) -> str:
     if not raw: return raw
-    return raw.replace("\\n","\n") if "\\n" in raw and "BEGIN PRIVATE KEY" in raw else raw
+    return raw.replace("\\
+# === Supabase<->Sheets 동기화 유틸 (직원) ===
+import pandas as _pd
+
+def _sync_truthy_v1(x):
+    if isinstance(x, bool):
+        return x
+    s = str(x).strip().lower()
+    return s in ("1","y","yes","true","t","o","on","true()")
+
+def _get_gspread_client_for_sync_v1():
+    try:
+        return gc  # 앱에 이미 gspread 클라이언트가 있으면 재사용
+    except NameError:
+        import gspread
+        from google.oauth2.service_account import Credentials
+        import streamlit as _st
+        sa = _st.secrets["gcp_service_account"]
+        scopes = [
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive",
+        ]
+        creds = Credentials.from_service_account_info(sa, scopes=scopes)
+        return gspread.authorize(creds)
+
+def sync_sheet_to_supabase_employees_v1():
+    gclient = _get_gspread_client_for_sync_v1()
+    sh = gclient.open_by_key(st.secrets["sheets"]["HR_SHEET_ID"])
+    ws = sh.worksheet("직원")
+    df = _pd.DataFrame(ws.get_all_records())
+    if df.empty:
+        st.warning("직원 시트가 비어있습니다.")
+        return
+
+    for col in ["적용여부", "재직여부"]:
+        if col in df.columns:
+            df[col] = df[col].map(_sync_truthy_v1)
+
+    supabase.table("employees").upsert(df.to_dict(orient="records"), on_conflict="사번").execute()
+    st.success(f"직원 {len(df)}건 Supabase 업서트 완료", icon="✅")
+n","\n") if "\\n" in raw and "BEGIN PRIVATE KEY" in raw else raw
 
 # Header auto-fix toggle (user manages Google Sheet headers)
 
