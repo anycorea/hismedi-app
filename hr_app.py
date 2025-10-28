@@ -1964,6 +1964,28 @@ def tab_job_desc(emp_df: pd.DataFrame):
         "면허": "", "경력(자격요건)": "", "비고": ""
     }
 
+    # --- 빈 값 보정: 저장본(jd_saved)이 있어도 직군/직종이 비어 있으면 직원 시트 값으로 채움 ---
+    try:
+        def __is_blank_val(v):
+            return (v is None) or (str(v).strip() == "") or (str(v).strip().lower() in {"nan", "none", "null"})
+
+        # 직군: 직원 시트 '직군'
+        if __is_blank_val(jd_current.get("직군", "")):
+            _v = _safe_get("직군", "")
+            if not __is_blank_val(_v):
+                jd_current["직군"] = _v
+
+        # 직종: 기본은 직원 시트 '직무' → 없으면 '직종'
+        if __is_blank_val(jd_current.get("직종", "")):
+            _v = _safe_get("직무", "")
+            if __is_blank_val(_v):
+                _v = _safe_get("직종", "")
+            if not __is_blank_val(_v):
+                jd_current["직종"] = _v
+    except Exception:
+        # 직원 시트/키 없음 등은 조용히 패스
+        pass
+
     with st.expander("현재 저장된 직무기술서 요약", expanded=False):
         st.write(f"**직무명:** {(jd_saved or {}).get('직무명', '')}")
         cc = st.columns(2)
