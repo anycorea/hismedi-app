@@ -1,12 +1,18 @@
 # -*- coding: utf-8 -*-
 
 # ────────────────────────────────────────────────────────────────
-# Supabase 연결 초기화 (2025-10-28)
+# Page config -> 반드시 가장 먼저 호출
 # ────────────────────────────────────────────────────────────────
 import os
 import streamlit as st
 from supabase import create_client, Client
 
+APP_TITLE = st.secrets.get("app", {}).get("TITLE", "HISMEDI - 인사/HR")
+st.set_page_config(page_title=APP_TITLE, layout="wide")
+
+# ────────────────────────────────────────────────────────────────
+# Supabase 연결 초기화 (2025-10-28)
+# ────────────────────────────────────────────────────────────────
 def _get_supabase_cfg():
     if "supabase" in st.secrets:
         return st.secrets["supabase"]["url"], st.secrets["supabase"]["key"]
@@ -18,12 +24,7 @@ def get_supabase() -> Client:
     return create_client(url, key)
 
 supabase = get_supabase()
-
-# 연결 테스트
-try:
-    st.write("✅ Supabase 연결 OK")
-except Exception as e:
-    st.error(f"❌ Supabase 연결 실패: {e}")
+st.caption("✅ Supabase 연결 OK")  # config 이후에 출력
 # ────────────────────────────────────────────────────────────────
 
 def _ensure_capacity(ws, min_row: int, min_col: int):
@@ -31,13 +32,11 @@ def _ensure_capacity(ws, min_row: int, min_col: int):
     try:
         r_needed = int(min_row) if min_row is not None else 0
         c_needed = int(min_col) if min_col is not None else 0
-        # gspread Worksheet has row_count / col_count
         if hasattr(ws, "row_count") and ws.row_count < r_needed:
             ws.add_rows(r_needed - int(ws.row_count))
         if hasattr(ws, "col_count") and ws.col_count < c_needed:
             ws.add_cols(c_needed - int(ws.col_count))
-    except Exception as _e:
-        # Non-fatal: if expansion fails, next API call may still error; upstream handles with _retry.
+    except Exception:
         pass
 
 # Minimal tuned build (2025-10-21): label text clarified; optional defaults normalized.
@@ -53,12 +52,9 @@ from datetime import datetime, timedelta
 from typing import Any, Tuple
 import pandas as pd
 import re, time, random, hashlib, secrets as pysecrets
-import streamlit as st
 
 # ==============================================================================
-
 # Helper Utilities (pure functions)
-
 # ==============================================================================
 
 def _to_bool(x) -> bool: return str(x).strip().lower() in ("true","1","y","yes","t")
