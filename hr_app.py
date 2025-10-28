@@ -171,10 +171,6 @@ except Exception:
 # ═════════════════════════════════════════════════════════════════════════════
 # Sync Utility (Force refresh Google Sheets caches)
 # ═════════════════════════════════════════════════════════════════════════════
-
-
-
-
 def force_sync(min_interval: int = 25):
     """Safely refresh data caches. Throttle & lock; keep session/auth stable.
     - Throttle: ignore if called within min_interval seconds of last run
@@ -286,6 +282,7 @@ st.markdown(
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Utils
+# ═════════════════════════════════════════════════════════════════════════════
 
 def current_year() -> int:
     """Return KST-based current year if tz_kst() is available, otherwise system year."""
@@ -2621,7 +2618,6 @@ def tab_admin_eval_items():
                 
             except Exception as e:
                 st.exception(e)
-
 
     st.divider()
     st.markdown("### 신규 등록 / 수정")
