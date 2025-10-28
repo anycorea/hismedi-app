@@ -23,11 +23,23 @@ def _ensure_capacity(ws, min_row: int, min_col: int):
 # ═════════════════════════════════════════════════════════════════════════════
 # Imports
 # ═════════════════════════════════════════════════════════════════════════════
-import re, time, random, hashlib, secrets as pysecrets
 from datetime import datetime, timedelta
 from typing import Any, Tuple
 import pandas as pd
+import re, time, random, hashlib, secrets as pysecrets
 import streamlit as st
+
+# ==============================================================================
+
+# Helper Utilities (pure functions)
+
+# ==============================================================================
+
+def _to_bool(x) -> bool: return str(x).strip().lower() in ("true","1","y","yes","t")
+
+def _normalize_private_key(raw: str) -> str:
+    if not raw: return raw
+    return raw.replace("\\n","\n") if "\\n" in raw and "BEGIN PRIVATE KEY" in raw else raw
 
 # Header auto-fix toggle (user manages Google Sheet headers)
 
@@ -35,9 +47,11 @@ import streamlit as st
 # Helpers
 # ═════════════════════════════════════════════════════════════════════════════
 # --- helper: detect Google Sheets quota(429) error -------------------------------
+
 def _is_quota_429(err) -> bool:
     try:
         from gspread.exceptions import APIError as _APIError
+
         if isinstance(err, _APIError):
             resp = getattr(err, "response", None)
             code = getattr(resp, "status_code", None)
@@ -137,20 +151,24 @@ def get_jd_approval_map_cached(_year: int, _rev: int = 0) -> dict:
 from html import escape as _html_escape
 
 # Optional zoneinfo (KST)
+
 try:
     from zoneinfo import ZoneInfo
+
     def tz_kst(): return ZoneInfo(st.secrets.get("app", {}).get("TZ", "Asia/Seoul"))
 except Exception:
     import pytz
+
     def tz_kst(): return pytz.timezone(st.secrets.get("app", {}).get("TZ", "Asia/Seoul"))
 
 # gspread (배포 최적화: 자동 pip 설치 제거, 의존성 사전 설치 전제)
-import gspread
 from google.oauth2.service_account import Credentials
 from gspread.exceptions import WorksheetNotFound, APIError
 from gspread.utils import rowcol_to_a1
 
 # --- Safe shim for batch helpers: defined early to avoid NameError ---
+import gspread
+
 try:
     _ = rowcol_to_a1  # ensure imported
     if 'gs_enqueue_range' not in globals():
@@ -292,6 +310,7 @@ def kst_now_str(): return datetime.now(tz=tz_kst()).strftime("%Y-%m-%d %H:%M:%S 
 
 def _jd_plain_html(text: str) -> str:
     import html
+
     if text is None:
         text = ""
     s = str(text).replace("\r\n","\n").replace("\r","\n")
@@ -299,10 +318,6 @@ def _jd_plain_html(text: str) -> str:
     return '<div class="jd-tight">' + html.escape(s).replace("\n", "<br>") + "</div>"
 
 def _sha256_hex(s: str) -> str: return hashlib.sha256(str(s).encode()).hexdigest()
-def _to_bool(x) -> bool: return str(x).strip().lower() in ("true","1","y","yes","t")
-def _normalize_private_key(raw: str) -> str:
-    if not raw: return raw
-    return raw.replace("\\n","\n") if "\\n" in raw and "BEGIN PRIVATE KEY" in raw else raw
 def _pin_hash(pin: str, sabun: str) -> str:
     return hashlib.sha256(f"{str(sabun).strip()}:{str(pin).strip()}".encode()).hexdigest()
 
@@ -564,6 +579,7 @@ def logout():
 
 # --- Enter Key Binder (사번→PIN, PIN→로그인) -------------------------------
 import streamlit.components.v1 as components
+
 def _inject_login_keybinder():
     components.html(
         """
@@ -1054,6 +1070,7 @@ def tab_eval(emp_df: pd.DataFrame):
     from typing import Tuple, Dict
 
 # --- 기본값/데이터 로드 -------------------------------
+
     this_year = current_year()
     year = st.number_input("연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="eval2_year")
 
@@ -2070,6 +2087,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
         }
         html = _jd_print_html(jd_current, meta)
         import streamlit.components.v1 as components
+
         components.html(html, height=1000, scrolling=True)
 
     # ===== (관리자/부서장) 승인 처리 =====
@@ -2594,6 +2612,7 @@ def tab_admin_eval_items():
 
                 # 범위 문자열 생성 도우미 (주어진 컬럼 인덱스 -> 'A2:A{n+1}' 형태)
                 import re as _re_local
+
                 def _col_range(col_idx: int, start_row: int, end_row: int) -> str:
                     letters = _re_local.match(r"([A-Z]+)", gspread.utils.rowcol_to_a1(1, col_idx)).group(1)
                     return f"{letters}{start_row}:{letters}{end_row}"
