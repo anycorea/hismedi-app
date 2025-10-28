@@ -1998,21 +1998,9 @@ def tab_job_desc(emp_df: pd.DataFrame):
     with r2[1]:
         dept2  = st.text_input("부서2", value=jd_current.get("부서2",""), key="jd2_dept2", disabled=not edit_mode)
     with r2[2]:
-        # 화면 렌더링 시점에서 폴백: 저장본이 비어 있으면 직원 시트 값 사용
-        _group_val = jd_current.get("직군")
-        if _group_val is None or str(_group_val).strip() == "" or str(_group_val).strip().lower() in {"nan","none","null"}:
-            _group_val = _safe_get("직군", "")
-        group = st.text_input("직군", value=str(_group_val or ""), key="jd2_group", disabled=not edit_mode)
-
+        group  = st.text_input("직군", value=jd_current.get("직군",""), key="jd2_group", disabled=not edit_mode)
     with r2[3]:
-        # 직종은 '직무' 우선, 없으면 '직종' 폴백
-        _series_val = jd_current.get("직종")
-        if _series_val is None or str(_series_val).strip() == "" or str(_series_val).strip().lower() in {"nan","none","null"}:
-            _series_val = _safe_get("직무", "")
-            if _series_val is None or str(_series_val).strip() == "" or str(_series_val).strip().lower() in {"nan","none","null"}:
-                _series_val = _safe_get("직종", "")
-        series = st.text_input("직종", value=str(_series_val or ""), key="jd2_series", disabled=not edit_mode)
-
+        series = st.text_input("직종", value=jd_current.get("직종",""), key="jd2_series", disabled=not edit_mode)
     with r2[4]:
         jobname= st.text_input("직무명", value=jd_current.get("직무명",""), key="jd2_jobname", disabled=not edit_mode)
 
