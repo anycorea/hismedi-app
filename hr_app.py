@@ -57,11 +57,28 @@ import re, time, random, hashlib, secrets as pysecrets
 # Helper Utilities (pure functions)
 # ==============================================================================
 
-def _to_bool(x) -> bool: return str(x).strip().lower() in ("true","1","y","yes","t")
+def _to_bool(x) -> bool:
+    return str(x).strip().lower() in ("true","1","y","yes","t")
 
 def _normalize_private_key(raw: str) -> str:
-    if not raw: return raw
-    return raw.replace("\\n", "\n")
+    """
+    Secrets에 개인키가 한 줄로 들어오거나 \\n, \\t 같은 문자 그 자체로 저장된 경우
+    실제 개행/탭 문자로 복원한다.
+    """
+    if not raw:
+        return raw
+    s = str(raw)
+    # Windows 개행 표기 복원
+    if "\\r\\n" in s:
+        s = s.replace("\\r\\n", "\n")
+    # 리터럴 "\n" -> 실제 개행
+    if "\\n" in s and "BEGIN PRIVATE KEY" in s:
+        s = s.replace("\\n", "\n")
+    # 리터럴 "\t" -> 실제 탭
+    if "\\t" in s:
+        s = s.replace("\\t", "\t")
+    return s
+
 # === Supabase<->Sheets 동기화 유틸 (직원) ===
 import pandas as _pd
 
@@ -99,11 +116,13 @@ def sync_sheet_to_supabase_employees_v1():
         if col in df.columns:
             df[col] = df[col].map(_sync_truthy_v1)
 
-    supabase.table("employees").upsert(df.to_dict(orient="records"), on_conflict="사번").execute()
-    st.success(f"직원 {len(df)}건 Supabase 업서트 완료", icon="✅")
-n","\n") if "\\n" in raw and "BEGIN PRIVATE KEY" in raw else raw
+    # 업서트 (기준: 사번)
+    supabase.table("employees").upsert(
+        df.to_dict(orient="records"),
+        on_conflict="사번"
+    ).execute()
 
-# Header auto-fix toggle (user manages Google Sheet headers)
+    st.success(f"직원 {len(df)}건 Supabase 업서트 완료", icon="✅")
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Helpers
