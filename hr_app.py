@@ -2158,7 +2158,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
 COMP_SIMPLE_PREFIX = "직무능력평가_"
 COMP_SIMPLE_HEADERS = [
     "연도","평가대상사번","평가대상이름","평가자사번","평가자이름",
-    "평가일자","주업무평가","기타업무평가","교육이수","자격유지","종합의견",
+    "주업무평가","기타업무평가","교육이수","자격유지","종합의견",
     "상태","제출시각","잠금"
 ]
 def _simp_sheet_name(year:int|str)->str: return f"{COMP_SIMPLE_PREFIX}{int(year)}"
@@ -2198,7 +2198,7 @@ def _edu_completion_from_jd(jd_row:dict)->str:
 
 def upsert_comp_simple_response(emp_df: pd.DataFrame, year:int, target_sabun:str,
                                 evaluator_sabun:str, main_grade:str, extra_grade:str,
-                                qual_status:str, opinion:str, eval_date:str)->dict:
+                                qual_status:str, opinion:str, )->dict:
     ws=_ensure_comp_simple_sheet(year)
     header=_retry(ws.row_values,1) or COMP_SIMPLE_HEADERS; hmap={n:i+1 for i,n in enumerate(header)}
     jd=_jd_latest_for_comp(target_sabun, int(year)); edu_status=_edu_completion_from_jd(jd)
@@ -2216,8 +2216,7 @@ def upsert_comp_simple_response(emp_df: pd.DataFrame, year:int, target_sabun:str
         buf=[""]*len(header)
         def put(k,v): c=hmap.get(k); buf[c-1]=v if c else ""
         put("연도",int(year)); put("평가대상사번",str(target_sabun)); put("평가대상이름",t_name)
-        put("평가자사번",str(evaluator_sabun)); put("평가자이름",e_name)
-        put("평가일자",eval_date); put("주업무평가",main_grade); put("기타업무평가",extra_grade)
+        put("평가자사번",str(evaluator_sabun)); put("평가자이름",e_name)put("주업무평가",main_grade); put("기타업무평가",extra_grade)
         put("교육이수",edu_status); put("자격유지",qual_status); put("종합의견",opinion)
         put("상태","제출"); put("제출시각",now); put("잠금","")
         _retry(ws.append_row, buf, value_input_option="USER_ENTERED")
@@ -2226,7 +2225,6 @@ def upsert_comp_simple_response(emp_df: pd.DataFrame, year:int, target_sabun:str
         return {"action":"insert"}
     else:
         _ws_batch_row(ws, row_idx, hmap, {
-            "평가일자": eval_date,
             "주업무평가": main_grade,
             "기타업무평가": extra_grade,
             "교육이수": edu_status,
@@ -2247,7 +2245,7 @@ def read_my_comp_simple_rows(year:int, sabun:str)->pd.DataFrame:
     except Exception: return pd.DataFrame(columns=COMP_SIMPLE_HEADERS)
     if df.empty: return df
     df=df[df["평가자사번"].astype(str)==str(sabun)]
-    sort_cols=[c for c in ["평가대상사번","평가일자","제출시각"] if c in df.columns]
+    sort_cols=[c for c in ["평가대상사번","제출시각"] if c in df.columns]
     if sort_cols: df=df.sort_values(sort_cols, ascending=[True,False,False])
     return df.reset_index(drop=True)
 
@@ -2330,7 +2328,7 @@ def tab_competency(emp_df: pd.DataFrame):
     with colG[1]: g_extra= st.radio("기타업무 평가", grade_options, index=2, key="cmpS_extra", horizontal=False, disabled=comp_locked)
     with colG[2]: qual   = st.radio("직무 자격 유지 여부", ["직무 유지","직무 변경","직무비부여"], index=0, key="cmpS_qual", disabled=comp_locked)
     with colG[3]:
-        eval_date = ""  # 입력란 제거: 제출시각으로 대체 기록
+        pass
 
     try: edu_status=_edu_completion_from_jd(_jd_latest_for_comp(sel_sab, int(year)))
     except Exception: edu_status="미완료"
@@ -2372,7 +2370,7 @@ def tab_competency(emp_df: pd.DataFrame):
             st.error("PIN이 올바르지 않습니다.")
         else:
             rep = upsert_comp_simple_response(
-                emp_df, int(year), str(sel_sab), str(me_sabun), g_main, g_extra, qual, opinion, eval_date
+                emp_df, int(year), str(sel_sab), str(me_sabun), g_main, g_extra, qual, opinion
             )
             st.success(("제출 완료" if rep.get("action")=="insert" else "업데이트 완료"), icon="✅")
         st.session_state['comp_rev'] = st.session_state.get('comp_rev', 0) + 1
