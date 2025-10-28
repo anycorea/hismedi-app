@@ -61,7 +61,7 @@ def _to_bool(x) -> bool: return str(x).strip().lower() in ("true","1","y","yes",
 
 def _normalize_private_key(raw: str) -> str:
     if not raw: return raw
-    return raw.replace("\\
+    return raw.replace("\\n", "\n")
 # === Supabase<->Sheets 동기화 유틸 (직원) ===
 import pandas as _pd
 
