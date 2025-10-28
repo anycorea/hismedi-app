@@ -1953,39 +1953,16 @@ def tab_job_desc(emp_df: pd.DataFrame):
         except Exception:
             return default
 
-    # jd_current: 저장본이 있으면 그것을 바탕으로 시작하고(값 보존),
-    # 없으면 기본값으로 채움. 이후 '빈 값'은 직원 시트 값으로 보정한다.
-    def __is_blank_val(v):
-        return (v is None) or (str(v).strip() == "") or (str(v).strip().lower() in {"nan", "none", "null"})
-
-    def __coalesce(*vals):
-        # 첫 번째 '빈 값이 아닌' 값을 반환
-        for v in vals:
-            if not __is_blank_val(v):
-                return v
-        return ""
-
-    # 1) 저장본이 있으면 우선 그 값을 복사, 없으면 기본 딕셔너리로 시작
-    jd_current = dict(jd_saved) if jd_saved else {
+    jd_current = jd_saved if jd_saved else {
         "사번": str(target_sabun), "연도": int(year), "버전": 0,
         "부서1": _safe_get("부서1",""), "부서2": _safe_get("부서2",""),
         "작성자사번": me_sabun, "작성자이름": _emp_name_by_sabun(emp_df, me_sabun),
-        "직군": "", "직종": "", "직무명": "", "제정일": "", "개정일": "", "검토주기": "1년",
+        "직군": _safe_get("직군",""), "직종": _safe_get("직무",""), "직무명": "", "제정일": "", "개정일": "", "검토주기": "1년",
         "직무개요": "", "주업무": "", "기타업무": "",
         "필요학력": "", "전공계열": "",
         "직원공통필수교육": "", "보수교육": "", "기타교육": "", "특성화교육": "",
         "면허": "", "경력(자격요건)": "", "비고": ""
     }
-
-    # 2) 부서는 지금처럼 직원 시트에서 가져오되, 기존 값이 있으면 유지
-    jd_current["부서1"] = __coalesce(jd_current.get("부서1"), _safe_get("부서1",""))
-    jd_current["부서2"] = __coalesce(jd_current.get("부서2"), _safe_get("부서2",""))
-
-    # 3) 직군/직종 자동 보정 (저장본이 비어 있으면 직원 시트 값으로 채움)
-    #   - 직군 ← 직원 시트 '직군'
-    #   - 직종 ← 직원 시트 '직무' 우선, 없다면 '직종'으로 대체
-    jd_current["직군"] = __coalesce(jd_current.get("직군"), _safe_get("직군",""))
-    jd_current["직종"] = __coalesce(jd_current.get("직종"), _safe_get("직무",""), _safe_get("직종",""))
 
     with st.expander("현재 저장된 직무기술서 요약", expanded=False):
         st.write(f"**직무명:** {(jd_saved or {}).get('직무명', '')}")
