@@ -6,3 +6,4 @@ sqlalchemy>=2.0
 psycopg[binary,pool]>=3.2
 requests
 pypdf
+supabase>=2.5.0
