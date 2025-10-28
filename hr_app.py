@@ -14,7 +14,6 @@ def _ensure_capacity(ws, min_row: int, min_col: int):
         # Non-fatal: if expansion fails, next API call may still error; upstream handles with _retry.
         pass
 
-
 # Minimal tuned build (2025-10-21): label text clarified; optional defaults normalized.
 # Safe: No structural deletions. Original logic preserved.
 
@@ -150,7 +149,6 @@ import gspread
 from google.oauth2.service_account import Credentials
 from gspread.exceptions import WorksheetNotFound, APIError
 from gspread.utils import rowcol_to_a1
-
 
 # --- Safe shim for batch helpers: defined early to avoid NameError ---
 try:
@@ -307,7 +305,6 @@ def _normalize_private_key(raw: str) -> str:
     return raw.replace("\\n","\n") if "\\n" in raw and "BEGIN PRIVATE KEY" in raw else raw
 def _pin_hash(pin: str, sabun: str) -> str:
     return hashlib.sha256(f"{str(sabun).strip()}:{str(pin).strip()}".encode()).hexdigest()
-
 
 def show_submit_banner(text: str):
     try:
@@ -508,7 +505,6 @@ def read_sheet_df(sheet_name: str) -> pd.DataFrame:
             st.info(f"네트워크 혼잡으로 캐시 데이터를 표시합니다: {sheet_name}")
             return LAST_GOOD[sheet_name]
         raise
-
 
 @st.cache_data(ttl=600, show_spinner=False)
 def read_emp_df() -> pd.DataFrame:
@@ -910,7 +906,6 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
 
 def _eval_sheet_name(year: int | str) -> str: return f"{EVAL_RESP_SHEET_PREFIX}{int(year)}"
 
-
 def ensure_eval_items_sheet():
     wb=get_book()
     try:
@@ -937,7 +932,6 @@ def ensure_eval_items_sheet():
                 return
             raise
 
-
 @st.cache_data(ttl=300, show_spinner=False)
 def read_eval_items_df(only_active: bool = True) -> pd.DataFrame:
     ensure_eval_items_sheet()
@@ -961,7 +955,6 @@ def read_eval_items_df(only_active: bool = True) -> pd.DataFrame:
     if cols: df=df.sort_values(cols).reset_index(drop=True)
     if only_active and "활성" in df.columns: df=df[df["활성"]==True]
     return df
-
 
 def _ensure_eval_resp_sheet(year:int, item_ids:list[str]):
     name=_eval_sheet_name(year)
@@ -1902,7 +1895,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
         _jd = _jd_latest_for(str(target_sabun), int(year)) or {}
         _sub_ts = (str(_jd.get('제출시각','')).strip() or "미제출")
         latest_ver = _jd_latest_version_for(str(target_sabun), int(year))
-    
+
         appr_df = read_jd_approval_df(st.session_state.get('appr_rev', 0))
         _appr_status = "미제출"
         _appr_time = ""
@@ -1917,7 +1910,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
                 srow = sub.iloc[0].to_dict()
                 _appr_status = str(srow.get('상태','')).strip() or "미제출"     # 승인 / 반려 / (없음)
                 _appr_time   = str(srow.get('승인시각','')).strip()
-    
+
         # 표기: 제출시각(직원 제출) | [부서장 승인여부] 승인/반려 (승인시각)
         _appr_right = _appr_status if _appr_status else "미제출"
         if _appr_time:
@@ -2571,7 +2564,7 @@ def tab_admin_eval_items():
                 "순서": st.column_config.NumberColumn(step=1, min_value=0),
             },
         )
-        
+
         if st.button("순서 일괄 저장", type="primary", use_container_width=True):
             try:
                 ws = get_book().worksheet(EVAL_ITEMS_SHEET)
@@ -2615,7 +2608,7 @@ def tab_admin_eval_items():
                         _retry(ws.update, _col_range(col_act, 2, n+1), active_values, value_input_option="USER_ENTERED")
 
                 st.success("업데이트 완료", icon="✅")
-                
+
             except Exception as e:
                 st.exception(e)
 
@@ -2685,7 +2678,7 @@ def tab_admin_eval_items():
                                 gs_enqueue_cell(ws, idx, hmap["비고"], memo.strip(), "USER_ENTERED")
                             gs_flush()
                             st.success("업데이트 완료", icon="✅")
-                            
+
                 except Exception as e:
                     st.exception(e)
 
