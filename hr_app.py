@@ -2980,20 +2980,41 @@ def main():
 
     with right:
         tabs = st.tabs(["인사평가","직무기술서","직무능력평가","관리자","도움말"])
-        with tabs[0]: tab_eval(emp_df)
-        with tabs[1]: tab_job_desc(emp_df)
-        with tabs[2]: tab_competency(emp_df)
+        with tabs[0]:
+            tab_eval(emp_df)
+        with tabs[1]:
+            tab_job_desc(emp_df)
+        with tabs[2]:
+            tab_competency(emp_df)
         with tabs[3]:
             me = str(st.session_state.get("user", {}).get("사번", ""))
             if not is_admin(me):
                 st.warning("관리자 전용 메뉴입니다.", icon="🔒")
             else:
+                # (선택) 동기화 버튼(수동)
+                with st.expander("🔁 동기화 도구 (시트 ↔ Supabase)", expanded=False):
+                    c1, c2 = st.columns([1, 1])
+                    with c1:
+                        if st.button("직원 동기화 (시트 → Supabase)"):
+                            sync_sheet_to_supabase_employees_v1()
+                    with c2:
+                        try:
+                            cnt = supabase.table("employees").select("사번", count="exact").execute().count
+                            st.caption(f"현재 Supabase employees 행수: {cnt}")
+                        except Exception:
+                            st.caption("행수 확인 불가")
+
                 a1, a2, a3, a4 = st.tabs(["직원","PIN 관리","평가 항목 관리","권한 관리"])
-                with a1: tab_staff_admin(emp_df)
-                with a2: tab_admin_pin(emp_df)
-                with a3: tab_admin_eval_items()
-                with a4: tab_admin_acl(emp_df)
-        with tabs[4]: tab_help()
+                with a1:
+                    tab_staff_admin(emp_df)
+                with a2:
+                    tab_admin_pin(emp_df)
+                with a3:
+                    tab_admin_eval_items()
+                with a4:
+                    tab_admin_acl(emp_df)
+        with tabs[4]:
+            tab_help()
 
 if __name__ == "__main__":
     main()
