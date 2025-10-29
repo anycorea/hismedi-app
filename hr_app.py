@@ -166,7 +166,7 @@ def sync_sheet_to_supabase_acl_v1():
     # 3) 불리언 정리
     df["활성"] = df["활성"].map(_sync_truthy_v1).fillna(False).astype(bool)
 
-    # 4) 키 결측 제거
+    # 4) (최소 키) 결측 제거 → B안에서는 사번/역할만 필수
     before = len(df)
     df = df[(df["사번"]!="") & (df["역할"]!="")]
     dropped_nullkey = before - len(df)
@@ -177,18 +177,15 @@ def sync_sheet_to_supabase_acl_v1():
         st.warning("업서트할 권한 데이터가 없습니다.")
         return
 
-    # 5) (사번, 역할) 중복 제거 – 활성(True) 우선, 그 다음 원본 순서 유지
-    df["_order"] = _pd.RangeIndex(len(df))
-    df = df.sort_values(["활성","_order"], ascending=[False, True])
+    # 5) 동일한 6-키 완전중복만 제거(같은 행이 시트에 2번 있는 경우 방지)
+    conflict_keys = ["사번","역할","범위유형","부서1","부서2","대상사번"]
     before_dups = len(df)
-    df = df.drop_duplicates(subset=["사번","역할"], keep="first")
+    df = df.drop_duplicates(subset=conflict_keys, keep="first")
     removed_dups = before_dups - len(df)
     if removed_dups > 0:
-        st.info(f"(사번, 역할) 중복 제거: {removed_dups}건 → 첫 행(활성 우선)만 유지")
+        st.info(f"완전중복 제거: {removed_dups}건 (키: {', '.join(conflict_keys)})")
 
-    df = df.drop(columns=["_order"], errors="ignore")
-
-    # 6) 업서트
+    # 6) 업서트 (B안: 6개 컬럼 조합을 고유로)
     try:
         supabase.table("acl").upsert(
             df.to_dict(orient="records"),
@@ -197,7 +194,7 @@ def sync_sheet_to_supabase_acl_v1():
         st.success(f"권한 {len(df)}건 업서트 완료", icon="✅")
     except Exception as e:
         st.exception(e)
-        st.error("권한 업서트 실패: (사번, 역할) 중복/인덱스/타입을 다시 확인해 주세요.")
+        st.error("권한 업서트 실패: 고유인덱스/키 중복/타입을 확인해 주세요.")
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Helpers
