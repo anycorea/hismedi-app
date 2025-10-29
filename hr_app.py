@@ -274,7 +274,7 @@ for i in range(2, len(values)+1):
                 out[sab] = (main, extra, qual, sub)
         except Exception:
             pass
-return out
+    return out
 
 @st.cache_data(ttl=120, show_spinner=False)
 def get_jd_approval_map_cached(_year: int, _rev: int = 0) -> dict:
