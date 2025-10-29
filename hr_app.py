@@ -219,31 +219,38 @@ AUTO_FIX_HEADERS = False
 # ===== Cached summary helpers (performance) =====
 @st.cache_data(ttl=300, show_spinner=False)
 def get_eval_summary_map_cached(_year: int, _rev: int = 0) -> dict:
-    """Return {(사번, 평가유형)->(총점, 제출시각)} for the year."""
+    """Return {(사번, 평가유형)->(총점, 제출시각)} for the year (robust to header variants)."""
     items = read_eval_items_df(True)
     item_ids = [str(x) for x in items["항목ID"].tolist()] if not items.empty else []
     try:
         ws = _ensure_eval_resp_sheet(int(_year), item_ids)
         header = _retry(ws.row_values, 1) or []
-        hmap = {n:i+1 for i,n in enumerate(header)}
+        hmap = {n: i + 1 for i, n in enumerate(header)}
         values = _ws_values(ws)
     except Exception:
         return {}
-    cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cTot=hmap.get("총점"); cSub=hmap.get("제출시각")
-    out = {}
-    for i in range(2, len(values)+1):
-        r = values[i-1]
+    cY = hmap.get('연도') or hmap.get('년도')
+    cType = hmap.get('평가유형')
+    cTS = hmap.get('평가대상사번') or hmap.get('사번')
+    cTot = hmap.get('총점')
+    cSub = hmap.get('제출시각') or hmap.get('제출일시') or hmap.get('제출시간')
+    out: dict[tuple[str, str], tuple[str, str]] = {}
+    for i in range(2, len(values) + 1):
+        r = values[i - 1]
         try:
-            if str(r[cY-1]).strip() != str(_year): continue
-            k = (str(r[cTS-1]).strip(), str(r[cT-1]).strip())
-            tot = r[cTot-1] if (cTot and cTot-1 < len(r)) else ""
-            sub = r[cSub-1] if (cSub and cSub-1 < len(r)) else ""
+            ry = (str(r[cY - 1]).strip() if cY else _extract_year(r[cSub - 1] if cSub else ''))
+            if str(ry) != str(_year):
+                continue
+            k = (str(r[cTS - 1]).strip() if cTS else '', str(r[cType - 1]).strip() if cType else '')
+            tot = r[cTot - 1] if cTot else ''
+            sub = r[cSub - 1] if cSub else ''
+            if not k[0]:
+                continue
             if k not in out or str(out[k][1]) < str(sub):
-                out[k] = (tot, sub)
+                out[k] = (str(tot), str(sub))
         except Exception:
             pass
     return out
-
 @st.cache_data(ttl=300, show_spinner=False)
 def get_comp_summary_map_cached(_year: int, _rev: int = 0) -> dict:
     """Return {사번->(주업무, 기타업무, 자격유지, 제출시각)} for the year (robust to header variants)."""
@@ -254,7 +261,6 @@ def get_comp_summary_map_cached(_year: int, _rev: int = 0) -> dict:
         values = _ws_values(ws)
     except Exception:
         return {}
-    # Allow header variants
     cY = hmap.get('연도') or hmap.get('년도')
     cTS = hmap.get('평가대상사번') or hmap.get('사번')
     cMain = hmap.get('주업무평가') or hmap.get('주업무')
@@ -265,7 +271,6 @@ def get_comp_summary_map_cached(_year: int, _rev: int = 0) -> dict:
     for i in range(2, len(values) + 1):
         r = values[i - 1]
         try:
-            # Year filter (robust): prefer 연도, else parse from 제출시각/제출일시
             ry = (str(r[cY - 1]).strip() if cY else _extract_year(r[cSub - 1] if cSub else ''))
             if str(ry) != str(_year):
                 continue
@@ -2514,8 +2519,7 @@ def read_my_comp_simple_rows(year:int, sabun:str)->pd.DataFrame:
         df=pd.DataFrame(_ws_get_all_records(ws))
     except Exception: return pd.DataFrame(columns=COMP_SIMPLE_HEADERS)
     if df.empty: return df
-    Y = df["연도"].astype(str) if "연도" in df.columns else df.get("제출시각","").map(_extract_year)
-    df = df[(df["평가자사번"].astype(str)==str(sabun)) & (Y.astype(str)==str(year))]
+    df=df[(df["평가자사번"].astype(str)==str(sabun)) & (df.get("연도").astype(str)==str(year) if "연도" in df.columns else True)]
     sort_cols=[c for c in ["평가대상사번","제출시각"] if c in df.columns]
     if sort_cols: df=df.sort_values(sort_cols, ascending=[True,False,False])
     return df.reset_index(drop=True)
