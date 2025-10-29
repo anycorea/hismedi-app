@@ -257,10 +257,14 @@ def get_comp_summary_map_cached(_year: int, _rev: int = 0) -> dict:
     cY=hmap.get("연도"); cTS=hmap.get("평가대상사번"); cMain=hmap.get("주업무평가")
     cExtra=hmap.get("기타업무평가"); cQual=hmap.get("자격유지"); cSub=hmap.get("제출시각")
     out = {}
-    for i in range(2, len(values)+1):
+    
+for i in range(2, len(values)+1):
         r = values[i-1]
         try:
-            if cY and str(r[cY-1]).strip()!=str(_year): continue
+            # Year filter (robust)
+            ry = (str(r[cY-1]).strip() if cY else _extract_year(r[cSub-1] if cSub else ""))
+            if str(ry) != str(_year):
+                continue
             sab = str(r[cTS-1]).strip()
             main = r[cMain-1] if cMain else ""
             extra = r[cExtra-1] if cExtra else ""
@@ -270,7 +274,7 @@ def get_comp_summary_map_cached(_year: int, _rev: int = 0) -> dict:
                 out[sab] = (main, extra, qual, sub)
         except Exception:
             pass
-    return out
+return out
 
 @st.cache_data(ttl=120, show_spinner=False)
 def get_jd_approval_map_cached(_year: int, _rev: int = 0) -> dict:
@@ -459,6 +463,18 @@ def current_year() -> int:
     except Exception:
         return datetime.now().year
 def kst_now_str(): return datetime.now(tz=tz_kst()).strftime("%Y-%m-%d %H:%M:%S (%Z)")
+
+# --- Year normalization helper ----------------------------------------------
+def _extract_year(val):
+    try:
+        s = str(val).strip()
+        if not s:
+            return ""
+        import re as _re
+        m = _re.search(r'(19|20)\d{2}', s)
+        return m.group(0) if m else ""
+    except Exception:
+        return ""
 
 def _jd_plain_html(text: str) -> str:
     import html
@@ -2496,7 +2512,7 @@ def read_my_comp_simple_rows(year:int, sabun:str)->pd.DataFrame:
         df=pd.DataFrame(_ws_get_all_records(ws))
     except Exception: return pd.DataFrame(columns=COMP_SIMPLE_HEADERS)
     if df.empty: return df
-    df=df[df["평가자사번"].astype(str)==str(sabun)]
+    df=df[(df["평가자사번"].astype(str)==str(sabun)) & (df.get("연도").astype(str)==str(year) if "연도" in df.columns else True)]
     sort_cols=[c for c in ["평가대상사번","제출시각"] if c in df.columns]
     if sort_cols: df=df.sort_values(sort_cols, ascending=[True,False,False])
     return df.reset_index(drop=True)
