@@ -154,31 +154,41 @@ def sync_sheet_to_supabase_acl_v1():
         return
 
     # 1) 필수 컬럼 확보
-    required = ["사번","역할","활성","이름","범위유형","부서1","부서2","대상사번","비고"]
+    required = ["사번","이름","역할","범위유형","부서1","부서2","대상사번","활성","비고"]
     for c in required:
         if c not in df.columns:
             df[c] = ""
 
-    # 2) 공백/타입 정리
-    for c in ["사번","역할","이름","범위유형","부서1","부서2","대상사번","비고"]:
+    # 2) 문자열/공백 정리
+    for c in ["사번","이름","역할","범위유형","부서1","부서2","대상사번","비고"]:
         df[c] = df[c].astype(str).fillna("").map(lambda s: s.strip())
 
-    # 3) 비어있는 키 행 제거(사번 또는 역할이 비면 업서트 불가)
+    # 3) 불리언 정리
+    df["활성"] = df["활성"].map(_sync_truthy_v1).fillna(False).astype(bool)
+
+    # 4) 키 결측 제거
     before = len(df)
     df = df[(df["사번"]!="") & (df["역할"]!="")]
-    dropped = before - len(df)
-    if dropped > 0:
-        st.info(f"빈 사번/역할로 제외된 행: {dropped}건")
-
-    # 4) 불리언 정리
-    if "활성" in df.columns:
-        df["활성"] = df["활성"].map(_sync_truthy_v1).fillna(False).astype(bool)
+    dropped_nullkey = before - len(df)
+    if dropped_nullkey > 0:
+        st.info(f"빈 사번/역할 제외: {dropped_nullkey}건")
 
     if df.empty:
         st.warning("업서트할 권한 데이터가 없습니다.")
         return
 
-    # 5) 업서트 (DB에 (사번,역할) 유니크 인덱스가 있어야 함)
+    # 5) (사번, 역할) 중복 제거 – 활성(True) 우선, 그 다음 원본 순서 유지
+    df["_order"] = _pd.RangeIndex(len(df))
+    df = df.sort_values(["활성","_order"], ascending=[False, True])
+    before_dups = len(df)
+    df = df.drop_duplicates(subset=["사번","역할"], keep="first")
+    removed_dups = before_dups - len(df)
+    if removed_dups > 0:
+        st.info(f"(사번, 역할) 중복 제거: {removed_dups}건 → 첫 행(활성 우선)만 유지")
+
+    df = df.drop(columns=["_order"], errors="ignore")
+
+    # 6) 업서트
     try:
         supabase.table("acl").upsert(
             df.to_dict(orient="records"),
@@ -187,7 +197,7 @@ def sync_sheet_to_supabase_acl_v1():
         st.success(f"권한 {len(df)}건 업서트 완료", icon="✅")
     except Exception as e:
         st.exception(e)
-        st.error("권한 업서트 실패: DB의 (사번, 역할) 고유 인덱스 유무와 빈값/타입을 확인해 주세요.")
+        st.error("권한 업서트 실패: (사번, 역할) 중복/인덱스/타입을 다시 확인해 주세요.")
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Helpers
