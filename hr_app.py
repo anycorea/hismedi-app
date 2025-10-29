@@ -851,7 +851,7 @@ AUTH_SHEET="권한"
 
 EVAL_ITEMS_SHEET = st.secrets.get("sheets", {}).get("EVAL_ITEMS_SHEET", "평가_항목")
 EVAL_ITEM_HEADERS = ["항목ID","항목","내용","순서","활성","비고","설명","유형","구분"]
-EVAL_RESP_SHEET_PREFIX = "인사평가_"
+EVAL_RESP_SHEET_NAME = "인사평가"
 EVAL_BASE_HEADERS = ["연도","평가유형","평가대상사번","평가대상이름","평가자사번","평가자이름","총점","상태","제출시각","잠금"]
 
 AUTH_HEADERS=["사번","이름","역할","범위유형","부서1","부서2","대상사번","활성","비고"]
@@ -1161,7 +1161,7 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
     else:
         st.dataframe(view[cols], use_container_width=True, height=(360 if not show_dashboard_cols else 420), hide_index=True)
 
-def _eval_sheet_name(year: int | str) -> str: return f"{EVAL_RESP_SHEET_PREFIX}{int(year)}"
+def _eval_sheet_name(year: int | str) -> str: return EVAL_RESP_SHEET_NAME
 
 def ensure_eval_items_sheet():
     wb=get_book()
@@ -2406,13 +2406,13 @@ def tab_job_desc(emp_df: pd.DataFrame):
 # ═════════════════════════════════════════════════════════════════════════════
 # 직무능력평가 + JD 요약 스크롤
 # ═════════════════════════════════════════════════════════════════════════════
-COMP_SIMPLE_PREFIX = "직무능력평가_"
+COMP_SIMPLE_NAME = "직무능력평가"
 COMP_SIMPLE_HEADERS = [
     "연도","평가대상사번","평가대상이름","평가자사번","평가자이름",
     "주업무평가","기타업무평가","교육이수","자격유지","종합의견",
     "상태","제출시각","잠금"
 ]
-def _simp_sheet_name(year:int|str)->str: return f"{COMP_SIMPLE_PREFIX}{int(year)}"
+def _simp_sheet_name(year:int|str)->str: return COMP_SIMPLE_NAME
 
 def _ensure_comp_simple_sheet(year:int):
     wb=get_book(); name=_simp_sheet_name(year)
@@ -3068,10 +3068,10 @@ def tab_help():
         - 직원: `직원` 시트
         - 권한: `권한` 시트 (역할=admin/manager, 범위유형: 공란=전체 · 부서 · 개별)
         - 평가 항목: `평가_항목` 시트
-        - 인사평가: `인사평가_YYYY` 시트
+        - 인사평가: `인사평가` 시트
         - 직무기술서: `직무기술서` 시트
         - 직무기술서(부서장 승인): `직무기술서_승인` 시트
-        - 직무능력평가: `직무능력평가_YYYY` 시트
+        - 직무능력평가: `직무능력평가` 시트
     """)
 
 # ═════════════════════════════════════════════════════════════════════════════
