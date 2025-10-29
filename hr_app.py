@@ -152,14 +152,42 @@ def sync_sheet_to_supabase_acl_v1():
     if df.empty:
         st.warning("권한 시트가 비어있습니다.")
         return
-    if "활성" in df.columns:
-        df["활성"] = df["활성"].map(_sync_truthy_v1)
-    supabase.table("acl").upsert(
-        df.to_dict(orient="records"),
-        on_conflict="사번,역할"
-    ).execute()
-    st.success(f"권한 {len(df)}건 업서트 완료", icon="✅")
 
+    # 1) 필수 컬럼 확보
+    required = ["사번","역할","활성","이름","범위유형","부서1","부서2","대상사번","비고"]
+    for c in required:
+        if c not in df.columns:
+            df[c] = ""
+
+    # 2) 공백/타입 정리
+    for c in ["사번","역할","이름","범위유형","부서1","부서2","대상사번","비고"]:
+        df[c] = df[c].astype(str).fillna("").map(lambda s: s.strip())
+
+    # 3) 비어있는 키 행 제거(사번 또는 역할이 비면 업서트 불가)
+    before = len(df)
+    df = df[(df["사번"]!="") & (df["역할"]!="")]
+    dropped = before - len(df)
+    if dropped > 0:
+        st.info(f"빈 사번/역할로 제외된 행: {dropped}건")
+
+    # 4) 불리언 정리
+    if "활성" in df.columns:
+        df["활성"] = df["활성"].map(_sync_truthy_v1).fillna(False).astype(bool)
+
+    if df.empty:
+        st.warning("업서트할 권한 데이터가 없습니다.")
+        return
+
+    # 5) 업서트 (DB에 (사번,역할) 유니크 인덱스가 있어야 함)
+    try:
+        supabase.table("acl").upsert(
+            df.to_dict(orient="records"),
+            on_conflict="사번,역할"
+        ).execute()
+        st.success(f"권한 {len(df)}건 업서트 완료", icon="✅")
+    except Exception as e:
+        st.exception(e)
+        st.error("권한 업서트 실패: DB의 (사번, 역할) 고유 인덱스 유무와 빈값/타입을 확인해 주세요.")
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Helpers
