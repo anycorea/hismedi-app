@@ -492,7 +492,101 @@ def _extract_year(val):
         return m.group(0) if m else ""
     except Exception:
         return ""
+
+# --- Dashboard year-scoped helpers (robust) -----------------------------------
+def _dash_eval_scores_for_year(_year: int) -> dict:
+    """Return {(sabun, eval_type)->(total, submitted_at)} for the given year.
+    - Accepts header variants and parses year from 제출시각 if needed."""
+    try:
+        ws = _ws(EVAL_RESP_SHEET_NAME)  # "인사평가"
+        df = pd.DataFrame(_ws_get_all_records(ws))
+    except Exception:
+        return {}
+    if df.empty:
+        return {}
+
+    col = lambda *names: next((n for n in names if n in df.columns), None)
+    cY    = col("연도","년도")
+    cTS   = col("평가대상사번","사번")
+    cType = col("평가유형","유형")
+    cTot  = col("총점","합계","점수")
+    cSub  = col("제출시각","제출일시","제출시간")
+
+    # Year filter
+    if cY:
+        df = df[df[cY].astype(str) == str(_year)]
+    elif cSub:
+        df = df[(df[cSub].astype(str).map(_extract_year).astype(str) == str(_year))]
+    else:
+        return {}
+
+    # Normalize 평가유형 -> {'자기','1차','2차'}
+    def norm_type(x: str) -> str:
+        s = str(x or "").strip().lower()
+        if s in ("자기","self","self-eval","자기평가","본인","본인평가"): return "자기"
+        if s in ("1차","1차평가","manager","mgr","상급자","부서장","부서장평가"): return "1차"
+        if s in ("2차","2차평가","admin","hr","최종","인사","경영진"): return "2차"
+        return str(x).strip() or ""
+
+    df["_T"]   = df[cType].map(norm_type) if cType else ""
+    df["_SUB"] = df[cSub].astype(str) if cSub else ""
+
+    out: dict[tuple[str,str], tuple[str,str]] = {}
+    for _, r in df.iterrows():
+        sab = str(r.get(cTS, "")).strip()
+        tp  = str(r.get("_T","")).strip()
+        tot = str(r.get(cTot, "")) if cTot else ""
+        sub = str(r.get("_SUB",""))
+        if not sab or not tp:
+            continue
+        k = (sab, tp)
+        if k not in out or str(out[k][1]) < str(sub):
+            out[k] = (tot, sub)
+    return out
+
+def _dash_comp_status_for_year(_year: int) -> dict:
+    """Return {sabun->(main, extra, qual, submitted_at)} for the given year.
+    - Accepts header variants and parses year from 제출시각 if needed."""
+    try:
+        ws = _ws(COMP_SIMPLE_NAME)  # "직무능력평가"
+        df = pd.DataFrame(_ws_get_all_records(ws))
+    except Exception:
+        return {}
+    if df.empty:
+        return {}
+
+    col = lambda *names: next((n for n in names if n in df.columns), None)
+    cY    = col("연도","년도")
+    cTS   = col("평가대상사번","사번")
+    cMain = col("주업무평가","주업무")
+    cExtra= col("기타업무평가","기타업무")
+    cQual = col("자격유지","자격")
+    cSub  = col("제출시각","제출일시","제출시간")
+
+    # Year filter
+    if cY:
+        df = df[df[cY].astype(str) == str(_year)]
+    elif cSub:
+        df = df[(df[cSub].astype(str).map(_extract_year).astype(str) == str(_year))]
+    else:
+        return {}
+
+    df["_SUB"] = df[cSub].astype(str) if cSub else ""
+    out: dict[str, tuple[str,str,str,str]] = {}
+    for _, r in df.iterrows():
+        sab  = str(r.get(cTS, "")).strip()
+        main = str(r.get(cMain, "")) if cMain else ""
+        extra= str(r.get(cExtra, "")) if cExtra else ""
+        qual = str(r.get(cQual, "")) if cQual else ""
+        sub  = str(r.get("_SUB",""))
+        if not sab:
+            continue
+        if sab not in out or str(out[sab][3]) < str(sub):
+            out[sab] = (main, extra, qual, sub)
+    return out
+
 def _sha256_hex(s: str) -> str: return hashlib.sha256(str(s).encode()).hexdigest()
+
 def _pin_hash(pin: str, sabun: str) -> str:
     return hashlib.sha256(f"{str(sabun).strip()}:{str(pin).strip()}".encode()).hexdigest()
 
@@ -1118,8 +1212,8 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
         this_year = current_year()
         dash_year = st.number_input("연도(현황판)", min_value=2000, max_value=2100, value=int(this_year), step=1, key="left_dash_year")
 
-        eval_map = get_eval_summary_map_cached(int(dash_year), st.session_state.get("eval_rev", 0))
-        comp_map = get_comp_summary_map_cached(int(dash_year), st.session_state.get("comp_rev", 0))
+        eval_map = _dash_eval_scores_for_year(int(dash_year))
+        comp_map = _dash_comp_status_for_year(int(dash_year))
         appr_map = get_jd_approval_map_cached(int(dash_year), st.session_state.get("appr_rev", 0))
 
         # view에 컬럼 합치기
