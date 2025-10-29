@@ -124,6 +124,43 @@ def sync_sheet_to_supabase_employees_v1():
 
     st.success(f"직원 {len(df)}건 Supabase 업서트 완료", icon="✅")
 
+# === 평가_항목: 시트 → Supabase 동기화 ===
+def _get_ws(sheet_title: str):
+    gclient = _get_gspread_client_for_sync_v1()
+    sh = gclient.open_by_key(st.secrets["sheets"]["HR_SHEET_ID"])
+    return sh.worksheet(sheet_title)
+
+def sync_sheet_to_supabase_eval_items_v1():
+    ws = _get_ws("평가_항목")
+    df = _pd.DataFrame(ws.get_all_records())
+    if df.empty:
+        st.warning("평가_항목 시트가 비어있습니다.")
+        return
+    # bool 정리
+    if "활성" in df.columns:
+        df["활성"] = df["활성"].map(_sync_truthy_v1)
+    supabase.table("eval_items").upsert(
+        df.to_dict(orient="records"),
+        on_conflict="항목ID"
+    ).execute()
+    st.success(f"평가_항목 {len(df)}건 업서트 완료", icon="✅")
+
+# === 권한: 시트 → Supabase 동기화 ===
+def sync_sheet_to_supabase_acl_v1():
+    ws = _get_ws("권한")
+    df = _pd.DataFrame(ws.get_all_records())
+    if df.empty:
+        st.warning("권한 시트가 비어있습니다.")
+        return
+    if "활성" in df.columns:
+        df["활성"] = df["활성"].map(_sync_truthy_v1)
+    supabase.table("acl").upsert(
+        df.to_dict(orient="records"),
+        on_conflict="사번,역할"
+    ).execute()
+    st.success(f"권한 {len(df)}건 업서트 완료", icon="✅")
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # Helpers
 # ═════════════════════════════════════════════════════════════════════════════
@@ -622,6 +659,38 @@ def read_emp_df() -> pd.DataFrame:
 
     return df
 
+def read_acl_df(only_enabled: bool = True) -> pd.DataFrame:
+    """권한(acl): Supabase 우선 → 비어 있으면 시트에서 로드 후 업서트"""
+    try:
+        q = supabase.table("acl").select("*")
+        if only_enabled:
+            q = q.eq("활성", True)
+        res = q.execute()
+        data = res.data or []
+        if data:
+            return pd.DataFrame(data)
+    except Exception as e:
+        st.warning(f"Supabase 권한 조회 실패: {e}")
+
+    # 폴백: 시트 -> Supabase 업서트(초기/수동 동기화 대체)
+    gclient = _get_gspread_client_for_sync_v1()
+    sh = gclient.open_by_key(st.secrets["sheets"]["HR_SHEET_ID"])
+    ws = sh.worksheet("권한")
+    df = pd.DataFrame(ws.get_all_records())
+
+    if not df.empty:
+        if "활성" in df.columns:
+            df["활성"] = df["활성"].map(_sync_truthy_v1)
+        try:
+            supabase.table("acl").upsert(
+                df.to_dict(orient="records"),
+                on_conflict="사번,역할"
+            ).execute()
+        except Exception as e:
+            st.warning(f"권한 업서트 실패: {e}")
+
+    return df
+
 # ═════════════════════════════════════════════════════════════════════════════
 # Login + Session
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1029,27 +1098,37 @@ def ensure_eval_items_sheet():
             raise
 
 @st.cache_data(ttl=300, show_spinner=False)
-def read_eval_items_df(only_active: bool = True) -> pd.DataFrame:
-    ensure_eval_items_sheet()
-    ws=_ws(EVAL_ITEMS_SHEET)
+def read_eval_items_df(only_active: bool = False) -> pd.DataFrame:
     try:
-        df=pd.DataFrame(_ws_get_all_records(ws))
+        q = supabase.table("eval_items").select("*")
+        if only_active:
+            q = q.eq("활성", True)
+        res = q.execute()
+        data = res.data or []
+        if data:
+            df = pd.DataFrame(data)
+            if "순서" in df.columns:
+                df = df.sort_values("순서", na_position="last")
+            return df
     except Exception as e:
-        if _is_quota_429(e):
-            try: st.warning('구글시트 읽기 할당량(1분) 초과. 잠시 후 "동기화"를 눌러 다시 시도해 주세요.', icon="⏳")
-            except Exception: pass
-            return pd.DataFrame(columns=EVAL_ITEM_HEADERS)
-        raise
-    if df.empty: return pd.DataFrame(columns=EVAL_ITEM_HEADERS)
-    if "순서" in df.columns:
-        def _i(x):
-            try: return int(float(str(x).strip()))
-            except: return 0
-        df["순서"]=df["순서"].apply(_i)
-    if "활성" in df.columns: df["활성"]=df["활성"].map(_to_bool)
-    cols=[c for c in ["순서","항목"] if c in df.columns]
-    if cols: df=df.sort_values(cols).reset_index(drop=True)
-    if only_active and "활성" in df.columns: df=df[df["활성"]==True]
+        st.warning(f"Supabase 평가_항목 조회 실패: {e}")
+
+    # 폴백: 시트 로드 + 업서트
+    st.info("Supabase 평가_항목 비어있음 → 시트에서 로드하여 Supabase에 업서트")
+    ws = _get_ws("평가_항목")
+    df = pd.DataFrame(ws.get_all_records())
+    if not df.empty:
+        if "활성" in df.columns:
+            df["활성"] = df["활성"].map(_sync_truthy_v1)
+        try:
+            supabase.table("eval_items").upsert(
+                df.to_dict(orient="records"),
+                on_conflict="항목ID"
+            ).execute()
+        except Exception as e:
+            st.warning(f"평가_항목 업서트 실패: {e}")
+        if "순서" in df.columns:
+            df = df.sort_values("순서", na_position="last")
     return df
 
 def _ensure_eval_resp_sheet(year:int, item_ids:list[str]):
@@ -2991,7 +3070,7 @@ def main():
             if not is_admin(me):
                 st.warning("관리자 전용 메뉴입니다.", icon="🔒")
             else:
-                # (선택) 동기화 버튼(수동)
+                # (선택) 동기화 도구(직원)
                 with st.expander("🔁 동기화 도구 (시트 ↔ Supabase)", expanded=False):
                     c1, c2 = st.columns([1, 1])
                     with c1:
@@ -3005,6 +3084,33 @@ def main():
                             st.caption("행수 확인 불가")
 
                 a1, a2, a3, a4 = st.tabs(["직원","PIN 관리","평가 항목 관리","권한 관리"])
+
+                # 권한(ACL) 동기화 버튼
+                with st.expander("🛡️ 권한 동기화", expanded=False):
+                    col1, col2 = st.columns([1, 1])
+                    with col1:
+                        if st.button("권한 동기화 (시트 → Supabase)"):
+                            sync_sheet_to_supabase_acl_v1()
+                    with col2:
+                        try:
+                            cnt_acl = supabase.table("acl").select("사번", count="exact").execute().count
+                            st.caption(f"현재 acl 행수: {cnt_acl}")
+                        except Exception:
+                            st.caption("행수 확인 불가")
+
+                with st.expander("🛡️ 권한 동기화", expanded=False):
+                    col1, col2 = st.columns([1, 1])
+                    with col1:
+                        if st.button("권한 동기화 (시트 → Supabase)"):
+                            # 시트 → Supabase 업서트 함수 (이미 상단 동기화 유틸 근처에 정의)
+                            sync_sheet_to_supabase_acl_v1()
+                    with col2:
+                        try:
+                            cnt_acl = supabase.table("acl").select("사번", count="exact").execute().count
+                            st.caption(f"현재 acl 행수: {cnt_acl}")
+                        except Exception:
+                            st.caption("행수 확인 불가")
+
                 with a1:
                     tab_staff_admin(emp_df)
                 with a2:
