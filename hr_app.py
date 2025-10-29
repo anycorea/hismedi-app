@@ -192,7 +192,7 @@ def sync_sheet_to_supabase_acl_v1():
     try:
         supabase.table("acl").upsert(
             df.to_dict(orient="records"),
-            on_conflict="사번,역할"
+            on_conflict="사번,역할,범위유형,부서1,부서2,대상사번"
         ).execute()
         st.success(f"권한 {len(df)}건 업서트 완료", icon="✅")
     except Exception as e:
