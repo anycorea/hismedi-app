@@ -246,35 +246,35 @@ def get_eval_summary_map_cached(_year: int, _rev: int = 0) -> dict:
 
 @st.cache_data(ttl=300, show_spinner=False)
 def get_comp_summary_map_cached(_year: int, _rev: int = 0) -> dict:
-    """Return {사번->(주업무, 기타업무, 자격유지, 제출시각)} for the year."""
-    try:
-        ws = _ensure_comp_simple_sheet(int(_year))
-        header = _retry(ws.row_values,1) or []
-        hmap = {n:i+1 for i,n in enumerate(header)}
-        values = _ws_values(ws)
-    except Exception:
-        return {}
-    cY=hmap.get("연도"); cTS=hmap.get("평가대상사번"); cMain=hmap.get("주업무평가")
-    cExtra=hmap.get("기타업무평가"); cQual=hmap.get("자격유지"); cSub=hmap.get("제출시각")
-    out = {}
-    
-for i in range(2, len(values)+1):
-        r = values[i-1]
+        """Return {사번->(주업무, 기타업무, 자격유지, 제출시각)} for the year."""
         try:
-            # Year filter (robust)
-            ry = (str(r[cY-1]).strip() if cY else _extract_year(r[cSub-1] if cSub else ""))
-            if str(ry) != str(_year):
-                continue
-            sab = str(r[cTS-1]).strip()
-            main = r[cMain-1] if cMain else ""
-            extra = r[cExtra-1] if cExtra else ""
-            qual = r[cQual-1] if cQual else ""
-            sub = r[cSub-1] if cSub else ""
-            if sab not in out or str(out[sab][3]) < str(sub):
-                out[sab] = (main, extra, qual, sub)
+            ws = _ensure_comp_simple_sheet(int(_year))
+            header = _retry(ws.row_values,1) or []
+            hmap = {n:i+1 for i,n in enumerate(header)}
+            values = _ws_values(ws)
         except Exception:
-            pass
-    return out
+            return {}
+        cY=hmap.get("연도"); cTS=hmap.get("평가대상사번"); cMain=hmap.get("주업무평가")
+        cExtra=hmap.get("기타업무평가"); cQual=hmap.get("자격유지"); cSub=hmap.get("제출시각")
+        out = {}
+    
+    for i in range(2, len(values)+1):
+            r = values[i-1]
+            try:
+                # Year filter (robust)
+                ry = (str(r[cY-1]).strip() if cY else _extract_year(r[cSub-1] if cSub else ""))
+                if str(ry) != str(_year):
+                    continue
+                sab = str(r[cTS-1]).strip()
+                main = r[cMain-1] if cMain else ""
+                extra = r[cExtra-1] if cExtra else ""
+                qual = r[cQual-1] if cQual else ""
+                sub = r[cSub-1] if cSub else ""
+                if sab not in out or str(out[sab][3]) < str(sub):
+                    out[sab] = (main, extra, qual, sub)
+            except Exception:
+                pass
+        return out
 
 @st.cache_data(ttl=120, show_spinner=False)
 def get_jd_approval_map_cached(_year: int, _rev: int = 0) -> dict:
