@@ -462,10 +462,11 @@ def kst_now_str(): return datetime.now(tz=tz_kst()).strftime("%Y-%m-%d %H:%M:%S 
 
 def _jd_plain_html(text: str) -> str:
     import html
-
     if text is None:
         text = ""
-    s = str(text).replace("\r\
+    s = str(text).replace("\r\n", "\n").replace("\r", "\n")
+    return '<div class="jd-tight">' + html.escape(s).replace("\n", "<br>") + "</div>"
+
 # --- Year normalization helper ----------------------------------------------
 def _extract_year(val):
     try:
@@ -477,10 +478,6 @@ def _extract_year(val):
         return m.group(0) if m else ""
     except Exception:
         return ""
-n","\n").replace("\r","\n")
-    # Escape HTML and convert newlines to <br> so Markdown won't turn '-' into <li>
-    return '<div class="jd-tight">' + html.escape(s).replace("\n", "<br>") + "</div>"
-
 def _sha256_hex(s: str) -> str: return hashlib.sha256(str(s).encode()).hexdigest()
 def _pin_hash(pin: str, sabun: str) -> str:
     return hashlib.sha256(f"{str(sabun).strip()}:{str(pin).strip()}".encode()).hexdigest()
