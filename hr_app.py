@@ -246,32 +246,41 @@ def get_eval_summary_map_cached(_year: int, _rev: int = 0) -> dict:
 
 @st.cache_data(ttl=300, show_spinner=False)
 def get_comp_summary_map_cached(_year: int, _rev: int = 0) -> dict:
-    """Return {사번->(주업무, 기타업무, 자격유지, 제출시각)} for the year."""
+    """Return {사번->(주업무, 기타업무, 자격유지, 제출시각)} for the year (robust to header variants)."""
     try:
         ws = _ensure_comp_simple_sheet(int(_year))
-        header = _retry(ws.row_values,1) or []
-        hmap = {n:i+1 for i,n in enumerate(header)}
+        header = _retry(ws.row_values, 1) or []
+        hmap = {n: i + 1 for i, n in enumerate(header)}
         values = _ws_values(ws)
     except Exception:
         return {}
-    cY=hmap.get("연도"); cTS=hmap.get("평가대상사번"); cMain=hmap.get("주업무평가")
-    cExtra=hmap.get("기타업무평가"); cQual=hmap.get("자격유지"); cSub=hmap.get("제출시각")
-    out = {}
-    for i in range(2, len(values)+1):
-        r = values[i-1]
+    # Allow header variants
+    cY = hmap.get('연도') or hmap.get('년도')
+    cTS = hmap.get('평가대상사번') or hmap.get('사번')
+    cMain = hmap.get('주업무평가') or hmap.get('주업무')
+    cExtra = hmap.get('기타업무평가') or hmap.get('기타업무')
+    cQual = hmap.get('자격유지') or hmap.get('자격')
+    cSub = hmap.get('제출시각') or hmap.get('제출일시') or hmap.get('제출시간')
+    out: dict[str, tuple[str, str, str, str]] = {}
+    for i in range(2, len(values) + 1):
+        r = values[i - 1]
         try:
-            if cY and str(r[cY-1]).strip()!=str(_year): continue
-            sab = str(r[cTS-1]).strip()
-            main = r[cMain-1] if cMain else ""
-            extra = r[cExtra-1] if cExtra else ""
-            qual = r[cQual-1] if cQual else ""
-            sub = r[cSub-1] if cSub else ""
+            # Year filter (robust): prefer 연도, else parse from 제출시각/제출일시
+            ry = (str(r[cY - 1]).strip() if cY else _extract_year(r[cSub - 1] if cSub else ''))
+            if str(ry) != str(_year):
+                continue
+            sab = str(r[cTS - 1]).strip() if cTS else ''
+            main = r[cMain - 1] if cMain else ''
+            extra = r[cExtra - 1] if cExtra else ''
+            qual = r[cQual - 1] if cQual else ''
+            sub = r[cSub - 1] if cSub else ''
+            if not sab:
+                continue
             if sab not in out or str(out[sab][3]) < str(sub):
-                out[sab] = (main, extra, qual, sub)
+                out[sab] = (str(main), str(extra), str(qual), str(sub))
         except Exception:
             pass
     return out
-
 @st.cache_data(ttl=120, show_spinner=False)
 def get_jd_approval_map_cached(_year: int, _rev: int = 0) -> dict:
     """Return {(사번, 최신버전)->(상태, 승인시각)} for the year from 직무기술서_승인."""
@@ -2505,7 +2514,8 @@ def read_my_comp_simple_rows(year:int, sabun:str)->pd.DataFrame:
         df=pd.DataFrame(_ws_get_all_records(ws))
     except Exception: return pd.DataFrame(columns=COMP_SIMPLE_HEADERS)
     if df.empty: return df
-    df=df[(df["평가자사번"].astype(str)==str(sabun)) & (df.get("연도").astype(str)==str(year) if "연도" in df.columns else True)]
+    Y = df["연도"].astype(str) if "연도" in df.columns else df.get("제출시각","").map(_extract_year)
+    df = df[(df["평가자사번"].astype(str)==str(sabun)) & (Y.astype(str)==str(year))]
     sort_cols=[c for c in ["평가대상사번","제출시각"] if c in df.columns]
     if sort_cols: df=df.sort_values(sort_cols, ascending=[True,False,False])
     return df.reset_index(drop=True)
