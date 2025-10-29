@@ -2924,15 +2924,18 @@ def tab_admin_acl(emp_df: pd.DataFrame):
     # 내 역할 목록 로드 (활성만)
     try:
         auth_df = read_auth_df(only_enabled=True)
-        my_roles = (
-            auth_df.loc[auth_df["사번"].astype(str) == str(me.get("사번", "")), "역할"]
-            .astype(str).str.lower().tolist()
-        )
+        rows = auth_df.loc[
+            auth_df["사번"].astype(str) == str(st.session_state.get("user", {}).get("사번", "")),
+            "역할"
+        ].astype(str)
+        my_roles = [r.strip().lower() for r in rows if r.strip()]
     except Exception:
         my_roles = []
 
-    # 편집 가능 여부: master 또는 admin 이면 True
-    can_edit = any(r in ("master", "admin") for r in my_roles)
+    # master 또는 admin 이면 편집 가능
+    can_edit = any(r in {"master", "admin"} for r in my_roles)
+
+    st.caption(f"내 역할: {', '.join(my_roles) or '없음'} / 편집권한: {'O' if can_edit else 'X'}")
 
     if not can_edit:
         st.error("admin 이상만 저장할 수 있습니다. (표/저장 비활성화)", icon="🛡️")
@@ -2977,6 +2980,7 @@ def tab_admin_acl(emp_df: pd.DataFrame):
         hide_index=True,
         column_config=colcfg,
         disabled=not can_edit,
+        num_rows="dynamic",
     )
 
     # 저장: 전체 덮어쓰기
