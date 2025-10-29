@@ -2916,20 +2916,27 @@ def tab_admin_eval_items():
                 except Exception as e:
                     st.exception(e)
 
+# ===== [BEGIN ACL_EDIT_RIGHTS] ===============================================
 def tab_admin_acl(emp_df: pd.DataFrame):
-    """권한 관리(간결/안정): 표 편집 → 저장 시 시트 전체 덮어쓰기."""
+    """권한 관리: master/admin 편집 허용, 저장은 시트 전체 덮어쓰기."""
     me = st.session_state.get("user", {})
-    am_master = False
-    try:
-        # master 판정: auth에서 내 역할이 master 인지 확인
-        my_auth = read_auth_df(only_enabled=False)
-        am_master = not my_auth[(my_auth["사번"].astype(str) == str(me.get("사번",""))) &
-                                (my_auth["역할"].astype(str).str.lower() == "master")].empty
-    except Exception:
-        am_master = False
 
-    if not am_master:
-        st.error("Master만 저장할 수 있습니다. (표/저장 비활성화)", icon="🛡️")
+    # 내 역할 목록 로드 (활성만)
+    try:
+        auth_df = read_auth_df(only_enabled=True)
+        my_roles = (
+            auth_df.loc[auth_df["사번"].astype(str) == str(me.get("사번", "")), "역할"]
+            .astype(str).str.lower().tolist()
+        )
+    except Exception:
+        my_roles = []
+
+    # 편집 가능 여부: master 또는 admin 이면 True
+    can_edit = any(r in ("master", "admin") for r in my_roles)
+
+    if not can_edit:
+        st.error("admin 이상만 저장할 수 있습니다. (표/저장 비활성화)", icon="🛡️")
+# ===== [END ACL_EDIT_RIGHTS] =================================================
 
     # 직원 룩업
     base = emp_df[["사번","이름","부서1","부서2"]].copy() if not emp_df.empty else pd.DataFrame(columns=["사번","이름","부서1","부서2"])
@@ -2969,11 +2976,11 @@ def tab_admin_acl(emp_df: pd.DataFrame):
         height=520,
         hide_index=True,
         column_config=colcfg,
-        disabled=not am_master,
+        disabled=not can_edit,
     )
 
     # 저장: 전체 덮어쓰기
-    if st.button("권한 전체 반영 (시트 저장)", type="primary", use_container_width=True, disabled=not am_master):
+    if st.button("권한 전체 반영 (시트 저장)", type="primary", use_container_width=True, disabled=not can_edit):
         try:
             # 사번 라벨 → 실제 사번
             inv_label = {v: k for k, v in label_by_sabun.items()}
