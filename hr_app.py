@@ -3088,16 +3088,28 @@ def main():
             else:
                 # 동기화 도구(직원)
                 with st.expander("🔁 동기화 도구 (시트 ↔ Supabase)", expanded=False):
-                    c1, c2 = st.columns([1, 1])
+                    c1, c2, c3 = st.columns(3)
                     with c1:
-                        if st.button("직원 동기화 (시트 → Supabase)"):
+                        if st.button("직원 동기화"):
                             sync_sheet_to_supabase_employees_v1()
-                    with c2:
                         try:
                             cnt = supabase.table("employees").select("사번", count="exact").execute().count
-                            st.caption(f"현재 Supabase employees 행수: {cnt}")
-                        except Exception:
-                            st.caption("행수 확인 불가")
+                            st.caption(f"employees: {cnt}")
+                        except Exception: pass
+                    with c2:
+                        if st.button("평가_항목 동기화"):
+                            sync_sheet_to_supabase_eval_items_v1()
+                        try:
+                            cnt = supabase.table("eval_items").select("항목ID", count="exact").execute().count
+                            st.caption(f"eval_items: {cnt}")
+                        except Exception: pass
+                    with c3:
+                        if st.button("권한 동기화"):
+                            sync_sheet_to_supabase_acl_v1()
+                        try:
+                            cnt = supabase.table("acl").select("사번", count="exact").execute().count
+                            st.caption(f"acl: {cnt}")
+                        except Exception: pass
 
                 a1, a2, a3, a4 = st.tabs(["직원","PIN 관리","평가 항목 관리","권한 관리"])
                 with a1:
