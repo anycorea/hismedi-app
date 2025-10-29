@@ -821,18 +821,45 @@ EVAL_BASE_HEADERS = ["연도","평가유형","평가대상사번","평가대상�
 
 AUTH_HEADERS=["사번","이름","역할","범위유형","부서1","부서2","대상사번","활성","비고"]
 
+AUTH_SHEET = "권한"
+AUTH_HEADERS = ["사번","이름","역할","범위유형","부서1","부서2","대상사번","활성","비고"]
+
 @st.cache_data(ttl=300, show_spinner=False)
-def read_auth_df()->pd.DataFrame:
+def read_auth_df(only_enabled: bool = True) -> pd.DataFrame:
+    """
+    권한 시트 우선 로딩 → 누락 시 빈 df.
+    필수 컬럼 보강, dtype 정리, boolean 정규화까지 한 번에.
+    """
     try:
-        ws=_ws(AUTH_SHEET); df=pd.DataFrame(_ws_get_all_records(ws))
+        ws = get_book().worksheet(AUTH_SHEET)
+        raw = _ws_get_all_records(ws)
+        df = pd.DataFrame(raw)
     except Exception:
-        return pd.DataFrame(columns=AUTH_HEADERS)
-    if df.empty: return pd.DataFrame(columns=AUTH_HEADERS)
+        df = pd.DataFrame(columns=AUTH_HEADERS)
+
+    # 필수 컬럼 보강
     for c in AUTH_HEADERS:
-        if c not in df.columns: df[c]=""
-    df["사번"]=df["사번"].astype(str)
-    if "활성" in df.columns: df["활성"]=df["활성"].map(_to_bool)
-    return df
+        if c not in df.columns:
+            df[c] = ""
+
+    # dtype 정리
+    df["사번"] = df["사번"].astype(str).str.strip()
+    df["이름"] = df["이름"].astype(str).str.strip()
+    df["역할"] = df["역할"].astype(str).str.strip()
+    df["범위유형"] = df["범위유형"].astype(str).str.strip()
+    for c in ["부서1","부서2","대상사번","비고"]:
+        df[c] = df[c].astype(str)
+
+    # 활성 → bool
+    if "활성" in df.columns:
+        df["활성"] = df["활성"].map(lambda v: str(v).strip().lower() in ("true","1","y","yes","t"))
+    else:
+        df["활성"] = True
+
+    if only_enabled:
+        df = df[df["활성"] == True]
+
+    return df.reset_index(drop=True)
 
 def is_admin(sabun:str)->bool:
     try:
@@ -842,25 +869,55 @@ def is_admin(sabun:str)->bool:
         return not q.empty
     except Exception: return False
 
-def get_allowed_sabuns(emp_df:pd.DataFrame, sabun:str, include_self:bool=True)->set[str]:
-    sabun=str(sabun); allowed=set([sabun]) if include_self else set()
-    df=read_auth_df()
-    if not df.empty:
-        mine=df[(df["사번"].astype(str)==sabun) & (df["활성"]==True)]
-        # 공란 범위유형이 하나라도 있으면 전체 허용
-        if not mine.empty and any(str(x).strip()=="" for x in mine.get("범위유형", [])):
-            return set(emp_df["사번"].astype(str).tolist())
-        for _,r in mine.iterrows():
-            t=str(r.get("범위유형","")).strip()
-            if t=="부서":
-                d1=str(r.get("부서1","")).strip(); d2=str(r.get("부서2","")).strip()
-                tgt=emp_df.copy()
-                if d1: tgt=tgt[tgt["부서1"].astype(str)==d1]
-                if d2: tgt=tgt[tgt["부서2"].astype(str)==d2]
-                allowed.update(tgt["사번"].astype(str).tolist())
-            elif t=="개별":
-                for p in re.split(r"[,\s]+", str(r.get("대상사번","")).strip()):
-                    if p: allowed.add(p)
+def get_allowed_sabuns(emp_df: pd.DataFrame, sabun: str, include_self: bool = True) -> set[str]:
+    """
+    내 권한 규칙에 따라 접근 가능한 사번 집합을 계산.
+    - 역할: "master"는 전체(+옵션), 그외는 범위유형에 따름
+    - 범위유형: (공란) 전체 / "부서" / "개별"
+    """
+    sabun = str(sabun)
+    allowed = {sabun} if include_self else set()
+
+    df = read_auth_df(only_enabled=True)
+    if df.empty:
+        return allowed
+
+    mine = df[(df["사번"].astype(str) == sabun) & (df["활성"] == True)]
+
+    # (1) master 전체 허용
+    if not mine.empty and any(r.strip().lower() == "master" for r in mine["역할"].astype(str)):
+        # 전체 직원
+        try:
+            return set(emp_df["사번"].astype(str).tolist()) if not emp_df.empty else allowed
+        except Exception:
+            return allowed
+
+    # (2) 범위유형 해석
+    for _, r in mine.iterrows():
+        t = str(r.get("범위유형", "")).strip()
+        if t == "":
+            # 전체 허용
+            try:
+                return set(emp_df["사번"].astype(str).tolist()) if not emp_df.empty else allowed
+            except Exception:
+                return allowed
+        elif t == "부서":
+            d1 = str(r.get("부서1", "")).strip()
+            d2 = str(r.get("부서2", "")).strip()
+            tgt = emp_df.copy()
+            tgt["사번"] = tgt["사번"].astype(str)
+            if "재직여부" in tgt.columns:
+                tgt = tgt[tgt["재직여부"] == True]
+            if d1:
+                tgt = tgt[tgt["부서1"].astype(str) == d1]
+            if d2:
+                tgt = tgt[tgt["부서2"].astype(str) == d2]
+            allowed.update(tgt["사번"].astype(str).tolist())
+        elif t == "개별":
+            for p in re.split(r"[,\s]+", str(r.get("대상사번", "")).strip()):
+                if p:
+                    allowed.add(p)
+
     return allowed
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -2860,145 +2917,93 @@ def tab_admin_eval_items():
                     st.exception(e)
 
 def tab_admin_acl(emp_df: pd.DataFrame):
-    """권한 관리(간소/고속): 편집 시 시트 접근 없음, 저장 시 전체 반영."""
+    """권한 관리(간결/안정): 표 편집 → 저장 시 시트 전체 덮어쓰기."""
     me = st.session_state.get("user", {})
-    am_admin = is_admin(str(me.get("사번","")))
-    if not am_admin:
-        st.error("Master만 저장할 수 있습니다. (표/저장 모두 비활성화)", icon="🛡️")
+    am_master = False
+    try:
+        # master 판정: auth에서 내 역할이 master 인지 확인
+        my_auth = read_auth_df(only_enabled=False)
+        am_master = not my_auth[(my_auth["사번"].astype(str) == str(me.get("사번",""))) &
+                                (my_auth["역할"].astype(str).str.lower() == "master")].empty
+    except Exception:
+        am_master = False
 
-    # 직원 라벨/룩업
+    if not am_master:
+        st.error("Master만 저장할 수 있습니다. (표/저장 비활성화)", icon="🛡️")
+
+    # 직원 룩업
     base = emp_df[["사번","이름","부서1","부서2"]].copy() if not emp_df.empty else pd.DataFrame(columns=["사번","이름","부서1","부서2"])
     base["사번"] = base["사번"].astype(str).str.strip()
     emp_lookup = {str(r["사번"]).strip(): str(r.get("이름","")).strip() for _, r in base.iterrows()}
-    sabuns = sorted(emp_lookup.keys())
-    labels, label_by_sabun, sabun_by_label = [], {}, {}
-    for s in sabuns:
-        nm = emp_lookup[s]
-        lab = f"{s} - {nm}" if nm else s
-        labels.append(lab)
-        label_by_sabun[s] = lab
-        sabun_by_label[lab] = s
 
-    # 최초 1회만 시트 → 세션 로드
-    if "acl_df" not in st.session_state:
-        try:
-            ws = get_book().worksheet(AUTH_SHEET)
-            header = _retry(ws.row_values, 1) or AUTH_HEADERS
-            vals = _retry(ws.get_all_values) or []
-            rows = vals[1:] if len(vals) > 1 else []
-            df_auth = pd.DataFrame(rows, columns=header).fillna("")
-        except Exception:
-            header = AUTH_HEADERS
-            df_auth = pd.DataFrame(columns=header)
-        # 표시용 사번 라벨 변환
-        df_disp = df_auth.copy()
-        if "사번" in df_disp.columns:
-            df_disp["사번"] = df_disp["사번"].map(lambda v: label_by_sabun.get(str(v).strip(), str(v).strip()))
-        st.session_state["acl_header"] = header
-        st.session_state["acl_df"] = df_disp
+    # 현재 권한 불러오기
+    df = read_auth_df(only_enabled=False).copy()
+    for c in AUTH_HEADERS:
+        if c not in df.columns:
+            df[c] = ""
 
-    header = st.session_state["acl_header"]
-    work = st.session_state["acl_df"].copy()
+    # 편집용 보기: 사번 라벨을 "사번 - 이름"으로
+    label_by_sabun = {s: (f"{s} - {n}" if n else s) for s, n in emp_lookup.items()}
+    df["사번"] = df["사번"].map(lambda s: label_by_sabun.get(str(s).strip(), str(s).strip()))
 
-    # 드롭다운 옵션(직원 시트 유니크)
-    dept1_options = [""] + sorted({str(x).strip() for x in base.get("부서1", pd.Series(dtype=str)).dropna().unique().tolist() if str(x).strip()})
-    dept2_options = [""] + sorted({str(x).strip() for x in base.get("부서2", pd.Series(dtype=str)).dropna().unique().tolist() if str(x).strip()})
+    # 에디터
+    role_options = ["", "master", "admin", "manager", "employee"]
+    scope_options = ["", "부서", "개별"]
 
-    # 컬럼 구성: '이름'은 에디터에서 제외
-    column_config = {
-        "사번": st.column_config.SelectboxColumn("사번 - 이름", options=labels),
-        "역할": st.column_config.SelectboxColumn("역할", options=["admin","manager"]),
-        "범위유형": st.column_config.SelectboxColumn("범위유형", options=["","부서","개별"]),
-        "부서1": st.column_config.SelectboxColumn("부서1", options=dept1_options),
-        "부서2": st.column_config.SelectboxColumn("부서2", options=dept2_options),
-        "대상사번": st.column_config.TextColumn("대상사번"),
-        "활성": st.column_config.CheckboxColumn("활성"),
-        "비고": st.column_config.TextColumn("비고"),
+    colcfg = {
+        "사번":     st.column_config.SelectboxColumn("사번", options=list(label_by_sabun.values())),
+        "이름":     st.column_config.TextColumn("이름", disabled=True),
+        "역할":     st.column_config.SelectboxColumn("역할", options=role_options),
+        "범위유형": st.column_config.SelectboxColumn("범위유형", options=scope_options),
+        "부서1":    st.column_config.TextColumn("부서1"),
+        "부서2":    st.column_config.TextColumn("부서2"),
+        "대상사번": st.column_config.TextColumn("대상사번", help="쉼표/공백 구분"),
+        "활성":     st.column_config.CheckboxColumn("활성"),
+        "비고":     st.column_config.TextColumn("비고"),
     }
-    edit_cols = [c for c in header if c != "이름" and c in work.columns]
 
+    st.info("사번은 '사번 - 이름' 라벨로 선택하세요. 저장 시 실제 사번으로 변환됩니다.", icon="ℹ️")
     edited = st.data_editor(
-        work[edit_cols],
-        key="acl_editor",
+        df[AUTH_HEADERS],
         use_container_width=True,
-        hide_index=True,
-        num_rows="dynamic",
         height=520,
-        disabled=not am_admin,
-        column_config=column_config,
+        hide_index=True,
+        column_config=colcfg,
+        disabled=not am_master,
     )
 
-    # ✅ 새 행/삭제까지 정확히 반영: 부분 대입 대신 "전체 교체"
-    if not edited.equals(work[edit_cols]):
-        new_df = edited.copy().reset_index(drop=True)
-        # 누락 컬럼 채움(저장 시 '이름'은 파생하므로 비워둬도 됨)
-        for col in header:
-            if col not in new_df.columns:
-                new_df[col] = ""
-        # 세션 저장(표시는 편집 컬럼 중심으로 유지)
-        st.session_state["acl_df"] = new_df[[c for c in work.columns if c in new_df.columns]].copy()
-
-    # 저장 버튼(전체 반영: 헤더+모든 행 덮어쓰기, '이름'은 저장 직전에 파생)
-    if st.button("권한 전체 반영", type="primary", use_container_width=True, disabled=not am_admin):
+    # 저장: 전체 덮어쓰기
+    if st.button("권한 전체 반영 (시트 저장)", type="primary", use_container_width=True, disabled=not am_master):
         try:
-            ws = get_book().worksheet(AUTH_SHEET)
-            header = [*st.session_state.get("acl_header", AUTH_HEADERS)] or AUTH_HEADERS
-
-            # 1) 헤더 덮어쓰기
-            _retry(ws.update, "1:1", [header], value_input_option="USER_ENTERED")
-
-            # 2) 편집본에서 저장용 DF 생성: '사번'은 라벨→실사번, '이름'은 사번으로부터 파생
-            save_df = st.session_state["acl_df"].copy()
-
-            def _sab_from_label(v: str):
-                s = str(v).strip()
-                return sabun_by_label.get(s) or (s.split(" - ", 1)[0].strip() if " - " in s else s)
-
-            if "사번" in save_df.columns:
-                save_df["사번"] = save_df["사번"].map(_sab_from_label)
-
-            # 이름 파생(저장 직전)
-            if "이름" not in save_df.columns:
-                save_df.insert(1, "이름", "")
+            # 사번 라벨 → 실제 사번
+            inv_label = {v: k for k, v in label_by_sabun.items()}
+            save_df = edited.copy()
+            save_df["사번"] = save_df["사번"].map(lambda v: inv_label.get(str(v).strip(), str(v).split(" - ",1)[0].strip()))
+            # 이름 파생
             save_df["이름"] = save_df["사번"].map(lambda s: emp_lookup.get(str(s).strip(), "")).fillna("").astype(str)
 
-            # 저장 순서 헤더 정렬
-            for col in header:
-                if col not in save_df.columns:
-                    save_df[col] = ""
-            save_df = save_df[header]
+            # 헤더/값 준비
+            ws = get_book().worksheet(AUTH_SHEET)
+            _retry(ws.update, "1:1", [AUTH_HEADERS], value_input_option="USER_ENTERED")
 
-            # 체크박스 보장
-            if "활성" in save_df.columns:
-                def _to_bool_local(x):
-                    if isinstance(x, bool): return x
-                    s = str(x).strip().lower()
-                    return s in ("true","1","y","yes","t","on","checked")
-                save_df["활성"] = save_df["활성"].map(_to_bool_local)
+            values = []
+            for _, r in save_df[AUTH_HEADERS].iterrows():
+                values.append([r.get(c, "") for c in AUTH_HEADERS])
 
-            # 완전 빈 행 제거
-            save_df = save_df[
-                save_df.astype(str).apply(lambda r: "".join(r.values).strip() != "", axis=1)
-            ]
+            if values:
+                _retry(ws.update, f"2:{len(values)+1}", values, value_input_option="USER_ENTERED")
+            # 값이 0개면 헤더 아래를 정리
+            else:
+                try:
+                    ws.resize(rows=2)
+                except Exception:
+                    pass
 
-            # 3) 본문 전부 덮어쓰기 (기존 행 깨끗이 정리)
-            data = save_df.fillna("").values.tolist()
-
-            # 시트를 데이터 크기에 맞춰 정리(남는 행 제거)
             try:
-                # 먼저 충분히 키우고
-                _ensure_capacity(ws, (len(data) + 1) if data else 1, max(1, len(header)))
-                # 본문 덮어쓰기
-                if data:
-                    _retry(ws.update, "A2", data, value_input_option="USER_ENTERED")
-                # 남는 행 잘라내기(헤더 포함 총 len(data)+1행만 유지)
-                _retry(ws.resize, rows=max(1, len(data) + 1))
+                st.cache_data.clear()
             except Exception:
-                # 최소 보루: 그래도 값만은 쓰기
-                if data:
-                    _retry(ws.update, "A2", data, value_input_option="USER_ENTERED")
-
-            st.success(f"업데이트 완료: {len(data)}행", icon="✅")
+                pass
+            st.success("권한 시트 저장 완료", icon="✅")
         except Exception as e:
             st.exception(e)
 
@@ -3070,7 +3075,7 @@ def main():
             if not is_admin(me):
                 st.warning("관리자 전용 메뉴입니다.", icon="🔒")
             else:
-                # (선택) 동기화 도구(직원)
+                # 동기화 도구(직원)
                 with st.expander("🔁 동기화 도구 (시트 ↔ Supabase)", expanded=False):
                     c1, c2 = st.columns([1, 1])
                     with c1:
@@ -3084,33 +3089,6 @@ def main():
                             st.caption("행수 확인 불가")
 
                 a1, a2, a3, a4 = st.tabs(["직원","PIN 관리","평가 항목 관리","권한 관리"])
-
-                # 권한(ACL) 동기화 버튼
-                with st.expander("🛡️ 권한 동기화", expanded=False):
-                    col1, col2 = st.columns([1, 1])
-                    with col1:
-                        if st.button("권한 동기화 (시트 → Supabase)"):
-                            sync_sheet_to_supabase_acl_v1()
-                    with col2:
-                        try:
-                            cnt_acl = supabase.table("acl").select("사번", count="exact").execute().count
-                            st.caption(f"현재 acl 행수: {cnt_acl}")
-                        except Exception:
-                            st.caption("행수 확인 불가")
-
-                with st.expander("🛡️ 권한 동기화", expanded=False):
-                    col1, col2 = st.columns([1, 1])
-                    with col1:
-                        if st.button("권한 동기화 (시트 → Supabase)"):
-                            # 시트 → Supabase 업서트 함수 (이미 상단 동기화 유틸 근처에 정의)
-                            sync_sheet_to_supabase_acl_v1()
-                    with col2:
-                        try:
-                            cnt_acl = supabase.table("acl").select("사번", count="exact").execute().count
-                            st.caption(f"현재 acl 행수: {cnt_acl}")
-                        except Exception:
-                            st.caption("행수 확인 불가")
-
                 with a1:
                     tab_staff_admin(emp_df)
                 with a2:
