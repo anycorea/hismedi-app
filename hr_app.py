@@ -3284,22 +3284,22 @@ def main():
         # ==== (관리자 영역) 탭 & 동기화 UI: 혼합 들여쓰기 제거한 최종본 ====
 
 # 5개 탭을 '한 번만' 생성합니다.
-        tabs = st.tabs(["직원", "PIN 관리", "평가 항목 관리", "권한 관리", "도움말"])
+        admin_tabs = st.tabs(["직원", "PIN 관리", "평가 항목 관리", "권한 관리", "도움말"])
 
         # 탭 1: 직원
-        with tabs[0]:
+        with admin_tabs[0]:
             tab_staff_admin(emp_df)
 
         # 탭 2: PIN 관리
-        with tabs[1]:
+        with admin_tabs[1]:
             tab_admin_pin(emp_df)
 
         # 탭 3: 평가 항목 관리
-        with tabs[2]:
+        with admin_tabs[2]:
             tab_admin_eval_items()
 
         # 탭 4: 권한 관리 + 동기화 도구
-        with tabs[3]:
+        with admin_tabs[3]:
             tab_admin_acl(emp_df)
 
             st.divider()
@@ -3353,7 +3353,7 @@ def main():
                     pass
 
         # 탭 5: 도움말
-        with tabs[4]:
+        with admin_tabs[4]:
             tab_help()
 if __name__ == "__main__":
     main()
