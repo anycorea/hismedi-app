@@ -55,6 +55,12 @@ import re, time, random, hashlib, secrets as pysecrets
 
 # ==============================================================================
 # Helper Utilities (pure functions)
+
+# === Sheet loader alias (프로젝트 고유 로더를 연결) ===
+sheet_loader = read_sheet_df
+
+def load_sheet_to_df(name: str):
+    return sheet_loader(name)
 # ==============================================================================
 
 # === Clean helpers for Supabase upserts ===
@@ -3471,83 +3477,58 @@ def main():
 
 # === (추가) 시트 → Supabase 동기화 함수 3종 및 렌더러 ===
 def sync_sheet_to_supabase_job_specs_v1():
-    # 1) 시트 → DataFrame 읽기 (기존 로직 그대로)
-    df = load_sheet_to_df("직무기술서")  # ← 기존에 사용하던 로더 함수명 유지하세요
-
-    # 2) 컬럼 정리
-    #    - 날짜로 보이는 컬럼들: '작성일','시행일','개정일' 등 필요시 추가
-    #    - 숫자일 것 같은 컬럼: '버전','등급','직군코드' 등 필요시 추가
-    DATE_COLS = {"작성일", "시행일", "개정일"}
-    NUMBER_COLS = set()  # 필요시 {'버전','등급'} 등 추가
-
-    # 3) 페이로드 구성 + 클린업
-    records = []
-    for row in df.to_dict(orient="records"):
-        payload = _clean_payload(row, date_keys=DATE_COLS, number_keys=NUMBER_COLS)
-        records.append(payload)
-
-    if not records:
+    df = load_sheet_to_df("직무기술서")
+    import pandas as pd
+    if df is None or (hasattr(df, "empty") and df.empty):
         st.info("직무기술서: 업서트할 데이터가 없습니다.")
         return
-
-    # 4) Upsert
-    #    - 충돌키는 보통 PK(id) 또는 유니크(예: job_code) 입니다.
-    #    - 현재 테이블에 PK가 'id' 라면 on_conflict="id"가 가장 안전합니다.
-    supabase.table("job_specs").upsert(
-        records,
-        on_conflict="id"  # ← PK/유니크 컬럼으로 맞춰주세요. (예: "job_code")
-    ).execute()
-    st.success(f"job_specs 업서트 완료 ({len(records)}건)")
-
-
-def sync_sheet_to_supabase_job_specs_approvals_v1():
-    df = load_sheet_to_df("직무기술서_승인")  # ← 기존 로더 함수명 유지
-
-    DATE_COLS = {"신청일", "승인일"}  # 예상 컬럼명, 실제에 맞게 추가/수정
-    NUMBER_COLS = set()
-
+    DATE_COLS = {"작성일","시행일","개정일"}
+    NUMBER_COLS = {}
     records = []
     for row in df.to_dict(orient="records"):
         payload = _clean_payload(row, date_keys=DATE_COLS, number_keys=NUMBER_COLS)
         records.append(payload)
+    if not records:
+        st.info("job_specs: 업서트할 데이터가 없습니다.")
+        return
+    supabase.table("job_specs").upsert(records, on_conflict="id").execute()
+    st.success(f"job_specs 업서트 완료 ({len(records)}건)")
 
+def sync_sheet_to_supabase_job_specs_approvals_v1():
+    df = load_sheet_to_df("직무기술서_승인")
+    import pandas as pd
+    if df is None or (hasattr(df, "empty") and df.empty):
+        st.info("직무기술서_승인: 업서트할 데이터가 없습니다.")
+        return
+    DATE_COLS = {"신청일","승인일"}
+    NUMBER_COLS = {}
+    records = []
+    for row in df.to_dict(orient="records"):
+        payload = _clean_payload(row, date_keys=DATE_COLS, number_keys=NUMBER_COLS)
+        records.append(payload)
     if not records:
         st.info("job_specs_approvals: 업서트할 데이터가 없습니다.")
         return
-
-    # ✅ 1순위: 테이블의 PK/유니크 키를 정확히 지정 (권장)
-    #    보통 'id'가 PK라면 이 줄 그대로 두세요.
-    supabase.table("job_specs_approvals").upsert(
-        records,
-        on_conflict="id"
-    ).execute()
-
+    supabase.table("job_specs_approvals").upsert(records, on_conflict="id").execute()
     st.success(f"job_specs_approvals 업서트 완료 ({len(records)}건)")
 
-
 def sync_sheet_to_supabase_competency_evals_v1():
-    df = load_sheet_to_df("직무능력평가")  # ← 기존 로더 함수명 유지
-
-    # 숫자형으로 보이는 컬럼들(예시): '점수','가중치','합계','평균','진행률'
-    # 한글 텍스트(미완료)가 들어가던 컬럼을 꼭 포함시켜 주세요.
-    NUMBER_COLS = {"점수", "가중치", "합계", "평균", "진행률"}
-    DATE_COLS = set()  # 필요시 {'평가일'} 등 추가
-
+    df = load_sheet_to_df("직무능력평가")
+    import pandas as pd
+    if df is None or (hasattr(df, "empty") and df.empty):
+        st.info("직무능력평가: 업서트할 데이터가 없습니다.")
+        return
+    DATE_COLS = {}
+    NUMBER_COLS = {"점수","가중치","합계","평균","진행률"}
     records = []
     for row in df.to_dict(orient="records"):
         payload = _clean_payload(row, date_keys=DATE_COLS, number_keys=NUMBER_COLS)
         records.append(payload)
-
     if not records:
         st.info("competency_evals: 업서트할 데이터가 없습니다.")
         return
-
-    supabase.table("competency_evals").upsert(
-        records,
-        on_conflict="id"  # ← PK/유니크 키로 조정
-    ).execute()
+    supabase.table("competency_evals").upsert(records, on_conflict="id").execute()
     st.success(f"competency_evals 업서트 완료 ({len(records)}건)")
-
 
 def render_job_sync_buttons():
     # 관리자 > 동기화 도구 내부에서 호출: 직무 3종 버튼/카운트
