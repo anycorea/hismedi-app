@@ -3300,7 +3300,7 @@ def main():
                         if st.button("직무기술서 동기화"):
                             sync_sheet_to_supabase_job_descriptions_v1()
                         try:
-                            cnt = supabase.table("job_descriptions").select("연도", count="exact").execute().count
+                            cnt = supabase.table("job_specs").select("연도", count="exact").execute().count
                             st.caption(f"job_descriptions: {cnt}")
                         except Exception:
                             pass
@@ -3308,7 +3308,7 @@ def main():
                         if st.button("직무기술서_승인 동기화"):
                             sync_sheet_to_supabase_jd_approvals_v1()
                         try:
-                            cnt = supabase.table("jd_approvals").select("연도", count="exact").execute().count
+                            cnt = supabase.table("job_specs_approvals").select("연도", count="exact").execute().count
                             st.caption(f"jd_approvals: {cnt}")
                         except Exception:
                             pass
@@ -3316,7 +3316,7 @@ def main():
                         if st.button("직무능력평가 동기화"):
                             sync_sheet_to_supabase_competencies_v1()
                         try:
-                            cnt = supabase.table("competencies").select("연도", count="exact").execute().count
+                            cnt = supabase.table("competency_evals").select("연도", count="exact").execute().count
                             st.caption(f"competencies: {cnt}")
                         except Exception:
                             pass
@@ -3382,7 +3382,7 @@ def sync_sheet_to_supabase_job_descriptions_v1():
     if "사번" in df.columns:
         df["사번"] = df["사번"].astype(str)
     df = df.where(~df.isna(), None)
-    supabase.table("job_descriptions").upsert(
+    supabase.table("job_specs").upsert(
         df.to_dict(orient="records"),
         on_conflict="연도,사번,버전"
     ).execute()
@@ -3404,7 +3404,7 @@ def sync_sheet_to_supabase_jd_approvals_v1():
     if "사번" in df.columns:
         df["사번"] = df["사번"].astype(str)
     df = df.where(~df.isna(), None)
-    supabase.table("jd_approvals").upsert(
+    supabase.table("job_specs_approvals").upsert(
         df.to_dict(orient="records"),
         on_conflict="연도,사번,버전"
     ).execute()
@@ -3420,16 +3420,19 @@ def sync_sheet_to_supabase_competencies_v1():
     if df.empty:
         st.warning("직무능력평가 시트가 비어있습니다.")
         return
-    if "평가대상사번" in df.columns and "사번" not in df.columns:
-        df["사번"] = df["평가대상사번"].astype(str)
-    if "연도" in df.columns:
+        
+    # 형식 정리
+    for c in ["평가대상사번","평가자사번"]:
+        if c in df.columns:
+            df[c] = df[c].astype(str)
+if "연도" in df.columns:
         df["연도"] = _pd.to_numeric(df["연도"], errors="coerce")
     if "잠금" in df.columns:
         df["잠금"] = df["잠금"].map(_sync_truthy_v1)
     df = df.where(~df.isna(), None)
-    supabase.table("competencies").upsert(
+    supabase.table("competency_evals").upsert(
         df.to_dict(orient="records"),
-        on_conflict="연도,사번"
+        on_conflict="연도,평가대상사번,평가자사번"
     ).execute()
     st.success(f"직무능력평가 {len(df)}건 업서트 완료", icon="✅")
 
