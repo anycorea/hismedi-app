@@ -57,6 +57,71 @@ import re, time, random, hashlib, secrets as pysecrets
 # Helper Utilities (pure functions)
 # ==============================================================================
 
+# === Clean helpers for Supabase upserts ===
+def _clean_date(x):
+    # 빈값/공백/NaN → None, 유효하지 않은 날짜도 None
+    if x is None:
+        return None
+    if isinstance(x, str):
+        s = x.strip()
+        if s == "" or s.lower() in ("nan", "none", "null", "-"):
+            return None
+        # 흔한 포맷 시도
+        for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y.%m.%d", "%y-%m-%d", "%y/%m/%d", "%y.%m.%d"):
+            try:
+                from datetime import datetime
+                return datetime.strptime(s, fmt).date().isoformat()
+            except Exception:
+                pass
+        # pandas로 마지막 시도
+        try:
+            v = pd.to_datetime(s, errors="coerce").date()
+            return None if pd.isna(v) else v.isoformat()
+        except Exception:
+            return None
+    # datetime/date/숫자(엑셀 직렬 등)
+    try:
+        import datetime as dt
+        if isinstance(x, (dt.date, dt.datetime)):
+            return x.date().isoformat() if isinstance(x, dt.datetime) else x.isoformat()
+        v = pd.to_datetime(x, errors="coerce").date()
+        return None if pd.isna(v) else v.isoformat()
+    except Exception:
+        return None
+
+
+def _clean_number(x):
+    # "미완료", "", None 등 → None, 가능하면 float
+    if x is None:
+        return None
+    if isinstance(x, str):
+        s = x.strip()
+        if s == "" or s in ("미완료", "N/A", "NA", "-", "null", "None"):
+            return None
+        s = s.replace(",", "")
+        try:
+            return float(s)
+        except Exception:
+            return None
+    try:
+        return float(x)
+    except Exception:
+        return None
+
+
+def _clean_payload(d: dict, date_keys=(), number_keys=()):
+    """사전 payload에서 빈문자열→None, 날짜/숫자 컬럼 정리"""
+    out = {}
+    for k, v in d.items():
+        if isinstance(v, str) and v.strip() == "":
+            v = None
+        if k in date_keys:
+            v = _clean_date(v)
+        elif k in number_keys:
+            v = _clean_number(v)
+        out[k] = v
+    return out
+
 def _to_bool(x) -> bool:
     return str(x).strip().lower() in ("true","1","y","yes","t")
 
@@ -3406,64 +3471,82 @@ def main():
 
 # === (추가) 시트 → Supabase 동기화 함수 3종 및 렌더러 ===
 def sync_sheet_to_supabase_job_specs_v1():
-    ws = _get_ws("직무기술서")
-    df = _pd.DataFrame(_ws_get_all_records(ws)) if ws else _pd.DataFrame()
-    if df.empty:
-        st.warning("직무기술서 시트가 비어있습니다.")
+    # 1) 시트 → DataFrame 읽기 (기존 로직 그대로)
+    df = load_sheet_to_df("직무기술서")  # ← 기존에 사용하던 로더 함수명 유지하세요
+
+    # 2) 컬럼 정리
+    #    - 날짜로 보이는 컬럼들: '작성일','시행일','개정일' 등 필요시 추가
+    #    - 숫자일 것 같은 컬럼: '버전','등급','직군코드' 등 필요시 추가
+    DATE_COLS = {"작성일", "시행일", "개정일"}
+    NUMBER_COLS = set()  # 필요시 {'버전','등급'} 등 추가
+
+    # 3) 페이로드 구성 + 클린업
+    records = []
+    for row in df.to_dict(orient="records"):
+        payload = _clean_payload(row, date_keys=DATE_COLS, number_keys=NUMBER_COLS)
+        records.append(payload)
+
+    if not records:
+        st.info("직무기술서: 업서트할 데이터가 없습니다.")
         return
-    if "연도" in df.columns:
-        df["연도"] = _pd.to_numeric(df["연도"], errors="coerce")
-    if "버전" in df.columns:
-        df["버전"] = _pd.to_numeric(df["버전"], errors="coerce")
-    if "사번" in df.columns:
-        df["사번"] = df["사번"].astype(str)
-    df = df.where(~df.isna(), None)
+
+    # 4) Upsert
+    #    - 충돌키는 보통 PK(id) 또는 유니크(예: job_code) 입니다.
+    #    - 현재 테이블에 PK가 'id' 라면 on_conflict="id"가 가장 안전합니다.
     supabase.table("job_specs").upsert(
-        df.to_dict(orient="records"),
-        on_conflict="연도,사번,버전"
+        records,
+        on_conflict="id"  # ← PK/유니크 컬럼으로 맞춰주세요. (예: "job_code")
     ).execute()
-    st.success(f"직무기술서 {len[df]}건 업서트 완료", icon="✅")
+    st.success(f"job_specs 업서트 완료 ({len(records)}건)")
 
 
 def sync_sheet_to_supabase_job_specs_approvals_v1():
-    ws = _get_ws("직무기술서_승인")
-    df = _pd.DataFrame(_ws_get_all_records(ws)) if ws else _pd.DataFrame()
-    if df.empty:
-        st.warning("직무기술서_승인 시트가 비어있습니다.")
+    df = load_sheet_to_df("직무기술서_승인")  # ← 기존 로더 함수명 유지
+
+    DATE_COLS = {"신청일", "승인일"}  # 예상 컬럼명, 실제에 맞게 추가/수정
+    NUMBER_COLS = set()
+
+    records = []
+    for row in df.to_dict(orient="records"):
+        payload = _clean_payload(row, date_keys=DATE_COLS, number_keys=NUMBER_COLS)
+        records.append(payload)
+
+    if not records:
+        st.info("job_specs_approvals: 업서트할 데이터가 없습니다.")
         return
-    if "연도" in df.columns:
-        df["연도"] = _pd.to_numeric(df["연도"], errors="coerce")
-    if "버전" in df.columns:
-        df["버전"] = _pd.to_numeric(df["버전"], errors="coerce")
-    if "사번" in df.columns:
-        df["사번"] = df["사번"].astype(str)
-    df = df.where(~df.isna(), None)
+
+    # ✅ 1순위: 테이블의 PK/유니크 키를 정확히 지정 (권장)
+    #    보통 'id'가 PK라면 이 줄 그대로 두세요.
     supabase.table("job_specs_approvals").upsert(
-        df.to_dict(orient="records"),
-        on_conflict="연도,사번,버전"
+        records,
+        on_conflict="id"
     ).execute()
-    st.success(f"직무기술서_승인 {len(df)}건 업서트 완료", icon="✅")
+
+    st.success(f"job_specs_approvals 업서트 완료 ({len(records)}건)")
 
 
 def sync_sheet_to_supabase_competency_evals_v1():
-    ws = _get_ws("직무능력평가")
-    df = _pd.DataFrame(_ws_get_all_records(ws)) if ws else _pd.DataFrame()
-    if df.empty:
-        st.warning("직무능력평가 시트가 비어있습니다.")
+    df = load_sheet_to_df("직무능력평가")  # ← 기존 로더 함수명 유지
+
+    # 숫자형으로 보이는 컬럼들(예시): '점수','가중치','합계','평균','진행률'
+    # 한글 텍스트(미완료)가 들어가던 컬럼을 꼭 포함시켜 주세요.
+    NUMBER_COLS = {"점수", "가중치", "합계", "평균", "진행률"}
+    DATE_COLS = set()  # 필요시 {'평가일'} 등 추가
+
+    records = []
+    for row in df.to_dict(orient="records"):
+        payload = _clean_payload(row, date_keys=DATE_COLS, number_keys=NUMBER_COLS)
+        records.append(payload)
+
+    if not records:
+        st.info("competency_evals: 업서트할 데이터가 없습니다.")
         return
-    if "연도" in df.columns:
-        df["연도"] = _pd.to_numeric(df["연도"], errors="coerce")
-    for c in ["평가대상사번", "평가자사번"]:
-        if c in df.columns:
-            df[c] = df[c].astype(str)
-    if "잠금" in df.columns:
-        df["잠금"] = df["잠금"].map(_sync_truthy_v1)
-    df = df.where(~df.isna(), None)
+
     supabase.table("competency_evals").upsert(
-        df.to_dict(orient="records"),
-        on_conflict="연도,평가대상사번,평가자사번"
+        records,
+        on_conflict="id"  # ← PK/유니크 키로 조정
     ).execute()
-    st.success(f"직무능력평가 {len(df)}건 업서트 완료", icon="✅")
+    st.success(f"competency_evals 업서트 완료 ({len(records)}건)")
 
 
 def render_job_sync_buttons():
