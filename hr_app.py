@@ -3686,3 +3686,128 @@ def gs_flush():
                 raise
     st.session_state.gs_queue = []
 # ===== End helpers =====
+
+
+
+# === PATCH 2025-10-30: 안정화 패치 (FK/UK/숫자 변환) ============================
+# - job_specs: employees에 없는 사번 필터링하여 FK 위반 방지
+# - job_specs_approvals: 중복키(연도,사번,버전,승인자사번) 기준 업서트
+# - competency_evals: "미완료" 등 비수치 값 -> None 처리 및 숫자 컬럼 자동 탐지 강화
+# ==============================================================================
+
+def _set_minus(a: set, b: set) -> set:
+    try:
+        return set(map(str, a)) - set(map(str, b))
+    except Exception:
+        return set()
+
+def _fetch_employee_sabuns() -> set[str]:
+    try:
+        res = supabase.table("employees").select("사번").execute()
+        rows = res.data or []
+        return {str(r.get("사번","")).strip() for r in rows if str(r.get("사번","")).strip()}
+    except Exception:
+        return set()
+
+def sync_sheet_to_supabase_job_specs_v1():
+    df = load_sheet_to_df("직무기술서")
+    import pandas as pd
+    if df is None or (hasattr(df, "empty") and df.empty):
+        st.info("직무기술서: 업서트할 데이터가 없습니다.")
+        return
+
+    # dtype 정리
+    if "사번" in df.columns:
+        df["사번"] = df["사번"].astype(str).str.strip()
+
+    DATE_COLS = {"작성일","시행일","개정일"}
+    NUMBER_COLS = set()  # 현재 없음
+
+    # FK 보호: 직원 테이블 기준으로 존재하는 사번만 허용
+    allowed = _fetch_employee_sabuns()
+    if allowed:
+        before = len(df)
+        df = df[df["사번"].astype(str).isin(allowed)]
+        skipped = before - len(df)
+        if skipped > 0:
+            st.warning(f"job_specs: 직원 테이블에 없는 사번 {skipped}건 제외(FK 보호).", icon="⚠️")
+
+    records = []
+    for row in df.to_dict(orient="records"):
+        payload = _clean_payload(row, date_keys=DATE_COLS, number_keys=NUMBER_COLS)
+        records.append(payload)
+
+    if not records:
+        st.info("job_specs: 업서트할 데이터가 없습니다.")
+        return
+
+    # 기존: on_conflict='id' 유지 (테이블 스키마 기준)
+    supabase.table("job_specs").upsert(records, on_conflict="id").execute()
+    st.success(f"job_specs 업서트 완료 ({len(records)}건)", icon="✅")
+
+
+def sync_sheet_to_supabase_job_specs_approvals_v1():
+    df = load_sheet_to_df("직무기술서_승인")
+    import pandas as pd
+    if df is None or (hasattr(df, "empty") and df.empty):
+        st.info("직무기술서_승인: 업서트할 데이터가 없습니다.")
+        return
+
+    # dtype 정리
+    for c in ["연도","사번","버전","승인자사번"]:
+        if c in df.columns:
+            if c == "연도" or c == "버전":
+                # 숫자화
+                df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0).astype(int)
+            else:
+                df[c] = df[c].astype(str).strip()
+
+    DATE_COLS = {"신청일","승인일","승인시각"}
+    NUMBER_COLS = set()
+
+    records = []
+    for row in df.to_dict(orient="records"):
+        payload = _clean_payload(row, date_keys=DATE_COLS, number_keys=NUMBER_COLS)
+        records.append(payload)
+
+    if not records:
+        st.info("job_specs_approvals: 업서트할 데이터가 없습니다.")
+        return
+
+    # 고유키 기준 업서트: ("연도","사번","버전","승인자사번")
+    supabase.table("job_specs_approvals").upsert(
+        records, on_conflict="연도,사번,버전,승인자사번"
+    ).execute()
+    st.success(f"job_specs_approvals 업서트 완료 ({len(records)}건)", icon="✅")
+
+
+def sync_sheet_to_supabase_competency_evals_v1():
+    df = load_sheet_to_df("직무능력평가")
+    import pandas as pd
+    if df is None or (hasattr(df, "empty") and df.empty):
+        st.info("직무능력평가: 업서트할 데이터가 없습니다.")
+        return
+
+    # 1) 숫자 컬럼 자동 탐지 강화
+    #   - 컬럼명에 점/가중/합계/평균/률/수/횟/perc/score/count/weight 등이 포함되면 숫자 시도
+    numeric_hints = ("점", "가중", "합계", "평균", "률", "비율", "수", "횟", "perc", "percent", "score", "count", "weight", "level", "단계")
+    NUMBER_COLS = {c for c in df.columns if any(h in str(c).lower() for h in numeric_hints)}
+    DATE_COLS = set()
+
+    # 2) 전처리: "미완료" 등 비수치 표기 → None (모든 열 공통 안전조치)
+    df = df.applymap(lambda v: None if (isinstance(v, str) and v.strip() in {"미완료", "N/A", "NA", "-", "null", "None"}) else v)
+
+    records = []
+    for row in df.to_dict(orient="records"):
+        payload = _clean_payload(row, date_keys=DATE_COLS, number_keys=NUMBER_COLS)
+        records.append(payload)
+
+    if not records:
+        st.info("competency_evals: 업서트할 데이터가 없습니다.")
+        return
+
+    supabase.table("competency_evals").upsert(records, on_conflict="id").execute()
+    st.success(f"competency_evals 업서트 완료 ({len(records)}건)", icon="✅")
+
+# === END PATCH ================================================================
+
