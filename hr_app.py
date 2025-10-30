@@ -3548,49 +3548,42 @@ def main():
                 # 직원 / 평가_항목 / 권한 / 인사평가 / 직무기술서 / 직무기술서_승인 / 직무능력평가
                 # ──────────────────────────────────────────────────────────────
                 with st.expander("🔁 동기화 도구 (시트 ↔ Supabase)", expanded=False):
-                    c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
+                    c1, c2, c3, c4, c5, c6, c7 = st.columns(7, gap="small")
 
                     with c1:
-                        if st.button("직원 동기화"):
+                        if st.button("👤 직원", use_container_width=True, help="직원 동기화 (employees)"):
                             _call_sync("sync_sheet_to_supabase_employees_v1")
-                        cnt = _safe_count("employees", "사번")
-                        st.caption(f"employees: {cnt if cnt is not None else '—'}")
+                        st.caption(f"employees · { _safe_count('employees','사번') or '—' }")
 
                     with c2:
-                        if st.button("평가_항목 동기화"):
+                        if st.button("🧩 평가항목", use_container_width=True, help="평가_항목 동기화 (eval_items)"):
                             _call_sync("sync_sheet_to_supabase_eval_items_v1")
-                        cnt = _safe_count("eval_items", "항목ID")
-                        st.caption(f"eval_items: {cnt if cnt is not None else '—'}")
+                        st.caption(f"eval_items · { _safe_count('eval_items','항목ID') or '—' }")
 
                     with c3:
-                        if st.button("권한 동기화"):
+                        if st.button("🔐 권한", use_container_width=True, help="권한 동기화 (acl)"):
                             _call_sync("sync_sheet_to_supabase_acl_v1")
-                        cnt = _safe_count("acl", "사번")
-                        st.caption(f"acl: {cnt if cnt is not None else '—'}")
+                        st.caption(f"acl · { _safe_count('acl','사번') or '—' }")
 
                     with c4:
-                        if st.button("인사평가 동기화"):
+                        if st.button("📝 인사평가", use_container_width=True, help="인사평가 동기화 (eval_responses)"):
                             _call_sync("sync_sheet_to_supabase_eval_responses_v1")
-                        cnt = _safe_count("eval_responses", "*")
-                        st.caption(f"eval_responses: {cnt if cnt is not None else '—'}")
+                        st.caption(f"eval_responses · { _safe_count('eval_responses','*') or '—' }")
 
                     with c5:
-                        if st.button("직무기술서 동기화"):
+                        if st.button("📄 직무기술서", use_container_width=True, help="직무기술서 동기화 (job_specs)"):
                             _call_sync("sync_sheet_to_supabase_job_specs_v1")
-                        cnt = _safe_count("job_specs", "*")
-                        st.caption(f"job_specs: {cnt if cnt is not None else '—'}")
+                        st.caption(f"job_specs · { _safe_count('job_specs','*') or '—' }")
 
                     with c6:
-                        if st.button("직무기술서_승인 동기화"):
+                        if st.button("✅ JD승인", use_container_width=True, help="직무기술서_승인 동기화 (job_specs_approvals)"):
                             _call_sync("sync_sheet_to_supabase_job_specs_approvals_v1")
-                        cnt = _safe_count("job_specs_approvals", "*")
-                        st.caption(f"job_specs_approvals: {cnt if cnt is not None else '—'}")
+                        st.caption(f"approvals · { _safe_count('job_specs_approvals','*') or '—' }")
 
                     with c7:
-                        if st.button("직무능력평가 동기화"):
+                        if st.button("🧠 능력평가", use_container_width=True, help="직무능력평가 동기화 (competency_evals)"):
                             _call_sync("sync_sheet_to_supabase_competency_evals_v1")
-                        cnt = _safe_count("competency_evals", "*")
-                        st.caption(f"competency_evals: {cnt if cnt is not None else '—'}")
+                        st.caption(f"competency · { _safe_count('competency_evals','*') or '—' }")
 
                 a1, a2, a3, a4 = st.tabs(["직원","PIN 관리","평가 항목 관리","권한 관리"])
                 with a1:
