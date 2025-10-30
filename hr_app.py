@@ -5,6 +5,26 @@
 # ────────────────────────────────────────────────────────────────
 import os
 import streamlit as st
+
+def _exec_with_api_error_log(req, context: str = ""):
+    """
+    Execute a Supabase request with nice error logging to Streamlit.
+    """
+    try:
+        return req.execute()
+    except Exception as e:
+        import traceback
+        try:
+            # PostgREST APIError often has .args[0] or .message with JSON
+            body = ""
+            if hasattr(e, "args") and e.args:
+                body = e.args[0]
+            st.error("Supabase APIError" + (f" @ {context}" if context else ""))
+            st.code(str(body) or traceback.format_exc(), language="json")
+        except Exception:
+            st.exception(e)
+        raise
+
 from supabase import create_client, Client
 
 APP_TITLE = st.secrets.get("app", {}).get("TITLE", "HISMEDI - 인사/HR")
@@ -3325,8 +3345,6 @@ def main():
                             st.caption(f"eval_responses: {cnt}")
                         except Exception: pass
 
-                    render_job_sync_buttons()
-                
                 a1, a2, a3, a4 = st.tabs(["직원","PIN 관리","평가 항목 관리","권한 관리"])
                 with a1:
                     tab_staff_admin(emp_df)
@@ -3338,6 +3356,8 @@ def main():
                     tab_admin_acl(emp_df)
         with tabs[4]:
             tab_help()
+
+
 
 # === (추가) 시트 → Supabase 동기화 함수 3종 및 렌더러 ===
 def sync_sheet_to_supabase_job_specs_v1():
@@ -3356,7 +3376,8 @@ def sync_sheet_to_supabase_job_specs_v1():
     supabase.table("job_specs").upsert(
         df.to_dict(orient="records"),
         on_conflict="연도,사번,버전"
-    ).execute()
+    )
+            .execute()
     st.success(f"직무기술서 {len[df]}건 업서트 완료", icon="✅")
 
 
@@ -3376,8 +3397,10 @@ def sync_sheet_to_supabase_job_specs_approvals_v1():
     supabase.table("job_specs_approvals").upsert(
         df.to_dict(orient="records"),
         on_conflict="연도,사번,버전"
-    ).execute()
+    )
+            .execute()
     st.success(f"직무기술서_승인 {len(df)}건 업서트 완료", icon="✅")
+
 
 def sync_sheet_to_supabase_competency_evals_v1():
     ws = _get_ws("직무능력평가")
@@ -3396,8 +3419,10 @@ def sync_sheet_to_supabase_competency_evals_v1():
     supabase.table("competency_evals").upsert(
         df.to_dict(orient="records"),
         on_conflict="연도,평가대상사번,평가자사번"
-    ).execute()
+    )
+            .execute()
     st.success(f"직무능력평가 {len(df)}건 업서트 완료", icon="✅")
+
 
 def render_job_sync_buttons():
     # 관리자 > 동기화 도구 내부에서 호출: 직무 3종 버튼/카운트
