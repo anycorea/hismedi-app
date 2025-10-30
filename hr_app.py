@@ -3295,7 +3295,7 @@ def main():
             else:
                 # 동기화 도구(직원)
                 with st.expander("🔁 동기화 도구 (시트 ↔ Supabase)", expanded=False):
-                    c1, c2, c3 = st.columns(3)
+                    c1, c2, c3, c4 = st.columns(4)
                     with c1:
                         if st.button("직원 동기화"):
                             sync_sheet_to_supabase_employees_v1()
