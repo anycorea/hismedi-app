@@ -251,6 +251,78 @@ def sync_sheet_to_supabase_acl_v1():
         st.exception(e)
         st.error("권한 업서트 실패: 고유인덱스/키 중복/타입을 확인해 주세요.")
 
+# === 직무기술서: 시트 → Supabase 동기화 ===
+def sync_sheet_to_supabase_job_specs_v1():
+    """
+    시트 '직무기술서'를 Supabase public.job_specs로 업서트
+    - on_conflict: "연도,사번,버전"
+    - 시트 헤더(고정): 사번/이름/연도/버전/부서1/부서2/작성자사번/작성자이름/직군/직종/직무명/제정일/개정일/검토주기/직무개요/주업무/기타업무/필요학력/전공계열/직원공통필수교육/보수교육/기타교육/특성화교육/면허/경력(자격요건)/비고/제출시각
+    """
+    ws = _get_ws("직무기술서")
+    import pandas as _pd
+    df = _pd.DataFrame(ws.get_all_records())
+    if df.empty:
+        st.warning("직무기술서 시트가 비어있습니다.")
+        return
+
+    # 1) 필수 컬럼 보정
+    cols = ["사번","이름","연도","버전","부서1","부서2","작성자사번","작성자이름","직군","직종",
+            "직무명","제정일","개정일","검토주기","직무개요","주업무","기타업무",
+            "필요학력","전공계열","직원공통필수교육","보수교육","기타교육","특성화교육",
+            "면허","경력(자격요건)","비고","제출시각"]
+    for c in cols:
+        if c not in df.columns:
+            df[c] = _pd.NA
+
+    # 2) 트림/타입 정리
+    str_cols = ["이름","부서1","부서2","작성자이름","직군","직종","직무명","검토주기","직무개요","주업무",
+                "기타업무","필요학력","전공계열","직원공통필수교육","보수교육","기타교육","특성화교육",
+                "면허","경력(자격요건)","비고"]
+    for c in str_cols:
+        df[c] = df[c].astype(str).where(~df[c].isna(), "").str.strip()
+
+    # 숫자 변환
+    df["사번"] = _pd.to_numeric(df["사번"], errors="coerce").astype("Int64")
+    df["작성자사번"] = _pd.to_numeric(df["작성자사번"], errors="coerce").astype("Int64")
+    df["연도"] = _pd.to_numeric(df["연도"], errors="coerce").astype("Int64")
+    df["버전"] = _pd.to_numeric(df["버전"], errors="coerce").astype("Int64")
+
+    # 날짜/시각 변환
+    for dcol in ["제정일","개정일"]:
+        dt = _pd.to_datetime(df[dcol], errors="coerce").dt.date
+        # date는 문자열 'YYYY-MM-DD'로 저장해도 Supabase가 파싱 가능
+        df[dcol] = _pd.to_datetime(dt, errors="coerce").dt.strftime("%Y-%m-%d")
+    if "제출시각" in df.columns:
+        dt = _pd.to_datetime(df["제출시각"], errors="coerce")
+        df["제출시각"] = dt.dt.strftime("%Y-%m-%d %H:%M:%S")
+
+    # NaN → None
+    df = df.where(~df.isna(), None)
+
+    # 키 결측 제거
+    before = len(df)
+    df = df[(df["연도"].notnull()) & (df["사번"].notnull()) & (df["버전"].notnull())]
+    dropped = before - len(df)
+    if dropped > 0:
+        st.info(f"키 결측으로 제외: {dropped}건 (연도/사번/버전이 비어있음)")
+
+    if df.empty:
+        st.warning("업서트할 직무기술서 데이터가 없습니다.")
+        return
+
+    # 3) 업서트
+    try:
+        supabase.table("job_specs").upsert(
+            df.to_dict(orient="records"),
+            on_conflict="연도,사번,버전"
+        ).execute()
+        st.success(f"직무기술서 {len(df)}건 업서트 완료", icon="✅")
+    except Exception as e:
+        st.exception(e)
+        st.error("직무기술서 업서트 실패: FK(사번/작성자사번) 또는 타입/키 중복을 확인하세요.")
+
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # Helpers
 # ═════════════════════════════════════════════════════════════════════════════
@@ -3293,37 +3365,75 @@ def main():
             if not is_admin(me):
                 st.warning("관리자 전용 메뉴입니다.", icon="🔒")
             else:
-                # 동기화 도구(직원)
+                # ──────────────────────────────────────────────────────────────
+                # 공통: 안전 실행/카운트를 위한 헬퍼 (일관성 유지를 위해 관리자 블록 내부에 선언)
+                # ──────────────────────────────────────────────────────────────
+                def _call_sync(fn_name: str):
+                    fn = globals().get(fn_name)
+                    if callable(fn):
+                        try:
+                            fn()
+                        except Exception as e:
+                            st.exception(e)
+                            st.error(f"{fn_name} 실행 중 오류가 발생했습니다.")
+                    else:
+                        st.error(f"동기화 함수가 준비되지 않았습니다: {fn_name}")
+
+                def _safe_count(table: str, col: str = '*'):
+                    try:
+                        res = supabase.table(table).select(col, count="exact").execute()
+                        return getattr(res, "count", None) if getattr(res, "count", None) is not None else (len(getattr(res, "data", []) or []))
+                    except Exception:
+                        return None
+
+                # ──────────────────────────────────────────────────────────────
+                # 관리자 > 🔁 동기화 도구 (시트 ↔ Supabase) : 1줄 7버튼, 일관 스타일
+                # 직원 / 평가_항목 / 권한 / 인사평가 / 직무기술서 / 직무기술서_승인 / 직무능력평가
+                # ──────────────────────────────────────────────────────────────
                 with st.expander("🔁 동기화 도구 (시트 ↔ Supabase)", expanded=False):
-                    c1, c2, c3, c4 = st.columns(4)
+                    c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
+
                     with c1:
                         if st.button("직원 동기화"):
-                            sync_sheet_to_supabase_employees_v1()
-                        try:
-                            cnt = supabase.table("employees").select("사번", count="exact").execute().count
-                            st.caption(f"employees: {cnt}")
-                        except Exception: pass
+                            _call_sync("sync_sheet_to_supabase_employees_v1")
+                        cnt = _safe_count("employees", "사번")
+                        st.caption(f"employees: {cnt if cnt is not None else '—'}")
+
                     with c2:
                         if st.button("평가_항목 동기화"):
-                            sync_sheet_to_supabase_eval_items_v1()
-                        try:
-                            cnt = supabase.table("eval_items").select("항목ID", count="exact").execute().count
-                            st.caption(f"eval_items: {cnt}")
-                        except Exception: pass
+                            _call_sync("sync_sheet_to_supabase_eval_items_v1")
+                        cnt = _safe_count("eval_items", "항목ID")
+                        st.caption(f"eval_items: {cnt if cnt is not None else '—'}")
+
                     with c3:
                         if st.button("권한 동기화"):
-                            sync_sheet_to_supabase_acl_v1()
-                        try:
-                            cnt = supabase.table("acl").select("사번", count="exact").execute().count
-                            st.caption(f"acl: {cnt}")
-                        except Exception: pass
+                            _call_sync("sync_sheet_to_supabase_acl_v1")
+                        cnt = _safe_count("acl", "사번")
+                        st.caption(f"acl: {cnt if cnt is not None else '—'}")
+
                     with c4:
                         if st.button("인사평가 동기화"):
-                            sync_sheet_to_supabase_eval_responses_v1()
-                        try:
-                            cnt = supabase.table("eval_responses").select("id", count="exact").execute().count
-                            st.caption(f"eval_responses: {cnt}")
-                        except Exception: pass
+                            _call_sync("sync_sheet_to_supabase_eval_responses_v1")
+                        cnt = _safe_count("eval_responses", "*")
+                        st.caption(f"eval_responses: {cnt if cnt is not None else '—'}")
+
+                    with c5:
+                        if st.button("직무기술서 동기화"):
+                            _call_sync("sync_sheet_to_supabase_job_specs_v1")
+                        cnt = _safe_count("job_specs", "*")
+                        st.caption(f"job_specs: {cnt if cnt is not None else '—'}")
+
+                    with c6:
+                        if st.button("직무기술서_승인 동기화"):
+                            _call_sync("sync_sheet_to_supabase_job_specs_approvals_v1")
+                        cnt = _safe_count("job_specs_approvals", "*")
+                        st.caption(f"job_specs_approvals: {cnt if cnt is not None else '—'}")
+
+                    with c7:
+                        if st.button("직무능력평가 동기화"):
+                            _call_sync("sync_sheet_to_supabase_competency_evals_v1")
+                        cnt = _safe_count("competency_evals", "*")
+                        st.caption(f"competency_evals: {cnt if cnt is not None else '—'}")
 
                 a1, a2, a3, a4 = st.tabs(["직원","PIN 관리","평가 항목 관리","권한 관리"])
                 with a1:
@@ -3339,6 +3449,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 # --- PATCH 2025-10-17: robust get_jd_approval_map_cached (append-only) -------------------------------
 @st.cache_data(ttl=120, show_spinner=False)
