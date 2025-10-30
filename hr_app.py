@@ -321,6 +321,163 @@ def sync_sheet_to_supabase_job_specs_v1():
         st.exception(e)
         st.error("직무기술서 업서트 실패: FK(사번/작성자사번) 또는 타입/키 중복을 확인하세요.")
 
+# === 직무기술서_승인: 시트 → Supabase 동기화 ================================
+def sync_sheet_to_supabase_job_specs_approvals_v1():
+    """
+    시트 '직무기술서_승인' -> public.job_specs_approvals 업서트
+    on_conflict: "연도,사번,버전,승인자사번"
+    헤더: 연도/사번/이름/버전/승인자사번/승인자이름/상태/승인시각/비고
+    """
+    ws = _get_ws("직무기술서_승인")
+    import pandas as _pd
+    df = _pd.DataFrame(ws.get_all_records())
+    if df.empty:
+        st.warning("직무기술서_승인 시트가 비어있습니다."); return
+
+    need = ["연도","사번","이름","버전","승인자사번","승인자이름","상태","승인시각","비고"]
+    for c in need:
+        if c not in df.columns:
+            df[c] = _pd.NA
+
+    # 타입 보정
+    df["연도"] = _pd.to_numeric(df["연도"], errors="coerce").astype("Int64")
+    df["사번"] = _pd.to_numeric(df["사번"], errors="coerce").astype("Int64")
+    df["버전"] = _pd.to_numeric(df["버전"], errors="coerce").astype("Int64")
+    df["승인자사번"] = _pd.to_numeric(df["승인자사번"], errors="coerce").astype("Int64")
+
+    text_cols = ["이름","승인자이름","상태","비고"]
+    for c in text_cols:
+        df[c] = df[c].astype(str).where(~df[c].isna(), "").str.strip()
+
+    # 시간 통일 (경고 억제)
+    df["승인시각"] = _normalize_ts_series(df["승인시각"])
+
+    # NaN -> None
+    df = df.where(~df.isna(), None)
+
+    # 키 유효 필터
+    before = len(df)
+    df = df[(df["연도"].notnull()) & (df["사번"].notnull()) & (df["버전"].notnull()) & (df["승인자사번"].notnull())]
+    dropn = before - len(df)
+    if dropn > 0:
+        st.info(f"키 결측 제외: {dropn}건 (연도/사번/버전/승인자사번)")
+
+    if df.empty:
+        st.warning("업서트할 직무기술서_승인 데이터가 없습니다."); return
+
+    try:
+        supabase.table("job_specs_approvals").upsert(
+            df.to_dict(orient="records"),
+            on_conflict="연도,사번,버전,승인자사번"
+        ).execute()
+        st.success(f"직무기술서_승인 {len(df)}건 업서트 완료", icon="✅")
+    except Exception as e:
+        st.exception(e)
+        st.error("직무기술서_승인 업서트 실패: FK(사번/승인자사번/직무기술서 존재) 또는 타입/키 중복을 확인하세요.")
+
+# === 직무능력평가: 시트 → Supabase 동기화 ==================================
+def sync_sheet_to_supabase_competency_evals_v1():
+    """
+    시트 '직무능력평가' -> public.competency_evals 업서트
+    on_conflict: "연도,평가대상사번,평가자사번"
+    헤더: 연도/평가대상사번/평가대상이름/평가자사번/평가자이름/주업무평가/기타업무평가/교육이수/자격유지/종합의견/상태/제출시각/잠금
+    """
+    ws = _get_ws("직무능력평가")
+    import pandas as _pd
+    df = _pd.DataFrame(ws.get_all_records())
+    if df.empty:
+        st.warning("직무능력평가 시트가 비어있습니다."); return
+
+    need = ["연도","평가대상사번","평가대상이름","평가자사번","평가자이름",
+            "주업무평가","기타업무평가","교육이수","자격유지","종합의견","상태","제출시각","잠금"]
+    for c in need:
+        if c not in df.columns:
+            df[c] = _pd.NA
+
+    # 타입 보정
+    df["연도"] = _pd.to_numeric(df["연도"], errors="coerce").astype("Int64")
+    df["평가대상사번"] = _pd.to_numeric(df["평가대상사번"], errors="coerce").astype("Int64")
+    df["평가자사번"] = _pd.to_numeric(df["평가자사번"], errors="coerce").astype("Int64")
+
+    # 텍스트 정리
+    text_cols = ["평가대상이름","평가자이름","주업무평가","기타업무평가","교육이수","자격유지","종합의견","상태"]
+    for c in text_cols:
+        df[c] = df[c].astype(str).where(~df[c].isna(), "").str.strip()
+
+    # 잠금: 다양한 입력(True/False/1/0/예/아니오) 허용
+    _true_vals = {"true","1","y","yes","t","on","예","확정","잠금","locked"}
+    def _to_bool(x):
+        s = str(x).strip().lower()
+        if s in _true_vals: return True
+        try:
+            return bool(int(s))
+        except Exception:
+            return False
+    df["잠금"] = df["잠금"].apply(_to_bool)
+
+    # 제출시각 정규화
+    df["제출시각"] = _normalize_ts_series(df["제출시각"])
+
+    # NaN -> None
+    df = df.where(~df.isna(), None)
+
+    # 키 필터
+    before = len(df)
+    df = df[(df["연도"].notnull()) & (df["평가대상사번"].notnull()) & (df["평가자사번"].notnull())]
+    dropn = before - len(df)
+    if dropn > 0:
+        st.info(f"키 결측 제외: {dropn}건 (연도/평가대상사번/평가자사번)")
+
+    if df.empty:
+        st.warning("업서트할 직무능력평가 데이터가 없습니다."); return
+
+    try:
+        supabase.table("competency_evals").upsert(
+            df.to_dict(orient="records"),
+            on_conflict="연도,평가대상사번,평가자사번"
+        ).execute()
+        st.success(f"직무능력평가 {len(df)}건 업서트 완료", icon="✅")
+    except Exception as e:
+        st.exception(e)
+        st.error("직무능력평가 업서트 실패: FK(사번) 또는 타입/키 중복을 확인하세요.")
+
+# === 공통: 제출시각 파싱 유틸 (경고 억제 & 포맷 통일) ===========================
+def _normalize_ts_series(_s):
+    """시리즈 내 각 원소를 datetime으로 파싱 후 'YYYY-MM-DD HH:MM:SS' 문자열로 통일.
+    - 여러 포맷 시도 후 실패는 None 반환
+    - pandas의 format 추론 경고를 억제
+    """
+    import warnings as _warnings
+    import pandas as _pd
+    from datetime import datetime as _dt
+
+    # 우선 빠르게 문자열화 & 트림
+    _s = _s.astype(str).where(~_s.isna(), "").str.strip()
+
+    # 자주 쓰는 포맷 우선 시도
+    fmts = ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d", "%Y/%m/%d %H:%M:%S", "%Y/%m/%d %H:%M", "%Y/%m/%d"]
+    out = []
+    for val in _s.tolist():
+        if not val or val.lower() in ("nan", "none"):
+            out.append(None); continue
+        parsed = None
+        for f in fmts:
+            try:
+                parsed = _dt.strptime(val, f); break
+            except Exception:
+                continue
+        if parsed is None:
+            # 최후의 수단: dateutil로 파싱 (경고 억제)
+            try:
+                with _warnings.catch_warnings():
+                    _warnings.simplefilter("ignore")
+                    tmp = _pd.to_datetime(val, errors="coerce")
+                if _pd.notna(tmp):
+                    parsed = tmp.to_pydatetime()
+            except Exception:
+                parsed = None
+        out.append(parsed.strftime("%Y-%m-%d %H:%M:%S") if parsed else None)
+    return _pd.Series(out)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
