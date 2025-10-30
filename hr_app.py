@@ -3302,28 +3302,69 @@ def main():
                         try:
                             cnt = supabase.table("employees").select("사번", count="exact").execute().count
                             st.caption(f"employees: {cnt}")
-                        except Exception: pass
+                        except Exception: 
+                            pass
+
                     with c2:
                         if st.button("평가_항목 동기화"):
                             sync_sheet_to_supabase_eval_items_v1()
                         try:
                             cnt = supabase.table("eval_items").select("항목ID", count="exact").execute().count
                             st.caption(f"eval_items: {cnt}")
-                        except Exception: pass
+                        except Exception: 
+                            pass
+
                     with c3:
                         if st.button("권한 동기화"):
                             sync_sheet_to_supabase_acl_v1()
                         try:
                             cnt = supabase.table("acl").select("사번", count="exact").execute().count
                             st.caption(f"acl: {cnt}")
-                        except Exception: pass
+                        except Exception: 
+                            pass
+
                     with c4:
                         if st.button("인사평가 동기화"):
                             sync_sheet_to_supabase_eval_responses_v1()
                         try:
                             cnt = supabase.table("eval_responses").select("id", count="exact").execute().count
                             st.caption(f"eval_responses: {cnt}")
-                        except Exception: pass
+                        except Exception: 
+                            pass
+
+                    # -------------------------------
+                    # ⬇⬇⬇ 여기부터 '직무*' 3개 버튼을 직접 그립니다 ⬇⬇⬇
+                    st.markdown("")  # 줄바꿈
+
+                    b1, b2, b3 = st.columns(3)
+
+                    with b1:
+                        if st.button("직무기술서 동기화"):
+                            sync_sheet_to_supabase_job_specs_v1()
+                        try:
+                            cnt = supabase.table("job_specs").select("id", count="exact").execute().count
+                            st.caption(f"job_specs: {cnt}")
+                        except Exception:
+                            pass
+
+                    with b2:
+                        if st.button("직무기술서_승인 동기화"):
+                            sync_sheet_to_supabase_job_specs_approvals_v1()
+                        try:
+                            cnt = supabase.table("job_specs_approvals").select("id", count="exact").execute().count
+                            st.caption(f"job_specs_approvals: {cnt}")
+                        except Exception:
+                            pass
+
+                    with b3:
+                        if st.button("직무능력평가 동기화"):
+                            sync_sheet_to_supabase_competency_evals_v1()
+                        try:
+                            cnt = supabase.table("competency_evals").select("id", count="exact").execute().count
+                            st.caption(f"competency_evals: {cnt}")
+                        except Exception:
+                            pass
+                    # -------------------------------
 
                 a1, a2, a3, a4 = st.tabs(["직원","PIN 관리","평가 항목 관리","권한 관리"])
                 with a1:
@@ -3334,9 +3375,9 @@ def main():
                     tab_admin_eval_items()
                 with a4:
                     tab_admin_acl(emp_df)
+
         with tabs[4]:
             tab_help()
-
 
 
 # === (추가) 시트 → Supabase 동기화 함수 3종 및 렌더러 ===
