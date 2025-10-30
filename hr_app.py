@@ -57,88 +57,6 @@ import re, time, random, hashlib, secrets as pysecrets
 # Helper Utilities (pure functions)
 # ==============================================================================
 
-# === Sheet loader alias (lazy resolver) ===
-def load_sheet_to_df(name: str):
-    """
-    프로젝트에 이미 있는 시트 로더 함수를 런타임에 탐색해 호출합니다.
-    read_sheet_df / sheet_to_df / get_sheet_df / load_sheet_df / read_gsheet_df 순으로 찾습니다.
-    """
-    candidates = ("read_sheet_df", "sheet_to_df", "get_sheet_df", "load_sheet_df", "read_gsheet_df")
-    for fn in candidates:
-        f = globals().get(fn)
-        if callable(f):
-            return f(name)
-    raise NameError(
-        "시트 로더 함수를 찾지 못했습니다. "
-        "read_sheet_df / sheet_to_df / get_sheet_df / load_sheet_df / read_gsheet_df 중 하나가 필요합니다."
-    )
-
-
-# === Clean helpers for Supabase upserts ===
-def _clean_date(x):
-    # 빈값/공백/NaN → None, 유효하지 않은 날짜도 None
-    if x is None:
-        return None
-    if isinstance(x, str):
-        s = x.strip()
-        if s == "" or s.lower() in ("nan", "none", "null", "-"):
-            return None
-        # 흔한 포맷 시도
-        for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y.%m.%d", "%y-%m-%d", "%y/%m/%d", "%y.%m.%d"):
-            try:
-                from datetime import datetime
-                return datetime.strptime(s, fmt).date().isoformat()
-            except Exception:
-                pass
-        # pandas로 마지막 시도
-        try:
-            v = pd.to_datetime(s, errors="coerce").date()
-            return None if pd.isna(v) else v.isoformat()
-        except Exception:
-            return None
-    # datetime/date/숫자(엑셀 직렬 등)
-    try:
-        import datetime as dt
-        if isinstance(x, (dt.date, dt.datetime)):
-            return x.date().isoformat() if isinstance(x, dt.datetime) else x.isoformat()
-        v = pd.to_datetime(x, errors="coerce").date()
-        return None if pd.isna(v) else v.isoformat()
-    except Exception:
-        return None
-
-
-def _clean_number(x):
-    # "미완료", "", None 등 → None, 가능하면 float
-    if x is None:
-        return None
-    if isinstance(x, str):
-        s = x.strip()
-        if s == "" or s in ("미완료", "N/A", "NA", "-", "null", "None"):
-            return None
-        s = s.replace(",", "")
-        try:
-            return float(s)
-        except Exception:
-            return None
-    try:
-        return float(x)
-    except Exception:
-        return None
-
-
-def _clean_payload(d: dict, date_keys=(), number_keys=()):
-    """사전 payload에서 빈문자열→None, 날짜/숫자 컬럼 정리"""
-    out = {}
-    for k, v in d.items():
-        if isinstance(v, str) and v.strip() == "":
-            v = None
-        if k in date_keys:
-            v = _clean_date(v)
-        elif k in number_keys:
-            v = _clean_number(v)
-        out[k] = v
-    return out
-
 def _to_bool(x) -> bool:
     return str(x).strip().lower() in ("true","1","y","yes","t")
 
@@ -3384,93 +3302,28 @@ def main():
                         try:
                             cnt = supabase.table("employees").select("사번", count="exact").execute().count
                             st.caption(f"employees: {cnt}")
-                        except Exception: 
-                            pass
-
+                        except Exception: pass
                     with c2:
                         if st.button("평가_항목 동기화"):
                             sync_sheet_to_supabase_eval_items_v1()
                         try:
                             cnt = supabase.table("eval_items").select("항목ID", count="exact").execute().count
                             st.caption(f"eval_items: {cnt}")
-                        except Exception: 
-                            pass
-
+                        except Exception: pass
                     with c3:
                         if st.button("권한 동기화"):
                             sync_sheet_to_supabase_acl_v1()
                         try:
                             cnt = supabase.table("acl").select("사번", count="exact").execute().count
                             st.caption(f"acl: {cnt}")
-                        except Exception: 
-                            pass
-
+                        except Exception: pass
                     with c4:
                         if st.button("인사평가 동기화"):
                             sync_sheet_to_supabase_eval_responses_v1()
                         try:
                             cnt = supabase.table("eval_responses").select("id", count="exact").execute().count
                             st.caption(f"eval_responses: {cnt}")
-                        except Exception: 
-                            pass
-
-                    # -------------------------------
-                    # ⬇⬇⬇ 여기부터 '직무*' 3개 버튼 (에러 본문 표시용 try/except 포함) ⬇⬇⬇
-                    st.markdown("")  # 줄바꿈
-
-                    b1, b2, b3 = st.columns(3)
-
-                    with b1:
-                        if st.button("직무기술서 동기화"):
-                            try:
-                                sync_sheet_to_supabase_job_specs_v1()
-                                st.success("job_specs 업서트 완료")
-                            except Exception as e:
-                                st.error("job_specs 동기화 오류")
-                                try:
-                                    st.code(str(getattr(e, "args", [""])[0]))
-                                except Exception:
-                                    st.exception(e)
-                        try:
-                            cnt = supabase.table("job_specs").select("id", count="exact").execute().count
-                            st.caption(f"job_specs: {cnt}")
-                        except Exception:
-                            pass
-
-                    with b2:
-                        if st.button("직무기술서_승인 동기화"):
-                            try:
-                                sync_sheet_to_supabase_job_specs_approvals_v1()
-                                st.success("job_specs_approvals 업서트 완료")
-                            except Exception as e:
-                                st.error("job_specs_approvals 동기화 오류")
-                                try:
-                                    st.code(str(getattr(e, "args", [""])[0]))
-                                except Exception:
-                                    st.exception(e)
-                        try:
-                            cnt = supabase.table("job_specs_approvals").select("id", count="exact").execute().count
-                            st.caption(f"job_specs_approvals: {cnt}")
-                        except Exception:
-                            pass
-
-                    with b3:
-                        if st.button("직무능력평가 동기화"):
-                            try:
-                                sync_sheet_to_supabase_competency_evals_v1()
-                                st.success("competency_evals 업서트 완료")
-                            except Exception as e:
-                                st.error("competency_evals 동기화 오류")
-                                try:
-                                    st.code(str(getattr(e, "args", [""])[0]))
-                                except Exception:
-                                    st.exception(e)
-                        try:
-                            cnt = supabase.table("competency_evals").select("id", count="exact").execute().count
-                            st.caption(f"competency_evals: {cnt}")
-                        except Exception:
-                            pass
-                    # -------------------------------
+                        except Exception: pass
 
                 a1, a2, a3, a4 = st.tabs(["직원","PIN 관리","평가 항목 관리","권한 관리"])
                 with a1:
@@ -3481,93 +3334,8 @@ def main():
                     tab_admin_eval_items()
                 with a4:
                     tab_admin_acl(emp_df)
-
         with tabs[4]:
             tab_help()
-
-
-# === (추가) 시트 → Supabase 동기화 함수 3종 및 렌더러 ===
-def sync_sheet_to_supabase_job_specs_v1():
-    df = load_sheet_to_df("직무기술서")
-    import pandas as pd
-    if df is None or (hasattr(df, "empty") and df.empty):
-        st.info("직무기술서: 업서트할 데이터가 없습니다.")
-        return
-    DATE_COLS = {"작성일","시행일","개정일"}
-    NUMBER_COLS = {}
-    records = []
-    for row in df.to_dict(orient="records"):
-        payload = _clean_payload(row, date_keys=DATE_COLS, number_keys=NUMBER_COLS)
-        records.append(payload)
-    if not records:
-        st.info("job_specs: 업서트할 데이터가 없습니다.")
-        return
-    supabase.table("job_specs").upsert(records, on_conflict="id").execute()
-    st.success(f"job_specs 업서트 완료 ({len(records)}건)")
-
-def sync_sheet_to_supabase_job_specs_approvals_v1():
-    df = load_sheet_to_df("직무기술서_승인")
-    import pandas as pd
-    if df is None or (hasattr(df, "empty") and df.empty):
-        st.info("직무기술서_승인: 업서트할 데이터가 없습니다.")
-        return
-    DATE_COLS = {"신청일","승인일"}
-    NUMBER_COLS = {}
-    records = []
-    for row in df.to_dict(orient="records"):
-        payload = _clean_payload(row, date_keys=DATE_COLS, number_keys=NUMBER_COLS)
-        records.append(payload)
-    if not records:
-        st.info("job_specs_approvals: 업서트할 데이터가 없습니다.")
-        return
-    supabase.table("job_specs_approvals").upsert(records, on_conflict="id").execute()
-    st.success(f"job_specs_approvals 업서트 완료 ({len(records)}건)")
-
-def sync_sheet_to_supabase_competency_evals_v1():
-    df = load_sheet_to_df("직무능력평가")
-    import pandas as pd
-    if df is None or (hasattr(df, "empty") and df.empty):
-        st.info("직무능력평가: 업서트할 데이터가 없습니다.")
-        return
-    DATE_COLS = {}
-    NUMBER_COLS = {"점수","가중치","합계","평균","진행률"}
-    records = []
-    for row in df.to_dict(orient="records"):
-        payload = _clean_payload(row, date_keys=DATE_COLS, number_keys=NUMBER_COLS)
-        records.append(payload)
-    if not records:
-        st.info("competency_evals: 업서트할 데이터가 없습니다.")
-        return
-    supabase.table("competency_evals").upsert(records, on_conflict="id").execute()
-    st.success(f"competency_evals 업서트 완료 ({len(records)}건)")
-
-def render_job_sync_buttons():
-    # 관리자 > 동기화 도구 내부에서 호출: 직무 3종 버튼/카운트
-    d1, d2, d3 = st.columns(3)
-    with d1:
-        if st.button("직무기술서 동기화"):
-            sync_sheet_to_supabase_job_specs_v1()
-        try:
-            cnt = supabase.table("job_specs").select("id", count="exact").execute().count
-            st.caption(f"job_specs: {cnt}")
-        except Exception:
-            pass
-    with d2:
-        if st.button("직무기술서_승인 동기화"):
-            sync_sheet_to_supabase_job_specs_approvals_v1()
-        try:
-            cnt = supabase.table("job_specs_approvals").select("id", count="exact").execute().count
-            st.caption(f"job_specs_approvals: {cnt}")
-        except Exception:
-            pass
-    with d3:
-        if st.button("직무능력평가 동기화"):
-            sync_sheet_to_supabase_competency_evals_v1()
-        try:
-            cnt = supabase.table("competency_evals").select("id", count="exact").execute().count
-            st.caption(f"competency_evals: {cnt}")
-        except Exception:
-            pass
 
 if __name__ == "__main__":
     main()
@@ -3686,128 +3454,3 @@ def gs_flush():
                 raise
     st.session_state.gs_queue = []
 # ===== End helpers =====
-
-
-
-# === PATCH 2025-10-30: 안정화 패치 (FK/UK/숫자 변환) ============================
-# - job_specs: employees에 없는 사번 필터링하여 FK 위반 방지
-# - job_specs_approvals: 중복키(연도,사번,버전,승인자사번) 기준 업서트
-# - competency_evals: "미완료" 등 비수치 값 -> None 처리 및 숫자 컬럼 자동 탐지 강화
-# ==============================================================================
-
-def _set_minus(a: set, b: set) -> set:
-    try:
-        return set(map(str, a)) - set(map(str, b))
-    except Exception:
-        return set()
-
-def _fetch_employee_sabuns() -> set[str]:
-    try:
-        res = supabase.table("employees").select("사번").execute()
-        rows = res.data or []
-        return {str(r.get("사번","")).strip() for r in rows if str(r.get("사번","")).strip()}
-    except Exception:
-        return set()
-
-def sync_sheet_to_supabase_job_specs_v1():
-    df = load_sheet_to_df("직무기술서")
-    import pandas as pd
-    if df is None or (hasattr(df, "empty") and df.empty):
-        st.info("직무기술서: 업서트할 데이터가 없습니다.")
-        return
-
-    # dtype 정리
-    if "사번" in df.columns:
-        df["사번"] = df["사번"].astype(str).str.strip()
-
-    DATE_COLS = {"작성일","시행일","개정일"}
-    NUMBER_COLS = set()  # 현재 없음
-
-    # FK 보호: 직원 테이블 기준으로 존재하는 사번만 허용
-    allowed = _fetch_employee_sabuns()
-    if allowed:
-        before = len(df)
-        df = df[df["사번"].astype(str).isin(allowed)]
-        skipped = before - len(df)
-        if skipped > 0:
-            st.warning(f"job_specs: 직원 테이블에 없는 사번 {skipped}건 제외(FK 보호).", icon="⚠️")
-
-    records = []
-    for row in df.to_dict(orient="records"):
-        payload = _clean_payload(row, date_keys=DATE_COLS, number_keys=NUMBER_COLS)
-        records.append(payload)
-
-    if not records:
-        st.info("job_specs: 업서트할 데이터가 없습니다.")
-        return
-
-    # 기존: on_conflict='id' 유지 (테이블 스키마 기준)
-    supabase.table("job_specs").upsert(records, on_conflict="id").execute()
-    st.success(f"job_specs 업서트 완료 ({len(records)}건)", icon="✅")
-
-
-def sync_sheet_to_supabase_job_specs_approvals_v1():
-    df = load_sheet_to_df("직무기술서_승인")
-    import pandas as pd
-    if df is None or (hasattr(df, "empty") and df.empty):
-        st.info("직무기술서_승인: 업서트할 데이터가 없습니다.")
-        return
-
-    # dtype 정리
-    for c in ["연도","사번","버전","승인자사번"]:
-        if c in df.columns:
-            if c == "연도" or c == "버전":
-                # 숫자화
-                df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0).astype(int)
-            else:
-                df[c] = df[c].astype(str).strip()
-
-    DATE_COLS = {"신청일","승인일","승인시각"}
-    NUMBER_COLS = set()
-
-    records = []
-    for row in df.to_dict(orient="records"):
-        payload = _clean_payload(row, date_keys=DATE_COLS, number_keys=NUMBER_COLS)
-        records.append(payload)
-
-    if not records:
-        st.info("job_specs_approvals: 업서트할 데이터가 없습니다.")
-        return
-
-    # 고유키 기준 업서트: ("연도","사번","버전","승인자사번")
-    supabase.table("job_specs_approvals").upsert(
-        records, on_conflict="연도,사번,버전,승인자사번"
-    ).execute()
-    st.success(f"job_specs_approvals 업서트 완료 ({len(records)}건)", icon="✅")
-
-
-def sync_sheet_to_supabase_competency_evals_v1():
-    df = load_sheet_to_df("직무능력평가")
-    import pandas as pd
-    if df is None or (hasattr(df, "empty") and df.empty):
-        st.info("직무능력평가: 업서트할 데이터가 없습니다.")
-        return
-
-    # 1) 숫자 컬럼 자동 탐지 강화
-    #   - 컬럼명에 점/가중/합계/평균/률/수/횟/perc/score/count/weight 등이 포함되면 숫자 시도
-    numeric_hints = ("점", "가중", "합계", "평균", "률", "비율", "수", "횟", "perc", "percent", "score", "count", "weight", "level", "단계")
-    NUMBER_COLS = {c for c in df.columns if any(h in str(c).lower() for h in numeric_hints)}
-    DATE_COLS = set()
-
-    # 2) 전처리: "미완료" 등 비수치 표기 → None (모든 열 공통 안전조치)
-    df = df.applymap(lambda v: None if (isinstance(v, str) and v.strip() in {"미완료", "N/A", "NA", "-", "null", "None"}) else v)
-
-    records = []
-    for row in df.to_dict(orient="records"):
-        payload = _clean_payload(row, date_keys=DATE_COLS, number_keys=NUMBER_COLS)
-        records.append(payload)
-
-    if not records:
-        st.info("competency_evals: 업서트할 데이터가 없습니다.")
-        return
-
-    supabase.table("competency_evals").upsert(records, on_conflict="id").execute()
-    st.success(f"competency_evals 업서트 완료 ({len(records)}건)", icon="✅")
-
-# === END PATCH ================================================================
-
