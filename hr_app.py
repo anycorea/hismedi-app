@@ -55,13 +55,24 @@ import re, time, random, hashlib, secrets as pysecrets
 
 # ==============================================================================
 # Helper Utilities (pure functions)
-
-# === Sheet loader alias (프로젝트 고유 로더를 연결) ===
-sheet_loader = read_sheet_df
-
-def load_sheet_to_df(name: str):
-    return sheet_loader(name)
 # ==============================================================================
+
+# === Sheet loader alias (lazy resolver) ===
+def load_sheet_to_df(name: str):
+    """
+    프로젝트에 이미 있는 시트 로더 함수를 런타임에 탐색해 호출합니다.
+    read_sheet_df / sheet_to_df / get_sheet_df / load_sheet_df / read_gsheet_df 순으로 찾습니다.
+    """
+    candidates = ("read_sheet_df", "sheet_to_df", "get_sheet_df", "load_sheet_df", "read_gsheet_df")
+    for fn in candidates:
+        f = globals().get(fn)
+        if callable(f):
+            return f(name)
+    raise NameError(
+        "시트 로더 함수를 찾지 못했습니다. "
+        "read_sheet_df / sheet_to_df / get_sheet_df / load_sheet_df / read_gsheet_df 중 하나가 필요합니다."
+    )
+
 
 # === Clean helpers for Supabase upserts ===
 def _clean_date(x):
