@@ -145,6 +145,61 @@ def sync_sheet_to_supabase_eval_items_v1():
     ).execute()
     st.success(f"평가_항목 {len(df)}건 업서트 완료", icon="✅")
 
+# === 인사평가: 시트 → Supabase 동기화 ===
+def sync_sheet_to_supabase_eval_responses_v1():
+    ws = _get_ws("인사평가")
+    df = _pd.DataFrame(ws.get_all_records())
+    if df.empty:
+        st.warning("인사평가 시트가 비어있습니다.")
+        return
+
+    # --- 컬럼 존재 보정(시트 헤더 변동 방지) ---
+    base_cols = [
+        "연도","평가유형","평가대상사번","평가대상이름",
+        "평가자사번","평가자이름","총점","상태","제출시각","잠금"
+    ]
+    for c in base_cols:
+        if c not in df.columns:
+            df[c] = _pd.NA
+
+    # --- 문자열 공백 정리 ---
+    for c in ["평가유형","평가대상사번","평가대상이름","평가자사번","평가자이름","상태"]:
+        if c in df.columns:
+            df[c] = df[c].astype(str).str.strip()
+
+    # --- 연도/총점 숫자 변환 ---
+    if "연도" in df.columns:
+        df["연도"] = _pd.to_numeric(df["연도"], errors="coerce").astype("Int64")
+    if "총점" in df.columns:
+        df["총점"] = _pd.to_numeric(df["총점"], errors="coerce")
+
+    # --- 잠금(boolean) 정리: 예/Y/TRUE/1 등 truthy → True ---
+    if "잠금" in df.columns:
+        df["잠금"] = df["잠금"].map(_sync_truthy_v1)
+
+    # --- 제출시각: 문자열→datetime→문자열(ISO) ---
+    if "제출시각" in df.columns:
+        dt = _pd.to_datetime(df["제출시각"], errors="coerce")
+        # 타임존 없이 저장(서버측에서 timestamptz 자동 파싱 가능), 불가 시 ISO 포맷으로
+        df["제출시각"] = dt.dt.strftime("%Y-%m-%d %H:%M:%S")
+
+    # --- 항목 점수 컬럼 자동 탐색 & 숫자화 ---
+    itm_cols = [c for c in df.columns if c.startswith("점수_ITM")]
+    for c in itm_cols:
+        df[c] = _pd.to_numeric(df[c], errors="coerce")
+
+    # --- None 처리: NaN → None (Supabase JSON 직렬화 호환) ---
+    df = df.where(~df.isna(), None)
+
+    # --- 업서트 (연도,평가유형,평가대상사번,평가자사번 기준) ---
+    on_conflict_key = "연도,평가유형,평가대상사번,평가자사번"
+    supabase.table("eval_responses").upsert(
+        df.to_dict(orient="records"),
+        on_conflict=on_conflict_key
+    ).execute()
+
+    st.success(f"인사평가 {len(df)}건 업서트 완료", icon="✅")
+
 # === 권한: 시트 → Supabase 동기화 ===
 def sync_sheet_to_supabase_acl_v1():
     ws = _get_ws("권한")
@@ -3261,6 +3316,13 @@ def main():
                         try:
                             cnt = supabase.table("acl").select("사번", count="exact").execute().count
                             st.caption(f"acl: {cnt}")
+                        except Exception: pass
+                    with c4:
+                        if st.button("인사평가 동기화"):
+                            sync_sheet_to_supabase_eval_responses_v1()
+                        try:
+                            cnt = supabase.table("eval_responses").select("id", count="exact").execute().count
+                            st.caption(f"eval_responses: {cnt}")
                         except Exception: pass
 
                 a1, a2, a3, a4 = st.tabs(["직원","PIN 관리","평가 항목 관리","권한 관리"])
