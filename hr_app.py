@@ -3333,14 +3333,22 @@ def main():
                             pass
 
                     # -------------------------------
-                    # ⬇⬇⬇ 여기부터 '직무*' 3개 버튼을 직접 그립니다 ⬇⬇⬇
+                    # ⬇⬇⬇ 여기부터 '직무*' 3개 버튼 (에러 본문 표시용 try/except 포함) ⬇⬇⬇
                     st.markdown("")  # 줄바꿈
 
                     b1, b2, b3 = st.columns(3)
 
                     with b1:
                         if st.button("직무기술서 동기화"):
-                            sync_sheet_to_supabase_job_specs_v1()
+                            try:
+                                sync_sheet_to_supabase_job_specs_v1()
+                                st.success("job_specs 업서트 완료")
+                            except Exception as e:
+                                st.error("job_specs 동기화 오류")
+                                try:
+                                    st.code(str(getattr(e, "args", [""])[0]))
+                                except Exception:
+                                    st.exception(e)
                         try:
                             cnt = supabase.table("job_specs").select("id", count="exact").execute().count
                             st.caption(f"job_specs: {cnt}")
@@ -3349,7 +3357,15 @@ def main():
 
                     with b2:
                         if st.button("직무기술서_승인 동기화"):
-                            sync_sheet_to_supabase_job_specs_approvals_v1()
+                            try:
+                                sync_sheet_to_supabase_job_specs_approvals_v1()
+                                st.success("job_specs_approvals 업서트 완료")
+                            except Exception as e:
+                                st.error("job_specs_approvals 동기화 오류")
+                                try:
+                                    st.code(str(getattr(e, "args", [""])[0]))
+                                except Exception:
+                                    st.exception(e)
                         try:
                             cnt = supabase.table("job_specs_approvals").select("id", count="exact").execute().count
                             st.caption(f"job_specs_approvals: {cnt}")
@@ -3358,7 +3374,15 @@ def main():
 
                     with b3:
                         if st.button("직무능력평가 동기화"):
-                            sync_sheet_to_supabase_competency_evals_v1()
+                            try:
+                                sync_sheet_to_supabase_competency_evals_v1()
+                                st.success("competency_evals 업서트 완료")
+                            except Exception as e:
+                                st.error("competency_evals 동기화 오류")
+                                try:
+                                    st.code(str(getattr(e, "args", [""])[0]))
+                                except Exception:
+                                    st.exception(e)
                         try:
                             cnt = supabase.table("competency_evals").select("id", count="exact").execute().count
                             st.caption(f"competency_evals: {cnt}")
