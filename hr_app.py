@@ -5,26 +5,6 @@
 # ────────────────────────────────────────────────────────────────
 import os
 import streamlit as st
-
-def _exec_with_api_error_log(req, context: str = ""):
-    """
-    Execute a Supabase request with nice error logging to Streamlit.
-    """
-    try:
-        return req.execute()
-    except Exception as e:
-        import traceback
-        try:
-            # PostgREST APIError often has .args[0] or .message with JSON
-            body = ""
-            if hasattr(e, "args") and e.args:
-                body = e.args[0]
-            st.error("Supabase APIError" + (f" @ {context}" if context else ""))
-            st.code(str(body) or traceback.format_exc(), language="json")
-        except Exception:
-            st.exception(e)
-        raise
-
 from supabase import create_client, Client
 
 APP_TITLE = st.secrets.get("app", {}).get("TITLE", "HISMEDI - 인사/HR")
@@ -3376,8 +3356,7 @@ def sync_sheet_to_supabase_job_specs_v1():
     supabase.table("job_specs").upsert(
         df.to_dict(orient="records"),
         on_conflict="연도,사번,버전"
-    )
-            .execute()
+    ).execute()
     st.success(f"직무기술서 {len[df]}건 업서트 완료", icon="✅")
 
 
@@ -3397,8 +3376,7 @@ def sync_sheet_to_supabase_job_specs_approvals_v1():
     supabase.table("job_specs_approvals").upsert(
         df.to_dict(orient="records"),
         on_conflict="연도,사번,버전"
-    )
-            .execute()
+    ).execute()
     st.success(f"직무기술서_승인 {len(df)}건 업서트 완료", icon="✅")
 
 
@@ -3419,8 +3397,7 @@ def sync_sheet_to_supabase_competency_evals_v1():
     supabase.table("competency_evals").upsert(
         df.to_dict(orient="records"),
         on_conflict="연도,평가대상사번,평가자사번"
-    )
-            .execute()
+    ).execute()
     st.success(f"직무능력평가 {len(df)}건 업서트 완료", icon="✅")
 
 
