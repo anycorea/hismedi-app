@@ -3325,10 +3325,7 @@ def main():
                             st.caption(f"eval_responses: {cnt}")
                         except Exception: pass
 
-                
-                        # 두 번째 행(직무 3종) 버튼 렌더링
-                        render_job_sync_buttons()
-a1, a2, a3, a4 = st.tabs(["직원","PIN 관리","평가 항목 관리","권한 관리"])
+                a1, a2, a3, a4 = st.tabs(["직원","PIN 관리","평가 항목 관리","권한 관리"])
                 with a1:
                     tab_staff_admin(emp_df)
                 with a2:
@@ -3342,7 +3339,7 @@ a1, a2, a3, a4 = st.tabs(["직원","PIN 관리","평가 항목 관리","권한 �
 
 
 
-# === (추가) 동기화 함수 3종 및 렌더러 ===
+# === (추가) 시트 → Supabase 동기화 함수 3종 및 렌더러 ===
 def sync_sheet_to_supabase_job_specs_v1():
     ws = _get_ws("직무기술서")
     df = _pd.DataFrame(_ws_get_all_records(ws)) if ws else _pd.DataFrame()
@@ -3360,7 +3357,7 @@ def sync_sheet_to_supabase_job_specs_v1():
         df.to_dict(orient="records"),
         on_conflict="연도,사번,버전"
     ).execute()
-    st.success(f"직무기술서 {len(df)}건 업서트 완료", icon="✅")
+    st.success(f"직무기술서 {len[df]}건 업서트 완료", icon="✅")
 
 
 def sync_sheet_to_supabase_job_specs_approvals_v1():
@@ -3405,7 +3402,7 @@ def sync_sheet_to_supabase_competency_evals_v1():
 
 
 def render_job_sync_buttons():
-    """관리자 > 동기화 도구 안에서 두 번째 행 버튼/카운트를 렌더링합니다."""
+    # 관리자 > 동기화 도구 내부에서 호출: 직무 3종 버튼/카운트
     d1, d2, d3 = st.columns(3)
     with d1:
         if st.button("직무기술서 동기화"):
