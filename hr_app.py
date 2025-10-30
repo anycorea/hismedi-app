@@ -3284,77 +3284,77 @@ def main():
         # ==== (관리자 영역) 탭 & 동기화 UI: 혼합 들여쓰기 제거한 최종본 ====
 
 # 5개 탭을 '한 번만' 생성합니다.
-    tabs = st.tabs(["직원", "PIN 관리", "평가 항목 관리", "권한 관리", "도움말"])
+        tabs = st.tabs(["직원", "PIN 관리", "평가 항목 관리", "권한 관리", "도움말"])
 
-    # 탭 1: 직원
-    with tabs[0]:
-        tab_staff_admin(emp_df)
+        # 탭 1: 직원
+        with tabs[0]:
+            tab_staff_admin(emp_df)
 
-    # 탭 2: PIN 관리
-    with tabs[1]:
-        tab_admin_pin(emp_df)
+        # 탭 2: PIN 관리
+        with tabs[1]:
+            tab_admin_pin(emp_df)
 
-    # 탭 3: 평가 항목 관리
-    with tabs[2]:
-        tab_admin_eval_items()
+        # 탭 3: 평가 항목 관리
+        with tabs[2]:
+            tab_admin_eval_items()
 
-    # 탭 4: 권한 관리 + 동기화 도구
-    with tabs[3]:
-        tab_admin_acl(emp_df)
+        # 탭 4: 권한 관리 + 동기화 도구
+        with tabs[3]:
+            tab_admin_acl(emp_df)
 
-        st.divider()
-        st.subheader("🔁 동기화 도구 (시트 → Supabase)")
+            st.divider()
+            st.subheader("🔁 동기화 도구 (시트 → Supabase)")
 
-        # 컬럼 4개 정의 (c1~c4)
-        c1, c2, c3, c4 = st.columns(4)
+            # 컬럼 4개 정의 (c1~c4)
+            c1, c2, c3, c4 = st.columns(4)
 
-        # c1: 인사평가
-        with c1:
-            st.caption("인사평가")
-            if st.button("인사평가 동기화", key="sync_eval_responses"):
-                sync_sheet_to_supabase_eval_responses_v1()
-            try:
-                cnt = supabase.table("eval_responses").select("id", count="exact").execute().count
-                st.caption(f"eval_responses: {cnt}")
-            except Exception:
-                pass
+            # c1: 인사평가
+            with c1:
+                st.caption("인사평가")
+                if st.button("인사평가 동기화", key="sync_eval_responses"):
+                    sync_sheet_to_supabase_eval_responses_v1()
+                try:
+                    cnt = supabase.table("eval_responses").select("id", count="exact").execute().count
+                    st.caption(f"eval_responses: {cnt}")
+                except Exception:
+                    pass
 
-        # c2: 직무기술서
-        with c2:
-            st.caption("직무기술서")
-            if st.button("직무기술서 동기화", key="sync_job_specs"):
-                sync_sheet_to_supabase_job_specs_v1()
-            try:
-                cnt = supabase.table("job_specs").select("id", count="exact").execute().count
-                st.caption(f"job_specs: {cnt}")
-            except Exception:
-                pass
+            # c2: 직무기술서
+            with c2:
+                st.caption("직무기술서")
+                if st.button("직무기술서 동기화", key="sync_job_specs"):
+                    sync_sheet_to_supabase_job_specs_v1()
+                try:
+                    cnt = supabase.table("job_specs").select("id", count="exact").execute().count
+                    st.caption(f"job_specs: {cnt}")
+                except Exception:
+                    pass
 
-        # c3: 직무기술서_승인
-        with c3:
-            st.caption("직무기술서_승인")
-            if st.button("직무기술서_승인 동기화", key="sync_job_specs_approvals"):
-                sync_sheet_to_supabase_job_specs_approvals_v1()
-            try:
-                cnt = supabase.table("job_specs_approvals").select("id", count="exact").execute().count
-                st.caption(f"job_specs_approvals: {cnt}")
-            except Exception:
-                pass
+            # c3: 직무기술서_승인
+            with c3:
+                st.caption("직무기술서_승인")
+                if st.button("직무기술서_승인 동기화", key="sync_job_specs_approvals"):
+                    sync_sheet_to_supabase_job_specs_approvals_v1()
+                try:
+                    cnt = supabase.table("job_specs_approvals").select("id", count="exact").execute().count
+                    st.caption(f"job_specs_approvals: {cnt}")
+                except Exception:
+                    pass
 
-        # c4: 직무능력평가
-        with c4:
-            st.caption("직무능력평가")
-            if st.button("직무능력평가 동기화", key="sync_competency_evals"):
-                sync_sheet_to_supabase_competency_evals_v1()
-            try:
-                cnt = supabase.table("competency_evals").select("id", count="exact").execute().count
-                st.caption(f"competency_evals: {cnt}")
-            except Exception:
-                pass
+            # c4: 직무능력평가
+            with c4:
+                st.caption("직무능력평가")
+                if st.button("직무능력평가 동기화", key="sync_competency_evals"):
+                    sync_sheet_to_supabase_competency_evals_v1()
+                try:
+                    cnt = supabase.table("competency_evals").select("id", count="exact").execute().count
+                    st.caption(f"competency_evals: {cnt}")
+                except Exception:
+                    pass
 
-    # 탭 5: 도움말
-    with tabs[4]:
-        tab_help()
+        # 탭 5: 도움말
+        with tabs[4]:
+            tab_help()
 if __name__ == "__main__":
     main()
 
