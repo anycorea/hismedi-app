@@ -247,77 +247,6 @@ def sync_sheet_to_supabase_acl_v1():
             on_conflict="사번,역할,범위유형,부서1,부서2,대상사번"
         ).execute()
         st.success(f"권한 {len(df)}건 업서트 완료", icon="✅")
-
-# === 직무기술서 / 직무기술서_승인 / 직무능력평가: 시트 → Supabase 동기화 ===
-def sync_sheet_to_supabase_job_descriptions_v1():
-    # 직무기술서 시트(= JOBDESC_SHEET) → Supabase job_descriptions 업서트
-    # on_conflict: 연도,사번,버전
-    try:
-        ws = _ws(JOBDESC_SHEET)
-        df = _pd.DataFrame(_ws_get_all_records(ws))
-    except Exception:
-        df = _pd.DataFrame()
-    if df.empty:
-        st.warning("직무기술서 시트가 비어있습니다.")
-        return
-    for c in ["연도","버전"]:
-        if c in df.columns:
-            df[c] = _pd.to_numeric(df[c], errors="coerce").fillna(0).astype(int)
-    if "사번" in df.columns:
-        df["사번"] = df["사번"].astype(str)
-    supabase.table("job_descriptions").upsert(
-        df.to_dict(orient="records"),
-        on_conflict="연도,사번,버전"
-    ).execute()
-    st.success(f"직무기술서 {len(df)}건 업서트 완료", icon="✅")
-
-
-def sync_sheet_to_supabase_jd_approvals_v1():
-    # 직무기술서_승인 시트(= JD_APPROVAL_SHEET) → Supabase jd_approvals 업서트
-    # on_conflict: 연도,사번,버전
-    try:
-        ws = _ws(JD_APPROVAL_SHEET)
-        df = _pd.DataFrame(_ws_get_all_records(ws))
-    except Exception:
-        df = _pd.DataFrame()
-    if df.empty:
-        st.warning("직무기술서_승인 시트가 비어있습니다.")
-        return
-    for c in ["연도","버전"]:
-        if c in df.columns:
-            df[c] = _pd.to_numeric(df[c], errors="coerce").fillna(0).astype(int)
-    if "사번" in df.columns:
-        df["사번"] = df["사번"].astype(str)
-    supabase.table("jd_approvals").upsert(
-        df.to_dict(orient="records"),
-        on_conflict="연도,사번,버전"
-    ).execute()
-    st.success(f"직무기술서_승인 {len(df)}건 업서트 완료", icon="✅")
-
-
-def sync_sheet_to_supabase_competencies_v1():
-    # 직무능력평가 시트(= COMP_SIMPLE_NAME) → Supabase competencies 업서트
-    # on_conflict: 연도,사번(=평가대상사번)
-    try:
-        ws = _ws(_simp_sheet_name(current_year()))
-        df = _pd.DataFrame(_ws_get_all_records(ws))
-    except Exception:
-        df = _pd.DataFrame()
-    if df.empty:
-        st.warning("직무능력평가 시트가 비어있습니다.")
-        return
-    if "평가대상사번" in df.columns and "사번" not in df.columns:
-        df["사번"] = df["평가대상사번"].astype(str)
-    if "연도" in df.columns:
-        df["연도"] = _pd.to_numeric(df["연도"], errors="coerce").fillna(0).astype(int)
-    for c in ["잠금"]:
-        if c in df.columns:
-            df[c] = df[c].map(_sync_truthy_v1)
-    supabase.table("competencies").upsert(
-        df.to_dict(orient="records"),
-        on_conflict="연도,사번"
-    ).execute()
-    st.success(f"직무능력평가 {len(df)}건 업서트 완료", icon="✅")
     except Exception as e:
         st.exception(e)
         st.error("권한 업서트 실패: 고유인덱스/키 중복/타입을 확인해 주세요.")
@@ -3366,6 +3295,33 @@ def main():
             else:
                 # 동기화 도구(직원)
                 with st.expander("🔁 동기화 도구 (시트 ↔ Supabase)", expanded=False):
+        # --- 추가: 직무 관련 3종 동기화 버튼 행 ---
+        d1, d2, d3 = st.columns(3)
+        with d1:
+            if st.button("직무기술서 동기화"):
+                sync_sheet_to_supabase_job_descriptions_v1()
+            try:
+                cnt = supabase.table("job_descriptions").select("연도", count="exact").execute().count
+                st.caption(f"job_descriptions: {cnt}")
+            except Exception:
+                pass
+        with d2:
+            if st.button("직무기술서_승인 동기화"):
+                sync_sheet_to_supabase_jd_approvals_v1()
+            try:
+                cnt = supabase.table("jd_approvals").select("연도", count="exact").execute().count
+                st.caption(f"jd_approvals: {cnt}")
+            except Exception:
+                pass
+        with d3:
+            if st.button("직무능력평가 동기화"):
+                sync_sheet_to_supabase_competencies_v1()
+            try:
+                cnt = supabase.table("competencies").select("연도", count="exact").execute().count
+                st.caption(f"competencies: {cnt}")
+            except Exception:
+                pass
+    
                     c1, c2, c3, c4 = st.columns(4)
                     with c1:
                         if st.button("직원 동기화"):
@@ -3395,30 +3351,6 @@ def main():
                             cnt = supabase.table("eval_responses").select("id", count="exact").execute().count
                             st.caption(f"eval_responses: {cnt}")
                         except Exception: pass
-                    # --- 추가: 직무 관련 3종 동기화 버튼 행 ---
-                    d1, d2, d3 = st.columns(3)
-                    with d1:
-                        if st.button("직무기술서 동기화"):
-                            sync_sheet_to_supabase_job_descriptions_v1()
-                        try:
-                            cnt = supabase.table("job_descriptions").select("연도", count="exact").execute().count
-                            st.caption(f"job_descriptions: {cnt}")
-                        except Exception: pass
-                    with d2:
-                        if st.button("직무기술서_승인 동기화"):
-                            sync_sheet_to_supabase_jd_approvals_v1()
-                        try:
-                            cnt = supabase.table("jd_approvals").select("연도", count="exact").execute().count
-                            st.caption(f"jd_approvals: {cnt}")
-                        except Exception: pass
-                    with d3:
-                        if st.button("직무능력평가 동기화"):
-                            sync_sheet_to_supabase_competencies_v1()
-                        try:
-                            cnt = supabase.table("competencies").select("연도", count="exact").execute().count
-                            st.caption(f"competencies: {cnt}")
-                        except Exception: pass
-    
 
                 a1, a2, a3, a4 = st.tabs(["직원","PIN 관리","평가 항목 관리","권한 관리"])
                 with a1:
@@ -3431,6 +3363,85 @@ def main():
                     tab_admin_acl(emp_df)
         with tabs[4]:
             tab_help()
+
+
+
+
+# === (추가) 직무기술서 / 직무기술서_승인 / 직무능력평가: 시트 → Supabase 동기화 ===
+def sync_sheet_to_supabase_job_descriptions_v1():
+    # 직무기술서 시트(= JOBDESC_SHEET) → Supabase job_descriptions 업서트
+    # on_conflict: 연도,사번,버전
+    try:
+        ws = _ws(JOBDESC_SHEET)
+        df = _pd.DataFrame(_ws_get_all_records(ws))
+    except Exception:
+        df = _pd.DataFrame()
+    if df.empty:
+        st.warning("직무기술서 시트가 비어있습니다.")
+        return
+    for c in ["연도","버전"]:
+        if c in df.columns:
+            df[c] = _pd.to_numeric(df[c], errors="coerce").fillna(0).astype(int)
+    if "사번" in df.columns:
+        df["사번"] = df["사번"].astype(str)
+    # NaN -> None
+    df = df.where(~df.isna(), None)
+    supabase.table("job_descriptions").upsert(
+        df.to_dict(orient="records"),
+        on_conflict="연도,사번,버전"
+    ).execute()
+    st.success(f"직무기술서 {len(df)}건 업서트 완료", icon="✅")
+
+
+def sync_sheet_to_supabase_jd_approvals_v1():
+    # 직무기술서_승인 시트(= JD_APPROVAL_SHEET) → Supabase jd_approvals 업서트
+    # on_conflict: 연도,사번,버전
+    try:
+        ws = _ws(JD_APPROVAL_SHEET)
+        df = _pd.DataFrame(_ws_get_all_records(ws))
+    except Exception:
+        df = _pd.DataFrame()
+    if df.empty:
+        st.warning("직무기술서_승인 시트가 비어있습니다.")
+        return
+    for c in ["연도","버전"]:
+        if c in df.columns:
+            df[c] = _pd.to_numeric(df[c], errors="coerce").fillna(0).astype(int)
+    if "사번" in df.columns:
+        df["사번"] = df["사번"].astype(str)
+    df = df.where(~df.isna(), None)
+    supabase.table("jd_approvals").upsert(
+        df.to_dict(orient="records"),
+        on_conflict="연도,사번,버전"
+    ).execute()
+    st.success(f"직무기술서_승인 {len(df)}건 업서트 완료", icon="✅")
+
+
+def sync_sheet_to_supabase_competencies_v1():
+    # 직무능력평가 시트 → Supabase competencies 업서트
+    # on_conflict: 연도,사번(=평가대상사번)
+    try:
+        ws = _ws("직무능력평가")
+        df = _pd.DataFrame(_ws_get_all_records(ws))
+    except Exception:
+        df = _pd.DataFrame()
+    if df.empty:
+        st.warning("직무능력평가 시트가 비어있습니다.")
+        return
+    if "평가대상사번" in df.columns and "사번" not in df.columns:
+        df["사번"] = df["평가대상사번"].astype(str)
+    if "연도" in df.columns:
+        df["연도"] = _pd.to_numeric(df["연도"], errors="coerce").fillna(0).astype(int)
+    for c in ["잠금"]:
+        if c in df.columns:
+            df[c] = df[c].map(_sync_truthy_v1)
+    df = df.where(~df.isna(), None)
+    supabase.table("competencies").upsert(
+        df.to_dict(orient="records"),
+        on_conflict="연도,사번"
+    ).execute()
+    st.success(f"직무능력평가 {len(df)}건 업서트 완료", icon="✅")
+
 
 if __name__ == "__main__":
     main()
