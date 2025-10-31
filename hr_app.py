@@ -1735,6 +1735,68 @@ def read_my_eval_rows(year: int, sabun: str) -> pd.DataFrame:
     if sort_cols: df=df.sort_values(sort_cols, ascending=[True,True,False]).reset_index(drop=True)
     return df
 
+
+# === DB-first helpers (placed before tab_eval) ===
+def _db_has_submitted(_year: int, _type: str, _target_sabun: str) -> bool:
+    try:
+        _y = int(_year)
+        res = (
+            supabase.table("eval_responses")
+            .select("상태,제출시각")
+            .eq("연도", _y)
+            .eq("평가유형", str(_type))
+            .eq("평가대상사번", str(_target_sabun))
+            .order("제출시각", desc=True)
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        if not rows:
+            return False
+        r0 = rows[0]
+        stt = str(r0.get("상태") or "").strip()
+        ts  = r0.get("제출시각")
+        return (stt in {"제출","완료"}) or (ts not in (None, "", "NULL"))
+    except Exception:
+        return False
+
+def _db_read_eval_saved_scores(year: int, eval_type: str, target_sabun: str, evaluator_sabun: str):
+    try:
+        _y = int(year)
+        q = (
+            supabase.table("eval_responses")
+            .select("*")
+            .eq("연도", _y)
+            .eq("평가유형", str(eval_type))
+            .eq("평가대상사번", str(target_sabun))
+            .eq("평가자사번", str(evaluator_sabun))
+            .order("제출시각", desc=True)
+            .limit(1)
+            .execute()
+        )
+        rows = q.data or []
+        if not rows:
+            return {}, {}
+        row = rows[0]
+        scores = {}
+        for k, v in row.items():
+            if isinstance(k, str) and k.startswith("점수_ITM"):
+                try:
+                    v = int(v)
+                except Exception:
+                    v = 3
+                scores[k] = max(1, min(5, v))
+        meta = {
+            "총점": row.get("총점"),
+            "상태": row.get("상태"),
+            "제출시각": row.get("제출시각"),
+            "잠금": row.get("잠금"),
+        }
+        return scores, meta
+    except Exception:
+        return {}, {}
+# === END DB-first helpers ===
+
 def tab_eval(emp_df: pd.DataFrame):
     """인사평가 탭 (심플·자동 라우팅)
     - 역할: employee / manager / admin
