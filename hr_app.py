@@ -1724,12 +1724,8 @@ def read_my_eval_rows(year: int, sabun: str) -> pd.DataFrame:
         except Exception:
             return _pd.DataFrame(columns=EVAL_BASE_HEADERS)
 
-def read_my_eval_rows(year: int, sabun: str) -> pd.DataFrame:
-    name=_eval_sheet_name(year)
-    try:
-        ws=_ws(name); df=pd.DataFrame(_ws_get_all_records(ws))
-    except Exception: return pd.DataFrame(columns=EVAL_BASE_HEADERS)
-    if df.empty: return df
+# [FIXED] Removed duplicate sheet-only read_my_eval_rows; DB-first version above remains.
+
     if "평가자사번" in df.columns: df=df[df["평가자사번"].astype(str)==str(sabun)]
     sort_cols=[c for c in ["평가유형","평가대상사번","제출시각"] if c in df.columns]
     if sort_cols: df=df.sort_values(sort_cols, ascending=[True,True,False]).reset_index(drop=True)
@@ -1931,7 +1927,38 @@ def tab_eval(emp_df: pd.DataFrame):
     st.markdown("#### 점수 입력 (자기/1차/2차) — 표에서 직접 수정하세요.")
 
     # ◇◇ Helper: 특정 평가유형(자기/1차/2차)의 '대상자 기준' 최신 점수(평가자 무관) 로드
-    def _stage_scores_any_evaluator(_year: int, _etype: str, _target_sabun: str) -> dict[str, int]:
+    
+def _stage_scores_any_evaluator(_year: int, _etype: str, _target_sabun: str) -> dict[str, int]:
+        """
+        조회(supabase→앱): 특정 연도·평가유형·평가대상사번의 최신 제출 1건을 가져와 항목별 점수 dict로 반환.
+        Supabase 우선, 실패 시 기존 구글시트 폴백.
+        """
+        # 1) Supabase 우선
+        try:
+            q = (supabase.table("eval_responses")
+                        .select("*")
+                        .eq("연도", int(_year))
+                        .eq("평가유형", str(_etype))
+                        .eq("평가대상사번", str(_target_sabun))
+                        .order("제출시각", desc=True)
+                        .limit(1))
+            res = q.execute()
+            row = (res.data or [None])[0]
+            if row:
+                out: dict[str,int] = {}
+                for iid in item_ids:
+                    key = f"점수_{iid}"
+                    if key in row and row[key] is not None and str(row[key]).strip() != "":
+                        try:
+                            out[iid] = int(row[key])
+                        except Exception:
+                            pass
+                return out
+        except Exception as e:
+            try: st.warning(f"Supabase 조회 실패({_etype}): {e}", icon="⚠️")
+            except Exception: pass
+
+        # 2) 폴백: 구글시트(기존 로직 유지)
         try:
             ws = _ensure_eval_resp_sheet(int(_year), item_ids)
             header = _retry(ws.row_values, 1) or []; hmap = {n: i+1 for i, n in enumerate(header)}
@@ -1962,8 +1989,7 @@ def tab_eval(emp_df: pd.DataFrame):
             return out
         except Exception:
             return {}
-
-    # ◇◇ 일괄 적용(현재 사용자의 '편집 대상' 컬럼에만 적용)
+# ◇◇ 일괄 적용(현재 사용자의 '편집 대상' 컬럼에만 적용)
     _year_safe = int(st.session_state.get("eval2_year", datetime.now(tz=tz_kst()).year))
     _eval_type_safe = str(st.session_state.get("eval_type") or st.session_state.get("eval2_type") or ("자기"))
     kbase = f"E2_{_year_safe}_{_eval_type_safe}_{me_sabun}_{target_sabun}"
