@@ -1724,8 +1724,12 @@ def read_my_eval_rows(year: int, sabun: str) -> pd.DataFrame:
         except Exception:
             return _pd.DataFrame(columns=EVAL_BASE_HEADERS)
 
-# [FIXED] Removed duplicate sheet-only read_my_eval_rows; DB-first version above remains.
-
+def read_my_eval_rows(year: int, sabun: str) -> pd.DataFrame:
+    name=_eval_sheet_name(year)
+    try:
+        ws=_ws(name); df=pd.DataFrame(_ws_get_all_records(ws))
+    except Exception: return pd.DataFrame(columns=EVAL_BASE_HEADERS)
+    if df.empty: return df
     if "평가자사번" in df.columns: df=df[df["평가자사번"].astype(str)==str(sabun)]
     sort_cols=[c for c in ["평가유형","평가대상사번","제출시각"] if c in df.columns]
     if sort_cols: df=df.sort_values(sort_cols, ascending=[True,True,False]).reset_index(drop=True)
@@ -1927,38 +1931,7 @@ def tab_eval(emp_df: pd.DataFrame):
     st.markdown("#### 점수 입력 (자기/1차/2차) — 표에서 직접 수정하세요.")
 
     # ◇◇ Helper: 특정 평가유형(자기/1차/2차)의 '대상자 기준' 최신 점수(평가자 무관) 로드
-    
-def _stage_scores_any_evaluator(_year: int, _etype: str, _target_sabun: str) -> dict[str, int]:
-        """
-        조회(supabase→앱): 특정 연도·평가유형·평가대상사번의 최신 제출 1건을 가져와 항목별 점수 dict로 반환.
-        Supabase 우선, 실패 시 기존 구글시트 폴백.
-        """
-        # 1) Supabase 우선
-        try:
-            q = (supabase.table("eval_responses")
-                        .select("*")
-                        .eq("연도", int(_year))
-                        .eq("평가유형", str(_etype))
-                        .eq("평가대상사번", str(_target_sabun))
-                        .order("제출시각", desc=True)
-                        .limit(1))
-            res = q.execute()
-            row = (res.data or [None])[0]
-            if row:
-                out: dict[str,int] = {}
-                for iid in item_ids:
-                    key = f"점수_{iid}"
-                    if key in row and row[key] is not None and str(row[key]).strip() != "":
-                        try:
-                            out[iid] = int(row[key])
-                        except Exception:
-                            pass
-                return out
-        except Exception as e:
-            try: st.warning(f"Supabase 조회 실패({_etype}): {e}", icon="⚠️")
-            except Exception: pass
-
-        # 2) 폴백: 구글시트(기존 로직 유지)
+    def _stage_scores_any_evaluator(_year: int, _etype: str, _target_sabun: str) -> dict[str, int]:
         try:
             ws = _ensure_eval_resp_sheet(int(_year), item_ids)
             header = _retry(ws.row_values, 1) or []; hmap = {n: i+1 for i, n in enumerate(header)}
@@ -1989,7 +1962,8 @@ def _stage_scores_any_evaluator(_year: int, _etype: str, _target_sabun: str) -> 
             return out
         except Exception:
             return {}
-# ◇◇ 일괄 적용(현재 사용자의 '편집 대상' 컬럼에만 적용)
+
+    # ◇◇ 일괄 적용(현재 사용자의 '편집 대상' 컬럼에만 적용)
     _year_safe = int(st.session_state.get("eval2_year", datetime.now(tz=tz_kst()).year))
     _eval_type_safe = str(st.session_state.get("eval_type") or st.session_state.get("eval2_type") or ("자기"))
     kbase = f"E2_{_year_safe}_{_eval_type_safe}_{me_sabun}_{target_sabun}"
@@ -3766,3 +3740,77 @@ def gs_flush():
                 raise
     st.session_state.gs_queue = []
 # ===== End helpers =====
+
+# === OVERRIDES: DB-first 조회 안정화 (2025-10-31) ===
+def read_my_eval_rows(year: int, sabun: str):
+    """
+    DB-first 조회: eval_responses에서 평가자사번 기준 조회
+    실패 시 빈 DataFrame을 반환.
+    """
+    import pandas as _pd
+    try:
+        _y = int(year)
+        _s = str(sabun)
+    except Exception:
+        return _pd.DataFrame()
+    try:
+        res = supabase.table("eval_responses").select("*").eq("연도", _y).eq("평가자사번", _s).execute()
+        data = res.data or []
+        df = _pd.DataFrame(data)
+        if df.empty:
+            return df
+        # 최신 제출 우선
+        for col in ("제출시각","평가유형","평가대상사번"):
+            if col not in df.columns:
+                df[col] = None
+        df = df.sort_values(["평가유형","평가대상사번","제출시각"], ascending=[True, True, False]).reset_index(drop=True)
+        return df
+    except Exception:
+        # Supabase 장애 시 빈 df
+        return _pd.DataFrame()
+
+def _stage_scores_any_evaluator(year: int, eval_type: str, target_sabun: str, evaluator_sabun: str, item_ids):
+    """
+    특정 평가자(evaluator_sabun)가 특정 대상(target_sabun)에 대해 가장 최근 제출한 점수 묶음 반환.
+    반환: dict{ '점수_ITM0001': 3, ... }  (항목 없으면 기본 3)
+    """
+    import pandas as _pd
+    scores = {}
+    try:
+        _y = int(year)
+        _etype = str(eval_type)
+        _t = str(target_sabun)
+        _e = str(evaluator_sabun)
+        # 최신 제출 1건
+        q = (
+            supabase.table("eval_responses")
+            .select("*")
+            .eq("연도", _y)
+            .eq("평가유형", _etype)
+            .eq("평가대상사번", _t)
+            .eq("평가자사번", _e)
+            .order("제출시각", desc=True)
+            .limit(1)
+            .execute()
+        )
+        rows = q.data or []
+        if rows:
+            row = rows[0]
+            for iid in item_ids:
+                key = f"점수_{iid}"
+                v = row.get(key, 3)
+                try:
+                    v = int(v)
+                except Exception:
+                    v = 3
+                scores[key] = max(1, min(5, v))
+        else:
+            # 기본값 3
+            for iid in item_ids:
+                scores[f"점수_{iid}"] = 3
+    except Exception:
+        # 장애 시 기본값 3
+        for iid in item_ids:
+            scores[f"점수_{iid}"] = 3
+    return scores
+# === END OVERRIDES ===
