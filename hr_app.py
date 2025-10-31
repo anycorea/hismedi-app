@@ -7,36 +7,6 @@ import os
 import streamlit as st
 from supabase import create_client, Client
 
-# ==== BOOT HARDENING (2025-10-31) =============================================
-SHEETS_DISABLED_ON_BOOT = True
-
-def _sheets_disabled_guard():
-    import streamlit as _st
-    _st.warning("Google Sheets access is disabled on boot (DB-first mode). Use Admin sync for Sheets.", icon="🛡️")
-
-def get_book():
-    if SHEETS_DISABLED_ON_BOOT:
-        _sheets_disabled_guard()
-        return None
-
-def _get_gspread_client_for_sync_v1():
-    if SHEETS_DISABLED_ON_BOOT:
-        _sheets_disabled_guard()
-        raise RuntimeError("Sheets client disabled on boot")
-
-def _ws(name: str):
-    if SHEETS_DISABLED_ON_BOOT:
-        _sheets_disabled_guard()
-        raise RuntimeError("Worksheet disabled on boot")
-
-def read_sheet_df(sheet_name: str):
-    import pandas as _pd
-    if SHEETS_DISABLED_ON_BOOT:
-        return _pd.DataFrame()
-
-def _boot_probe(msg: str):
-    pass
-# =============================================================================
 APP_TITLE = st.secrets.get("app", {}).get("TITLE", "HISMEDI - 인사/HR")
 st.set_page_config(page_title=APP_TITLE, layout="wide")
 
@@ -1620,7 +1590,19 @@ def ensure_eval_items_sheet():
                 return
             raise
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False)
+def read_eval_items_df(only_active: bool = True) -> pd.DataFrame:
+    try:
+        q = supabase.table("eval_items").select("*")
+        if only_active:
+            q = q.eq("활성", True)
+        res = q.order("순서", desc=False).execute()
+        df = pd.DataFrame(res.data or [])
+        return df.reset_index(drop=True)
+    except Exception as e:
+        st.warning(f"Supabase 평가_항목 조회 실패: {e}")
+        return pd.DataFrame(columns=["항목ID","항목","내용","순서","활성","비고","설명","유형","구분"])
+
 def read_eval_items_df(only_active: bool = False) -> pd.DataFrame:
     try:
         q = supabase.table("eval_items").select("*")
