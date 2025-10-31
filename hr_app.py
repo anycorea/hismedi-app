@@ -3741,150 +3741,67 @@ def gs_flush():
     st.session_state.gs_queue = []
 # ===== End helpers =====
 
-# === OVERRIDES: DB-first 조회 안정화 (2025-10-31) ===
-def read_my_eval_rows(year: int, sabun: str):
-    """
-    DB-first 조회: eval_responses에서 평가자사번 기준 조회
-    실패 시 빈 DataFrame을 반환.
-    """
-    import pandas as _pd
-    try:
-        _y = int(year)
-        _s = str(sabun)
-    except Exception:
-        return _pd.DataFrame()
-    try:
-        res = supabase.table("eval_responses").select("*").eq("연도", _y).eq("평가자사번", _s).execute()
-        data = res.data or []
-        df = _pd.DataFrame(data)
-        if df.empty:
-            return df
-        # 최신 제출 우선
-        for col in ("제출시각","평가유형","평가대상사번"):
-            if col not in df.columns:
-                df[col] = None
-        df = df.sort_values(["평가유형","평가대상사번","제출시각"], ascending=[True, True, False]).reset_index(drop=True)
-        return df
-    except Exception:
-        # Supabase 장애 시 빈 df
-        return _pd.DataFrame()
-
-def _stage_scores_any_evaluator(year: int, eval_type: str, target_sabun: str, evaluator_sabun: str, item_ids):
-    """
-    특정 평가자(evaluator_sabun)가 특정 대상(target_sabun)에 대해 가장 최근 제출한 점수 묶음 반환.
-    반환: dict{ '점수_ITM0001': 3, ... }  (항목 없으면 기본 3)
-    """
-    import pandas as _pd
-    scores = {}
-    try:
-        _y = int(year)
-        _etype = str(eval_type)
-        _t = str(target_sabun)
-        _e = str(evaluator_sabun)
-        # 최신 제출 1건
-        q = (
-            supabase.table("eval_responses")
-            .select("*")
-            .eq("연도", _y)
-            .eq("평가유형", _etype)
-            .eq("평가대상사번", _t)
-            .eq("평가자사번", _e)
-            .order("제출시각", desc=True)
-            .limit(1)
-            .execute()
-        )
-        rows = q.data or []
-        if rows:
-            row = rows[0]
-            for iid in item_ids:
-                key = f"점수_{iid}"
-                v = row.get(key, 3)
-                try:
-                    v = int(v)
-                except Exception:
-                    v = 3
-                scores[key] = max(1, min(5, v))
-        else:
-            # 기본값 3
-            for iid in item_ids:
-                scores[f"점수_{iid}"] = 3
-    except Exception:
-        # 장애 시 기본값 3
-        for iid in item_ids:
-            scores[f"점수_{iid}"] = 3
-    return scores
-# === END OVERRIDES ===
-
-# === OVERRIDES: Dashboard uses Supabase eval_latest (2025-10-31) ===
+# === OVERRIDES: Sync UX 분리 (Admin 전용 시트 동기화 / 사용자 새로고침) 2025-10-31 ===
 try:
-    import streamlit as st  # ensure available in this scope
+    import streamlit as st
 except Exception:
     pass
 
-def _compute_total_from_row(row: dict) -> float:
-    """점수_ITMxxxx 컬럼을 모아 100점 환산 총점을 계산(소수1자리). 항목 없으면 0."""
-    try:
-        keys = [k for k in row.keys() if isinstance(k, str) and k.startswith("점수_ITM")]
-        if not keys:
-            return 0.0
-        vals = []
-        for k in keys:
-            v = row.get(k, 3)
+def _safe_call(func_name: str, *args, **kwargs):
+    fn = globals().get(func_name)
+    if callable(fn):
+        return fn(*args, **kwargs)
+    return False
+
+def render_left_sync_buttons():
+    col1, col2 = st.columns([1,1])
+    with col1:
+        if st.button("새로고침(캐시 무시)", help="앱 캐시만 비우고 Supabase에서 다시 불러옵니다."):
             try:
-                v = int(v)
+                if '_dash_eval_scores_for_year_cached' in globals():
+                    _dash_eval_scores_for_year_cached.clear()
+                for k, v in list(globals().items()):
+                    if k.startswith("_cache_") and hasattr(v, "clear"):
+                        v.clear()
             except Exception:
-                v = 3
-            vals.append(max(1, min(5, v)))
-        return round(sum(vals) * (100.0 / (len(vals)*5)), 1)
-    except Exception:
-        return 0.0
+                pass
+            try:
+                bump_eval_cache()
+            except Exception:
+                st.session_state['eval_cache_bust'] = st.session_state.get('eval_cache_bust', 0) + 1
+            st.rerun()
+    with col2:
+        st.caption("시트 연동은 관리자 메뉴에서만 수행")
 
-@st.cache_data(ttl=60)
-def _dash_eval_scores_for_year_cached(_year: int, _bust: int) -> dict:
-    """
-    Supabase의 eval_latest 뷰에서 연도별 최신 제출만 읽어
-    {(평가대상사번, 평가유형) -> (총점, 제출시각)} 맵을 반환.
-    """
-    import pandas as _pd
-    try:
-        _y = int(_year)
-    except Exception:
-        return {}
-    try:
-        res = supabase.table("eval_latest").select("*").eq("연도", _y).execute()
-        rows = res.data or []
-    except Exception:
-        return {}
-    if not rows:
-        return {}
-    # 표준화
-    out = {}
-    for r in rows:
-        tgt = str(r.get("평가대상사번", "")).strip()
-        et  = str(r.get("평가유형", "")).strip()
-        if not tgt or not et:
-            continue
-        total = _compute_total_from_row(r)
-        ts = r.get("제출시각")
-        out[(tgt, et)] = (total, ts)
-    return out
-
-def _dash_eval_scores_for_year(_year: int) -> dict:
-    """
-    기존 시트 기반 구현을 대체: Supabase eval_latest만 조회.
-    세션의 cache bust 토큰을 키에 포함하여 저장/제출 직후 즉시 반영 가능.
-    """
-    try:
-        bust = int(st.session_state.get("eval_cache_bust", 0))
-    except Exception:
-        bust = 0
-    return _dash_eval_scores_for_year_cached(int(_year), bust)
-
-def bump_eval_cache():
-    """저장/제출 성공 직후 호출하면 대시보드 캐시 무효화"""
-    try:
-        import time
-        st.session_state['eval_cache_bust'] = int(time.time())
-    except Exception:
-        pass
+def render_admin_sync_tools():
+    st.subheader("🔁 동기화 도구 (시트 ↔ Supabase)")
+    st.caption("관리자 전용: 대량 동기화/백업용. 일반 조회/대시보드는 Supabase를 직접 조회합니다.")
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("시트 → DB 동기화", help="구글시트 내용을 Supabase에 업서트"):
+            with st.spinner("시트→DB 동기화 중..."):
+                _safe_call("sync_sheet_to_supabase_employees_v1")
+                _safe_call("sync_sheet_to_supabase_eval_items_v1")
+                _safe_call("sync_sheet_to_supabase_job_specs_v1")
+                _safe_call("sync_sheet_to_supabase_acl_v1")
+                _safe_call("sync_sheet_to_supabase_eval_responses_v1")
+            try:
+                bump_eval_cache()
+            except Exception:
+                st.session_state['eval_cache_bust'] = st.session_state.get('eval_cache_bust', 0) + 1
+            st.success("시트→DB 동기화 완료")
+    with c2:
+        if st.button("DB → 시트 동기화", help="Supabase 최신본을 구글시트에 반영"):
+            with st.spinner("DB→시트 동기화 중..."):
+                _safe_call("sync_supabase_to_sheet_employees_v1")
+                _safe_call("sync_supabase_to_sheet_eval_items_v1")
+                _safe_call("sync_supabase_to_sheet_job_specs_v1")
+                _safe_call("sync_supabase_to_sheet_acl_v1")
+                _safe_call("sync_supabase_to_sheet_eval_responses_v1")
+            st.success("DB→시트 동기화 완료")
+            try:
+                if '_dash_eval_scores_for_year_cached' in globals():
+                    _dash_eval_scores_for_year_cached.clear()
+            except Exception:
+                pass
 # === END OVERRIDES ===
