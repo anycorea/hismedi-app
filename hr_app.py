@@ -24,7 +24,7 @@ def get_supabase() -> Client:
     return create_client(url, key)
 
 supabase = get_supabase()
-# caption removed
+st.caption("✅ Supabase 연결 OK")  # config 이후에 출력
 # ────────────────────────────────────────────────────────────────
 
 def _ensure_capacity(ws, min_row: int, min_col: int):
@@ -1805,61 +1805,55 @@ def tab_eval(emp_df: pd.DataFrame):
 
 # --- 제출 여부 / 저장값 조회 -------------------------------
     def has_submitted(_year: int, _type: str, _target_sabun: str) -> bool:
-        """해당 연도+유형+대상자의 '상태'가 제출/완료인지 검사(평가자 무관).
-        Supabase `eval_responses` 기준으로 조회한다.
-        """
+        """해당 연도+유형+대상자의 '상태'가 제출/완료인지 검사(평가자 무관)."""
         try:
-            res = (supabase.table("eval_responses")
-                   .select("상태")
-                   .eq("연도", int(_year))
-                   .eq("평가유형", str(_type))
-                   .eq("평가대상사번", str(_target_sabun))
-                   .execute())
-            rows = res.data or []
-            for r in rows:
-                s = str(r.get("상태","")).strip()
-                if s in {"제출","완료"}:
-                    return True
-            return False
-        except Exception:
-            return False
-def read_eval_saved_scores(year: int, eval_type: str, target_sabun: str, evaluator_sabun: str) -> Tuple[dict, dict]:
-        """현 평가자 기준 저장된 점수/메타 로드 (Supabase 우선).
-        - key: (연도, 평가유형, 평가대상사번, 평가자사번)
-        - 점수 컬럼: 점수_{항목ID}
-        - 메타: 상태, 잠금, 제출시각, 총점
-        """
+            ws = _ensure_eval_resp_sheet(int(_year), item_ids)
+            header = _retry(ws.row_values, 1) or []; hmap = {n: i+1 for i, n in enumerate(header)}
+            values = _ws_values(ws)
+            cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cS=hmap.get("상태")
+            if not all([cY, cT, cTS, cS]): return False
+            for r in values[1:]:
+                try:
+                    if (str(r[cY-1]).strip()==str(_year)
+                        and str(r[cT-1]).strip()==_type
+                        and str(r[cTS-1]).strip()==str(_target_sabun)):
+                        if str(r[cS-1]).strip() in {"제출","완료"}: return True
+                except: pass
+        except: pass
+        return False
+
+    def read_eval_saved_scores(year: int, eval_type: str, target_sabun: str, evaluator_sabun: str) -> Tuple[dict, dict]:
+        """현 평가자 기준 저장된 점수/메타 로드"""
         try:
-            res = (supabase.table("eval_responses")
-                   .select("*")
-                   .eq("연도", int(year))
-                   .eq("평가유형", str(eval_type))
-                   .eq("평가대상사번", str(target_sabun))
-                   .eq("평가자사번", str(evaluator_sabun))
-                   .execute())
-            rows = res.data or []
-            if not rows:
-                return {}, {}
-            # 최신 제출 기준 정렬
-            def ts(x):
-                v = str(x.get("제출시각","")).strip()
-                return v
-            rows.sort(key=ts, reverse=True)
-            row = rows[0]
+            ws = _ensure_eval_resp_sheet(int(year), item_ids)
+            header = _retry(ws.row_values, 1) or []; hmap = {n: i+1 for i, n in enumerate(header)}
+            values = _ws_values(ws)
+            cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
+            row_idx = 0
+            for i in range(2, len(values)+1):
+                r = values[i-1]
+                try:
+                    if (str(r[cY-1]).strip()==str(year) and str(r[cT-1]).strip()==str(eval_type)
+                        and str(r[cTS-1]).strip()==str(target_sabun) and str(r[cES-1]).strip()==str(evaluator_sabun)):
+                        row_idx = i; break
+                except: pass
+            if row_idx == 0: return {}, {}
+            row = values[row_idx-1]
             scores = {}
-            for k, v in row.items():
-                if isinstance(k, str) and k.startswith("점수_"):
-                    iid = k.split("_",1)[1]
-                    try:
-                        iv = int(v) if v is not None and str(v).strip() != "" else None
-                    except Exception:
-                        iv = None
-                    if iv is not None:
-                        scores[iid] = iv
-            meta = {k: row.get(k, "") for k in ["상태","잠금","제출시각","총점"]}
+            for iid in item_ids:
+                col = hmap.get(f"점수_{iid}")
+                if col:
+                    try: v = int(str(row[col-1]).strip() or "0")
+                    except: v = 0
+                    if v: scores[iid] = v
+            meta = {}
+            for k in ["상태","잠금","제출시각","총점"]:
+                c = hmap.get(k)
+                if c and c-1 < len(row): meta[k] = row[c-1]
             return scores, meta
         except Exception:
             return {}, {}
+
 # --- 대상 선택 + 유형 자동결정 -------------------------------
     glob_sab, glob_name = get_global_target()
     st.session_state.setdefault("eval2_target_sabun", (glob_sab if my_role!="employee" else me_sabun))
