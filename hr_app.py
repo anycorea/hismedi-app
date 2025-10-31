@@ -1260,18 +1260,53 @@ AUTH_HEADERS=["사번","이름","역할","범위유형","부서1","부서2","대
 AUTH_SHEET = "권한"
 AUTH_HEADERS = ["사번","이름","역할","범위유형","부서1","부서2","대상사번","활성","비고"]
 
-@st.cache_data(ttl=300, show_spinner=False)
+
+@st.cache_data(ttl=120, show_spinner=False)
 def read_auth_df(only_enabled: bool = True) -> pd.DataFrame:
     """
-    권한 시트 우선 로딩 → 누락 시 빈 df.
-    필수 컬럼 보강, dtype 정리, boolean 정규화까지 한 번에.
+    권한 데이터 로딩:
+      1) Supabase 'acl' 테이블을 1차 소스로 사용 (빠르고 일관성↑)
+      2) 실패 시 구글시트 '권한'을 폴백
     """
+    # 1) Supabase 우선
+    try:
+        res = supabase.table("acl").select("*").execute()
+        rows = res.data or []
+        df = pd.DataFrame(rows)
+        if not df.empty:
+            # dtype/필수 컬럼 정리
+            for c in ["사번","이름","역할","범위유형","부서1","부서2","대상사번","비고"]:
+                if c not in df.columns:
+                    df[c] = ""
+                df[c] = df[c].astype(str).fillna("").map(lambda s: s.strip())
+            if "활성" not in df.columns:
+                df["활성"] = False
+            df["활성"] = df["활성"].map(_to_bool).fillna(False).astype(bool)
+            if only_enabled:
+                df = df[df["활성"] == True].copy()
+            return df[AUTH_HEADERS]
+    except Exception:
+        pass
+
+    # 2) 폴백: 구글시트
     try:
         ws = get_book().worksheet(AUTH_SHEET)
         raw = _ws_get_all_records(ws)
         df = pd.DataFrame(raw)
     except Exception:
         df = pd.DataFrame(columns=AUTH_HEADERS)
+
+    for c in AUTH_HEADERS:
+        if c not in df.columns:
+            df[c] = "" if c != "활성" else False
+
+    for c in ["사번","이름","역할","범위유형","부서1","부서2","대상사번","비고"]:
+        df[c] = df[c].astype(str).fillna("").map(lambda s: s.strip())
+    df["활성"] = df["활성"].map(_to_bool).fillna(False).astype(bool)
+
+    if only_enabled:
+        df = df[df["활성"] == True].copy()
+    return df[AUTH_HEADERS]
 
     # 필수 컬럼 보강
     for c in AUTH_HEADERS:
@@ -3420,39 +3455,47 @@ def tab_admin_acl(emp_df: pd.DataFrame):
     )
 
     # 저장: 전체 덮어쓰기
-    if st.button("권한 전체 반영 (시트 저장)", type="primary", use_container_width=True, disabled=not can_edit):
+    
+if st.button("권한 전체 반영 (저장)", type="primary", use_container_width=True, disabled=not can_edit):
         try:
-            # 사번 라벨 → 실제 사번
+            # 1) 라벨 → 실제 사번 매핑 및 파생 컬럼
             inv_label = {v: k for k, v in label_by_sabun.items()}
             save_df = edited.copy()
             save_df["사번"] = save_df["사번"].map(lambda v: inv_label.get(str(v).strip(), str(v).split(" - ",1)[0].strip()))
-            # 이름 파생
             save_df["이름"] = save_df["사번"].map(lambda s: emp_lookup.get(str(s).strip(), "")).fillna("").astype(str)
 
-            # 헤더/값 준비
-            ws = get_book().worksheet(AUTH_SHEET)
-            _retry(ws.update, "1:1", [AUTH_HEADERS], value_input_option="USER_ENTERED")
-
-            values = []
+            # 2) Supabase 우선 저장 (write-through)
+            payload = []
             for _, r in save_df[AUTH_HEADERS].iterrows():
-                values.append([r.get(c, "") for c in AUTH_HEADERS])
+                obj = {c: (bool(r[c]) if c=="활성" else str(r[c]).strip()) for c in AUTH_HEADERS}
+                obj["활성"] = bool(_to_bool(obj["활성"]))
+                payload.append(obj)
 
-            if values:
-                _retry(ws.update, f"2:{len(values)+1}", values, value_input_option="USER_ENTERED")
-            # 값이 0개면 헤더 아래를 정리
+            if payload:
+                supabase.table("acl").upsert(
+                    payload,
+                    on_conflict="사번,역할,범위유형,부서1,부서2,대상사번"
+                ).execute()
+
+            # 3) Google Sheets 미러 (비차단적 배치)
+            ws = get_book().worksheet(AUTH_SHEET)
+            gs_enqueue_range(ws, "1:1", [AUTH_HEADERS], value_input_option="USER_ENTERED")
+            if payload:
+                values = [[r.get(c, "") for c in AUTH_HEADERS] for r in payload]
+                gs_enqueue_range(ws, f"2:{len(values)+1}", values, value_input_option="USER_ENTERED")
             else:
                 try:
                     ws.resize(rows=2)
                 except Exception:
                     pass
+            gs_flush()
 
-            try:
-                st.cache_data.clear()
-            except Exception:
-                pass
-            st.success("권한 시트 저장 완료", icon="✅")
+            try: st.cache_data.clear()
+            except Exception: pass
+            st.success("권한 저장 완료 (Supabase ↔ 시트 동기화)", icon="✅")
         except Exception as e:
             st.exception(e)
+
 
 def tab_help():
     st.markdown("""
