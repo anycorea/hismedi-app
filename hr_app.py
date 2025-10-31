@@ -3521,18 +3521,20 @@ def main():
         st.caption(f"DB연결 {kst_now_str()}")
         st.markdown(f"- 사용자: **{u.get('이름','')} ({u.get('사번','')})**")
 
-        # 상단 컨트롤: [로그아웃] | [동기화]
+        
+
+        # 상단 컨트롤: [로그아웃] | [새로고침(캐시 무시)]
         c1, c2 = st.columns([1, 1], gap="small")
         with c1:
             if st.button("로그아웃", key="btn_logout", use_container_width=True):
                 logout()
         with c2:
-            clicked_sync = st.button("🔄 동기화", key="sync_left", use_container_width=True, help="캐시를 비우고 구글시트에서 다시 불러옵니다.")
-            if _debounce_passed("__sync_left", 1.0, clicked_sync):
-                force_sync(min_interval=25)
+            # 새로고침(캐시 무시): 시트에 접근하지 않고 Supabase 재조회
+            render_left_sync_buttons()
 
         # 좌측 메뉴
         render_staff_picker_left(emp_df)
+
 
     with right:
         tabs = st.tabs(["인사평가","직무기술서","직무능력평가","관리자","도움말"])
