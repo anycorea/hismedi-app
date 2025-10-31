@@ -1076,37 +1076,40 @@ def read_sheet_df(sheet_name: str) -> pd.DataFrame:
 
 @st.cache_data(ttl=600, show_spinner=False)
 def read_emp_df() -> pd.DataFrame:
-    """직원 시트 표준화: 필수 컬럼 보강 및 dtype 정리"""
-    df = read_sheet_df(EMP_SHEET)
-
-    # 최소 컬럼 보강
-    for c in ["사번", "이름", "PIN_hash", "재직여부", "적용여부"]:
+    """직원: Supabase 우선 → 실패/빈 경우 시트 폴백"""
+    try:
+        res = supabase.table("employees").select("*").execute()
+        data = res.data or []
+        if data:
+            df = pd.DataFrame(data)
+        else:
+            df = pd.DataFrame(columns=["사번","이름","PIN_hash","재직여부","적용여부"])
+    except Exception as e:
+        st.warning(f"Supabase 직원 조회 실패: {e}")
+        df = read_sheet_df(EMP_SHEET)
+    for c in ["사번","이름","PIN_hash","재직여부","적용여부"]:
         if c not in df.columns:
-            df[c] = "" if c != "재직여부" else True
-
-    # dtype 정리
+            df[c] = "" if c!="재직여부" else True
     df["사번"] = df["사번"].astype(str)
-    # 재직여부는 확실히 bool로
-    for _col in ["재직여부", "적용여부"]:
-        if _col in df.columns:
-            df[_col] = df[_col].map(
-                lambda v: True if str(v).strip() == "" else _to_bool(v)
-            ).astype(bool)
-
-    return df
+    for b in ["재직여부","적용여부"]:
+        if b in df.columns:
+            df[b] = df[b].map(lambda x: str(x).strip().lower() in ["true","1","y","yes","t"] if isinstance(x,str) else bool(x))
+    df = df.fillna({"PIN_hash":""})
+    try: df = df[df["적용여부"]==True]
+    except Exception: pass
+    return df.reset_index(drop=True)
 
 def read_acl_df(only_enabled: bool = True) -> pd.DataFrame:
-    """권한(acl): Supabase 우선 → 비어 있으면 시트에서 로드 후 업서트"""
+    """권한(acl): Supabase DB 전용 (비어있으면 빈 df 반환)"""
     try:
         q = supabase.table("acl").select("*")
         if only_enabled:
             q = q.eq("활성", True)
         res = q.execute()
-        data = res.data or []
-        if data:
-            return pd.DataFrame(data)
+        return pd.DataFrame(res.data or [])
     except Exception as e:
         st.warning(f"Supabase 권한 조회 실패: {e}")
+        return pd.DataFrame(columns=AUTH_HEADERS)
 
     # 폴백: 시트 -> Supabase 업서트(초기/수동 동기화 대체)
     gclient = _get_gspread_client_for_sync_v1()
@@ -1262,16 +1265,19 @@ AUTH_HEADERS = ["사번","이름","역할","범위유형","부서1","부서2","�
 
 @st.cache_data(ttl=300, show_spinner=False)
 def read_auth_df(only_enabled: bool = True) -> pd.DataFrame:
-    """
-    권한 시트 우선 로딩 → 누락 시 빈 df.
-    필수 컬럼 보강, dtype 정리, boolean 정규화까지 한 번에.
-    """
-    try:
-        ws = get_book().worksheet(AUTH_SHEET)
-        raw = _ws_get_all_records(ws)
-        df = pd.DataFrame(raw)
-    except Exception:
-        df = pd.DataFrame(columns=AUTH_HEADERS)
+    """권한: Supabase('acl') 스키마 정리"""
+    acl_df = read_acl_df(only_enabled=only_enabled)
+    if acl_df is None or acl_df.empty:
+        return pd.DataFrame(columns=AUTH_HEADERS)
+    for c in AUTH_HEADERS:
+        if c not in acl_df.columns:
+            acl_df[c] = "" if c!="활성" else True
+    acl_df["사번"] = acl_df["사번"].astype(str)
+    if "대상사번" in acl_df.columns:
+        acl_df["대상사번"] = acl_df["대상사번"].astype(str)
+    if "활성" in acl_df.columns:
+        acl_df["활성"] = acl_df["활성"].map(lambda x: str(x).strip().lower() in ["true","1","y","yes","t"] if isinstance(x,str) else bool(x))
+    return acl_df[AUTH_HEADERS].reset_index(drop=True)
 
     # 필수 컬럼 보강
     for c in AUTH_HEADERS:
@@ -1590,21 +1596,36 @@ def ensure_eval_items_sheet():
                 return
             raise
 
-@st.cache_data(ttl=300, show_spinner=False)
-def read_eval_items_df(only_active: bool = False) -> pd.DataFrame:
+@st.cache_data(ttl=600, show_spinner=False)
+def read_eval_items_df(only_active: bool = True) -> pd.DataFrame:
     try:
         q = supabase.table("eval_items").select("*")
         if only_active:
             q = q.eq("활성", True)
-        res = q.execute()
-        data = res.data or []
-        if data:
-            df = pd.DataFrame(data)
-            if "순서" in df.columns:
-                df = df.sort_values("순서", na_position="last")
-            return df
+        res = q.order("순서", desc=False).execute()
+        df = pd.DataFrame(res.data or [])
+        return df.reset_index(drop=True)
     except Exception as e:
         st.warning(f"Supabase 평가_항목 조회 실패: {e}")
+        return pd.DataFrame(columns=["항목ID","항목","내용","순서","활성","비고","설명","유형","구분"])
+
+@st.cache_data(ttl=600, show_spinner=False)
+def read_eval_items_df(only_active: bool = True) -> pd.DataFrame:
+    """평가_항목: Supabase(eval_items) 조회 (순서 asc)"""
+    try:
+        q = supabase.table("eval_items").select("*")
+        if only_active:
+            q = q.eq("활성", True)
+        res = q.order("순서", desc=False).execute()
+        df = pd.DataFrame(res.data or [])
+        # 기본 컬럼 보강
+        for c in ["항목ID","항목","내용","순서","활성","비고","설명","유형","구분"]:
+            if c not in df.columns:
+                df[c] = "" if c not in ["순서","활성"] else (0 if c=="순서" else True)
+        return df.reset_index(drop=True)
+    except Exception as e:
+        st.warning(f"Supabase 평가_항목 조회 실패: {e}")
+        return pd.DataFrame(columns=["항목ID","항목","내용","순서","활성","비고","설명","유형","구분"])
 
     # 폴백: 시트 로드 + 업서트
     st.info("Supabase 평가_항목 비어있음 → 시트에서 로드하여 Supabase에 업서트")
@@ -1650,30 +1671,28 @@ def _emp_name_by_sabun(emp_df: pd.DataFrame, sabun: str) -> str:
 def upsert_eval_response(emp_df: pd.DataFrame, year: int, eval_type: str,
                          target_sabun: str, evaluator_sabun: str,
                          scores: dict[str,int], status="제출")->dict:
-    """
-    DB-first: eval_responses 업서트(on_conflict: 연도,평가유형,평가대상사번,평가자사번)
-    - 시트는 더 이상 직접 쓰지 않음 (관리자 버튼으로 DB→시트 반영 가능)
-    """
+    """인사평가: DB-first 업서트 (eval_responses)."""
     import pandas as _pd
-    # 1) 항목
     items = read_eval_items_df(True)
-    item_ids = [str(x) for x in items["항목ID"].tolist()]
-    # 2) 점수 보정 및 총점
+    item_ids = [str(x) for x in items.get("항목ID", []).tolist()] if not items.empty else []
+
     def _c5(v):
         try: v = int(v)
         except Exception: v = 3
         return min(5, max(1, v))
+
     scores_list = [_c5(scores.get(i, 3)) for i in item_ids]
-    total = round(sum(scores_list)*(100.0/max(1,len(item_ids)*5)), 1)
-    # 3) 메타
+    total = round(sum(scores_list) * (100.0 / max(1, len(item_ids)*5)), 1)
+
     tname = _emp_name_by_sabun(emp_df, target_sabun)
     ename = _emp_name_by_sabun(emp_df, evaluator_sabun)
+
     try:
         now = kst_now_str()
     except Exception:
         import datetime
         now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    # 4) payload
+
     payload = {
         "연도": int(year),
         "평가유형": str(eval_type),
@@ -1688,23 +1707,28 @@ def upsert_eval_response(emp_df: pd.DataFrame, year: int, eval_type: str,
     }
     for iid, sc in zip(item_ids, scores_list):
         payload[f"점수_{iid}"] = sc
-    # 5) Supabase 업서트
+
     res = supabase.table("eval_responses").upsert(payload, on_conflict="연도,평가유형,평가대상사번,평가자사번").execute()
+
+    # 🔁 제출 직후 바로 보이게: 캐시 무효화 + 세션 리비전 증가
+    st.session_state["eval_rev"] = st.session_state.get("eval_rev", 0) + 1
     try:
-        st.cache_data.clear()
+        read_my_eval_rows.clear()
     except Exception:
         pass
+
     return {"action": "upsert", "total": total, "rows": len(res.data or [])}
 
 @st.cache_data(ttl=300, show_spinner=False)
-def read_my_eval_rows(year: int, sabun: str) -> pd.DataFrame:
-    """
-    DB-first 조회: eval_responses에서 평가자사번 기준 조회
-    - 실패 시 기존 시트 데이터로 안전 폴백
-    """
+def read_my_eval_rows(year: int, sabun: str, _rev: int = 0) -> pd.DataFrame:
+    """인사평가: Supabase 우선 조회 → (문제 시 최소 폴백)"""
     import pandas as _pd
     try:
-        res = supabase.table("eval_responses").select("*").eq("연도", int(year)).eq("평가자사번", str(sabun)).execute()
+        res = (supabase.table("eval_responses")
+               .select("*")
+               .eq("연도", int(year))
+               .eq("평가자사번", str(sabun))
+               .execute())
         data = res.data or []
         df = _pd.DataFrame(data)
         if df.empty:
@@ -1713,7 +1737,7 @@ def read_my_eval_rows(year: int, sabun: str) -> pd.DataFrame:
         if sort_cols:
             df = df.sort_values(sort_cols, ascending=[True, True, False]).reset_index(drop=True)
         return df
-    except Exception as e:
+    except Exception:
         try:
             name = _eval_sheet_name(year)
             ws = _ws(name)
@@ -1723,79 +1747,6 @@ def read_my_eval_rows(year: int, sabun: str) -> pd.DataFrame:
             return df
         except Exception:
             return _pd.DataFrame(columns=EVAL_BASE_HEADERS)
-
-def read_my_eval_rows(year: int, sabun: str) -> pd.DataFrame:
-    name=_eval_sheet_name(year)
-    try:
-        ws=_ws(name); df=pd.DataFrame(_ws_get_all_records(ws))
-    except Exception: return pd.DataFrame(columns=EVAL_BASE_HEADERS)
-    if df.empty: return df
-    if "평가자사번" in df.columns: df=df[df["평가자사번"].astype(str)==str(sabun)]
-    sort_cols=[c for c in ["평가유형","평가대상사번","제출시각"] if c in df.columns]
-    if sort_cols: df=df.sort_values(sort_cols, ascending=[True,True,False]).reset_index(drop=True)
-    return df
-
-
-# === DB-first helpers (placed before tab_eval) ===
-def _db_has_submitted(_year: int, _type: str, _target_sabun: str) -> bool:
-    try:
-        _y = int(_year)
-        res = (
-            supabase.table("eval_responses")
-            .select("상태,제출시각")
-            .eq("연도", _y)
-            .eq("평가유형", str(_type))
-            .eq("평가대상사번", str(_target_sabun))
-            .order("제출시각", desc=True)
-            .limit(1)
-            .execute()
-        )
-        rows = res.data or []
-        if not rows:
-            return False
-        r0 = rows[0]
-        stt = str(r0.get("상태") or "").strip()
-        ts  = r0.get("제출시각")
-        return (stt in {"제출","완료"}) or (ts not in (None, "", "NULL"))
-    except Exception:
-        return False
-
-def _db_read_eval_saved_scores(year: int, eval_type: str, target_sabun: str, evaluator_sabun: str):
-    try:
-        _y = int(year)
-        q = (
-            supabase.table("eval_responses")
-            .select("*")
-            .eq("연도", _y)
-            .eq("평가유형", str(eval_type))
-            .eq("평가대상사번", str(target_sabun))
-            .eq("평가자사번", str(evaluator_sabun))
-            .order("제출시각", desc=True)
-            .limit(1)
-            .execute()
-        )
-        rows = q.data or []
-        if not rows:
-            return {}, {}
-        row = rows[0]
-        scores = {}
-        for k, v in row.items():
-            if isinstance(k, str) and k.startswith("점수_ITM"):
-                try:
-                    v = int(v)
-                except Exception:
-                    v = 3
-                scores[k] = max(1, min(5, v))
-        meta = {
-            "총점": row.get("총점"),
-            "상태": row.get("상태"),
-            "제출시각": row.get("제출시각"),
-            "잠금": row.get("잠금"),
-        }
-        return scores, meta
-    except Exception:
-        return {}, {}
-# === END DB-first helpers ===
 
 def tab_eval(emp_df: pd.DataFrame):
     """인사평가 탭 (심플·자동 라우팅)
@@ -1962,16 +1913,16 @@ def tab_eval(emp_df: pd.DataFrame):
 # --- 선행조건 / 잠금 -------------------------------
     prereq_ok, prereq_msg = True, ""
     if eval_type == "1차":
-        if not _db_has_submitted(year, "자기", target_sabun):
+        if not has_submitted(year, "자기", target_sabun):
             prereq_ok = False; prereq_msg = "대상자의 '자기평가'가 제출되어야 1차평가를 입력할 수 있습니다."
     elif eval_type == "2차":
-        if not _db_has_submitted(year, "1차", target_sabun):
+        if not has_submitted(year, "1차", target_sabun):
             prereq_ok = False; prereq_msg = "대상자의 '1차평가'가 제출되어야 2차평가를 입력할 수 있습니다."
 
-    saved_scores, saved_meta = _db_read_eval_saved_scores(int(year), eval_type, target_sabun, me_sabun)
+    saved_scores, saved_meta = read_eval_saved_scores(int(year), eval_type, target_sabun, me_sabun)
     is_locked = (str(saved_meta.get("잠금","")).upper()=="Y") or (str(saved_meta.get("상태","")).strip() in {"제출","완료"})
     # 직원 자기평가: 제출되어 있으면 항상 잠금
-    if my_role=="employee" and eval_type=="자기" and _db_has_submitted(year,"자기",me_sabun):
+    if my_role=="employee" and eval_type=="자기" and has_submitted(year,"자기",me_sabun):
         is_locked = True
 
     if is_locked:
@@ -2220,124 +2171,73 @@ JOBDESC_HEADERS = [
 ]
 
 def ensure_jobdesc_sheet():
-    wb = get_book()
-    try:
-        ws = wb.worksheet(JOBDESC_SHEET)
-        header = _retry(ws.row_values, 1) or []
-        need = [h for h in JOBDESC_HEADERS if h not in header]
-        if need:
-            if AUTO_FIX_HEADERS:
-                _retry(ws.update, "1:1", [header + need])
-            else:
-                try:
-                    st.warning("시트 헤더에 다음 컬럼이 없습니다: " + ", ".join(need) + "\n"                               "→ 시트를 직접 수정한 뒤 좌측 🔄 동기화 버튼을 눌러주세요.", icon="⚠️")
-                except Exception:
-                    pass
-        return ws
-    except Exception as e:
-        # WorksheetNotFound 등
-        ws = _retry(wb.add_worksheet, title=JOBDESC_SHEET, rows=2000, cols=80)
-        _retry(ws.update, "A1", [JOBDESC_HEADERS])
-        return ws
+    """DB-first 모드: 시트 보장은 수행하지 않음 (관리자 동기화에서만 사용)."""
+    return None
 
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False)
 def read_jobdesc_df(_rev: int = 0) -> pd.DataFrame:
-    ensure_jobdesc_sheet()
-    ws = _ws(JOBDESC_SHEET)
-    df = pd.DataFrame(_ws_get_all_records(ws))
-    if df.empty:
+    """직무기술서: Supabase(job_specs)에서 조회"""
+    try:
+        res = supabase.table("job_specs").select("*").execute()
+        data = res.data or []
+        df = pd.DataFrame(data)
+        order_cols = [c for c in ["사번","연도","버전"] if c in df.columns]
+        if order_cols:
+            asc = [True, False, False][:len(order_cols)]
+            df = df.sort_values(order_cols, ascending=asc).reset_index(drop=True)
+        return df
+    except Exception as e:
+        st.warning(f"Supabase 직무기술서 조회 실패: {e}")
         return pd.DataFrame(columns=JOBDESC_HEADERS)
-    # 타입 정리
-    for c in JOBDESC_HEADERS:
-        if c in df.columns:
-            df[c] = df[c].astype(str)
-    for c in ["연도","버전"]:
-        if c in df.columns:
-            def _i(x):
-                try:
-                    return int(float(str(x).strip()))
-                except:
-                    return 0
-            df[c] = df[c].apply(_i)
-    if "사번" in df.columns:
-        df["사번"] = df["사번"].astype(str)
-    return df
 
 def _jd_latest_for(sabun: str, year: int) -> dict | None:
-    df = read_jobdesc_df(st.session_state.get("jobdesc_rev", 0))
-    if df.empty:
-        return None
-    sub = df[(df["사번"].astype(str) == str(sabun)) & (df["연도"].astype(int) == int(year))].copy()
-    if sub.empty:
-        return None
+    """해당 사번/연도의 최신 버전 JD 1건 (DB)"""
     try:
-        sub["버전"] = sub["버전"].astype(int)
+        res = (supabase.table("job_specs")
+               .select("*")
+               .eq("사번", str(sabun))
+               .eq("연도", int(year))
+               .order("버전", desc=True)
+               .limit(1)
+               .execute())
+        rows = res.data or []
+        return None if not rows else rows[0]
     except Exception:
-        pass
-    sub = sub.sort_values(["버전"], ascending=[False]).reset_index(drop=True)
-    row = sub.iloc[0].to_dict()
-    for k, v in row.items():
-        row[k] = ("" if v is None else str(v))
-    return row
+        return None
 
 def _jobdesc_next_version(sabun: str, year: int) -> int:
-    df = read_jobdesc_df(st.session_state.get("jobdesc_rev", 0))
-    if df.empty:
+    """DB에서 해당 사번/연도의 다음 버전 번호 계산"""
+    try:
+        res = (supabase.table("job_specs")
+               .select("버전")
+               .eq("사번", str(sabun))
+               .eq("연도", int(year))
+               .order("버전", desc=True)
+               .limit(1)
+               .execute())
+        rows = res.data or []
+        return (int(rows[0]["버전"]) + 1) if rows else 1
+    except Exception:
         return 1
-    sub = df[(df["사번"] == str(sabun)) & (df["연도"].astype(int) == int(year))]
-    return 1 if sub.empty else int(sub["버전"].astype(int).max()) + 1
 
 def upsert_jobdesc(rec: dict, as_new_version: bool = False) -> dict:
-    ensure_jobdesc_sheet()
-    ws = _ws(JOBDESC_SHEET)
-    header = _retry(ws.row_values, 1)
-    hmap = {n: i + 1 for i, n in enumerate(header)}
-    sabun = str(rec.get("사번", "")).strip()
-    year = int(rec.get("연도", 0))
-
-    # 이름 자동 채움
-    rec["이름"] = _emp_name_by_sabun(read_emp_df(), sabun)
-
-    # 버전 결정
-    if as_new_version:
+    """직무기술서: Supabase 업서트 (on_conflict: 연도,사번,버전)"""
+    sabun = str(rec.get("사번","")).strip()
+    year  = int(rec.get("연도", 0) or 0)
+    ver   = int(rec.get("버전", 0) or 0)
+    if as_new_version or ver <= 0:
         ver = _jobdesc_next_version(sabun, year)
-    else:
-        try_ver = int(str(rec.get("버전", 0) or 0))
-        if try_ver <= 0:
-            ver = _jobdesc_next_version(sabun, year)
-        else:
-            df = read_jobdesc_df(st.session_state.get("jobdesc_rev", 0))
-            exist = not df[(df["사번"] == sabun) & (df["연도"].astype(int) == year) & (df["버전"].astype(int) == try_ver)].empty
-            ver = try_ver if exist else 1
-    rec["버전"] = int(ver)
-    rec["제출시각"] = kst_now_str()
-    rec["이름"] = _emp_name_by_sabun(read_emp_df(), sabun)
-
-    values = _ws_values(ws)
-    row_idx = 0
-    cS, cY, cV = hmap.get("사번"), hmap.get("연도"), hmap.get("버전")
-    for i in range(2, len(values) + 1):
-        row = values[i - 1]
-        if str(row[cS - 1]).strip() == sabun and str(row[cY - 1]).strip() == str(year) and str(row[cV - 1]).strip() == str(ver):
-            row_idx = i
-            break
-
-    def build_row():
-        buf = [""] * len(header)
-        for k, v in rec.items():
-            c = hmap.get(k)
-            if c:
-                buf[c - 1] = v
-        return buf
-
-    if row_idx == 0:
-        _retry(ws.append_row, build_row(), value_input_option="USER_ENTERED")
-        st.cache_data.clear()
-        return {"action": "insert", "version": ver}
-    else:
-        _ws_batch_row(ws, row_idx, hmap, rec)
-        st.cache_data.clear()
-        return {"action": "update", "version": ver}
+        rec["버전"] = ver
+    try:
+        now = kst_now_str()
+    except Exception:
+        import datetime
+        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    if "개정일" in rec and not str(rec.get("개정일","")).strip():
+        rec["개정일"] = now.split(" ")[0]
+    res = supabase.table("job_specs").upsert(rec, on_conflict="연도,사번,버전").execute()
+    st.cache_data.clear()
+    return {"action": "insert" if as_new_version else "update", "version": ver, "rows": len(res.data or [])}
 
 # ────────────────────────────────────────────────────────────────────────────
 # 인쇄용 HTML (심플 · 모든 섹션 포함 · 첫 페이지부터 연속 인쇄)
@@ -3583,35 +3483,18 @@ def main():
         st.caption(f"DB연결 {kst_now_str()}")
         st.markdown(f"- 사용자: **{u.get('이름','')} ({u.get('사번','')})**")
 
-        
-
-        
-        # 상단 컨트롤: [로그아웃] | [새로고침(캐시 무시)]
+        # 상단 컨트롤: [로그아웃] | [동기화]
         c1, c2 = st.columns([1, 1], gap="small")
         with c1:
             if st.button("로그아웃", key="btn_logout", use_container_width=True):
                 logout()
         with c2:
-            # 새로고침(캐시 무시): 시트에 접근하지 않고 Supabase 재조회
-            if st.button("새로고침(캐시 무시)", key="btn_refresh_cache_bypass", use_container_width=True,
-                         help="앱 캐시만 비우고 Supabase에서 다시 불러옵니다."):
-                try:
-                    if '_dash_eval_scores_for_year_cached' in globals():
-                        _dash_eval_scores_for_year_cached.clear()
-                    for k, v in list(globals().items()):
-                        if k.startswith("_cache_") and hasattr(v, "clear"):
-                            v.clear()
-                except Exception:
-                    pass
-                try:
-                    bump_eval_cache()
-                except Exception:
-                    st.session_state['eval_cache_bust'] = st.session_state.get('eval_cache_bust', 0) + 1
-                st.rerun()
+            clicked_sync = st.button("🔄 동기화", key="sync_left", use_container_width=True, help="캐시를 비우고 구글시트에서 다시 불러옵니다.")
+            if _debounce_passed("__sync_left", 1.0, clicked_sync):
+                force_sync(min_interval=25)
 
         # 좌측 메뉴
         render_staff_picker_left(emp_df)
-
 
     with right:
         tabs = st.tabs(["인사평가","직무기술서","직무능력평가","관리자","도움말"])
@@ -3819,131 +3702,3 @@ def gs_flush():
                 raise
     st.session_state.gs_queue = []
 # ===== End helpers =====
-
-# === OVERRIDES: Sync UX 분리 (Admin 전용 시트 동기화 / 사용자 새로고침) 2025-10-31 ===
-try:
-    import streamlit as st
-except Exception:
-    pass
-
-def _safe_call(func_name: str, *args, **kwargs):
-    fn = globals().get(func_name)
-    if callable(fn):
-        return fn(*args, **kwargs)
-    return False
-
-def render_left_sync_buttons():
-    col1, col2 = st.columns([1,1])
-    with col1:
-        if st.button("새로고침(캐시 무시)", help="앱 캐시만 비우고 Supabase에서 다시 불러옵니다."):
-            try:
-                if '_dash_eval_scores_for_year_cached' in globals():
-                    _dash_eval_scores_for_year_cached.clear()
-                for k, v in list(globals().items()):
-                    if k.startswith("_cache_") and hasattr(v, "clear"):
-                        v.clear()
-            except Exception:
-                pass
-            try:
-                bump_eval_cache()
-            except Exception:
-                st.session_state['eval_cache_bust'] = st.session_state.get('eval_cache_bust', 0) + 1
-            st.rerun()
-    with col2:
-        st.caption("시트 연동은 관리자 메뉴에서만 수행")
-
-def render_admin_sync_tools():
-    st.subheader("🔁 동기화 도구 (시트 ↔ Supabase)")
-    st.caption("관리자 전용: 대량 동기화/백업용. 일반 조회/대시보드는 Supabase를 직접 조회합니다.")
-    c1, c2 = st.columns(2)
-    with c1:
-        if st.button("시트 → DB 동기화", help="구글시트 내용을 Supabase에 업서트"):
-            with st.spinner("시트→DB 동기화 중..."):
-                _safe_call("sync_sheet_to_supabase_employees_v1")
-                _safe_call("sync_sheet_to_supabase_eval_items_v1")
-                _safe_call("sync_sheet_to_supabase_job_specs_v1")
-                _safe_call("sync_sheet_to_supabase_acl_v1")
-                _safe_call("sync_sheet_to_supabase_eval_responses_v1")
-            try:
-                bump_eval_cache()
-            except Exception:
-                st.session_state['eval_cache_bust'] = st.session_state.get('eval_cache_bust', 0) + 1
-            st.success("시트→DB 동기화 완료")
-    with c2:
-        if st.button("DB → 시트 동기화", help="Supabase 최신본을 구글시트에 반영"):
-            with st.spinner("DB→시트 동기화 중..."):
-                _safe_call("sync_supabase_to_sheet_employees_v1")
-                _safe_call("sync_supabase_to_sheet_eval_items_v1")
-                _safe_call("sync_supabase_to_sheet_job_specs_v1")
-                _safe_call("sync_supabase_to_sheet_acl_v1")
-                _safe_call("sync_supabase_to_sheet_eval_responses_v1")
-            st.success("DB→시트 동기화 완료")
-            try:
-                if '_dash_eval_scores_for_year_cached' in globals():
-                    _dash_eval_scores_for_year_cached.clear()
-            except Exception:
-                pass
-# === END OVERRIDES ===
-
-
-
-# === DB-first helpers (do not depend on sheets) ===
-def _db__db_has_submitted(_year: int, _type: str, _target_sabun: str) -> bool:
-    try:
-        _y = int(_year)
-        res = (
-            supabase.table("eval_responses")
-            .select("상태,제출시각")
-            .eq("연도", _y)
-            .eq("평가유형", str(_type))
-            .eq("평가대상사번", str(_target_sabun))
-            .order("제출시각", desc=True)
-            .limit(1)
-            .execute()
-        )
-        rows = res.data or []
-        if not rows:
-            return False
-        r0 = rows[0]
-        stt = str(r0.get("상태") or "").strip()
-        ts  = r0.get("제출시각")
-        return (stt in {"제출","완료"}) or (ts not in (None, "", "NULL"))
-    except Exception:
-        return False
-
-def _db__db_read_eval_saved_scores(year: int, eval_type: str, target_sabun: str, evaluator_sabun: str):
-    try:
-        _y = int(year)
-        q = (
-            supabase.table("eval_responses")
-            .select("*")
-            .eq("연도", _y)
-            .eq("평가유형", str(eval_type))
-            .eq("평가대상사번", str(target_sabun))
-            .eq("평가자사번", str(evaluator_sabun))
-            .order("제출시각", desc=True)
-            .limit(1)
-            .execute()
-        )
-        rows = q.data or []
-        if not rows:
-            return {}, {}
-        row = rows[0]
-        scores = {}
-        for k, v in row.items():
-            if isinstance(k, str) and k.startswith("점수_ITM"):
-                try:
-                    v = int(v)
-                except Exception:
-                    v = 3
-                scores[k] = max(1, min(5, v))
-        meta = {
-            "총점": row.get("총점"),
-            "상태": row.get("상태"),
-            "제출시각": row.get("제출시각"),
-            "잠금": row.get("잠금"),
-        }
-        return scores, meta
-    except Exception:
-        return {}, {}
-# === END DB-first helpers ===
