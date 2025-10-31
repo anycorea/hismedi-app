@@ -35,8 +35,7 @@ def read_sheet_df(sheet_name: str):
         return _pd.DataFrame()
 
 def _boot_probe(msg: str):
-    import streamlit as _st, datetime as _dt
-    _st.caption(f"🩺 {_dt.datetime.now().strftime('%H:%M:%S')} – {msg}")
+    pass
 # =============================================================================
 APP_TITLE = st.secrets.get("app", {}).get("TITLE", "HISMEDI - 인사/HR")
 st.set_page_config(page_title=APP_TITLE, layout="wide")
