@@ -1900,16 +1900,16 @@ def tab_eval(emp_df: pd.DataFrame):
 # --- 선행조건 / 잠금 -------------------------------
     prereq_ok, prereq_msg = True, ""
     if eval_type == "1차":
-        if not has_submitted(year, "자기", target_sabun):
+        if not _db_has_submitted(year, "자기", target_sabun):
             prereq_ok = False; prereq_msg = "대상자의 '자기평가'가 제출되어야 1차평가를 입력할 수 있습니다."
     elif eval_type == "2차":
-        if not has_submitted(year, "1차", target_sabun):
+        if not _db_has_submitted(year, "1차", target_sabun):
             prereq_ok = False; prereq_msg = "대상자의 '1차평가'가 제출되어야 2차평가를 입력할 수 있습니다."
 
-    saved_scores, saved_meta = read_eval_saved_scores(int(year), eval_type, target_sabun, me_sabun)
+    saved_scores, saved_meta = _db_read_eval_saved_scores(int(year), eval_type, target_sabun, me_sabun)
     is_locked = (str(saved_meta.get("잠금","")).upper()=="Y") or (str(saved_meta.get("상태","")).strip() in {"제출","완료"})
     # 직원 자기평가: 제출되어 있으면 항상 잠금
-    if my_role=="employee" and eval_type=="자기" and has_submitted(year,"자기",me_sabun):
+    if my_role=="employee" and eval_type=="자기" and _db_has_submitted(year,"자기",me_sabun):
         is_locked = True
 
     if is_locked:
@@ -3822,3 +3822,66 @@ def render_admin_sync_tools():
             except Exception:
                 pass
 # === END OVERRIDES ===
+
+
+
+# === DB-first helpers (do not depend on sheets) ===
+def _db__db_has_submitted(_year: int, _type: str, _target_sabun: str) -> bool:
+    try:
+        _y = int(_year)
+        res = (
+            supabase.table("eval_responses")
+            .select("상태,제출시각")
+            .eq("연도", _y)
+            .eq("평가유형", str(_type))
+            .eq("평가대상사번", str(_target_sabun))
+            .order("제출시각", desc=True)
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        if not rows:
+            return False
+        r0 = rows[0]
+        stt = str(r0.get("상태") or "").strip()
+        ts  = r0.get("제출시각")
+        return (stt in {"제출","완료"}) or (ts not in (None, "", "NULL"))
+    except Exception:
+        return False
+
+def _db__db_read_eval_saved_scores(year: int, eval_type: str, target_sabun: str, evaluator_sabun: str):
+    try:
+        _y = int(year)
+        q = (
+            supabase.table("eval_responses")
+            .select("*")
+            .eq("연도", _y)
+            .eq("평가유형", str(eval_type))
+            .eq("평가대상사번", str(target_sabun))
+            .eq("평가자사번", str(evaluator_sabun))
+            .order("제출시각", desc=True)
+            .limit(1)
+            .execute()
+        )
+        rows = q.data or []
+        if not rows:
+            return {}, {}
+        row = rows[0]
+        scores = {}
+        for k, v in row.items():
+            if isinstance(k, str) and k.startswith("점수_ITM"):
+                try:
+                    v = int(v)
+                except Exception:
+                    v = 3
+                scores[k] = max(1, min(5, v))
+        meta = {
+            "총점": row.get("총점"),
+            "상태": row.get("상태"),
+            "제출시각": row.get("제출시각"),
+            "잠금": row.get("잠금"),
+        }
+        return scores, meta
+    except Exception:
+        return {}, {}
+# === END DB-first helpers ===
