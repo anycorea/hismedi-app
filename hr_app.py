@@ -3510,7 +3510,6 @@ def tab_help():
 # Main App
 # ═════════════════════════════════════════════════════════════════════════════
 def main():
-    _boot_probe('main() entered')
     emp_df = read_emp_df()
     st.session_state["emp_df"] = emp_df.copy()
 
