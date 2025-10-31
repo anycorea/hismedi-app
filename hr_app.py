@@ -1034,20 +1034,14 @@ def read_emp_df() -> pd.DataFrame:
     except Exception as e:
         st.warning(f"Supabase 직원 조회 실패: {e}")
         df = read_sheet_df(EMP_SHEET)
-
-    # 최소 컬럼 보강
     for c in ["사번", "이름", "PIN_hash", "재직여부", "적용여부"]:
         if c not in df.columns:
             df[c] = "" if c != "재직여부" else True
-
-    # dtype/정규화
     df["사번"] = df["사번"].astype(str)
     for _col in ["재직여부", "적용여부"]:
         if _col in df.columns:
             df[_col] = df[_col].map(lambda x: str(x).strip().lower() in ["true","1","y","yes","t"] if isinstance(x, str) else bool(x))
     df = df.fillna({"PIN_hash":""})
-
-    # 최신/재직자만 (기존 로직 유지)
     try:
         df = df[df["적용여부"]==True]
     except Exception:
@@ -1196,26 +1190,56 @@ AUTH_SHEET = "권한"
 AUTH_HEADERS = ["사번","이름","역할","범위유형","부서1","부서2","대상사번","활성","비고"]
 
 @st.cache_data(ttl=300, show_spinner=False)
-@st.cache_data(ttl=300, show_spinner=False)
 def read_auth_df(only_enabled: bool = True) -> pd.DataFrame:
-    """
-    권한: Supabase('acl') 우선 사용. (시트는 read_acl_df가 폴백/초기화 수행)
-    AUTH_HEADERS 스키마로 정렬/보강하여 반환.
-    """
+    """권한: Supabase('acl') 우선 사용. AUTH_HEADERS 스키마로 정리"""
     acl_df = read_acl_df(only_enabled=only_enabled)
     if acl_df is None or acl_df.empty:
         return pd.DataFrame(columns=AUTH_HEADERS)
-    # 컬럼 정렬/보강
     for c in AUTH_HEADERS:
         if c not in acl_df.columns:
-            acl_df[c] = "" if c not in ["활성"] else True
-    # dtype 정리
+            acl_df[c] = "" if c != "활성" else True
     acl_df["사번"] = acl_df["사번"].astype(str)
     if "대상사번" in acl_df.columns:
         acl_df["대상사번"] = acl_df["대상사번"].astype(str)
     if "활성" in acl_df.columns:
         acl_df["활성"] = acl_df["활성"].map(lambda x: str(x).strip().lower() in ["true","1","y","yes","t"] if isinstance(x, str) else bool(x))
     return acl_df[AUTH_HEADERS].reset_index(drop=True)
+
+def read_auth_df(only_enabled: bool = True) -> pd.DataFrame:
+    """
+    권한 시트 우선 로딩 → 누락 시 빈 df.
+    필수 컬럼 보강, dtype 정리, boolean 정규화까지 한 번에.
+    """
+    try:
+        ws = get_book().worksheet(AUTH_SHEET)
+        raw = _ws_get_all_records(ws)
+        df = pd.DataFrame(raw)
+    except Exception:
+        df = pd.DataFrame(columns=AUTH_HEADERS)
+
+    # 필수 컬럼 보강
+    for c in AUTH_HEADERS:
+        if c not in df.columns:
+            df[c] = ""
+
+    # dtype 정리
+    df["사번"] = df["사번"].astype(str).str.strip()
+    df["이름"] = df["이름"].astype(str).str.strip()
+    df["역할"] = df["역할"].astype(str).str.strip()
+    df["범위유형"] = df["범위유형"].astype(str).str.strip()
+    for c in ["부서1","부서2","대상사번","비고"]:
+        df[c] = df[c].astype(str)
+
+    # 활성 → bool
+    if "활성" in df.columns:
+        df["활성"] = df["활성"].map(lambda v: str(v).strip().lower() in ("true","1","y","yes","t"))
+    else:
+        df["활성"] = True
+
+    if only_enabled:
+        df = df[df["활성"] == True]
+
+    return df.reset_index(drop=True)
 
 def is_admin(sabun:str)->bool:
     try:
@@ -1570,55 +1594,69 @@ def _emp_name_by_sabun(emp_df: pd.DataFrame, sabun: str) -> str:
 def upsert_eval_response(emp_df: pd.DataFrame, year: int, eval_type: str,
                          target_sabun: str, evaluator_sabun: str,
                          scores: dict[str,int], status="제출")->dict:
-    items=read_eval_items_df(True); item_ids=[str(x) for x in items["항목ID"].tolist()]
-    ws=_ensure_eval_resp_sheet(year, item_ids)
-    header=_retry(ws.row_values, 1); hmap={n:i+1 for i,n in enumerate(header)}
-    def c5(v):
-        try: v=int(v)
-        except: v=3
-        return min(5,max(1,v))
-    scores_list=[c5(scores.get(i,3)) for i in item_ids]
-    total=round(sum(scores_list)*(100.0/max(1,len(item_ids)*5)),1)
-    tname=_emp_name_by_sabun(emp_df, target_sabun); ename=_emp_name_by_sabun(emp_df, evaluator_sabun)
-    now=kst_now_str()
-    values = _ws_values(ws); cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
-    row_idx=0
-    for i in range(2, len(values)+1):
-        r=values[i-1]
-        try:
-            if (str(r[cY-1]).strip()==str(year) and str(r[cT-1]).strip()==eval_type and
-                str(r[cTS-1]).strip()==str(target_sabun) and str(r[cES-1]).strip()==str(evaluator_sabun)):
-                row_idx=i; break
-        except: pass
-    if row_idx==0:
-        buf=[""]*len(header)
-        def put(k,v): c=hmap.get(k); buf[c-1]=v if c else ""
-        put("연도", int(year)); put("평가유형", eval_type)
-        put("평가대상사번", str(target_sabun)); put("평가대상이름", tname)
-        put("평가자사번", str(evaluator_sabun)); put("평가자이름", ename)
-        put("총점", total); put("상태", status); put("제출시각", now)
-        for iid, sc in zip(item_ids, scores_list):
-            c=hmap.get(f"점수_{iid}")
-            if c: buf[c-1]=sc
-        _retry(ws.append_row, buf, value_input_option="USER_ENTERED")
+    """인사평가: DB-first 업서트 (eval_responses). 시트는 더 이상 직접 쓰지 않음."""
+    import pandas as _pd
+    items = read_eval_items_df(True)
+    item_ids = [str(x) for x in items["항목ID"].tolist()]
+    def _c5(v):
+        try: v = int(v)
+        except Exception: v = 3
+        return min(5, max(1, v))
+    scores_list = [_c5(scores.get(i, 3)) for i in item_ids]
+    total = round(sum(scores_list)*(100.0/max(1,len(item_ids)*5)), 1)
+    tname = _emp_name_by_sabun(emp_df, target_sabun)
+    ename = _emp_name_by_sabun(emp_df, evaluator_sabun)
+    try:
+        now = kst_now_str()
+    except Exception:
+        import datetime
+        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    payload = {
+        "연도": int(year),
+        "평가유형": str(eval_type),
+        "평가대상사번": str(target_sabun),
+        "평가대상이름": str(tname),
+        "평가자사번": str(evaluator_sabun),
+        "평가자이름": str(ename),
+        "총점": total,
+        "상태": status,
+        "제출시각": now,
+        "잠금": "",
+    }
+    for iid, sc in zip(item_ids, scores_list):
+        payload[f"점수_{iid}"] = sc
+    res = supabase.table("eval_responses").upsert(payload, on_conflict="연도,평가유형,평가대상사번,평가자사번").execute()
+    try:
         st.cache_data.clear()
-        return {"action":"insert","total":total}
-    else:
-        payload={"총점": total, "상태": status, "제출시각": now, "평가대상이름": tname, "평가자이름": ename}
-        for iid, sc in zip(item_ids, scores_list): payload[f"점수_{iid}"]=sc
-        def _batch_row(ws, idx, hmap, kv):
-            upd=[]
-            for k,v in kv.items():
-                c=hmap.get(k)
-                if c:
-                    a1=gspread.utils.rowcol_to_a1(idx, c)
-                    upd.append({"range": a1, "values": [[v]]})
-            if upd: _retry(ws.batch_update, upd)
-        _batch_row(ws, row_idx, hmap, payload)
-        st.cache_data.clear()
-        return {"action":"update","total":total}
+    except Exception:
+        pass
+    return {"action": "upsert", "total": total, "rows": len(res.data or [])}
 
 @st.cache_data(ttl=300, show_spinner=False)
+def read_my_eval_rows(year: int, sabun: str) -> pd.DataFrame:
+    """인사평가: Supabase 우선 조회 → 시트 폴백"""
+    import pandas as _pd
+    try:
+        res = supabase.table("eval_responses").select("*").eq("연도", int(year)).eq("평가자사번", str(sabun)).execute()
+        data = res.data or []
+        df = _pd.DataFrame(data)
+        if df.empty:
+            return _pd.DataFrame(columns=EVAL_BASE_HEADERS)
+        sort_cols = [c for c in ["평가유형","평가대상사번","제출시각"] if c in df.columns]
+        if sort_cols:
+            df = df.sort_values(sort_cols, ascending=[True, True, False]).reset_index(drop=True)
+        return df
+    except Exception:
+        try:
+            name = _eval_sheet_name(year)
+            ws = _ws(name)
+            df = _pd.DataFrame(_ws_get_all_records(ws))
+            if "평가자사번" in df.columns:
+                df = df[df["평가자사번"].astype(str) == str(sabun)]
+            return df
+        except Exception:
+            return _pd.DataFrame(columns=EVAL_BASE_HEADERS)
+
 def read_my_eval_rows(year: int, sabun: str) -> pd.DataFrame:
     name=_eval_sheet_name(year)
     try:
@@ -2053,51 +2091,10 @@ JOBDESC_HEADERS = [
 ]
 
 def ensure_jobdesc_sheet():
-    wb = get_book()
-    try:
-        ws = wb.worksheet(JOBDESC_SHEET)
-        header = _retry(ws.row_values, 1) or []
-        need = [h for h in JOBDESC_HEADERS if h not in header]
-        if need:
-            if AUTO_FIX_HEADERS:
-                _retry(ws.update, "1:1", [header + need])
-            else:
-                try:
-                    st.warning("시트 헤더에 다음 컬럼이 없습니다: " + ", ".join(need) + "\n"                               "→ 시트를 직접 수정한 뒤 좌측 🔄 동기화 버튼을 눌러주세요.", icon="⚠️")
-                except Exception:
-                    pass
-        return ws
-    except Exception as e:
-        # WorksheetNotFound 등
-        ws = _retry(wb.add_worksheet, title=JOBDESC_SHEET, rows=2000, cols=80)
-        _retry(ws.update, "A1", [JOBDESC_HEADERS])
-        return ws
-
-@st.cache_data(ttl=600, show_spinner=False)
-def read_jobdesc_df(_rev: int = 0) -> pd.DataFrame:
-    ensure_jobdesc_sheet()
-def ensure_jobdesc_sheet():
     """DB-first 모드: 시트 보장은 수행하지 않음 (관리자 동기화에서만 사용)."""
     return None
 
-def _jd_latest_for(sabun: str, year: int) -> dict | None:
-    df = read_jobdesc_df(st.session_state.get("jobdesc_rev", 0))
-    if df.empty:
-        return None
-    sub = df[(df["사번"].astype(str) == str(sabun)) & (df["연도"].astype(int) == int(year))].copy()
-    if sub.empty:
-        return None
-    try:
-        sub["버전"] = sub["버전"].astype(int)
-    except Exception:
-        pass
-    sub = sub.sort_values(["버전"], ascending=[False]).reset_index(drop=True)
-    row = sub.iloc[0].to_dict()
-    for k, v in row.items():
-        row[k] = ("" if v is None else str(v))
-    return row
-
-def _jobdesc_next_version(sabun: str, year: int) -> int:
+@st.cache_data(ttl=600, show_spinner=False)
 @st.cache_data(ttl=300, show_spinner=False)
 def read_jobdesc_df(_rev: int = 0) -> pd.DataFrame:
     """직무기술서: Supabase(job_specs)에서 조회"""
@@ -2114,12 +2111,6 @@ def read_jobdesc_df(_rev: int = 0) -> pd.DataFrame:
         st.warning(f"Supabase 직무기술서 조회 실패: {e}")
         return pd.DataFrame(columns=JOBDESC_HEADERS)
 
-def upsert_jobdesc(rec: dict, as_new_version: bool = False) -> dict:
-    ensure_jobdesc_sheet()
-    ws = _ws(JOBDESC_SHEET)
-    header = _retry(ws.row_values, 1)
-    hmap = {n: i + 1 for i, n in enumerate(header)}
-    sabun = str(rec.get("사번", "")).strip()
 def _jd_latest_for(sabun: str, year: int) -> dict | None:
     """해당 사번/연도의 최신 버전 JD 1건 (DB)"""
     try:
@@ -2135,8 +2126,6 @@ def _jd_latest_for(sabun: str, year: int) -> dict | None:
     except Exception:
         return None
 
-def _jd_print_html(jd: dict, meta: dict) -> str:
-    def g(k): return (str(jd.get(k, "")) or "—").strip()
 def _jobdesc_next_version(sabun: str, year: int) -> int:
     """DB에서 해당 사번/연도의 다음 버전 번호 계산"""
     try:
@@ -2144,17 +2133,22 @@ def _jobdesc_next_version(sabun: str, year: int) -> int:
                .select("버전")
                .eq("사번", str(sabun))
                .eq("연도", int(year))
+               .order("버전", desc=True)
+               .limit(1)
+               .execute())
+        rows = res.data or []
+        return (int(rows[0]["버전"]) + 1) if rows else 1
+    except Exception:
+        return 1
+
 def upsert_jobdesc(rec: dict, as_new_version: bool = False) -> dict:
     """직무기술서: Supabase 업서트 (on_conflict: 연도,사번,버전)"""
     sabun = str(rec.get("사번","")).strip()
     year  = int(rec.get("연도", 0) or 0)
     ver   = int(rec.get("버전", 0) or 0)
-
     if as_new_version or ver <= 0:
         ver = _jobdesc_next_version(sabun, year)
         rec["버전"] = ver
-
-    # 메타 보정
     try:
         now = kst_now_str()
     except Exception:
@@ -2162,37 +2156,182 @@ def upsert_jobdesc(rec: dict, as_new_version: bool = False) -> dict:
         now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     if "개정일" in rec and not str(rec.get("개정일","")).strip():
         rec["개정일"] = now.split(" ")[0]
-
     res = supabase.table("job_specs").upsert(rec, on_conflict="연도,사번,버전").execute()
     st.cache_data.clear()
     return {"action": "insert" if as_new_version else "update", "version": ver, "rows": len(res.data or [])}
 
+def _jd_print_html(jd: dict, meta: dict) -> str:
+    def g(k): return (str(jd.get(k, "")) or "—").strip()
+    def m(k): return (str(meta.get(k, "")) or "—").strip()
+
+    # Combine departments
+    dept = m('부서1')
+    if m('부서2') != '—' and m('부서2'):
+        dept = f"{dept} / {m('부서2')}" if dept and dept != '—' else m('부서2')
+
+# --- Meta rows -------------------------------
+    row1 = [("사번", m('사번')), ("이름", m('이름')), ("부서", dept or "—")]
+    row2 = [("직종", m('직종')), ("직군", m('직군')), ("직무명", m('직무명'))]
+    row3 = [("연도", m('연도')), ("버전", m('버전')), ("제정일", m('제정일')), ("개정일", m('개정일')), ("검토주기", m('검토주기'))]
+
+    # Helpers
+    def trow_3cols_kvk(title_pairs, wide_last=True):
+        cells = []
+        for i, (k, v) in enumerate(title_pairs):
+            wide_cls = " wide" if (wide_last and i == 2) else ""
+            cells.append(f"<td class='k'>{k}</td><td class='v{wide_cls}'>{v}</td>")
+        return "<tr>" + "".join(cells) + "</tr>"
+
+    def trow_5cols_kvk(title_pairs):
+        cells = []
+        for (k, v) in title_pairs:
+            cells.append(f"<td class='k'>{k}</td><td class='v'>{v}</td>")
+        return "<tr>" + "".join(cells) + "</tr>"
+
+    def block(title, body):
+        body_val = (body or "").strip() or "—"
+        return f"""
+        <section class="blk">
+          <div class="cap">{title}</div>
+          <div class="body">{body_val}</div>
+        </section>
+        """
+
+    body_html = (
+        block("직무개요", g("직무개요")) +
+        block("주요업무", g("주업무")) +
+        block("기타업무", g("기타업무")) +
+        block("자격교육요건", f"""
+            <div class="grid edu">
+              <div class="cell"><b>필요학력</b><div>{g("필요학력")}</div></div>
+              <div class="cell"><b>전공계열</b><div>{g("전공계열")}</div></div>
+              <div class="cell"><b>면허</b><div>{g("면허")}</div></div>
+              <div class="cell"><b>경력(자격요건)</b><div>{g("경력(자격요건)")}</div></div>
+
+              <div class="cell span2"><b>직원공통필수교육</b><div>{g("직원공통필수교육")}</div></div>
+              <div class="cell span2"><b>특성화교육</b><div>{g("특성화교육")}</div></div>
+              <div class="cell span2"><b>보수교육</b><div>{g("보수교육")}</div></div>
+              <div class="cell span2"><b>기타교육</b><div>{g("기타교육")}</div></div>
+            </div>
+        """)
+    )
+
+    html = f"""
+    <html>
+    <head>
+      <meta charset="utf-8" />
+      <title>직무기술서 출력</title>
+      <style>
+        :root {{ --fg:#111; --muted:#666; --line:#e5e7eb; }}
+        html, body {{
+          color: var(--fg);
+          font-family: 'Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic','Segoe UI',Roboto,system-ui,sans-serif;
+          -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+          orphans: 2; widows: 2; word-break: keep-all; overflow-wrap: anywhere;
+        }}
+        .print-wrap {{ max-width: 900px; margin: 0 auto; padding: 28px 24px; background:#fff; }}
+        .actionbar {{ display:flex; justify-content:flex-end; margin-bottom:12px; }}
+        .actionbar button {{ padding:6px 12px; border:1px solid var(--line); background:#fff; border-radius:6px; cursor:pointer; }}
+        header {{ border-bottom:1px solid var(--line); padding-bottom:10px; margin-bottom:18px; }}
+        header h1 {{ margin:0; font-size: 22px; }}
+
+        /* === Meta tables (3 rows) === */
+        table.meta6 {{ width:100%; border-collapse:collapse; margin-top:4px; font-size:13px; color:var(--muted); table-layout:fixed; }}
+        table.meta6 td {{ padding:4px 6px; vertical-align:top; border-bottom:1px dashed var(--line); }}
+        table.meta6 td.k {{ width:10%; color:#111; font-weight:700; white-space:nowrap; }}
+        table.meta6 td.v {{ width:20%; color:#333; overflow:hidden; text-overflow:ellipsis; }}
+        table.meta6 td.v.wide {{ width:30%; }} /* 부서/직무명 등 넓은 칸 */
+
+        table.meta10 {{ width:100%; border-collapse:collapse; margin-top:4px; font-size:13px; color:var(--muted); table-layout:fixed; }}
+        table.meta10 td {{ padding:4px 6px; vertical-align:top; border-bottom:1px dashed var(--line); }}
+        table.meta10 td.k {{ width:10%; color:#111; font-weight:700; white-space:nowrap; }}
+        table.meta10 td.v {{ width:10%; color:#333; overflow:hidden; text-overflow:ellipsis; }}
+
+        /* === Blocks with SMALL captions and 11px body === */
+        .blk {{ break-inside: auto; page-break-inside: auto; margin: 12px 0 16px; }}
+        .blk .cap {{ font-size:13px; color:#111; font-weight:700; margin: 2px 0 6px; }}
+        .blk .body {{ white-space: pre-wrap; font-size:11px; line-height: 1.55; border:1px solid var(--line); padding:10px; border-radius:8px; min-height:60px; }}
+
+        /* Education grid */
+        .grid.edu {{ display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:8px; }}
+        .grid.edu .cell {{ border:1px solid var(--line); border-radius:8px; padding:8px; }}
+        /* INNER field labels smaller than section caption (12px < 13px) */
+        .grid.edu .cell > b {{ font-size:12px; color:#111; }}
+        .grid.edu .cell > div {{ font-size:11px; line-height:1.55; color:#333; }}
+        .grid.edu .cell.span2 {{ grid-column: 1 / -1; }} /* full-width lines for long fields */
+
+        /* Signature area */
+        .sign {{ margin-top:20px; display:flex; gap:16px; }}
+        .sign > div {{ flex:1; border:1px dashed var(--line); border-radius:8px; padding:10px; min-height:70px; }}
+        .sign .cap {{ font-size:13px; color:#111; font-weight:700; margin-bottom:6px; }}
+        .sign .body {{ font-size:11px; line-height:1.55; color:#333; }}
+
+        @media print {{
+          @page {{ size: A4; margin: 18mm 14mm; }}
+          body {{ -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
+          .actionbar {{ display:none !important; }}
+        }}
+      </style>
+    </head>
+    <body>
+      <div class="print-wrap">
+        <div class="actionbar"><button onclick="window.print()">인쇄</button></div>
+        <header>
+          <h1>직무기술서 (Job Description)</h1>
+          <!-- Row 1 -->
+          <table class="meta6">
+            {trow_3cols_kvk(row1, wide_last=True)}
+          </table>
+          <!-- Row 2 -->
+          <table class="meta6">
+            {trow_3cols_kvk(row2, wide_last=True)}
+          </table>
+          <!-- Row 3 -->
+          <table class="meta10">
+            {trow_5cols_kvk(row3)}
+          </table>
+        </header>
+        {body_html}
+        <div class="sign">
+          <div>
+            <div class="cap">직원 확인 서명</div>
+            <div class="body"></div>
+          </div>
+          <div>
+            <div class="cap">부서장 확인 서명</div>
+            <div class="body"></div>
+          </div>
+        </div>
+      </div>
+    </body>
+    </html>
+    """
+    return html
+
+# ===== JD Approval (within JD tab) =====
+JD_APPROVAL_SHEET = "직무기술서_승인"
+JD_APPROVAL_HEADERS = ["연도","사번","이름","버전","승인자사번","승인자이름","상태","승인시각","비고"]
+
 def ensure_jd_approval_sheet():
-    wb = get_book()
-    try:
-        _ = wb.worksheet(JD_APPROVAL_SHEET)
-    except WorksheetNotFound:
-        ws = _retry(wb.add_worksheet, title=JD_APPROVAL_SHEET, rows=3000, cols=20)
-        _retry(ws.update, "1:1", [JD_APPROVAL_HEADERS])
+    """DB-first: 시트 보장은 수행하지 않음."""
+    return None
 
 @st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=180, show_spinner=False)
 def read_jd_approval_df(_rev: int = 0) -> pd.DataFrame:
-    ensure_jd_approval_sheet()
+    """직무기술서_승인: Supabase(job_specs_approvals)에서 조회"""
     try:
-        ws = _ws(JD_APPROVAL_SHEET)
-        df = pd.DataFrame(_ws_get_all_records(ws))
-    except Exception:
-        df = pd.DataFrame(columns=JD_APPROVAL_HEADERS)
-    for c in JD_APPROVAL_HEADERS:
-        if c not in df.columns:
-            df[c] = ""
-    if "연도" in df.columns:
-        df["연도"] = pd.to_numeric(df["연도"], errors="coerce").fillna(0).astype(int)
-    if "버전" in df.columns:
-        df["버전"] = pd.to_numeric(df["버전"], errors="coerce").fillna(0).astype(int)
-    if "사번" in df.columns:
-        df["사번"] = df["사번"].astype(str)
-    return df
+        res = supabase.table("job_specs_approvals").select("*").execute()
+        data = res.data or []
+        df = pd.DataFrame(data)
+        base_cols = ["연도","사번","이름","버전","승인자사번","승인자이름","상태","승인시각","비고"]
+        for c in base_cols:
+            if c not in df.columns:
+                df[c] = ""
+        return df[base_cols].reset_index(drop=True)
+    except Exception as e:
+        st.warning(f"Supabase 직무기술서_승인 조회 실패: {e}")
+        return pd.DataFrame(columns=["연도","사번","이름","버전","승인자사번","승인자이름","상태","승인시각","비고"])
 
 def _ws_batch_row(ws, idx, hmap, kv: dict):
     updates = []
@@ -2215,59 +2354,38 @@ def _ws_batch_row(ws, idx, hmap, kv: dict):
         _retry(ws.spreadsheet.values_batch_update, body)
 
 def _jd_latest_version_for(sabun: str, year: int) -> int:
-    row = _jd_latest_for(sabun, int(year)) or {}
     try:
-        return int(row.get("버전", 0) or 0)
+        res = (supabase.table("job_specs")
+               .select("버전")
+               .eq("사번", str(sabun))
+               .eq("연도", int(year))
+               .order("버전", desc=True)
+               .limit(1)
+               .execute())
+        rows = res.data or []
+        return int(rows[0]["버전"]) if rows else 0
     except Exception:
         return 0
 
 def set_jd_approval(year: int, sabun: str, name: str, version: int,
-                    approver_sabun: str, approver_name: str, status: str, remark: str = "") -> dict:
-    """
-    (연도, 사번, 버전) 기준 upsert. status: '승인' | '반려'
-    """
-    ensure_jd_approval_sheet()
-    ws = _ws(JD_APPROVAL_SHEET)
-    header = _retry(ws.row_values, 1) or JD_APPROVAL_HEADERS
-    hmap = {n: i+1 for i, n in enumerate(header)}
-    values = _ws_values(ws)
-    cY = hmap.get("연도"); cS = hmap.get("사번"); cV = hmap.get("버전")
-    target_row = 0
-    for i in range(2, len(values)+1):
-        r = values[i-1] if i-1 < len(values) else []
-        try:
-            if (str(r[cY-1]).strip()==str(year) and str(r[cS-1]).strip()==str(sabun) and str(r[cV-1]).strip()==str(version)):
-                target_row = i
-                break
-        except Exception:
-            pass
-    now = kst_now_str() if "kst_now_str" in globals() else str(pd.Timestamp.now()).split(".")[0]
+                    approver_sabun: str, approver_name: str, status: str, when: str|None=None) -> dict:
+    """승인행 업서트: job_specs_approvals (on_conflict: 연도,사번,버전,승인자사번)"""
+    try:
+        when = when or kst_now_str()
+    except Exception:
+        import datetime
+        when = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     payload = {
-        "연도": int(year),
-        "사번": str(sabun),
-        "이름": str(name),
-        "버전": int(version),
-        "승인자사번": str(approver_sabun),
-        "승인자이름": str(approver_name),
-        "상태": str(status),
-        "승인시각": now,
-        "비고": str(remark or ""),
+        "연도": int(year),"사번": str(sabun),"이름": str(name),
+        "버전": int(version),"승인자사번": str(approver_sabun),"승인자이름": str(approver_name),
+        "상태": str(status),"승인시각": str(when),"비고": ""
     }
-    if target_row > 0:
-        _ws_batch_row(ws, target_row, hmap, payload)
-        try: st.cache_data.clear()
-        except Exception: pass
-        return {"action": "update", "row": target_row}
-    else:
-        rowbuf = [""] * len(header)
-        for k, v in payload.items():
-            c = hmap.get(k)
-            if c:
-                rowbuf[c-1] = v
-        _retry(ws.append_row, rowbuf, value_input_option="USER_ENTERED")
-        try: st.cache_data.clear()
-        except Exception: pass
-        return {"action": "insert", "row": len(values) + 1}
+    res = supabase.table("job_specs_approvals").upsert(payload, on_conflict="연도,사번,버전,승인자사번").execute()
+    try:
+        read_jd_approval_df.clear()
+    except Exception:
+        pass
+    return {"action":"upsert", "rows": len(res.data or [])}
 
 def tab_job_desc(emp_df: pd.DataFrame):
     """JD editor with 2-row header and 4-row education layout + print button order handled by _jd_print_html()."""
@@ -2353,30 +2471,237 @@ def tab_job_desc(emp_df: pd.DataFrame):
         st.rerun()
     st.caption(f"현재: **{'수정모드' if st.session_state['jd2_edit_mode'] else '보기모드'}**")
     edit_mode = bool(st.session_state["jd2_edit_mode"])
-def ensure_jd_approval_sheet():
-    """DB-first: 시트 보장은 수행하지 않음."""
-    return None
 
+    # 현재/초기 레코드
+    jd_saved = _jd_latest_for(target_sabun, int(year))
+
+    def _safe_get(col, default=""):
+        try:
+            return emp_df.loc[emp_df["사번"].astype(str) == str(target_sabun)].get(col, default).values[0] if col in emp_df.columns else default
+        except Exception:
+            return default
+
+    jd_current = jd_saved if jd_saved else {
+        "사번": str(target_sabun), "연도": int(year), "버전": 0,
+        "부서1": _safe_get("부서1",""), "부서2": _safe_get("부서2",""),
+        "작성자사번": me_sabun, "작성자이름": _emp_name_by_sabun(emp_df, me_sabun),
+        "직군": _safe_get("직군",""), "직종": _safe_get("직무",""), "직무명": "", "제정일": "", "개정일": "", "검토주기": "1년",
+        "직무개요": "", "주업무": "", "기타업무": "",
+        "필요학력": "", "전공계열": "",
+        "직원공통필수교육": "", "보수교육": "", "기타교육": "", "특성화교육": "",
+        "면허": "", "경력(자격요건)": "", "비고": ""
+    }
+
+    with st.expander("현재 저장된 직무기술서 요약", expanded=False):
+        st.write(f"**직무명:** {(jd_saved or {}).get('직무명', '')}")
+        cc = st.columns(2)
+        with cc[0]:
+            st.markdown("**직무개요**")
+            st.markdown(_jd_plain_html((jd_saved or {}).get("직무개요","") or "—"), unsafe_allow_html=True)
+            st.markdown("**주업무**")
+            st.markdown(_jd_plain_html((jd_saved or {}).get("주업무","") or "—"), unsafe_allow_html=True)
+        with cc[1]:
+            st.markdown("**기타업무**")
+            st.markdown(_jd_plain_html((jd_saved or {}).get("기타업무","") or "—"), unsafe_allow_html=True)
+
+    # =================== Header Row 1 (가로) ===================
+    r1 = st.columns([1, 1, 1, 1, 1.6])
+    with r1[0]:
+        version = st.number_input("버전(없으면 자동)", min_value=0, max_value=999,
+                                  value=int(str(jd_current.get("버전", 0)) or 0),
+                                  step=1, key="jd2_ver", disabled=not edit_mode)
+    with r1[1]:
+        d_create = st.text_input("제정일", value=jd_current.get("제정일",""), key="jd2_d_create", disabled=not edit_mode)
+    with r1[2]:
+        d_update = st.text_input("개정일", value=jd_current.get("개정일",""), key="jd2_d_update", disabled=not edit_mode)
+    with r1[3]:
+        review = st.text_input("검토주기", value=jd_current.get("검토주기",""), key="jd2_review", disabled=not edit_mode)
+    with r1[4]:
+        memo = st.text_input("비고", value=jd_current.get("비고",""), key="jd2_memo", disabled=not edit_mode)
+
+    # =================== Header Row 2 (가로) ===================
+    r2 = st.columns([1, 1, 1, 1, 1.6])
+    with r2[0]:
+        dept1  = st.text_input("부서1", value=jd_current.get("부서1",""), key="jd2_dept1", disabled=not edit_mode)
+    with r2[1]:
+        dept2  = st.text_input("부서2", value=jd_current.get("부서2",""), key="jd2_dept2", disabled=not edit_mode)
+    with r2[2]:
+        group  = st.text_input("직군", value=jd_current.get("직군",""), key="jd2_group", disabled=not edit_mode)
+    with r2[3]:
+        series = st.text_input("직종", value=jd_current.get("직종",""), key="jd2_series", disabled=not edit_mode)
+    with r2[4]:
+        jobname= st.text_input("직무명", value=jd_current.get("직무명",""), key="jd2_jobname", disabled=not edit_mode)
+
+    # 본문
+    job_summary = st.text_area("직무개요", value=jd_current.get("직무개요",""), height=80,  key="jd2_summary", disabled=not edit_mode)
+    job_main    = st.text_area("주업무",   value=jd_current.get("주업무",""),   height=120, key="jd2_main",    disabled=not edit_mode)
+    job_other   = st.text_area("기타업무", value=jd_current.get("기타업무",""), height=80,  key="jd2_other",   disabled=not edit_mode)
+
+    # =================== Education/Qualification (4 rows) ===================
+    # R1: 필요학력 | 전공계열 | 면허 | 경력(자격요건)
+    e1 = st.columns([1,1,1,1])
+    with e1[0]: edu_req    = st.text_input("필요학력",        value=jd_current.get("필요학력",""),        key="jd2_edu",        disabled=not edit_mode)
+    with e1[1]: major_req  = st.text_input("전공계열",        value=jd_current.get("전공계열",""),        key="jd2_major",      disabled=not edit_mode)
+    with e1[2]: license_   = st.text_input("면허",            value=jd_current.get("면허",""),            key="jd2_license",    disabled=not edit_mode)
+    with e1[3]: career     = st.text_input("경력(자격요건)", value=jd_current.get("경력(자격요건)",""), key="jd2_career",     disabled=not edit_mode)
+
+    # R2: 직원공통필수교육 (full width)
+    edu_common = st.text_input("직원공통필수교육", value=jd_current.get("직원공통필수교육",""), key="jd2_edu_common", disabled=not edit_mode)
+
+    # R3: 특성화교육 (full width)
+    edu_spec   = st.text_input("특성화교육",       value=jd_current.get("특성화교육",""),       key="jd2_edu_spec",   disabled=not edit_mode)
+
+    # R4: 보수교육 | 기타교육
+    e4 = st.columns([1,1])
+    with e4[0]: edu_cont   = st.text_input("보수교육",        value=jd_current.get("보수교육",""),        key="jd2_edu_cont",   disabled=not edit_mode)
+    with e4[1]: edu_etc    = st.text_input("기타교육",        value=jd_current.get("기타교육",""),        key="jd2_edu_etc",    disabled=not edit_mode)
+
+    # 제출 확인
+    ca1, ca2 = st.columns([2, 1])
+    with ca1:
+        jd_attest_ok = st.checkbox(
+            "본인은 입력한 직무기술서 내용이 사실이며, 회사 정책에 따라 제출함을 확인합니다.",
+            key=f"jd_attest_ok_{year}_{target_sabun}_{me_sabun}",
+        )
+    with ca2:
+        jd_pin_input = st.text_input(
+            "PIN 재입력",
+            value="",
+            type="password",
+            key=f"jd_attest_pin_{year}_{target_sabun}_{me_sabun}",
+        )
+
+    # 버튼
+    cbtn = st.columns([1, 1])
+    with cbtn[0]:
+        do_save = st.button("제출/저장", type="primary", use_container_width=True, key="jd2_save", disabled=not edit_mode)
+    with cbtn[1]:
+        do_print = st.button("인쇄", type="secondary", use_container_width=True, key="jd2_print", disabled=False)
+
+    if do_save:
+        if not jd_attest_ok:
+            st.error("제출 전에 확인란에 체크해주세요.")
+        elif not verify_pin(me_sabun, jd_pin_input):
+            st.error("PIN이 올바르지 않습니다.")
+        else:
+            rec = {
+                "사번": str(target_sabun), "연도": int(year), "버전": int(version or 0),
+                "부서1": dept1, "부서2": dept2, "작성자사번": me_sabun, "작성자이름": _emp_name_by_sabun(emp_df, me_sabun),
+                "직군": group, "직종": series, "직무명": jobname,
+                "제정일": d_create, "개정일": d_update, "검토주기": review,
+                "직무개요": job_summary, "주업무": job_main, "기타업무": job_other,
+                "필요학력": edu_req, "전공계열": major_req,
+                "직원공통필수교육": edu_common, "보수교육": edu_cont, "기타교육": edu_etc, "특성화교육": edu_spec,
+                "면허": license_, "경력(자격요건)": career, "비고": memo
+            }
+            try:
+                rep = upsert_jobdesc(rec, as_new_version=(version == 0))
+                st.success(f"저장 완료 (버전 {rep['version']})", icon="✅")
+                st.session_state['jobdesc_rev'] = st.session_state.get('jobdesc_rev', 0) + 1
+                st.rerun()
+            except Exception as e:
+                st.exception(e)
+
+    # 인쇄
+    if do_print:
+        meta = {
+            "사번": str(target_sabun), "이름": str(target_name),
+            "부서1": str(dept1), "부서2": str(dept2),
+            "연도": int(year), "버전": int(version or (jd_current.get("버전") or 1)),
+            "작성자이름": _emp_name_by_sabun(emp_df, me_sabun),
+            "제정일": str(d_create), "개정일": str(d_update),
+            "검토주기": str(review),
+            "직종": str(series), "직군": str(group), "직무명": str(jobname),
+        }
+        html = _jd_print_html(jd_current, meta)
+        import streamlit.components.v1 as components
+
+        components.html(html, height=1000, scrolling=True)
+
+    # ===== (관리자/부서장) 승인 처리 =====
+    if am_admin_or_mgr:
+        st.markdown("### 부서장 승인")
+        appr_df = read_jd_approval_df(st.session_state.get("appr_rev", 0))
+        latest_ver = _jd_latest_version_for(target_sabun, int(year))
+        _approved = False
+        if latest_ver > 0 and not appr_df.empty:
+            _ok = appr_df[(appr_df['연도'] == int(year)) & (appr_df['사번'].astype(str) == str(target_sabun)) & (appr_df['버전'] == int(latest_ver)) & (appr_df['상태'].astype(str) == '승인')]
+            _approved = not _ok.empty
+        cur_status = ""
+        cur_when = ""
+        cur_who = ""
+        if latest_ver > 0 and not appr_df.empty:
+            sub = appr_df[(appr_df["연도"]==int(year)) & (appr_df["사번"].astype(str)==str(target_sabun)) & (appr_df["버전"]==int(latest_ver))]
+            if not sub.empty:
+                srow = sub.sort_values(["승인시각"], ascending=[False]).iloc[0].to_dict()
+                cur_status = str(srow.get("상태",""))
+                cur_when = str(srow.get("승인시각",""))
+                cur_who = str(srow.get("승인자이름",""))
+        # 의견/핀 입력 (의견을 좌측에 크게)
+        c_remark, c_pin = st.columns([4,1])
+        with c_remark:
+            if _approved:
+                st.markdown("<div class='approval-dim'>부서장 승인이 완료된 대상자입니다. (수정/변경 불가)</div>", unsafe_allow_html=True)
+            else:
+                appr_remark = st.text_input("부서장 의견", key=f"jd_appr_remark_{year}_{target_sabun}")
+        with c_pin:
+            appr_pin = st.text_input("부서장 PIN 재입력", type="password", key=f"jd_appr_pin_{year}_{target_sabun}")
+
+        if not _approved:
+            # 승인/반려 버튼
+            b1, b2 = st.columns([1,1])
+            with b1:
+                do_ok = st.button("승인", type="primary", use_container_width=True, disabled=not (latest_ver>0))
+            with b2:
+                do_rej = st.button("반려", use_container_width=True, disabled=not (latest_ver>0))
+
+            if do_ok or do_rej:
+                if not verify_pin(me_sabun, appr_pin):
+                    st.error("부서장 PIN 이 올바르지 않습니다.", icon="🚫")
+                else:
+                    status = "승인" if do_ok else "반려"
+                    with st.spinner("처리 중..."):
+                        res = set_jd_approval(
+                            year=int(year),
+                            sabun=str(target_sabun),
+                            name=str(target_name),
+                            version=int(latest_ver),
+                            approver_sabun=str(me_sabun),
+                            approver_name=str(me_name),
+                            status=status,
+                            remark=appr_remark
+                        )
+                        st.session_state["appr_rev"] = st.session_state.get("appr_rev", 0) + 1
+                    st.success(f"{status} 처리되었습니다. ({res.get('action')})", icon="✅")
+                    appr_df = read_jd_approval_df(st.session_state.get("appr_rev", 0))
+                base["사번"] = base["사번"].astype(str)
+            base = base[base["사번"].isin({str(s) for s in allowed})]
+            if "재직여부" in base.columns:
+                base = base[base["재직여부"] == True]
+            base = base.sort_values(["사번"]).reset_index(drop=True)
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 직무능력평가 + JD 요약 스크롤
+# ═════════════════════════════════════════════════════════════════════════════
+COMP_SIMPLE_NAME = "직무능력평가"
+COMP_SIMPLE_HEADERS = [
+    "연도","평가대상사번","평가대상이름","평가자사번","평가자이름",
+    "주업무평가","기타업무평가","교육이수","자격유지","종합의견",
+    "상태","제출시각","잠금"
+]
 def _simp_sheet_name(year:int|str)->str: return COMP_SIMPLE_NAME
 
 def _ensure_comp_simple_sheet(year:int):
     wb=get_book(); name=_simp_sheet_name(year)
     try:
-@st.cache_data(ttl=180, show_spinner=False)
-def read_jd_approval_df(_rev: int = 0) -> pd.DataFrame:
-    """직무기술서_승인: Supabase(job_specs_approvals)에서 조회"""
-    try:
-        res = supabase.table("job_specs_approvals").select("*").execute()
-        data = res.data or []
-        df = pd.DataFrame(data)
-        base_cols = ["연도","사번","이름","버전","승인자사번","승인자이름","상태","승인시각","비고"]
-        for c in base_cols:
-            if c not in df.columns:
-                df[c] = ""
-        return df[base_cols].reset_index(drop=True)
-    except Exception as e:
-        st.warning(f"Supabase 직무기술서_승인 조회 실패: {e}")
-        return pd.DataFrame(columns=["연도","사번","이름","버전","승인자사번","승인자이름","상태","승인시각","비고"])
+        ws=wb.worksheet(name)
+    except WorksheetNotFound:
+        ws=_retry(wb.add_worksheet, title=name, rows=1000, cols=50)
+        _retry(ws.update, "1:1", [COMP_SIMPLE_HEADERS]); return ws
+    header=_retry(ws.row_values,1) or []
+    need=[h for h in COMP_SIMPLE_HEADERS if h not in header]
+    if need: _retry(ws.update, "1:1", [header+need])
+    return ws
 
 def _jd_latest_for_comp(sabun:str, year:int)->dict:
     try:
@@ -2400,34 +2725,40 @@ def _edu_completion_from_jd(jd_row:dict)->str:
     return "완료" if val else "미완료"
 
 def upsert_comp_simple_response(emp_df: pd.DataFrame, year:int, target_sabun:str,
-def _jd_latest_version_for(sabun: str, year: int) -> int:
+                                evaluator_sabun:str, main_grade:str, extra_grade:str,
+                                qual_status:str, opinion:str, eval_date:str)->dict:
+    """직무능력평가: DB-first 업서트 (competency_evals)"""
+    jd = _jd_latest_for_comp(target_sabun, int(year))
+    edu_status = _edu_completion_from_jd(jd)
+    t_name = _emp_name_by_sabun(emp_df, target_sabun)
+    e_name = _emp_name_by_sabun(emp_df, evaluator_sabun)
     try:
-        res = (supabase.table("job_specs")
-               .select("버전")
-               .eq("사번", str(sabun))
-               .eq("연도", int(year))
-               .order("버전", desc=True)
-def set_jd_approval(year: int, sabun: str, name: str, version: int,
-                    approver_sabun: str, approver_name: str, status: str, when: str|None=None) -> dict:
-    """승인행 업서트: job_specs_approvals (on_conflict: 연도,사번,버전,승인자사번)"""
-    try:
-        when = when or kst_now_str()
+        now = kst_now_str()
     except Exception:
         import datetime
-        when = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     payload = {
-        "연도": int(year),"사번": str(sabun),"이름": str(name),
-        "버전": int(version),"승인자사번": str(approver_sabun),"승인자이름": str(approver_name),
-        "상태": str(status),"승인시각": str(when),"비고": ""
+        "연도": int(year),
+        "평가대상사번": str(target_sabun),
+        "평가대상이름": str(t_name),
+        "평가자사번": str(evaluator_sabun),
+        "평가자이름": str(e_name),
+        "주업무평가": str(main_grade),
+        "기타업무평가": str(extra_grade),
+        "교육이수": str(edu_status),
+        "자격유지": str(qual_status),
+        "종합의견": str(opinion),
+        "상태": "제출",
+        "제출시각": now,
+        "잠금": "",
     }
-    res = supabase.table("job_specs_approvals").upsert(payload, on_conflict="연도,사번,버전,승인자사번").execute()
+    res = supabase.table("competency_evals").upsert(payload, on_conflict="연도,평가대상사번,평가자사번").execute()
     try:
-        read_jd_approval_df.clear()
+        read_my_comp_simple_rows.clear()
     except Exception:
         pass
     return {"action":"upsert", "rows": len(res.data or [])}
 
-@st.cache_data(ttl=300, show_spinner=False)
 @st.cache_data(ttl=300, show_spinner=False)
 def read_my_comp_simple_rows(year:int, sabun:str)->pd.DataFrame:
     """직무능력평가: Supabase 우선 조회 → 시트 폴백"""
@@ -2443,7 +2774,6 @@ def read_my_comp_simple_rows(year:int, sabun:str)->pd.DataFrame:
             df=df.sort_values(sort_cols, ascending=[True, False]).reset_index(drop=True)
         return df
     except Exception:
-        # 안전 폴백
         try:
             ws=get_book().worksheet(_simp_sheet_name(year))
             df=_pd.DataFrame(_ws_get_all_records(ws))
@@ -2455,6 +2785,17 @@ def read_my_comp_simple_rows(year:int, sabun:str)->pd.DataFrame:
             return df.reset_index(drop=True)
         except Exception:
             return _pd.DataFrame(columns=COMP_SIMPLE_HEADERS)
+
+def read_my_comp_simple_rows(year:int, sabun:str)->pd.DataFrame:
+    try:
+        ws=get_book().worksheet(_simp_sheet_name(year))
+        df=pd.DataFrame(_ws_get_all_records(ws))
+    except Exception: return pd.DataFrame(columns=COMP_SIMPLE_HEADERS)
+    if df.empty: return df
+    df=df[(df["평가자사번"].astype(str)==str(sabun)) & (df.get("연도").astype(str)==str(year) if "연도" in df.columns else True)]
+    sort_cols=[c for c in ["평가대상사번","제출시각"] if c in df.columns]
+    if sort_cols: df=df.sort_values(sort_cols, ascending=[True,False,False])
+    return df.reset_index(drop=True)
 
 def tab_competency(emp_df: pd.DataFrame):
     # 권한 게이트: 관리자/평가권한자만 접근 가능 (일반 직원 접근 불가)
