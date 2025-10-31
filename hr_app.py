@@ -1260,53 +1260,18 @@ AUTH_HEADERS=["사번","이름","역할","범위유형","부서1","부서2","대
 AUTH_SHEET = "권한"
 AUTH_HEADERS = ["사번","이름","역할","범위유형","부서1","부서2","대상사번","활성","비고"]
 
-
-@st.cache_data(ttl=120, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False)
 def read_auth_df(only_enabled: bool = True) -> pd.DataFrame:
     """
-    권한 데이터 로딩:
-      1) Supabase 'acl' 테이블을 1차 소스로 사용 (빠르고 일관성↑)
-      2) 실패 시 구글시트 '권한'을 폴백
+    권한 시트 우선 로딩 → 누락 시 빈 df.
+    필수 컬럼 보강, dtype 정리, boolean 정규화까지 한 번에.
     """
-    # 1) Supabase 우선
-    try:
-        res = supabase.table("acl").select("*").execute()
-        rows = res.data or []
-        df = pd.DataFrame(rows)
-        if not df.empty:
-            # dtype/필수 컬럼 정리
-            for c in ["사번","이름","역할","범위유형","부서1","부서2","대상사번","비고"]:
-                if c not in df.columns:
-                    df[c] = ""
-                df[c] = df[c].astype(str).fillna("").map(lambda s: s.strip())
-            if "활성" not in df.columns:
-                df["활성"] = False
-            df["활성"] = df["활성"].map(_to_bool).fillna(False).astype(bool)
-            if only_enabled:
-                df = df[df["활성"] == True].copy()
-            return df[AUTH_HEADERS]
-    except Exception:
-        pass
-
-    # 2) 폴백: 구글시트
     try:
         ws = get_book().worksheet(AUTH_SHEET)
         raw = _ws_get_all_records(ws)
         df = pd.DataFrame(raw)
     except Exception:
         df = pd.DataFrame(columns=AUTH_HEADERS)
-
-    for c in AUTH_HEADERS:
-        if c not in df.columns:
-            df[c] = "" if c != "활성" else False
-
-    for c in ["사번","이름","역할","범위유형","부서1","부서2","대상사번","비고"]:
-        df[c] = df[c].astype(str).fillna("").map(lambda s: s.strip())
-    df["활성"] = df["활성"].map(_to_bool).fillna(False).astype(bool)
-
-    if only_enabled:
-        df = df[df["활성"] == True].copy()
-    return df[AUTH_HEADERS]
 
     # 필수 컬럼 보강
     for c in AUTH_HEADERS:
@@ -3455,47 +3420,39 @@ def tab_admin_acl(emp_df: pd.DataFrame):
     )
 
     # 저장: 전체 덮어쓰기
-    
-if st.button("권한 전체 반영 (저장)", type="primary", use_container_width=True, disabled=not can_edit):
+    if st.button("권한 전체 반영 (시트 저장)", type="primary", use_container_width=True, disabled=not can_edit):
         try:
-            # 1) 라벨 → 실제 사번 매핑 및 파생 컬럼
+            # 사번 라벨 → 실제 사번
             inv_label = {v: k for k, v in label_by_sabun.items()}
             save_df = edited.copy()
             save_df["사번"] = save_df["사번"].map(lambda v: inv_label.get(str(v).strip(), str(v).split(" - ",1)[0].strip()))
+            # 이름 파생
             save_df["이름"] = save_df["사번"].map(lambda s: emp_lookup.get(str(s).strip(), "")).fillna("").astype(str)
 
-            # 2) Supabase 우선 저장 (write-through)
-            payload = []
-            for _, r in save_df[AUTH_HEADERS].iterrows():
-                obj = {c: (bool(r[c]) if c=="활성" else str(r[c]).strip()) for c in AUTH_HEADERS}
-                obj["활성"] = bool(_to_bool(obj["활성"]))
-                payload.append(obj)
-
-            if payload:
-                supabase.table("acl").upsert(
-                    payload,
-                    on_conflict="사번,역할,범위유형,부서1,부서2,대상사번"
-                ).execute()
-
-            # 3) Google Sheets 미러 (비차단적 배치)
+            # 헤더/값 준비
             ws = get_book().worksheet(AUTH_SHEET)
-            gs_enqueue_range(ws, "1:1", [AUTH_HEADERS], value_input_option="USER_ENTERED")
-            if payload:
-                values = [[r.get(c, "") for c in AUTH_HEADERS] for r in payload]
-                gs_enqueue_range(ws, f"2:{len(values)+1}", values, value_input_option="USER_ENTERED")
+            _retry(ws.update, "1:1", [AUTH_HEADERS], value_input_option="USER_ENTERED")
+
+            values = []
+            for _, r in save_df[AUTH_HEADERS].iterrows():
+                values.append([r.get(c, "") for c in AUTH_HEADERS])
+
+            if values:
+                _retry(ws.update, f"2:{len(values)+1}", values, value_input_option="USER_ENTERED")
+            # 값이 0개면 헤더 아래를 정리
             else:
                 try:
                     ws.resize(rows=2)
                 except Exception:
                     pass
-            gs_flush()
 
-            try: st.cache_data.clear()
-            except Exception: pass
-            st.success("권한 저장 완료 (Supabase ↔ 시트 동기화)", icon="✅")
+            try:
+                st.cache_data.clear()
+            except Exception:
+                pass
+            st.success("권한 시트 저장 완료", icon="✅")
         except Exception as e:
             st.exception(e)
-
 
 def tab_help():
     st.markdown("""
@@ -3758,3 +3715,189 @@ def gs_flush():
                 raise
     st.session_state.gs_queue = []
 # ===== End helpers =====
+
+
+
+# =====================================================================
+# PATCH 2025-10-31 (DB-first I/O)
+# - Writes: App → Supabase → (optional) Sheets
+# - Reads : App ↔ Supabase
+#   * Replace sheet-centric functions for 인사평가/직무능력평가 with DB-first versions.
+#   * Keep existing sheet sync tools for admins.
+# =====================================================================
+
+import pandas as _pd
+
+def _now_kst_str():
+    try:
+        return kst_now_str()
+    except Exception:
+        # Fallback to local time if helper unavailable
+        return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+# ---------- Eval: READ (내가 작성한 평가 행) ----------
+@st.cache_data(ttl=300, show_spinner=False)
+def read_my_eval_rows(year: int, sabun: str) -> _pd.DataFrame:
+    try:
+        res = supabase.table("eval_responses").select("*").eq("연도", int(year)).eq("평가자사번", str(sabun)).execute()
+        data = res.data or []
+        df = _pd.DataFrame(data)
+        if df.empty:
+            return _pd.DataFrame(columns=EVAL_BASE_HEADERS)
+        # 정렬
+        sort_cols = [c for c in ["평가유형","평가대상사번","제출시각"] if c in df.columns]
+        if sort_cols:
+            df = df.sort_values(sort_cols, ascending=[True, True, False]).reset_index(drop=True)
+        return df
+    except Exception as e:
+        st.warning(f"Supabase 인사평가 조회 실패: {e}")
+        # 안전 폴백: 기존 시트 버전
+        try:
+            name = _eval_sheet_name(year)
+            ws = _ws(name)
+            df = _pd.DataFrame(_ws_get_all_records(ws))
+            if "평가자사번" in df.columns:
+                df = df[df["평가자사번"].astype(str) == str(sabun)]
+            return df
+        except Exception:
+            return _pd.DataFrame(columns=EVAL_BASE_HEADERS)
+
+# ---------- Eval: WRITE (업서트) ----------
+def upsert_eval_response(emp_df: _pd.DataFrame, year: int, eval_type: str,
+                         target_sabun: str, evaluator_sabun: str,
+                         scores: dict[str,int], status="제출")->dict:
+    # 1) 항목 목록
+    items = read_eval_items_df(True)
+    item_ids = [str(x) for x in items["항목ID"].tolist()]
+    # 2) 점수 보정/총점
+    def _c5(v):
+        try: v = int(v)
+        except: v = 3
+        return min(5, max(1, v))
+    scores_list = [_c5(scores.get(i, 3)) for i in item_ids]
+    total = round(sum(scores_list)*(100.0/max(1,len(item_ids)*5)), 1)
+    # 3) 메타
+    tname = _emp_name_by_sabun(emp_df, target_sabun)
+    ename = _emp_name_by_sabun(emp_df, evaluator_sabun)
+    now = _now_kst_str()
+    # 4) 페이로드
+    payload = {
+        "연도": int(year),
+        "평가유형": str(eval_type),
+        "평가대상사번": str(target_sabun),
+        "평가대상이름": str(tname),
+        "평가자사번": str(evaluator_sabun),
+        "평가자이름": str(ename),
+        "총점": total,
+        "상태": status,
+        "제출시각": now,
+        "잠금": "",
+    }
+    for iid, sc in zip(item_ids, scores_list):
+        payload[f"점수_{iid}"] = sc
+
+    # 5) DB 업서트
+    res = supabase.table("eval_responses").upsert(payload, on_conflict="연도,평가유형,평가대상사번,평가자사번").execute()
+    try:
+        st.cache_data.clear()
+    except Exception:
+        pass
+    return {"action": "upsert", "total": total, "rows": len(res.data or [])}
+
+# ---------- Competency: READ (내가 작성한 행) ----------
+@st.cache_data(ttl=300, show_spinner=False)
+def read_my_comp_simple_rows(year:int, sabun:str)->_pd.DataFrame:
+    try:
+        res = supabase.table("competency_evals").select("*").eq("연도", int(year)).eq("평가자사번", str(sabun)).execute()
+        data = res.data or []
+        df = _pd.DataFrame(data)
+        if df.empty:
+            return _pd.DataFrame(columns=COMP_SIMPLE_HEADERS)
+        sort_cols=[c for c in ["평가대상사번","제출시각"] if c in df.columns]
+        if sort_cols:
+            df=df.sort_values(sort_cols, ascending=[True, False]).reset_index(drop=True)
+        return df
+    except Exception as e:
+        st.warning(f"Supabase 직무능력평가 조회 실패: {e}")
+        # 안전 폴백
+        try:
+            ws = get_book().worksheet(_simp_sheet_name(year))
+            return _pd.DataFrame(_ws_get_all_records(ws))
+        except Exception:
+            return _pd.DataFrame(columns=COMP_SIMPLE_HEADERS)
+
+# ---------- Competency: WRITE (업서트) ----------
+def upsert_comp_simple_response(emp_df: _pd.DataFrame, year:int, target_sabun:str,
+                                evaluator_sabun:str, main_grade:str, extra_grade:str,
+                                qual_status:str, opinion:str, eval_date:str)->dict:
+    jd = _jd_latest_for_comp(target_sabun, int(year))
+    edu_status = _edu_completion_from_jd(jd)
+    t_name = _emp_name_by_sabun(emp_df, target_sabun)
+    e_name = _emp_name_by_sabun(emp_df, evaluator_sabun)
+    now = _now_kst_str()
+
+    payload = {
+        "연도": int(year),
+        "평가대상사번": str(target_sabun),
+        "평가대상이름": str(t_name),
+        "평가자사번": str(evaluator_sabun),
+        "평가자이름": str(e_name),
+        "주업무평가": str(main_grade),
+        "기타업무평가": str(extra_grade),
+        "교육이수": str(edu_status),
+        "자격유지": str(qual_status),
+        "종합의견": str(opinion),
+        "상태": "제출",
+        "제출시각": now,
+        "잠금": "",
+    }
+
+    res = supabase.table("competency_evals").upsert(payload, on_conflict="연도,평가대상사번,평가자사번").execute()
+    try:
+        read_my_comp_simple_rows.clear()
+    except Exception:
+        pass
+    return {"action":"upsert", "rows": len(res.data or [])}
+
+# ---------- OPTIONAL: Push latest DB → Sheets (admin button can call) ----------
+def push_eval_responses_db_to_sheet(year:int):
+    """DB → 시트('인사평가') 반영 (관리자용)."""
+    # 1) DB에서 조회
+    res = supabase.table("eval_responses").select("*").eq("연도", int(year)).execute()
+    data = res.data or []
+    if not data:
+        st.info("DB에 인사평가 데이터가 없습니다.")
+        return
+    df = _pd.DataFrame(data)
+    # 2) 시트 보장
+    items = read_eval_items_df(True)
+    item_ids = [str(x) for x in items["항목ID"].tolist()]
+    ws = _ensure_eval_resp_sheet(year, item_ids)
+    header, _ = _hdr(ws, _eval_sheet_name(year))
+    if not header:
+        header = EVAL_BASE_HEADERS + [f"점수_{iid}" for iid in item_ids]
+        _retry(ws.update, "1:1", [header])
+    # 3) 정렬/정제
+    cols = [c for c in header if c in df.columns]
+    save_df = df[cols].copy()
+    # 4) 쓰기
+    values = [cols] + save_df[cols].astype(str).fillna("").values.tolist()
+    ws.clear()
+    _retry(ws.update, f"1:{len(values)}", values, value_input_option="USER_ENTERED")
+    st.success(f"시트로 {len(save_df)}건 반영 완료", icon="✅")
+
+def push_comp_evals_db_to_sheet(year:int):
+    """DB → 시트('직무능력평가') 반영 (관리자용)."""
+    res = supabase.table("competency_evals").select("*").eq("연도", int(year)).execute()
+    data = res.data or []
+    if not data:
+        st.info("DB에 직무능력평가 데이터가 없습니다.")
+        return
+    df = _pd.DataFrame(data)
+    ws = _ensure_comp_simple_sheet(year)
+    header = _retry(ws.row_values, 1) or COMP_SIMPLE_HEADERS
+    cols = [c for c in header if c in df.columns]
+    values = [cols] + df[cols].astype(str).fillna("").values.tolist()
+    ws.clear()
+    _retry(ws.update, f"1:{len(values)}", values, value_input_option="USER_ENTERED")
+    st.success(f"시트로 {len(df)}건 반영 완료", icon="✅")
