@@ -3523,6 +3523,7 @@ def main():
 
         
 
+        
         # 상단 컨트롤: [로그아웃] | [새로고침(캐시 무시)]
         c1, c2 = st.columns([1, 1], gap="small")
         with c1:
@@ -3530,7 +3531,21 @@ def main():
                 logout()
         with c2:
             # 새로고침(캐시 무시): 시트에 접근하지 않고 Supabase 재조회
-            render_left_sync_buttons()
+            if st.button("새로고침(캐시 무시)", key="btn_refresh_cache_bypass", use_container_width=True,
+                         help="앱 캐시만 비우고 Supabase에서 다시 불러옵니다."):
+                try:
+                    if '_dash_eval_scores_for_year_cached' in globals():
+                        _dash_eval_scores_for_year_cached.clear()
+                    for k, v in list(globals().items()):
+                        if k.startswith("_cache_") and hasattr(v, "clear"):
+                            v.clear()
+                except Exception:
+                    pass
+                try:
+                    bump_eval_cache()
+                except Exception:
+                    st.session_state['eval_cache_bust'] = st.session_state.get('eval_cache_bust', 0) + 1
+                st.rerun()
 
         # 좌측 메뉴
         render_staff_picker_left(emp_df)
