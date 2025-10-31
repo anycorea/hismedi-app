@@ -1852,6 +1852,50 @@ def tab_eval(emp_df: pd.DataFrame):
 
     view = list_targets_for(my_role)[["사번","이름","부서1","부서2","직급"]].copy().sort_values(["사번"]).reset_index(drop=True)
 
+
+    # --- DB 진단 패널 (선택 대상의 원본 행 미리보기) -------------------------------
+    with st.expander("🔎 DB 진단: eval_responses 원본 보기", expanded=False):
+        try:
+            _y_dbg = int(year)
+            _tgt_dbg = str(target_sabun)
+            # 자기/1차/2차 상관없이 대상자 기준 최신 5건
+            res_dbg = (
+                supabase.table("eval_responses")
+                .select("*")
+                .eq("연도", _y_dbg)
+                .eq("평가대상사번", _tgt_dbg)
+                .order("제출시각", desc=True)
+                .limit(5)
+                .execute()
+            )
+            rows_dbg = res_dbg.data or []
+            if rows_dbg:
+                st.caption(f"DB 행 {len(rows_dbg)}건 (상위 5건)")
+                st.dataframe(pd.DataFrame(rows_dbg))
+                # 현재 평가자-유형 매칭 1건
+                _etype_dbg = str(eval_type)
+                _ev_dbg = str(me_sabun)
+                res_one = (
+                    supabase.table("eval_responses")
+                    .select("*")
+                    .eq("연도", _y_dbg)
+                    .eq("평가유형", _etype_dbg)
+                    .eq("평가대상사번", _tgt_dbg)
+                    .eq("평가자사번", _ev_dbg)
+                    .order("제출시각", desc=True)
+                    .limit(1)
+                    .execute()
+                )
+                one = (res_one.data or [None])[0]
+                st.write("현재 키(연/유형/대상/평가자) 최신 1건:", one)
+                if one:
+                    keys = [k for k in one.keys() if isinstance(k,str) and k.startswith("점수_ITM")]
+                    st.write("감지된 점수 키 수:", len(keys), "예:", keys[:8])
+            else:
+                st.info("해당 대상자에 대한 DB 행이 없습니다.")
+        except Exception as _e_dbg:
+            st.warning(f"DB 진단 중 오류: {_e_dbg}")
+
 # --- 제출 여부 / 저장값 조회 -------------------------------
     def has_submitted(_year: int, _type: str, _target_sabun: str) -> bool:
         """해당 연도+유형+대상자의 '상태'가 제출/완료인지 검사(평가자 무관)."""
