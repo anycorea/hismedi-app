@@ -3814,3 +3814,77 @@ def _stage_scores_any_evaluator(year: int, eval_type: str, target_sabun: str, ev
             scores[f"점수_{iid}"] = 3
     return scores
 # === END OVERRIDES ===
+
+# === OVERRIDES: Dashboard uses Supabase eval_latest (2025-10-31) ===
+try:
+    import streamlit as st  # ensure available in this scope
+except Exception:
+    pass
+
+def _compute_total_from_row(row: dict) -> float:
+    """점수_ITMxxxx 컬럼을 모아 100점 환산 총점을 계산(소수1자리). 항목 없으면 0."""
+    try:
+        keys = [k for k in row.keys() if isinstance(k, str) and k.startswith("점수_ITM")]
+        if not keys:
+            return 0.0
+        vals = []
+        for k in keys:
+            v = row.get(k, 3)
+            try:
+                v = int(v)
+            except Exception:
+                v = 3
+            vals.append(max(1, min(5, v)))
+        return round(sum(vals) * (100.0 / (len(vals)*5)), 1)
+    except Exception:
+        return 0.0
+
+@st.cache_data(ttl=60)
+def _dash_eval_scores_for_year_cached(_year: int, _bust: int) -> dict:
+    """
+    Supabase의 eval_latest 뷰에서 연도별 최신 제출만 읽어
+    {(평가대상사번, 평가유형) -> (총점, 제출시각)} 맵을 반환.
+    """
+    import pandas as _pd
+    try:
+        _y = int(_year)
+    except Exception:
+        return {}
+    try:
+        res = supabase.table("eval_latest").select("*").eq("연도", _y).execute()
+        rows = res.data or []
+    except Exception:
+        return {}
+    if not rows:
+        return {}
+    # 표준화
+    out = {}
+    for r in rows:
+        tgt = str(r.get("평가대상사번", "")).strip()
+        et  = str(r.get("평가유형", "")).strip()
+        if not tgt or not et:
+            continue
+        total = _compute_total_from_row(r)
+        ts = r.get("제출시각")
+        out[(tgt, et)] = (total, ts)
+    return out
+
+def _dash_eval_scores_for_year(_year: int) -> dict:
+    """
+    기존 시트 기반 구현을 대체: Supabase eval_latest만 조회.
+    세션의 cache bust 토큰을 키에 포함하여 저장/제출 직후 즉시 반영 가능.
+    """
+    try:
+        bust = int(st.session_state.get("eval_cache_bust", 0))
+    except Exception:
+        bust = 0
+    return _dash_eval_scores_for_year_cached(int(_year), bust)
+
+def bump_eval_cache():
+    """저장/제출 성공 직후 호출하면 대시보드 캐시 무효화"""
+    try:
+        import time
+        st.session_state['eval_cache_bust'] = int(time.time())
+    except Exception:
+        pass
+# === END OVERRIDES ===
