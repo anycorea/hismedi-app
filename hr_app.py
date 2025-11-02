@@ -24,154 +24,7 @@ def get_supabase() -> Client:
     return create_client(url, key)
 
 supabase = get_supabase()
-st.caption("✅ Supabase 연결 OK")
-# ────────────────────────────────────────
-# DB-FIRST OVERRIDE (Sheets → Supabase proxy for 7 target sheets)
-DB_FIRST = True
-
-# Map sheet titles to Supabase tables and their conflict keys
-_SHEET_DB_MAP = {
-    "직원": {"table": "employees", "key_cols": ["사번"]},
-    "평가_항목": {"table": "eval_items", "key_cols": ["항목ID"]},
-    "권한": {"table": "acl", "key_cols": ["사번","역할"]},
-    "인사평가": {"table": "eval_responses", "key_cols": ["연도","평가유형","평가대상사번","평가자사번"]},
-    "직무기술서": {"table": "job_specs", "key_cols": ["연도","사번","버전"]},
-    "직무기술서_승인": {"table": "job_specs_approvals", "key_cols": ["연도","사번","버전","승인자사번"]},
-    "직무능력평가": {"table": "competency_evals", "key_cols": ["연도","평가대상사번","평가자사번"]},
-}
-
-def _table_conflict_clause(pk_cols):
-    return ",".join(pk_cols)
-
-class _WSProxy:
-    """A minimal gspread-like proxy backed by Supabase for get/update operations."""
-    def __init__(self, sheet_title:str, table:str, pk_cols:list[str]):
-        self.sheet_title = sheet_title
-        self.table = table
-        self.pk_cols = pk_cols
-        self._headers_cache = None  # preserve stable ordering across calls
-
-    # READS
-    def get_all_records(self, expected_headers=None):
-        # Fetch all rows
-        res = supabase.table(self.table).select("*").execute()
-        rows = res.data or []
-        # Decide headers
-        if expected_headers:
-            headers = expected_headers
-        else:
-            if self._headers_cache is not None:
-                headers = self._headers_cache
-            else:
-                # prefer pk first, then others alpha
-                keys = set()
-                for r in rows:
-                    keys.update(r.keys())
-                others = [k for k in sorted(keys) if k not in self.pk_cols]
-                headers = self.pk_cols + others
-                self._headers_cache = headers
-        # Order fields
-        out = []
-        for r in rows:
-            out.append({h: r.get(h, None) for h in headers})
-        return out
-
-    def get_all_values(self):
-        records = self.get_all_records()
-        if not records:
-            return []
-        headers = list(records[0].keys())
-        values = [headers]
-        for r in records:
-            values.append([r.get(h, "") if r.get(h, "") is not None else "" for h in headers])
-        return values
-
-    def col_values(self, col_idx:int):
-        values = self.get_all_values()
-        if not values:
-            return []
-        # col_idx is 1-based including header row
-        col = []
-        for row in values:
-            if col_idx-1 < len(row):
-                col.append(row[col_idx-1])
-            else:
-                col.append("")
-        return col
-
-    # WRITES
-    def _upsert_row(self, row_dict:dict):
-        # Build conflict clause
-        conflict = _table_conflict_clause(self.pk_cols)
-        return supabase.table(self.table).upsert(row_dict, on_conflict=conflict).execute()
-
-    def update_cell(self, row:int, col:int, value):
-        """Row/Col are 1-based including header row; row=1 is header."""
-        values = self.get_all_values()
-        if not values:
-            # new table: can't infer headers; ignore header row write
-            return
-        headers = values[0]
-        # header row write: change nothing; ignore
-        if row == 1:
-            return
-        # expand to target row
-        while len(values) <= row-1:
-            values.append([""]*len(headers))
-        # expand to target col if needed
-        if col-1 >= len(headers):
-            # ignore out-of-range column writes (keeps schema stable)
-            return
-        # set value
-        values[row-1][col-1] = value
-        # convert row to dict and upsert
-        body = {headers[i]: values[row-1][i] for i in range(len(headers))}
-        # normalize blanks to None
-        for k,v in list(body.items()):
-            if v == "":
-                body[k] = None
-        self._upsert_row(body)
-
-    def update(self, a1_range:str, values:list[list]):
-        """
-        Support update("A2", [[val]]) or update("B2:B5", [[...], ...]).
-        For simplicity, we only map single-cell updates to update_cell.
-        """
-        # crude A1 single-cell parser
-        m = re.match(r"^([A-Za-z]+)(\d+)$", a1_range.strip())
-        if not m:
-            return
-        col_letters, row_s = m.groups()
-        # convert letters to 1-based index
-        col = 0
-        for ch in col_letters.upper():
-            col = col*26 + (ord(ch)-64)
-        row = int(row_s)
-        if not values or not values[0]:
-            return
-        self.update_cell(row, col, values[0][0])
-
-def _get_ws(sheet_title: str):
-    if DB_FIRST and sheet_title in _SHEET_DB_MAP:
-        cfg = _SHEET_DB_MAP[sheet_title]
-        # Special readable view for "인사평가" if available
-        if sheet_title == "인사평가":
-            try:
-                # touch eval_latest to warm headers (ignore errors)
-                _ = supabase.table("eval_latest").select("*").limit(1).execute()
-                proxy = _WSProxy(sheet_title, "eval_responses", cfg.get("key_cols") or cfg.get("pk"))
-                # prefer headers from eval_latest if exists
-                rec = supabase.table("eval_latest").select("*").limit(1).execute().data
-                if rec:
-                    proxy._headers_cache = list(rec[0].keys())
-                return proxy
-            except Exception:
-                return _WSProxy(sheet_title, cfg["table"], cfg.get("key_cols") or cfg.get("pk"))
-        return _WSProxy(sheet_title, cfg["table"], cfg.get("key_cols") or cfg.get("pk"))
-    # default: original Sheets behavior
-    return _ORIG__get_ws(sheet_title) if _ORIG__get_ws else (_raise_no_orig())
-# ────────────────────────────────────────
-  # config 이후에 출력
+st.caption("✅ Supabase 연결 OK")  # config 이후에 출력
 # ────────────────────────────────────────────────────────────────
 
 def _ensure_capacity(ws, min_row: int, min_col: int):
@@ -3888,35 +3741,168 @@ def gs_flush():
     st.session_state.gs_queue = []
 # ===== End helpers =====
 
+
+
 # ────────────────────────────────────────────────────────────────
-# Safe late patch: override _get_ws after original is defined
+# DB-FIRST Monkey Patch for 7 sheets → Supabase (2025-11-02)
 # ────────────────────────────────────────────────────────────────
 try:
-    _ORIG__get_ws  # noqa: F401
-except NameError:  # first time
-    try:
-        _ORIG__get_ws = _get_ws  # keep original sheet getter
-    except NameError:
-        _ORIG__get_ws = None
+    DB_FIRST = True  # 강제
+    _ORIG__ws = _ws  # original Google Sheet accessor
 
-def _get_ws(sheet_title: str):
-    """Return a worksheet-like object.
-    - For 7 target sheets, return WSProxy that talks to Supabase.
-    - Otherwise, fall back to original Google Sheet getter if available.
-    """
-    if DB_FIRST and sheet_title in _SHEET_DB_MAP:
-        cfg = _SHEET_DB_MAP[sheet_title]
-        return WSProxy(
-            supabase,
-            cfg["table"],
-            cfg["key_cols"],
-            sheet_title,
-            cfg.get("view_for_read")
-        )
-    # fallback
-    if _ORIG__get_ws is not None:
-        return _ORIG__get_ws(sheet_title) if _ORIG__get_ws else (_raise_no_orig())
-    raise RuntimeError("Original _get_ws is not available and sheet_title is not mapped for DB proxy.")
+    _DB_MAP = {
+        "직원": {
+            "table": "employees",
+            "key_cols": ["사번"],
+            "headers": ["사번","이름","부서1","부서2","직급","직무","직군","입사일","퇴사일","기타1","기타2","적용여부","재직여부","PIN_hash","PIN_No"]
+        },
+        "평가_항목": {
+            "table": "eval_items",
+            "key_cols": ["항목ID"],
+            "headers": ["항목ID","항목","내용","순서","활성","비고","설명","유형","구분"]
+        },
+        "권한": {
+            "table": "acl",
+            "key_cols": ["사번","역할"],
+            "headers": ["사번","이름","역할","범위유형","부서1","부서2","대상사번","활성","비고"]
+        },
+        "인사평가": {
+            "table": "eval_responses",
+            "key_cols": ["연도","평가유형","평가대상사번","평가자사번"],
+            "headers": None  # 동적으로
+        },
+        "직무기술서": {
+            "table": "job_specs",
+            "key_cols": ["연도","사번","버전"],
+            "headers": None
+        },
+        "직무기술서_승인": {
+            "table": "job_specs_approvals",
+            "key_cols": ["연도","사번","버전","승인자사번"],
+            "headers": ["연도","사번","이름","버전","승인자사번","승인자이름","상태","승인시각","비고"]
+        },
+        "직무능력평가": {
+            "table": "competency_evals",
+            "key_cols": ["연도","평가대상사번","평가자사번"],
+            "headers": ["연도","평가대상사번","평가대상이름","평가자사번","평가자이름","주업무평가","기타업무평가","교육이수","자격유지","종합의견","상태","제출시각","잠금"]
+        },
+    }
 
-# Alias for uniform naming
-WSProxy = _WSProxy
+    class _WSProxy:
+        def __init__(self, title: str, table: str, key_cols: list[str], headers: list[str] | None):
+            self.title = title
+            self._table = table
+            self._key_cols = key_cols
+            self._headers = headers  # may be None
+
+        # --- internal helpers ---
+        def _fetch(self):
+            try:
+                res = supabase.table(self._table).select("*").execute()
+                data = res.data or []
+            except Exception as e:
+                data = []
+            return data
+
+        def _header_list(self):
+            if self._headers:
+                return list(self._headers)
+            # infer from sample row
+            data = self._fetch()
+            if data:
+                # preserve order as returned
+                return list(data[0].keys())
+            # fallback
+            return self._key_cols
+
+        # --- gspread-like read methods ---
+        def get_all_records(self):
+            return self._fetch()
+
+        def get_all_values(self):
+            hdr = self._header_list()
+            rows = self._fetch()
+            out = [hdr]
+            for r in rows:
+                out.append([r.get(h, "") for h in hdr])
+            return out
+
+        def row_values(self, idx: int):
+            vals = self.get_all_values()
+            if 1 <= idx <= len(vals):
+                return vals[idx-1]
+            return []
+
+        def col_values(self, idx: int):
+            vals = self.get_all_values()
+            col = []
+            for r in vals:
+                if 1 <= idx <= len(r):
+                    col.append(r[idx-1])
+                else:
+                    col.append("")
+            return col
+
+        # --- gspread-like write methods ---
+        def update_cell(self, row: int, col: int, value):
+            hdr = self._header_list()
+            if row <= 1:
+                # header write ignored
+                return
+            rows = self._fetch()
+            ridx = row - 2
+            current = rows[ridx] if 0 <= ridx < len(rows) else {}
+            if 1 <= col <= len(hdr):
+                current[hdr[col-1]] = value
+            # upsert needs keys
+            payload = current
+            on_conflict = ",".join(self._key_cols)
+            supabase.table(self._table).upsert(payload, on_conflict=on_conflict).execute()
+
+        def update(self, a1_range: str, values):
+            # support single cell A1 like "D2"
+            try:
+                from gspread.utils import a1_to_rowcol
+                if isinstance(values, list) and values and not isinstance(values[0], list):
+                    # normalize to [[...]]
+                    values = [values]
+                if isinstance(values, list) and len(values)==1 and len(values[0])==1:
+                    r,c = a1_to_rowcol(a1_range)
+                    return self.update_cell(r, c, values[0][0])
+            except Exception:
+                pass
+            # fallback: write first row into appropriate records
+            hdr = self._header_list()
+            rows = self._fetch()
+            # only handle simple block starting at row>=2
+            try:
+                from gspread.utils import a1_to_rowcol
+                r0,c0 = a1_to_rowcol(a1_range.split(":")[0])
+            except Exception:
+                r0,c0 = 2,1
+            r = r0
+            for row_vals in values:
+                if r<=1:
+                    r+=1; continue
+                ridx = r-2
+                cur = rows[ridx] if 0 <= ridx < len(rows) else {}
+                for j, v in enumerate(row_vals):
+                    ci = c0 + j
+                    if 1 <= ci <= len(hdr):
+                        cur[hdr[ci-1]] = v
+                on_conflict = ",".join(self._key_cols)
+                supabase.table(self._table).upsert(cur, on_conflict=on_conflict).execute()
+                r += 1
+
+    def _ws_patched(title: str):
+        if DB_FIRST and title in _DB_MAP:
+            m = _DB_MAP[title]
+            return _WSProxy(title, m["table"], m["key_cols"], m.get("headers"))
+        return _ORIG__ws(title)
+
+    # override
+    _ws = _ws_patched
+
+    st.caption("🟢 DB-FIRST 프록시 활성화(7개 시트=Supabase)")
+except Exception as _e:
+    st.warning(f"DB-FIRST 프록시 로딩 실패: {_e}")
