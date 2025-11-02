@@ -3798,6 +3798,19 @@ def _merge_missing(dst_row: Dict[str, Any], src_row: Dict[str, Any], editable_co
             filled.append(c)
     return merged, filled
 
+def _strip_empty(d: dict, keep: list) -> dict:
+    \"\"\"Return new dict where keys in 'keep' are preserved, and other keys with empty values are dropped.
+    Prevents null/empty overwrites on upsert.\"\"\"
+    out = {}
+    for k, v in d.items():
+        if k in keep:
+            out[k] = v  # keys must be present even if None
+        else:
+            if not _is_empty(v):
+                out[k] = v
+    return out
+
+
 def _key_of(row: Dict[str, Any], key_cols: List[str]):
     return tuple(row.get(k) for k in key_cols)
 
@@ -3956,7 +3969,7 @@ def _bisync_missing_only_table(*, supabase, sheet, table_name: str,
             continue
 
         if sh_r and not db_r:
-            payload = {c: sh_r.get(c) for c in (key_cols + editable_cols)}
+            payload = _strip_empty({c: sh_r.get(c) for c in (key_cols + editable_cols)}, keep=key_cols)
             if any(not _is_empty(payload.get(c)) for c in editable_cols):
                 to_db_upserts.append(payload)
             continue
@@ -3964,7 +3977,7 @@ def _bisync_missing_only_table(*, supabase, sheet, table_name: str,
         if db_r and sh_r:
             merged_db, fill_db = _merge_missing(db_r, sh_r, editable_cols)
             if fill_db:
-                to_db_upserts.append({c: merged_db.get(c) for c in (key_cols + editable_cols)})
+                to_db_upserts.append(_strip_empty({c: merged_db.get(c) for c in (key_cols + editable_cols)}, keep=key_cols))
             merged_sh, fill_sh = _merge_missing(sh_r, db_r, editable_cols)
             if fill_sh:
                 to_sheet_updates.append((k, {c: merged_sh.get(c) for c in fill_sh}))
@@ -3975,7 +3988,7 @@ def _bisync_missing_only_table(*, supabase, sheet, table_name: str,
 # 1) employees
 _EMP_KEY = ["사번"]
 _EMP_EDIT = ["이름","부서","직급","입사일","휴직여부"]
-_EMP_SCHEMA = {"사번":"text","이름":"text","부서":"text","직급":"text","입స일":"date","휴직여부":"bool"}
+_EMP_SCHEMA = {"사번":"text","이름":"text","부서":"text","직급":"text","입사일":"date","휴직여부":"bool"}
 
 def _map_employees(r: Dict[str,Any]):  # sheet row -> dict
     return {"사번":r.get("사번"),"이름":r.get("이름"),"부서":r.get("부서"),
