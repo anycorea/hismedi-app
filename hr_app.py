@@ -92,8 +92,8 @@ def _get_gspread_client_for_sync_v1():
     try:
         return gc  # 앱에 이미 gspread 클라이언트가 있으면 재사용
     except NameError:
-# [A-Plan removed import]         import gspread
-# [A-Plan removed import]         from google.oauth2.service_account import Credentials
+        import gspread
+        from google.oauth2.service_account import Credentials
         import streamlit as _st
         sa = _st.secrets["gcp_service_account"]
         scopes = [
@@ -261,142 +261,6 @@ def sync_sheet_to_supabase_job_specs_v1():
     ws = _get_ws("직무기술서")
     import pandas as _pd
     df = _pd.DataFrame(ws.get_all_records())
-
-# =============================================================
-# [A-Plan Full Integration Patch v3] (top-insert)
-# =============================================================
-try:
-    from supabase import create_client, Client  # v2
-except Exception:
-    create_client = None
-    Client = None
-
-class APIError(Exception):
-    """Shim for Google Sheets APIError under A-Plan."""
-    pass
-
-def _ap_get_supabase_client():
-    import streamlit as st
-    import os as _os
-    url = _os.environ.get("SUPABASE_URL", "").strip()
-    key = _os.environ.get("SUPABASE_ANON_KEY", "").strip() or _os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
-    if not url or not key:
-        st.error("SUPABASE_URL / SUPABASE_ANON_KEY 환경변수가 필요합니다 (A-Plan).")
-        raise RuntimeError("Missing Supabase credentials")
-    return create_client(url, key)
-
-def _ap_sb_select(table_name: str, select_cols=None):
-    import pandas as _pd
-    sb = _ap_get_supabase_client()
-    q = sb.table(table_name).select(",".join(select_cols) if select_cols else "*")
-    res = q.execute()
-    data = res.data or []
-    return _pd.DataFrame(data)
-
-def _ap_sb_upsert(table_name: str, payload, on_conflict_cols=None):
-    sb = _ap_get_supabase_client()
-    import pandas as _pd
-    if payload is None:
-        return {"status":"noop","reason":"empty payload"}
-    if isinstance(payload, _pd.Series):
-        payload = payload.to_frame().T
-    if isinstance(payload, _pd.DataFrame):
-        rows = payload.fillna(None).to_dict(orient="records")
-    elif isinstance(payload, dict):
-        rows = [payload]
-    elif isinstance(payload, list):
-        rows = payload
-    else:
-        return {"status":"error","reason":f"unsupported payload type: {type(payload)}"}
-    if on_conflict_cols:
-        res = sb.table(table_name).upsert(rows, on_conflict=",".join(on_conflict_cols)).execute()
-    else:
-        res = sb.table(table_name).upsert(rows).execute()
-    return {"status":"ok","count":len(res.data or []),"data":res.data}
-
-_AP_READ_MAP = {
-    "직원": "employees",
-    "employees": "employees",
-    "평가_항목": "eval_items",
-    "eval_items": "eval_items",
-    "권한": "acl",
-    "acl": "acl",
-    "인사평가": "eval_latest",
-    "eval_latest": "eval_latest",
-    "직무기술서": "job_specs",
-    "job_specs": "job_specs",
-    "직무기술서_승인": "job_specs_approvals",
-    "job_specs_approvals": "job_specs_approvals",
-    "직무능력평가": "competency_evals",
-    "competency_evals": "competency_evals",
-}
-
-_AP_WRITE_MAP = {
-    "직원": ("employees", ["사번"]),
-    "employees": ("employees", ["사번"]),
-    "평가_항목": ("eval_items", ["항목ID"]),
-    "eval_items": ("eval_items", ["항목ID"]),
-    "권한": ("acl", ["ID"]),
-    "acl": ("acl", ["ID"]),
-    "인사평가": ("eval_latest", ["ID"]),
-    "eval_latest": ("eval_latest", ["ID"]),
-    "직무기술서": ("job_specs", ["사번","연도","버전"]),
-    "job_specs": ("job_specs", ["사번","연도","버전"]),
-    "직무기술서_승인": ("job_specs_approvals", ["사번","연도","버전","승인자사번"]),
-    "job_specs_approvals": ("job_specs_approvals", ["사번","연도","버전","승인자사번"]),
-    "직무능력평가": ("competency_evals", ["연도","평가대상사번","평가자사번"]),
-    "competency_evals": ("competency_evals", ["연도","평가대상사번","평가자사번"]),
-}
-
-def _ap_read_sheet_df_override(sheet_name, *args, **kwargs):
-    key = str(sheet_name)
-    table = _AP_READ_MAP.get(key) or _AP_READ_MAP.get(key.lower())
-    if table:
-        return _ap_sb_select(table)
-    try:
-        if 'EMP_SHEET' in globals() and sheet_name == globals().get('EMP_SHEET'):
-            return _ap_sb_select("employees")
-        if 'EVAL_ITEMS_SHEET' in globals() and sheet_name == globals().get('EVAL_ITEMS_SHEET'):
-            return _ap_sb_select("eval_items")
-        if 'ACL_SHEET' in globals() and sheet_name == globals().get('ACL_SHEET'):
-            return _ap_sb_select("acl")
-        if 'EVAL_SHEET' in globals() and sheet_name == globals().get('EVAL_SHEET'):
-            return _ap_sb_select("eval_latest")
-        if 'JD_SHEET' in globals() and sheet_name == globals().get('JD_SHEET'):
-            return _ap_sb_select("job_specs")
-        if 'JD_APPROVAL_SHEET' in globals() and sheet_name == globals().get('JD_APPROVAL_SHEET'):
-            return _ap_sb_select("job_specs_approvals")
-        if 'COMP_EVAL_SHEET' in globals() and sheet_name == globals().get('COMP_EVAL_SHEET'):
-            return _ap_sb_select("competency_evals")
-    except Exception:
-        pass
-    raise RuntimeError(f"[A-Plan] Unknown sheet name for Supabase mapping: {sheet_name!r}")
-
-def _ap_write_sheet_df_override(sheet_name, df, *args, **kwargs):
-    key = str(sheet_name)
-    entry = _AP_WRITE_MAP.get(key) or _AP_WRITE_MAP.get(key.lower())
-    if not entry:
-        raise RuntimeError(f"[A-Plan] write_sheet_df blocked: unknown sheet '{sheet_name}'")
-    table, conflict = entry
-    return _ap_sb_upsert(table, df, conflict)
-
-# Rebind early
-read_sheet_df = _ap_read_sheet_df_override
-write_sheet_df = _ap_write_sheet_df_override
-
-def save_emp_df(df, *args, **kwargs):
-    return _ap_sb_upsert("employees", df, ["사번"])
-
-def save_employee_row(row_dict, *args, **kwargs):
-    return _ap_sb_upsert("employees", row_dict, ["사번"])
-
-def gs_enqueue_range(*args, **kwargs):
-    return {"status": "disabled", "reason": "A-Plan: sheets write disabled"}
-
-def values_batch_update(*args, **kwargs):
-    return {"status": "disabled", "reason": "A-Plan: sheets write disabled"}
-# ========================= END OF A-Plan v3 =========================
-
     if df.empty:
         st.warning("직무기술서 시트가 비어있습니다.")
         return
@@ -623,7 +487,7 @@ def _normalize_ts_series(_s):
 
 def _is_quota_429(err) -> bool:
     try:
-# [A-Plan removed import]         from gspread.exceptions import APIError as _APIError
+        from gspread.exceptions import APIError as _APIError
 
         if isinstance(err, _APIError):
             resp = getattr(err, "response", None)
@@ -749,12 +613,12 @@ except Exception:
     def tz_kst(): return pytz.timezone(st.secrets.get("app", {}).get("TZ", "Asia/Seoul"))
 
 # gspread (배포 최적화: 자동 pip 설치 제거, 의존성 사전 설치 전제)
-# [A-Plan removed import] from google.oauth2.service_account import Credentials
-# [A-Plan removed import] from gspread.exceptions import WorksheetNotFound, APIError
-# [A-Plan removed import] from gspread.utils import rowcol_to_a1
+from google.oauth2.service_account import Credentials
+from gspread.exceptions import WorksheetNotFound, APIError
+from gspread.utils import rowcol_to_a1
 
 # --- Safe shim for batch helpers: defined early to avoid NameError ---
-# [A-Plan removed import] import gspread
+import gspread
 
 try:
     _ = rowcol_to_a1  # ensure imported
@@ -3975,49 +3839,3 @@ def read_sheet_df(sheet_name, *args, **kwargs):
     raise RuntimeError(f"[A-Plan] Unknown sheet name for Supabase mapping: {sheet_name!r}")
 
 # --- End of A-Plan Monkey Patch ---
-
-# ========================= A-Plan tail override (final) =========================
-try:
-    # rebind to Supabase overrides (defined earlier by the patch)
-    read_sheet_df = _ap_read_sheet_df_override
-    write_sheet_df = _ap_write_sheet_df_override
-except NameError:
-    # if not yet defined for some reason, define minimal fallbacks
-    def _ap_get_supabase_client():
-        import os, streamlit as st
-        from supabase import create_client
-        url = os.environ.get("SUPABASE_URL","").strip()
-        key = os.environ.get("SUPABASE_ANON_KEY","").strip() or os.environ.get("SUPABASE_SERVICE_ROLE_KEY","").strip()
-        if not url or not key:
-            st.error("SUPABASE_URL / SUPABASE_ANON_KEY 필요(A-Plan)")
-            raise RuntimeError("Missing Supabase credentials")
-        return create_client(url, key)
-    def _ap_sb_select(table): 
-        from pandas import DataFrame
-        sb = _ap_get_supabase_client()
-        return DataFrame((sb.table(table).select("*").execute().data) or [])
-    def _ap_sb_upsert(table, payload, on_conflict_cols=None):
-        from pandas import DataFrame, Series
-        sb = _ap_get_supabase_client()
-        if isinstance(payload, Series): payload = payload.to_frame().T
-        if isinstance(payload, DataFrame): payload = payload.fillna(None).to_dict(orient="records")
-        if isinstance(payload, dict): payload=[payload]
-        if on_conflict_cols: res = sb.table(table).upsert(payload, on_conflict=",".join(on_conflict_cols)).execute()
-        else: res = sb.table(table).upsert(payload).execute()
-        return {"status":"ok","count":len(res.data or []),"data":res.data}
-    _AP_READ_MAP = {"직원":"employees","employees":"employees","평가_항목":"eval_items","eval_items":"eval_items","권한":"acl","acl":"acl","인사평가":"eval_latest","eval_latest":"eval_latest","직무기술서":"job_specs","job_specs":"job_specs","직무기술서_승인":"job_specs_approvals","job_specs_approvals":"job_specs_approvals","직무능력평가":"competency_evals","competency_evals":"competency_evals"}
-    _AP_WRITE_MAP = {"직원":("employees",["사번"]),"employees":("employees",["사번"]),"평가_항목":("eval_items",["항목ID"]),"eval_items":("eval_items",["항목ID"]),"권한":("acl",["ID"]),"acl":("acl",["ID"]),"인사평가":("eval_latest",["ID"]),"eval_latest":("eval_latest",["ID"]),"직무기술서":("job_specs",["사번","연도","버전"]),"job_specs":("job_specs",["사번","연도","버전"]),"직무기술서_승인":("job_specs_approvals",["사번","연도","버전","승인자사번"]),"job_specs_approvals":("job_specs_approvals",["사번","연도","버전","승인자사번"]),"직무능력평가":("competency_evals",["연도","평가대상사번","평가자사번"]),"competency_evals":("competency_evals",["연도","평가대상사번","평가자사번"])}
-    def read_sheet_df(sheet_name, *_, **__):
-        t = _AP_READ_MAP.get(str(sheet_name)) or _AP_READ_MAP.get(str(sheet_name).lower())
-        if t: return _ap_sb_select(t)
-        raise RuntimeError(f"[A-Plan] Unknown sheet name: {sheet_name!r}")
-    def write_sheet_df(sheet_name, df, *_, **__):
-        table, conflict = _AP_WRITE_MAP[str(sheet_name)] if str(sheet_name) in _AP_WRITE_MAP else (None, None)
-        if not table: raise RuntimeError(f"[A-Plan] write blocked: unknown sheet '{sheet_name}'")
-        return _ap_sb_upsert(table, df, conflict)
-
-# legacy sheets helpers are force-disabled (safety)
-def _ws(*args, **kwargs): return {"status":"disabled","reason":"A-Plan: _ws disabled"}
-def get_book(*args, **kwargs): return {"status":"disabled","reason":"A-Plan: get_book disabled"}
-def get_client(*args, **kwargs): return {"status":"disabled","reason":"A-Plan: get_client disabled"}
-# ================================================================================
