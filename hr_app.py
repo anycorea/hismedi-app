@@ -1,12 +1,4 @@
-# =============================================================================
-# A-Plan Refactor Banner
-# This file is auto-modified to disable Google Sheets paths and keep Supabase-only.
-# - Google Sheets imports are commented out.
-# - Sheets sync sections are wrapped in docstrings (disabled).
-# - Functions starting with these prefixes are stubbed: sync_sheet_to_supabase_, _get_gspread_client, _get_ws, _ws_values, gs_enqueue_range, values_batch_update, batch_update, _ensure_eval_resp_sheet
-# If anything breaks, please roll back to the original file.
-# =============================================================================
-
+# [A-Plan] Safe refactor from original to disable Sheets paths.
 # -*- coding: utf-8 -*-
 
 # ────────────────────────────────────────────────────────────────
@@ -99,28 +91,28 @@ def _sync_truthy_v1(x):
 
 def _get_gspread_client_for_sync_v1(*args, **kwargs):
 
-    """[A-Plan] Disabled Google Sheets function (original body removed)."""
+    """[A-Plan] Disabled Google Sheets function (stub)."""
 
-    return {"status":"disabled","reason":"sheets path removed"}
+    return {"status": "disabled", "reason": "sheets path removed"}
 
 def sync_sheet_to_supabase_employees_v1(*args, **kwargs):
 
-    """[A-Plan] Disabled Google Sheets function (original body removed)."""
+    """[A-Plan] Disabled Google Sheets function (stub)."""
 
-    return {"status":"disabled","reason":"sheets path removed"}
+    return {"status": "disabled", "reason": "sheets path removed"}
 def _get_ws(*args, **kwargs):
-    """[A-Plan] Disabled Google Sheets function (original body removed)."""
-    return {"status":"disabled","reason":"sheets path removed"}
-son":"sheets path removed"}
+    """[A-Plan] Disabled Google Sheets function (stub)."""
+    return {"status": "disabled", "reason": "sheets path removed"}
+    return {"status": "disabled", "reason": "sheets path removed"}
 def sync_sheet_to_supabase_job_specs_v1(*args, **kwargs):
-    """[A-Plan] Disabled Google Sheets function (original body removed)."""
-    return {"status":"disabled","reason":"sheets path removed"}
+    """[A-Plan] Disabled Google Sheets function (stub)."""
+    return {"status": "disabled", "reason": "sheets path removed"}
 def sync_sheet_to_supabase_job_specs_approvals_v1(*args, **kwargs):
-    """[A-Plan] Disabled Google Sheets function (original body removed)."""
-    return {"status":"disabled","reason":"sheets path removed"}
+    """[A-Plan] Disabled Google Sheets function (stub)."""
+    return {"status": "disabled", "reason": "sheets path removed"}
 def sync_sheet_to_supabase_competency_evals_v1(*args, **kwargs):
-    """[A-Plan] Disabled Google Sheets function (original body removed)."""
-    return {"status":"disabled","reason":"sheets path removed"}
+    """[A-Plan] Disabled Google Sheets function (stub)."""
+    return {"status": "disabled", "reason": "sheets path removed"}
 def _normalize_ts_series(_s):
     """시리즈 내 각 원소를 datetime으로 파싱 후 'YYYY-MM-DD HH:MM:SS' 문자열로 통일.
     - 여러 포맷 시도 후 실패는 None 반환
@@ -303,8 +295,8 @@ try:
     _ = rowcol_to_a1  # ensure imported
     if 'gs_enqueue_range' not in globals():
         def gs_enqueue_range(*args, **kwargs):
-            """[A-Plan] Disabled Google Sheets function (original body removed)."""
-            return {"status":"disabled","reason":"sheets path removed"}
+            """[A-Plan] Disabled Google Sheets function (stub)."""
+            return {"status": "disabled", "reason": "sheets path removed"}
         def gs_enqueue_cell(ws, row, col, value, value_input_option="USER_ENTERED"):
             ws.update(rowcol_to_a1(int(row), int(col)), [[value]], value_input_option=value_input_option)
     if 'gs_flush' not in globals():
@@ -676,9 +668,9 @@ _VAL_TTL = 90
 
 def _ws_values(*args, **kwargs):
 
-    """[A-Plan] Disabled Google Sheets function (original body removed)."""
+    """[A-Plan] Disabled Google Sheets function (stub)."""
 
-    return {"status":"disabled","reason":"sheets path removed"}
+    return {"status": "disabled", "reason": "sheets path removed"}
 
 def _ws(title: str):
     now=time.time(); hit=_WS_CACHE.get(title)
@@ -1301,9 +1293,9 @@ def read_eval_items_df(only_active: bool = False) -> pd.DataFrame:
 
 def _ensure_eval_resp_sheet(*args, **kwargs):
 
-    """[A-Plan] Disabled Google Sheets function (original body removed)."""
+    """[A-Plan] Disabled Google Sheets function (stub)."""
 
-    return {"status":"disabled","reason":"sheets path removed"}
+    return {"status": "disabled", "reason": "sheets path removed"}
 
 def tab_eval(emp_df: pd.DataFrame):
     """인사평가 탭 (심플·자동 라우팅)
@@ -2633,9 +2625,9 @@ REQ_EMP_COLS = [
 
 def _get_ws_and_headers(*args, **kwargs):
 
-    """[A-Plan] Disabled Google Sheets function (original body removed)."""
+    """[A-Plan] Disabled Google Sheets function (stub)."""
 
-    return {"status":"disabled","reason":"sheets path removed"}
+    return {"status": "disabled", "reason": "sheets path removed"}
 
 def ensure_emp_sheet_columns():
     ws, header, hmap = _get_ws_and_headers(EMP_SHEET)
@@ -3281,9 +3273,9 @@ def _gs_queue_init():
 
 def gs_enqueue_range(*args, **kwargs):
 
-    """[A-Plan] Disabled Google Sheets function (original body removed)."""
+    """[A-Plan] Disabled Google Sheets function (stub)."""
 
-    return {"status":"disabled","reason":"sheets path removed"}
+    return {"status": "disabled", "reason": "sheets path removed"}
 
 def gs_enqueue_cell(ws, row, col, value, value_input_option="USER_ENTERED"):
     _gs_queue_init()
@@ -3311,5 +3303,3 @@ def gs_flush():
                 raise
     st.session_state.gs_queue = []
 # ===== End helpers =====
-[A-Plan] End Removed Section
-"""
