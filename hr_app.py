@@ -3744,9 +3744,8 @@ def gs_flush():
 
 
 # ============================================================================
-# === DB-FIRST OVERRIDE SECTION (app ↔ DB as primary; Sheets as fallback) ====
-# This block keeps ALL original code above intact, but overrides specific
-# read_* functions to prefer Supabase. Safe for rollback by deleting this block.
+# === DB-FIRST OVERRIDE SECTION (READ) =======================================
+# Prefers DB for all reads; Sheets only as a fallback with one-time upsert.
 # ============================================================================
 import pandas as _pd
 
@@ -3778,7 +3777,6 @@ def _db_upsert(table: str, df: _pd.DataFrame, on_conflict: str):
 
 # ---- employees
 def read_emp_df() -> pd.DataFrame:
-    """직원: DB 우선, 비어있으면 시트 폴백 후 DB 업서트"""
     _df = _db_select_all("employees")
     if not _df.empty:
         if "사번" in _df.columns:
@@ -3793,10 +3791,9 @@ def read_emp_df() -> pd.DataFrame:
         return df_sheet
     return _df
 
-# ---- eval_items
 def read_eval_items_df() -> pd.DataFrame:
     _df = _db_select_all("eval_items")
-    if not _df.empty:
+    if not _df.empty":
         return _df
     df_sheet = read_sheet_df("평가_항목")
     if not df_sheet.empty:
@@ -3804,7 +3801,6 @@ def read_eval_items_df() -> pd.DataFrame:
         return df_sheet
     return _df
 
-# ---- acl
 def read_acl_df() -> pd.DataFrame:
     _df = _db_select_all("acl")
     if not _df.empty:
@@ -3815,7 +3811,6 @@ def read_acl_df() -> pd.DataFrame:
         return df_sheet
     return _df
 
-# ---- eval_responses
 def read_eval_responses_df() -> pd.DataFrame:
     _df = _db_select_all("eval_responses")
     if not _df.empty:
@@ -3826,7 +3821,6 @@ def read_eval_responses_df() -> pd.DataFrame:
         return df_sheet
     return _df
 
-# ---- job_specs
 def read_job_specs_df() -> pd.DataFrame:
     _df = _db_select_all("job_specs")
     if not _df.empty:
@@ -3837,7 +3831,6 @@ def read_job_specs_df() -> pd.DataFrame:
         return df_sheet
     return _df
 
-# ---- job_specs_approvals
 def read_job_specs_approvals_df() -> pd.DataFrame:
     _df = _db_select_all("job_specs_approvals")
     if not _df.empty:
@@ -3848,7 +3841,6 @@ def read_job_specs_approvals_df() -> pd.DataFrame:
         return df_sheet
     return _df
 
-# ---- competency_evals
 def read_competency_evals_df() -> pd.DataFrame:
     _df = _db_select_all("competency_evals")
     if not _df.empty:
@@ -3858,7 +3850,61 @@ def read_competency_evals_df() -> pd.DataFrame:
         _db_upsert("competency_evals", df_sheet, on_conflict="연도,평가대상사번,평가자사번")
         return df_sheet
     return _df
+# ============================================================================
+# === END READ OVERRIDES =====================================================
+# ============================================================================
+
+
 
 # ============================================================================
-# === END OF DB-FIRST OVERRIDE SECTION =======================================
+# === DB-FIRST WRITE ADAPTER (monkey patch write_sheet_df) ===================
+# Redirects writes that target Sheets into DB upserts when DB_PRIMARY=True.
+# Keeps original write_sheet_df as fallback in _write_sheet_df_orig.
+# ============================================================================
+DB_PRIMARY = True
+
+try:
+    _write_sheet_df_orig = write_sheet_df  # capture original if exists
+except Exception:
+    _write_sheet_df_orig = None
+
+_SHEET_TO_TABLE = {
+    "직원": ("employees", "사번"),
+    "평가_항목": ("eval_items", "항목ID"),
+    "권한": ("acl", "사번,역할"),
+    "인사평가": ("eval_responses", "연도,평가유형,평가대상사번,평가자사번"),
+    "직무기술서": ("job_specs", "연도,사번,버전"),
+    "직무기술서_승인": ("job_specs_approvals", "연도,사번,버전,승인자사번"),
+    "직무능력평가": ("competency_evals", "연도,평가대상사번,평가자사번"),
+}
+
+def _write_sheet_df_dbfirst(sheet_name: str, df):
+    if not isinstance(df, _pd.DataFrame):
+        try: df = _pd.DataFrame(df)
+        except Exception: pass
+
+    if DB_PRIMARY and sheet_name in _SHEET_TO_TABLE and isinstance(df, _pd.DataFrame):
+        table, conflict = _SHEET_TO_TABLE[sheet_name]
+        n = _db_upsert(table, df, on_conflict=conflict)
+        try:
+            st.success(f"DB에 {n}건 반영됨 · ({sheet_name}→{table})", icon="🗄️")
+        except Exception:
+            pass
+        return True
+
+    # Fallback: original sheet write if available
+    if _write_sheet_df_orig is not None:
+        return _write_sheet_df_orig(sheet_name, df)
+
+    # No-op
+    try:
+        st.info("write_sheet_df 원본 부재: DB_PRIMARY 모드에서 시트 쓰기는 생략됨.")
+    except Exception:
+        pass
+    return True
+
+# Monkey-patch
+write_sheet_df = _write_sheet_df_dbfirst
+# ============================================================================
+# === END WRITE ADAPTER ======================================================
 # ============================================================================
