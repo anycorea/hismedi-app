@@ -3577,37 +3577,37 @@ def main():
 
                     with c1:
                         if st.button("👤 직원", use_container_width=True, help="직원 동기화 (employees)"):
-                            _call_sync("sync_employees_fill_blanks")
+                            _call_sync("sync_sheet_to_supabase_employees_v1")
                         st.caption(f"employees · { _safe_count('employees','사번') or '—' }")
 
                     with c2:
                         if st.button("🧩 평가항목", use_container_width=True, help="평가_항목 동기화 (eval_items)"):
-                            _call_sync("sync_eval_items_fill_blanks")
+                            _call_sync("sync_sheet_to_supabase_eval_items_v1")
                         st.caption(f"eval_items · { _safe_count('eval_items','항목ID') or '—' }")
 
                     with c3:
                         if st.button("🔐 권한", use_container_width=True, help="권한 동기화 (acl)"):
-                            _call_sync("sync_acl_fill_blanks")
+                            _call_sync("sync_sheet_to_supabase_acl_v1")
                         st.caption(f"acl · { _safe_count('acl','사번') or '—' }")
 
                     with c4:
                         if st.button("📝 인사평가", use_container_width=True, help="인사평가 동기화 (eval_responses)"):
-                            _call_sync("sync_eval_responses_fill_blanks")
+                            _call_sync("sync_sheet_to_supabase_eval_responses_v1")
                         st.caption(f"eval_responses · { _safe_count('eval_responses','*') or '—' }")
 
                     with c5:
                         if st.button("📄 직무기술서", use_container_width=True, help="직무기술서 동기화 (job_specs)"):
-                            _call_sync("sync_job_specs_fill_blanks")
+                            _call_sync("sync_sheet_to_supabase_job_specs_v1")
                         st.caption(f"job_specs · { _safe_count('job_specs','*') or '—' }")
 
                     with c6:
                         if st.button("✅ JD승인", use_container_width=True, help="직무기술서_승인 동기화 (job_specs_approvals)"):
-                            _call_sync("sync_job_specs_approvals_fill_blanks")
+                            _call_sync("sync_sheet_to_supabase_job_specs_approvals_v1")
                         st.caption(f"approvals · { _safe_count('job_specs_approvals','*') or '—' }")
 
                     with c7:
                         if st.button("🧠 능력평가", use_container_width=True, help="직무능력평가 동기화 (competency_evals)"):
-                            _call_sync("sync_competency_evals_fill_blanks")
+                            _call_sync("sync_sheet_to_supabase_competency_evals_v1")
                         st.caption(f"competency · { _safe_count('competency_evals','*') or '—' }")
 
                 a1, a2, a3, a4 = st.tabs(["직원","PIN 관리","평가 항목 관리","권한 관리"])
@@ -3740,244 +3740,3 @@ def gs_flush():
                 raise
     st.session_state.gs_queue = []
 # ===== End helpers =====
-
-
-# === Bidirectional blank-fill sync tools (embedded) ===
-
-import os
-from typing import List, Dict, Any, Tuple
-import pandas as _pd
-import numpy as _np
-
-# Optional: Streamlit integration (used for messages)
-try:
-    import streamlit as st
-except Exception:
-    class _Dummy:
-        def __getattr__(self, k): 
-            def _f(*a, **kw): pass
-            return _f
-    st = _Dummy()
-
-# Supabase client
-def _get_supabase_client():
-    try:
-        from supabase import create_client
-        url = st.secrets["supabase"]["url"]
-        key = st.secrets["supabase"]["key"]
-    except Exception:
-        # Fallback to env vars
-        url = os.getenv("SUPABASE_URL")
-        key = os.getenv("SUPABASE_KEY")
-    if not url or not key:
-        raise RuntimeError("Supabase URL/KEY not found in secrets or env.")
-    return create_client(url, key)
-
-# Google Sheets (gspread) client
-def _get_gspread_client():
-    try:
-        import gspread
-        from google.oauth2.service_account import Credentials
-        scopes = [
-            "https://www.googleapis.com/auth/spreadsheets",
-            "https://www.googleapis.com/auth/drive.readonly",
-        ]
-        info = st.secrets["gcp_service_account"]
-        creds = Credentials.from_service_account_info(info, scopes=scopes)
-        return gspread.authorize(creds)
-    except Exception as e:
-        raise RuntimeError("gspread client init failed: %s" % e)
-
-def _get_ws(sheet_title: str):
-    gclient = _get_gspread_client()
-    sh = gclient.open_by_key(st.secrets["sheets"]["HR_SHEET_ID"])
-    return sh.worksheet(sheet_title)
-
-# -----------------------------
-# Helpers
-# -----------------------------
-def _is_empty(x):
-    if x is None: return True
-    if isinstance(x, float) and _np.isnan(x): return True
-    if isinstance(x, str):
-        return x.strip() == "" or x.strip("\u00a0") == ""
-    return False
-
-def _truthy_map(v):
-    if isinstance(v, bool): return v
-    if v is None: return None
-    s = str(v).strip().lower()
-    return s in ("y","yes","true","1","t","예","네")
-
-def _normalize_bool_cols(df: _pd.DataFrame, cols: List[str]):
-    for c in cols:
-        if c in df.columns:
-            df[c] = df[c].map(_truthy_map)
-
-def _ensure_columns(df: _pd.DataFrame, cols: List[str]):
-    for c in cols:
-        if c not in df.columns:
-            df[c] = _pd.NA
-    return df
-
-def _sheet_df(ws) -> _pd.DataFrame:
-    header = ws.row_values(1)
-    recs = ws.get_all_records()
-    df = _pd.DataFrame(recs)
-    for h in header:
-        if h not in df.columns:
-            df[h] = _pd.NA
-    df = df[header]
-    return df, header
-
-def _supa_df(supa, table: str) -> _pd.DataFrame:
-    res = supa.table(table).select("*").execute()
-    data = getattr(res, "data", []) or []
-    df = _pd.DataFrame(data)
-    return df
-
-def _merge_fill_blanks(left: _pd.DataFrame, right: _pd.DataFrame, on: List[str], cols_order: List[str]) -> Tuple[_pd.DataFrame, _pd.DataFrame, int, int]:
-    if left.empty and right.empty:
-        return left, right, 0, 0
-    L = left.copy()
-    R = right.copy()
-    common_cols = [c for c in cols_order if c in L.columns and c in R.columns]
-    def _mk_index(df):
-        if df.empty:
-            return df, _pd.Series(dtype=object)
-        idx = df[on].astype(str).agg("|".join, axis=1)
-        df = df.copy()
-        df["__key__"] = idx
-        return df.set_index("__key__", drop=True), idx
-    Li, _ = _mk_index(L)
-    Ri, _ = _mk_index(R)
-    fill_L = 0
-    fill_R = 0
-    keys = set(Li.index).intersection(set(Ri.index))
-    for k in keys:
-        lrow = Li.loc[k]
-        rrow = Ri.loc[k]
-        for c in common_cols:
-            lv = lrow.get(c, _pd.NA)
-            rv = rrow.get(c, _pd.NA)
-            lv_emp = _is_empty(lv)
-            rv_emp = _is_empty(rv)
-            if lv_emp and not rv_emp:
-                Li.at[k, c] = rv
-                fill_L += 1
-            elif rv_emp and not lv_emp:
-                Ri.at[k, c] = lv
-                fill_R += 1
-    Li = Li.reset_index(drop=False).drop(columns="__key__", errors="ignore")
-    Ri = Ri.reset_index(drop=False).drop(columns="__key__", errors="ignore")
-    Li = Li[[c for c in cols_order if c in Li.columns]]
-    return Li, Ri, fill_L, fill_R
-
-def _batch_update_sheet(ws, header: List[str], new_df: _pd.DataFrame, old_df: _pd.DataFrame):
-    if new_df.empty and old_df.empty:
-        return 0
-    changed_rows = []
-    for i in range(len(new_df)):
-        changed = False
-        for c in header:
-            oldv = old_df.iloc[i][c] if i < len(old_df) else _pd.NA
-            newv = new_df.iloc[i][c]
-            if _is_empty(oldv) and not _is_empty(newv):
-                changed = True
-                break
-        if changed:
-            changed_rows.append(i)
-    if not changed_rows:
-        return 0
-    values = [list(map(lambda x: "" if _is_empty(x) else x, new_df.iloc[i][header].tolist())) for i in changed_rows]
-    start_row = min(changed_rows) + 2
-    end_row = max(changed_rows) + 2
-    rng = f"{start_row}:{end_row}"
-    block_values = []
-    for r in range(start_row-2, end_row-1):
-        if r in changed_rows:
-            idx = r
-            block_values.append(values[changed_rows.index(idx)])
-        else:
-            if r < len(old_df):
-                block_values.append(list(map(lambda x: "" if _is_empty(x) else x, old_df.iloc[r][header].tolist())))
-            else:
-                block_values.append([""] * len(header))
-    try:
-        ws.update(rng, block_values, value_input_option="USER_ENTERED")
-        return len(changed_rows)
-    except Exception as e:
-        try:
-            st.warning(f"시트 업데이트 실패: {e}")
-        except Exception:
-            pass
-        return 0
-
-def _upsert_supabase(supa, table: str, df_new: _pd.DataFrame, df_old: _pd.DataFrame, on_conflict: str):
-    if df_new.empty:
-        return 0
-    to_send = []
-    for i in range(len(df_new)):
-        changed = False
-        row_new = df_new.iloc[i].to_dict()
-        row_old = df_old.iloc[i].to_dict() if i < len(df_old) else {}
-        for k, v in row_new.items():
-            ov = row_old.get(k, None)
-            if _is_empty(ov) and not _is_empty(v):
-                changed = True
-                break
-        if changed:
-            to_send.append(row_new)
-    if not to_send:
-        return 0
-    supa.table(table).upsert(to_send, on_conflict=on_conflict).execute()
-    return len(to_send)
-
-def sync_fill_blanks(sheet_name: str, table: str, key_cols: List[str], truthy_cols: List[str] = None, on_conflict: str = None):
-    if truthy_cols is None: truthy_cols = []
-    if on_conflict is None: on_conflict = ",".join(key_cols)
-    supa = _get_supabase_client()
-    ws = _get_ws(sheet_name)
-    sheet_df, header = _sheet_df(ws)
-    supa_df = _supa_df(supa, table)
-    sheet_df = _ensure_columns(sheet_df, key_cols)
-    supa_df = _ensure_columns(supa_df, key_cols)
-    _normalize_bool_cols(sheet_df, truthy_cols)
-    _normalize_bool_cols(supa_df, truthy_cols)
-    supa_view = supa_df.copy()
-    for h in header:
-        if h not in supa_view.columns:
-            supa_view[h] = _pd.NA
-    supa_view = supa_view[header]
-    new_sheet, new_supa, filled_into_sheet, filled_into_supa = _merge_fill_blanks(sheet_df, supa_view, on=key_cols, cols_order=header)
-    n_sheet = _batch_update_sheet(ws, header, new_sheet, sheet_df)
-    n_supa  = _upsert_supabase(supa, table, new_supa, supa_view, on_conflict=on_conflict)
-    try:
-        st.success(f"'{sheet_name}' ↔ '{table}' 상호 보정 완료 · 시트 {n_sheet}행 채움 · Supabase {n_supa}행 채움", icon="🔁")
-        if (filled_into_sheet - n_sheet) != 0 or (filled_into_supa - n_supa) != 0:
-            st.caption(f"(참고) 비교상 채워질 후보: 시트 {filled_into_sheet}셀, Supabase {filled_into_supa}셀")
-    except Exception:
-        pass
-    return dict(sheet_rows_filled=n_sheet, supabase_rows_filled=n_supa)
-
-# Table-specific wrappers
-def sync_employees_fill_blanks():
-    return sync_fill_blanks("직원", "employees", ["사번"], ["적용여부", "재직여부"])
-
-def sync_eval_items_fill_blanks():
-    return sync_fill_blanks("평가_항목", "eval_items", ["항목ID"], ["활성"])
-
-def sync_acl_fill_blanks():
-    return sync_fill_blanks("권한", "acl", ["사번","역할"], ["활성"])
-
-def sync_eval_responses_fill_blanks():
-    return sync_fill_blanks("인사평가", "eval_responses", ["연도","평가유형","평가대상사번","평가자사번"], ["잠금"])
-
-def sync_job_specs_fill_blanks():
-    return sync_fill_blanks("직무기술서", "job_specs", ["연도","사번","버전"])
-
-def sync_job_specs_approvals_fill_blanks():
-    return sync_fill_blanks("직무기술서_승인", "job_specs_approvals", ["연도","사번","버전","승인자사번"])
-
-def sync_competency_evals_fill_blanks():
-    return sync_fill_blanks("직무능력평가", "competency_evals", ["연도","평가대상사번","평가자사번"], ["잠금"])
