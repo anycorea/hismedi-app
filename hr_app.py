@@ -3908,3 +3908,65 @@ write_sheet_df = _write_sheet_df_dbfirst
 # ============================================================================
 # === END WRITE ADAPTER ======================================================
 # ============================================================================
+
+
+
+# ============================================================================
+# === ADMIN: DB 점검 패널 =====================================================
+# Adds a lightweight DB health panel for admins (safe to keep in production).
+# ============================================================================
+def _db_count(table: str) -> int:
+    try:
+        res = supabase.table(table).select("id", count="exact").limit(1).execute()
+        cnt = getattr(res, "count", None)
+        if isinstance(cnt, int): return cnt
+    except Exception:
+        pass
+    try:
+        res = supabase.table(table).select("*").execute()
+        return len(getattr(res, "data", []) or [])
+    except Exception:
+        return -1
+
+def admin_db_health_panel():
+    if 'is_admin' in globals():
+        try:
+            is_admin_user = is_admin(st.session_state.get("me"))
+        except Exception:
+            is_admin_user = True
+    else:
+        is_admin_user = True
+
+    if not is_admin_user:
+        return
+
+    with st.sidebar.expander("🗄️ DB 점검", expanded=False):
+        col1, col2 = st.columns(2)
+        with col1:
+            st.write("employees:", _db_count("employees"))
+            st.write("eval_items:", _db_count("eval_items"))
+            st.write("acl:", _db_count("acl"))
+            st.write("eval_responses:", _db_count("eval_responses"))
+        with col2:
+            st.write("job_specs:", _db_count("job_specs"))
+            st.write("job_specs_approvals:", _db_count("job_specs_approvals"))
+            st.write("competency_evals:", _db_count("competency_evals"))
+
+# 자동 호출(앱 진입 시)
+try:
+    admin_db_health_panel()
+except Exception:
+    pass
+# ============================================================================
+# === END ADMIN PANEL ========================================================
+# ============================================================================
+
+
+
+# ============================================================================
+# === UI FLAG: Hide legacy Sheet sync tools by default =======================
+# If your UI builds the "시트 ↔ Supabase" panel, you can wrap it like:
+# if SHOW_SHEET_TOOLS:   ... panel code ...
+# ============================================================================
+SHOW_SHEET_TOOLS = False
+# ============================================================================
