@@ -3799,8 +3799,8 @@ def _merge_missing(dst_row: Dict[str, Any], src_row: Dict[str, Any], editable_co
     return merged, filled
 
 def _strip_empty(d: dict, keep: list) -> dict:
-    \"\"\"Return new dict where keys in 'keep' are preserved, and other keys with empty values are dropped.
-    Prevents null/empty overwrites on upsert.\"\"\"
+    """Return new dict where keys in 'keep' are preserved, and other keys with empty values are dropped.
+    Prevents null/empty overwrites on upsert."""
     out = {}
     for k, v in d.items():
         if k in keep:
