@@ -4,193 +4,6 @@
 # Page config -> 반드시 가장 먼저 호출
 # ────────────────────────────────────────────────────────────────
 import os
-
-# ===== DB-FIRST SWITCH (2025-11-02) =====
-DB_FIRST = True  # 앱 저장/조회 경로를 '앱 ↔ DB(Supabase)'로 강제 전환
-
-_TABLE_TITLE_TO_NAME = {
-    "직원": "employees",
-    "평가_항목": "eval_items",
-    "권한": "acl",
-    "인사평가": "eval_latest",  # 읽기 전용(뷰). 없으면 eval_responses fallback
-    "직무기술서": "job_specs",
-    "직무기술서_승인": "job_specs_approvals",
-    "직무능력평가": "competency_evals",
-}
-
-# upsert conflict targets by table
-_TABLE_ON_CONFLICT = {
-    "employees": "사번",
-    "eval_items": "항목ID",
-    "acl": "사번,역할",
-    "eval_responses": "연도,평가유형,평가대상사번,평가자사번",
-    "job_specs": "연도,사번,버전",
-    "job_specs_approvals": "연도,사번,버전,승인자사번",
-    "competency_evals": "연도,평가대상사번,평가자사번",
-}
-
-def _a1_to_rowcol(a1: str):
-    import re
-    a1 = str(a1)
-    m = re.match(r'^([A-Za-z]+)(\d+)$', a1)
-    if not m:
-        return None, None
-    col_letters, row_str = m.groups()
-    # convert letters to number
-    col = 0
-    for ch in col_letters.upper():
-        col = col * 26 + (ord(ch) - ord('A') + 1)
-    return int(row_str), int(col)
-
-class _WSProxy:
-    """Google Sheet 워크시트 인터페이스를 흉내내는 DB-우선 프록시."""
-    def __init__(self, title: str):
-        self.title = title
-        self._table = _TABLE_TITLE_TO_NAME.get(title, "")
-        self._sb = get_supabase()
-        self._df_cache = None
-        self._headers_cache = None
-
-    # --- helpers ---
-    def _load_df(self):
-        import pandas as _pd
-        if self._df_cache is not None:
-            return self._df_cache
-        table = self._table
-        # '인사평가'는 우선 eval_latest 뷰 사용, 없으면 eval_responses
-        if table == "eval_latest":
-            try:
-                data = self._sb.table("eval_latest").select("*").execute().data
-            except Exception:
-                data = self._sb.table("eval_responses").select("*").execute().data
-        elif table:
-            data = self._sb.table(table).select("*").execute().data
-        else:
-            data = []
-        df = _pd.DataFrame(data)
-        # ensure stable header order
-        if not df.empty:
-            self._headers_cache = list(df.columns)
-        self._df_cache = df
-        return df
-
-    def _headers(self):
-        self._load_df()
-        return self._headers_cache or []
-
-    def _on_conflict_for_table(self, table: str):
-        if table == "eval_latest":
-            return _TABLE_ON_CONFLICT.get("eval_responses")
-        return _TABLE_ON_CONFLICT.get(table) or None
-
-    def _upsert_record(self, rec: dict):
-        table = self._table
-        if table == "eval_latest":
-            table = "eval_responses"
-        conflict = self._on_conflict_for_table(table)
-        q = self._sb.table(table).upsert([rec])
-        if conflict:
-            q = q.on_conflict(conflict)
-        q.execute()
-        # bust cache
-        self._df_cache = None
-
-    # --- read API ---
-    def get_all_records(self):
-        return self._load_df().to_dict(orient="records")
-
-    def get_all_values(self):
-        df = self._load_df()
-        if df.empty:
-            return []
-        headers = self._headers()
-        rows = [[df.iloc[i][h] if h in df.columns else "" for h in headers] for i in range(len(df))]
-        return [headers] + rows
-
-    def col_values(self, col_index: int):
-        vals = []
-        allv = self.get_all_values()
-        if not allv:
-            return vals
-        headers, rows = allv[0], allv[1:]
-        if 1 <= col_index <= len(headers):
-            vals = [r[col_index-1] for r in rows]
-        return [headers[col_index-1]] + vals if vals else []
-
-    # --- write API ---
-    def update(self, *args, **kwargs):
-        # support both update(range_name, values, ...) and update(values, range_name=...)
-        if args and isinstance(args[0], str):
-            a1 = args[0]
-            values = args[1] if len(args) > 1 else kwargs.get("values") or kwargs.get("body")
-        else:
-            a1 = kwargs.get("range_name") or kwargs.get("range") or ""
-            values = args[0] if args else kwargs.get("values") or kwargs.get("body")
-        if not a1 or values is None:
-            return
-        row, col = _a1_to_rowcol(a1)
-        if not row or not col:
-            return
-        # single-cell updates only (as used by gs_enqueue_cell)
-        if isinstance(values, list) and values and isinstance(values[0], list):
-            v = values[0][0] if values[0] else None
-        else:
-            v = values
-        return self.update_cell(row, col, v)
-
-    def update_cell(self, row: int, col: int, value):
-        # row 1 is header
-        headers = self._headers()
-        if not headers:
-            return
-        if row == 1:
-            # header edits are ignored
-            return
-        df = self._load_df()
-        idx = row - 2
-        # bounds check
-        if not (0 <= idx < max(len(df), 10) or len(df)==0):
-            pass
-        # derive field name
-        if col-1 < len(headers):
-            key = headers[col-1]
-        else:
-            return
-        # build record dict (existing row or new row)
-        if 0 <= idx < len(df):
-            rec = df.iloc[idx].to_dict()
-        else:
-            rec = {h: None for h in headers}
-        rec[key] = value
-        self._upsert_record(rec)
-
-    # --- no-op methods to satisfy callers ---
-    def add_rows(self, n): return None
-    def add_cols(self, n): return None
-    def clear(self): return None
-    def resize(self, rows=None, cols=None): return None
-    def append(self, *args, **kwargs): return None
-    @property
-    def row_count(self): return (self._load_df().shape[0] + 1)
-    @property
-    def col_count(self): return len(self._headers())
-
-# patch _get_ws to return DB proxy when 켜짐
-_ORIG__get_ws = None
-try:
-    _ORIG__get_ws = _get_ws
-except Exception:
-    _ORIG__get_ws = None
-
-def _get_ws(sheet_title: str):
-    if 'DB_FIRST' in globals() and DB_FIRST and sheet_title in _TABLE_TITLE_TO_NAME:
-        return _WSProxy(sheet_title)
-    # fallback to original sheets
-    if _ORIG__get_ws:
-        return _ORIG__get_ws(sheet_title)
-    # last resort: DB proxy
-    return _WSProxy(sheet_title)
-# ===== /DB-FIRST SWITCH =====
 import streamlit as st
 from supabase import create_client, Client
 
@@ -211,7 +24,157 @@ def get_supabase() -> Client:
     return create_client(url, key)
 
 supabase = get_supabase()
-st.caption("✅ Supabase 연결 OK")  # config 이후에 출력
+st.caption("✅ Supabase 연결 OK")
+# ────────────────────────────────────────
+# DB-FIRST OVERRIDE (Sheets → Supabase proxy for 7 target sheets)
+DB_FIRST = True
+
+# Map sheet titles to Supabase tables and their conflict keys
+_SHEET_DB_MAP = {
+    "직원": {"table": "employees", "pk": ["사번"]},
+    "평가_항목": {"table": "eval_items", "pk": ["항목ID"]},
+    "권한": {"table": "acl", "pk": ["사번","역할"]},
+    "인사평가": {"table": "eval_responses", "pk": ["연도","평가유형","평가대상사번","평가자사번"]},
+    "직무기술서": {"table": "job_specs", "pk": ["연도","사번","버전"]},
+    "직무기술서_승인": {"table": "job_specs_approvals", "pk": ["연도","사번","버전","승인자사번"]},
+    "직무능력평가": {"table": "competency_evals", "pk": ["연도","평가대상사번","평가자사번"]},
+}
+
+def _table_conflict_clause(pk_cols):
+    return ",".join(pk_cols)
+
+class _WSProxy:
+    """A minimal gspread-like proxy backed by Supabase for get/update operations."""
+    def __init__(self, sheet_title:str, table:str, pk_cols:list[str]):
+        self.sheet_title = sheet_title
+        self.table = table
+        self.pk_cols = pk_cols
+        self._headers_cache = None  # preserve stable ordering across calls
+
+    # READS
+    def get_all_records(self, expected_headers=None):
+        # Fetch all rows
+        res = supabase.table(self.table).select("*").execute()
+        rows = res.data or []
+        # Decide headers
+        if expected_headers:
+            headers = expected_headers
+        else:
+            if self._headers_cache is not None:
+                headers = self._headers_cache
+            else:
+                # prefer pk first, then others alpha
+                keys = set()
+                for r in rows:
+                    keys.update(r.keys())
+                others = [k for k in sorted(keys) if k not in self.pk_cols]
+                headers = self.pk_cols + others
+                self._headers_cache = headers
+        # Order fields
+        out = []
+        for r in rows:
+            out.append({h: r.get(h, None) for h in headers})
+        return out
+
+    def get_all_values(self):
+        records = self.get_all_records()
+        if not records:
+            return []
+        headers = list(records[0].keys())
+        values = [headers]
+        for r in records:
+            values.append([r.get(h, "") if r.get(h, "") is not None else "" for h in headers])
+        return values
+
+    def col_values(self, col_idx:int):
+        values = self.get_all_values()
+        if not values:
+            return []
+        # col_idx is 1-based including header row
+        col = []
+        for row in values:
+            if col_idx-1 < len(row):
+                col.append(row[col_idx-1])
+            else:
+                col.append("")
+        return col
+
+    # WRITES
+    def _upsert_row(self, row_dict:dict):
+        # Build conflict clause
+        conflict = _table_conflict_clause(self.pk_cols)
+        return supabase.table(self.table).upsert(row_dict, on_conflict=conflict).execute()
+
+    def update_cell(self, row:int, col:int, value):
+        """Row/Col are 1-based including header row; row=1 is header."""
+        values = self.get_all_values()
+        if not values:
+            # new table: can't infer headers; ignore header row write
+            return
+        headers = values[0]
+        # header row write: change nothing; ignore
+        if row == 1:
+            return
+        # expand to target row
+        while len(values) <= row-1:
+            values.append([""]*len(headers))
+        # expand to target col if needed
+        if col-1 >= len(headers):
+            # ignore out-of-range column writes (keeps schema stable)
+            return
+        # set value
+        values[row-1][col-1] = value
+        # convert row to dict and upsert
+        body = {headers[i]: values[row-1][i] for i in range(len(headers))}
+        # normalize blanks to None
+        for k,v in list(body.items()):
+            if v == "":
+                body[k] = None
+        self._upsert_row(body)
+
+    def update(self, a1_range:str, values:list[list]):
+        """
+        Support update("A2", [[val]]) or update("B2:B5", [[...], ...]).
+        For simplicity, we only map single-cell updates to update_cell.
+        """
+        # crude A1 single-cell parser
+        m = re.match(r"^([A-Za-z]+)(\d+)$", a1_range.strip())
+        if not m:
+            return
+        col_letters, row_s = m.groups()
+        # convert letters to 1-based index
+        col = 0
+        for ch in col_letters.upper():
+            col = col*26 + (ord(ch)-64)
+        row = int(row_s)
+        if not values or not values[0]:
+            return
+        self.update_cell(row, col, values[0][0])
+
+# Override _get_ws to return proxy for 7 target sheets
+_ORIG__get_ws = _get_ws  # keep fallback
+
+def _get_ws(sheet_title: str):
+    if DB_FIRST and sheet_title in _SHEET_DB_MAP:
+        cfg = _SHEET_DB_MAP[sheet_title]
+        # Special readable view for "인사평가" if available
+        if sheet_title == "인사평가":
+            try:
+                # touch eval_latest to warm headers (ignore errors)
+                _ = supabase.table("eval_latest").select("*").limit(1).execute()
+                proxy = _WSProxy(sheet_title, "eval_responses", cfg["pk"])
+                # prefer headers from eval_latest if exists
+                rec = supabase.table("eval_latest").select("*").limit(1).execute().data
+                if rec:
+                    proxy._headers_cache = list(rec[0].keys())
+                return proxy
+            except Exception:
+                return _WSProxy(sheet_title, cfg["table"], cfg["pk"])
+        return _WSProxy(sheet_title, cfg["table"], cfg["pk"])
+    # default: original Sheets behavior
+    return _ORIG__get_ws(sheet_title)
+# ────────────────────────────────────────
+  # config 이후에 출력
 # ────────────────────────────────────────────────────────────────
 
 def _ensure_capacity(ws, min_row: int, min_col: int):
