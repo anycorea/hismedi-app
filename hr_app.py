@@ -3577,37 +3577,37 @@ def main():
 
                     with c1:
                         if st.button("👤 직원", use_container_width=True, help="직원 동기화 (employees)"):
-                            _call_sync("sync_sheet_to_supabase_employees_v1")
+                            _call_sync("sync_employees_fill_blanks")
                         st.caption(f"employees · { _safe_count('employees','사번') or '—' }")
 
                     with c2:
                         if st.button("🧩 평가항목", use_container_width=True, help="평가_항목 동기화 (eval_items)"):
-                            _call_sync("sync_sheet_to_supabase_eval_items_v1")
+                            _call_sync("sync_eval_items_fill_blanks")
                         st.caption(f"eval_items · { _safe_count('eval_items','항목ID') or '—' }")
 
                     with c3:
                         if st.button("🔐 권한", use_container_width=True, help="권한 동기화 (acl)"):
-                            _call_sync("sync_sheet_to_supabase_acl_v1")
+                            _call_sync("sync_acl_fill_blanks")
                         st.caption(f"acl · { _safe_count('acl','사번') or '—' }")
 
                     with c4:
                         if st.button("📝 인사평가", use_container_width=True, help="인사평가 동기화 (eval_responses)"):
-                            _call_sync("sync_sheet_to_supabase_eval_responses_v1")
+                            _call_sync("sync_eval_responses_fill_blanks")
                         st.caption(f"eval_responses · { _safe_count('eval_responses','*') or '—' }")
 
                     with c5:
                         if st.button("📄 직무기술서", use_container_width=True, help="직무기술서 동기화 (job_specs)"):
-                            _call_sync("sync_sheet_to_supabase_job_specs_v1")
+                            _call_sync("sync_job_specs_fill_blanks")
                         st.caption(f"job_specs · { _safe_count('job_specs','*') or '—' }")
 
                     with c6:
                         if st.button("✅ JD승인", use_container_width=True, help="직무기술서_승인 동기화 (job_specs_approvals)"):
-                            _call_sync("sync_sheet_to_supabase_job_specs_approvals_v1")
+                            _call_sync("sync_job_specs_approvals_fill_blanks")
                         st.caption(f"approvals · { _safe_count('job_specs_approvals','*') or '—' }")
 
                     with c7:
                         if st.button("🧠 능력평가", use_container_width=True, help="직무능력평가 동기화 (competency_evals)"):
-                            _call_sync("sync_sheet_to_supabase_competency_evals_v1")
+                            _call_sync("sync_competency_evals_fill_blanks")
                         st.caption(f"competency · { _safe_count('competency_evals','*') or '—' }")
 
                 a1, a2, a3, a4 = st.tabs(["직원","PIN 관리","평가 항목 관리","권한 관리"])
@@ -3742,403 +3742,242 @@ def gs_flush():
 # ===== End helpers =====
 
 
+# === Bidirectional blank-fill sync tools (embedded) ===
 
-# =========================
-# Missing-Only Bi-Sync Patch (2025-11-02)
-# - Overrides: sync_sheet_to_supabase_*_v1 functions (7개)
-# - Behavior: DB(Supabase)와 시트 상호 "빈칸만 채우기"; 기존 값 절대 덮어쓰기 금지
-# - 단일 진실원칙: 운영·저장/조회는 앱↔Supabase, 시트는 보조 캐시
-# =========================
+import os
+from typing import List, Dict, Any, Tuple
+import pandas as _pd
+import numpy as _np
 
-from typing import Dict, Any, List, Tuple, Optional
+# Optional: Streamlit integration (used for messages)
+try:
+    import streamlit as st
+except Exception:
+    class _Dummy:
+        def __getattr__(self, k): 
+            def _f(*a, **kw): pass
+            return _f
+    st = _Dummy()
 
-# --- Null/typing helpers ---
-NULL_EQUIV = {None, "", " ", "  ", "NULL", "NaN", "nan", "None"}
+# Supabase client
+def _get_supabase_client():
+    try:
+        from supabase import create_client
+        url = st.secrets["supabase"]["url"]
+        key = st.secrets["supabase"]["key"]
+    except Exception:
+        # Fallback to env vars
+        url = os.getenv("SUPABASE_URL")
+        key = os.getenv("SUPABASE_KEY")
+    if not url or not key:
+        raise RuntimeError("Supabase URL/KEY not found in secrets or env.")
+    return create_client(url, key)
 
-def _is_empty(v):
-    if v is None: return True
-    if isinstance(v, str):
-        return v.strip() in {""} or v in NULL_EQUIV
+# Google Sheets (gspread) client
+def _get_gspread_client():
+    try:
+        import gspread
+        from google.oauth2.service_account import Credentials
+        scopes = [
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive.readonly",
+        ]
+        info = st.secrets["gcp_service_account"]
+        creds = Credentials.from_service_account_info(info, scopes=scopes)
+        return gspread.authorize(creds)
+    except Exception as e:
+        raise RuntimeError("gspread client init failed: %s" % e)
+
+def _get_ws(sheet_title: str):
+    gclient = _get_gspread_client()
+    sh = gclient.open_by_key(st.secrets["sheets"]["HR_SHEET_ID"])
+    return sh.worksheet(sheet_title)
+
+# -----------------------------
+# Helpers
+# -----------------------------
+def _is_empty(x):
+    if x is None: return True
+    if isinstance(x, float) and _np.isnan(x): return True
+    if isinstance(x, str):
+        return x.strip() == "" or x.strip("\u00a0") == ""
     return False
 
-def _coerce_type(v, typ: str):
-    # typ: "text"|"int"|"float"|"bool"|"date"|"ts"
-    if _is_empty(v): return None
-    try:
-        if typ == "text":
-            return str(v).strip()
-        if typ == "int":
-            return int(float(v))
-        if typ == "float":
-            return float(v)
-        if typ == "bool":
-            if isinstance(v, bool): return v
-            s = str(v).strip().lower()
-            return s in {"1","y","yes","true","t","on","ok","true(참)","참"}
-        if typ == "date":
-            s = str(v).strip().replace(".", "-").replace("/", "-")
-            return s if len(s) >= 8 else None
-        if typ == "ts":
-            import datetime as dt
-            if isinstance(v, (int,float)):
-                return dt.datetime.utcfromtimestamp(v).isoformat(timespec="seconds")+"Z"
-            return str(v).strip()
-    except:
-        return None
+def _truthy_map(v):
+    if isinstance(v, bool): return v
+    if v is None: return None
+    s = str(v).strip().lower()
+    return s in ("y","yes","true","1","t","예","네")
 
-def _normalize_row(row: Dict[str, Any], schema: Dict[str, str]):
-    return {c: _coerce_type(row.get(c), t) for c, t in schema.items()}
+def _normalize_bool_cols(df: _pd.DataFrame, cols: List[str]):
+    for c in cols:
+        if c in df.columns:
+            df[c] = df[c].map(_truthy_map)
 
-def _merge_missing(dst_row: Dict[str, Any], src_row: Dict[str, Any], editable_cols: List[str]):
-    filled = []
-    merged = dict(dst_row)
-    for c in editable_cols:
-        if c in src_row and (_is_empty(merged.get(c)) and not _is_empty(src_row.get(c))):
-            merged[c] = src_row[c]
-            filled.append(c)
-    return merged, filled
+def _ensure_columns(df: _pd.DataFrame, cols: List[str]):
+    for c in cols:
+        if c not in df.columns:
+            df[c] = _pd.NA
+    return df
 
-def _strip_empty(d: dict, keep: list) -> dict:
-    """Return new dict where keys in 'keep' are preserved, and other keys with empty values are dropped.
-    Prevents null/empty overwrites on upsert."""
-    out = {}
-    for k, v in d.items():
-        if k in keep:
-            out[k] = v  # keys must be present even if None
+def _sheet_df(ws) -> _pd.DataFrame:
+    header = ws.row_values(1)
+    recs = ws.get_all_records()
+    df = _pd.DataFrame(recs)
+    for h in header:
+        if h not in df.columns:
+            df[h] = _pd.NA
+    df = df[header]
+    return df, header
+
+def _supa_df(supa, table: str) -> _pd.DataFrame:
+    res = supa.table(table).select("*").execute()
+    data = getattr(res, "data", []) or []
+    df = _pd.DataFrame(data)
+    return df
+
+def _merge_fill_blanks(left: _pd.DataFrame, right: _pd.DataFrame, on: List[str], cols_order: List[str]) -> Tuple[_pd.DataFrame, _pd.DataFrame, int, int]:
+    if left.empty and right.empty:
+        return left, right, 0, 0
+    L = left.copy()
+    R = right.copy()
+    common_cols = [c for c in cols_order if c in L.columns and c in R.columns]
+    def _mk_index(df):
+        if df.empty:
+            return df, _pd.Series(dtype=object)
+        idx = df[on].astype(str).agg("|".join, axis=1)
+        df = df.copy()
+        df["__key__"] = idx
+        return df.set_index("__key__", drop=True), idx
+    Li, _ = _mk_index(L)
+    Ri, _ = _mk_index(R)
+    fill_L = 0
+    fill_R = 0
+    keys = set(Li.index).intersection(set(Ri.index))
+    for k in keys:
+        lrow = Li.loc[k]
+        rrow = Ri.loc[k]
+        for c in common_cols:
+            lv = lrow.get(c, _pd.NA)
+            rv = rrow.get(c, _pd.NA)
+            lv_emp = _is_empty(lv)
+            rv_emp = _is_empty(rv)
+            if lv_emp and not rv_emp:
+                Li.at[k, c] = rv
+                fill_L += 1
+            elif rv_emp and not lv_emp:
+                Ri.at[k, c] = lv
+                fill_R += 1
+    Li = Li.reset_index(drop=False).drop(columns="__key__", errors="ignore")
+    Ri = Ri.reset_index(drop=False).drop(columns="__key__", errors="ignore")
+    Li = Li[[c for c in cols_order if c in Li.columns]]
+    return Li, Ri, fill_L, fill_R
+
+def _batch_update_sheet(ws, header: List[str], new_df: _pd.DataFrame, old_df: _pd.DataFrame):
+    if new_df.empty and old_df.empty:
+        return 0
+    changed_rows = []
+    for i in range(len(new_df)):
+        changed = False
+        for c in header:
+            oldv = old_df.iloc[i][c] if i < len(old_df) else _pd.NA
+            newv = new_df.iloc[i][c]
+            if _is_empty(oldv) and not _is_empty(newv):
+                changed = True
+                break
+        if changed:
+            changed_rows.append(i)
+    if not changed_rows:
+        return 0
+    values = [list(map(lambda x: "" if _is_empty(x) else x, new_df.iloc[i][header].tolist())) for i in changed_rows]
+    start_row = min(changed_rows) + 2
+    end_row = max(changed_rows) + 2
+    rng = f"{start_row}:{end_row}"
+    block_values = []
+    for r in range(start_row-2, end_row-1):
+        if r in changed_rows:
+            idx = r
+            block_values.append(values[changed_rows.index(idx)])
         else:
-            if not _is_empty(v):
-                out[k] = v
-    return out
-
-
-def _key_of(row: Dict[str, Any], key_cols: List[str]):
-    return tuple(row.get(k) for k in key_cols)
-
-def _batched(iterable, n=500):
-    buf = []
-    for x in iterable:
-        buf.append(x)
-        if len(buf) >= n:
-            yield buf
-            buf = []
-    if buf: yield buf
-
-# --- Sheet helpers ---
-def _sheet_read_all_records(ws):
-    return ws.get_all_records()
-
-def _sheet_get_headers(ws):
-    vals = ws.get_all_values()
-    return vals[0] if vals else []
-
-def _sheet_build_row_index_by_key(ws, key_cols: List[str]):
-    vals = ws.get_all_values()
-    if not vals: return [], {}, {}
-    headers = vals[0]
-    col_index = {h:i for i,h in enumerate(headers)}
-    row_by_key = {}
-    for i, row in enumerate(vals[1:], start=2):
-        key = tuple((row[col_index[k]] if k in col_index and col_index[k] < len(row) else "") for k in key_cols)
-        row_by_key[key] = i
-    return headers, row_by_key, col_index
-
-def _col_to_a1(idx: int) -> str:
-    s=""; x=idx+1
-    while x:
-        x, r = divmod(x-1, 26)
-        s = chr(65+r)+s
-    return s
-
-
-def _sheet_batch_patch(ws, patches: List[Tuple[Tuple[Any, ...], Dict[str, Any]]], key_cols: List[str]):
-    """
-    Apply partial updates to Google Sheet.
-    - If the row for a key doesn't exist, append a new row with BOTH key columns and editable cols.
-    - Try batch update via values_batch_update; fallback to values_update for each range.
-    """
-    if not patches:
-        return
-
-    headers, row_by_key, col_index = _sheet_build_row_index_by_key(ws, key_cols)
-    if not headers:
-        # Without headers, we cannot map columns—abort safely.
-        return
-
-    # Helpers
-    def _a1_col(idx: int) -> str:
-        s=""; x=idx+1
-        while x:
-            x, r = divmod(x-1, 26)
-            s = chr(65+r)+s
-        return s
-
-    data_payload = []  # for batch update
-    appended = 0
-
-    for key_tuple, colvals in patches:
-        key_as_strs = tuple("" if v is None else str(v) for v in key_tuple)
-        row_i = row_by_key.get(key_as_strs)
-
-        if not row_i:
-            # Build a brand-new row skeleton and fill BOTH key columns and provided editable values.
-            new_row = [""] * len(headers)
-
-            # 1) place keys
-            for k_name, k_val in zip(key_cols, key_as_strs):
-                if k_name in col_index:
-                    new_row[col_index[k_name]] = k_val
-
-            # 2) place editable patch
-            for c, v in colvals.items():
-                if c in col_index:
-                    new_row[col_index[c]] = "" if v is None else v
-
-            ws.append_row(new_row, value_input_option="USER_ENTERED")
-            appended += 1
-
-            # Update in-memory index so subsequent patches in same run can find this row
-            # Recompute the row index as last row = header(1) + existing rows + appended
-            # Simpler approach: rebuild index at end; for now we skip in-run addressability.
-            continue
-
-        # Row exists: queue single-cell range updates
-        for c, v in colvals.items():
-            if c not in col_index:
-                continue
-            a1 = f"{ws.title}!{_a1_col(col_index[c])}{row_i}"
-            data_payload.append({
-                "range": a1,
-                "values": [[ "" if v is None else v ]]
-            })
-
-    # Apply queued updates
-    if data_payload:
-        # Prefer values_batch_update if available (gspread >=5.7 has it); otherwise fallback to values_update loop.
-        spreadsheet = ws.spreadsheet
-        try:
-            updater = getattr(spreadsheet, "values_batch_update", None)
-            if callable(updater):
-                updater({
-                    "valueInputOption": "USER_ENTERED",
-                    "data": data_payload
-                })
+            if r < len(old_df):
+                block_values.append(list(map(lambda x: "" if _is_empty(x) else x, old_df.iloc[r][header].tolist())))
             else:
-                # Fallback: call values_update per range
-                for item in data_payload:
-                    spreadsheet.values_update(
-                        item["range"],
-                        params={"valueInputOption": "USER_ENTERED"},
-                        body={"values": item["values"]}
-                    )
-        except Exception as e:
-            # As a last resort, try per-cell ws.update with A1 ranges
-            for item in data_payload:
-                ws.update(item["range"], item["values"], value_input_option="USER_ENTERED")
-    # Done
+                block_values.append([""] * len(header))
+    try:
+        ws.update(rng, block_values, value_input_option="USER_ENTERED")
+        return len(changed_rows)
+    except Exception as e:
+        try:
+            st.warning(f"시트 업데이트 실패: {e}")
+        except Exception:
+            pass
+        return 0
 
-# --- Generic engine ---
-# --- Generic engine ---
-def _bisync_missing_only_table(*, supabase, sheet, table_name: str,
-                               key_cols: List[str], editable_cols: List[str],
-                               schema_types: Dict[str,str], sheet_row_to_dict,
-                               where_filters: Optional[Dict[str,Any]]=None):
-    # DB
-    q = supabase.table(table_name).select("*")
-    if where_filters:
-        for k,v in where_filters.items():
-            q = q.eq(k, v)
-    db_rows = q.execute().data or []
-    db_rows = [_normalize_row(r, schema_types) for r in db_rows]
-    db_map = { _key_of(r, key_cols): r for r in db_rows }
+def _upsert_supabase(supa, table: str, df_new: _pd.DataFrame, df_old: _pd.DataFrame, on_conflict: str):
+    if df_new.empty:
+        return 0
+    to_send = []
+    for i in range(len(df_new)):
+        changed = False
+        row_new = df_new.iloc[i].to_dict()
+        row_old = df_old.iloc[i].to_dict() if i < len(df_old) else {}
+        for k, v in row_new.items():
+            ov = row_old.get(k, None)
+            if _is_empty(ov) and not _is_empty(v):
+                changed = True
+                break
+        if changed:
+            to_send.append(row_new)
+    if not to_send:
+        return 0
+    supa.table(table).upsert(to_send, on_conflict=on_conflict).execute()
+    return len(to_send)
 
-    # SHEET
-    sheet_values = _sheet_read_all_records(sheet)
-    sh_rows = [_normalize_row(sheet_row_to_dict(r), schema_types) for r in sheet_values]
-    sh_map = { _key_of(r, key_cols): r for r in sh_rows }
+def sync_fill_blanks(sheet_name: str, table: str, key_cols: List[str], truthy_cols: List[str] = None, on_conflict: str = None):
+    if truthy_cols is None: truthy_cols = []
+    if on_conflict is None: on_conflict = ",".join(key_cols)
+    supa = _get_supabase_client()
+    ws = _get_ws(sheet_name)
+    sheet_df, header = _sheet_df(ws)
+    supa_df = _supa_df(supa, table)
+    sheet_df = _ensure_columns(sheet_df, key_cols)
+    supa_df = _ensure_columns(supa_df, key_cols)
+    _normalize_bool_cols(sheet_df, truthy_cols)
+    _normalize_bool_cols(supa_df, truthy_cols)
+    supa_view = supa_df.copy()
+    for h in header:
+        if h not in supa_view.columns:
+            supa_view[h] = _pd.NA
+    supa_view = supa_view[header]
+    new_sheet, new_supa, filled_into_sheet, filled_into_supa = _merge_fill_blanks(sheet_df, supa_view, on=key_cols, cols_order=header)
+    n_sheet = _batch_update_sheet(ws, header, new_sheet, sheet_df)
+    n_supa  = _upsert_supabase(supa, table, new_supa, supa_view, on_conflict=on_conflict)
+    try:
+        st.success(f"'{sheet_name}' ↔ '{table}' 상호 보정 완료 · 시트 {n_sheet}행 채움 · Supabase {n_supa}행 채움", icon="🔁")
+        if (filled_into_sheet - n_sheet) != 0 or (filled_into_supa - n_supa) != 0:
+            st.caption(f"(참고) 비교상 채워질 후보: 시트 {filled_into_sheet}셀, Supabase {filled_into_supa}셀")
+    except Exception:
+        pass
+    return dict(sheet_rows_filled=n_sheet, supabase_rows_filled=n_supa)
 
-    to_db_upserts, to_sheet_updates = [], []
-    all_keys = set(db_map.keys()) | set(sh_map.keys())
+# Table-specific wrappers
+def sync_employees_fill_blanks():
+    return sync_fill_blanks("직원", "employees", ["사번"], ["적용여부", "재직여부"])
 
-    for k in all_keys:
-        db_r = db_map.get(k)
-        sh_r = sh_map.get(k)
+def sync_eval_items_fill_blanks():
+    return sync_fill_blanks("평가_항목", "eval_items", ["항목ID"], ["활성"])
 
-        if db_r and not sh_r:
-            patch = {c: db_r.get(c) for c in editable_cols if not _is_empty(db_r.get(c))}
-            if patch: to_sheet_updates.append((k, patch))
-            continue
+def sync_acl_fill_blanks():
+    return sync_fill_blanks("권한", "acl", ["사번","역할"], ["활성"])
 
-        if sh_r and not db_r:
-            payload = _strip_empty({c: sh_r.get(c) for c in (key_cols + editable_cols)}, keep=key_cols)
-            if any(not _is_empty(payload.get(c)) for c in editable_cols):
-                to_db_upserts.append(payload)
-            continue
+def sync_eval_responses_fill_blanks():
+    return sync_fill_blanks("인사평가", "eval_responses", ["연도","평가유형","평가대상사번","평가자사번"], ["잠금"])
 
-        if db_r and sh_r:
-            merged_db, fill_db = _merge_missing(db_r, sh_r, editable_cols)
-            if fill_db:
-                to_db_upserts.append(_strip_empty({c: merged_db.get(c) for c in (key_cols + editable_cols)}, keep=key_cols))
-            merged_sh, fill_sh = _merge_missing(sh_r, db_r, editable_cols)
-            if fill_sh:
-                to_sheet_updates.append((k, {c: merged_sh.get(c) for c in fill_sh}))
+def sync_job_specs_fill_blanks():
+    return sync_fill_blanks("직무기술서", "job_specs", ["연도","사번","버전"])
 
-    return to_db_upserts, to_sheet_updates
+def sync_job_specs_approvals_fill_blanks():
+    return sync_fill_blanks("직무기술서_승인", "job_specs_approvals", ["연도","사번","버전","승인자사번"])
 
-# --- Table configs & mappers ---
-# 1) employees
-_EMP_KEY = ["사번"]
-_EMP_EDIT = ["이름","부서","직급","입사일","휴직여부"]
-_EMP_SCHEMA = {"사번":"text","이름":"text","부서":"text","직급":"text","입사일":"date","휴직여부":"bool"}
-
-def _map_employees(r: Dict[str,Any]):  # sheet row -> dict
-    return {"사번":r.get("사번"),"이름":r.get("이름"),"부서":r.get("부서"),
-            "직급":r.get("직급"),"입사일":r.get("입사일"),"휴직여부":r.get("휴직여부")}
-
-# 2) acl
-_ACL_KEY = ["사번","역할"]
-_ACL_EDIT = ["활성"]
-_ACL_SCHEMA = {"사번":"text","역할":"text","활성":"bool"}
-def _map_acl(r): return {"사번":r.get("사번"),"역할":r.get("역할"),"활성":r.get("활성")}
-
-# 3) eval_items
-_EVI_KEY = ["항목ID"]
-_EVI_EDIT = ["항목명","설명","가중치","활성"]
-_EVI_SCHEMA = {"항목ID":"text","항목명":"text","설명":"text","가중치":"float","활성":"bool"}
-def _map_eval_items(r):
-    return {"항목ID":r.get("항목ID"),"항목명":r.get("항목명"),"설명":r.get("설명"),
-            "가중치":r.get("가중치"),"활성":r.get("활성")}
-
-# 4) job_specs
-_JS_KEY = ["연도","사번","버전"]
-_JS_EDIT = ["직무명","직무목표","주요업무","필수역량","비고","제출시각"]
-_JS_SCHEMA = {"연도":"int","사번":"text","버전":"int","직무명":"text","직무목표":"text","주요업무":"text","필수역량":"text","비고":"text","제출시각":"ts"}
-def _map_job_specs(r):
-    return {"연도":r.get("연도"),"사번":r.get("사번"),"버전":r.get("버전"),
-            "직무명":r.get("직무명"),"직무목표":r.get("직무목표"),"주요업무":r.get("주요업무"),
-            "필수역량":r.get("필수역량"),"비고":r.get("비고"),"제출시각":r.get("제출시각")}
-
-# 5) job_specs_approvals
-_JSA_KEY = ["연도","사번","버전","승인자사번"]
-_JSA_EDIT = ["승인상태","의견","승인시각"]
-_JSA_SCHEMA = {"연도":"int","사번":"text","버전":"int","승인자사번":"text","승인상태":"text","의견":"text","승인시각":"ts"}
-def _map_js_approvals(r):
-    return {"연도":r.get("연도"),"사번":r.get("사번"),"버전":r.get("버전"),"승인자사번":r.get("승인자사번"),
-            "승인상태":r.get("승인상태"),"의견":r.get("의견"),"승인시각":r.get("승인시각")}
-
-# 6) competency_evals
-_CPE_KEY = ["연도","평가대상사번","평가자사번"]
-_CPE_EDIT = ["상태","잠금","제출시각","종합코멘트"]
-_CPE_SCHEMA = {"연도":"int","평가대상사번":"text","평가자사번":"text","상태":"text","잠금":"bool","제출시각":"ts","종합코멘트":"text"}
-def _map_competency_evals(r):
-    return {"연도":r.get("연도"),"평가대상사번":r.get("평가대상사번"),"평가자사번":r.get("평가자사번"),
-            "상태":r.get("상태"),"잠금":r.get("잠금"),"제출시각":r.get("제출시각"),"종합코멘트":r.get("종합코멘트")}
-
-# 7) eval_responses
-_EVR_KEY = ["연도","평가유형","평가대상사번","평가자사번"]
-_EVR_EDIT = ["항목ID","점수","코멘트","제출시각"]
-_EVR_SCHEMA = {"연도":"int","평가유형":"text","평가대상사번":"text","평가자사번":"text","항목ID":"text","점수":"float","코멘트":"text","제출시각":"ts"}
-def _map_eval_responses(r):
-    return {"연도":r.get("연도"),"평가유형":r.get("평가유형"),"평가대상사번":r.get("평가대상사번"),"평가자사번":r.get("평가자사번"),
-            "항목ID":r.get("항목ID"),"점수":r.get("점수"),"코멘트":r.get("코멘트"),"제출시각":r.get("제출시각")}
-
-# --- Wrappers (override 7 functions) ---
-def sync_sheet_to_supabase_employees_v1():
-    import streamlit as st
-    ws = _get_ws("직원")
-    to_db, to_sh = _bisync_missing_only_table(
-        supabase=supabase, sheet=ws, table_name="employees",
-        key_cols=_EMP_KEY, editable_cols=_EMP_EDIT, schema_types=_EMP_SCHEMA,
-        sheet_row_to_dict=_map_employees
-    )
-    for batch in _batched(to_db, 500):
-        supabase.table("employees").upsert(batch, on_conflict="사번").execute()
-    _sheet_batch_patch(ws, to_sh, _EMP_KEY)
-    st.success(f"[employees] 시트↔DB 결손 채움: 시트→DB {len(to_db)} / DB→시트 {len(to_sh)}")
-
-def sync_sheet_to_supabase_acl_v1():
-    import streamlit as st
-    ws = _get_ws("권한")
-    to_db, to_sh = _bisync_missing_only_table(
-        supabase=supabase, sheet=ws, table_name="acl",
-        key_cols=_ACL_KEY, editable_cols=_ACL_EDIT, schema_types=_ACL_SCHEMA,
-        sheet_row_to_dict=_map_acl
-    )
-    for batch in _batched(to_db, 500):
-        supabase.table("acl").upsert(batch, on_conflict="사번,역할").execute()
-    _sheet_batch_patch(ws, to_sh, _ACL_KEY)
-    st.success(f"[acl] 시트↔DB 결손 채움: 시트→DB {len(to_db)} / DB→시트 {len(to_sh)}")
-
-def sync_sheet_to_supabase_eval_items_v1():
-    import streamlit as st
-    ws = _get_ws("평가_항목")
-    to_db, to_sh = _bisync_missing_only_table(
-        supabase=supabase, sheet=ws, table_name="eval_items",
-        key_cols=_EVI_KEY, editable_cols=_EVI_EDIT, schema_types=_EVI_SCHEMA,
-        sheet_row_to_dict=_map_eval_items
-    )
-    for batch in _batched(to_db, 500):
-        supabase.table("eval_items").upsert(batch, on_conflict="항목ID").execute()
-    _sheet_batch_patch(ws, to_sh, _EVI_KEY)
-    st.success(f"[eval_items] 시트↔DB 결손 채움: 시트→DB {len(to_db)} / DB→시트 {len(to_sh)}")
-
-def sync_sheet_to_supabase_job_specs_v1():
-    import streamlit as st
-    ws = _get_ws("직무기술서")
-    year = st.session_state.get("filter_year")
-    to_db, to_sh = _bisync_missing_only_table(
-        supabase=supabase, sheet=ws, table_name="job_specs",
-        key_cols=_JS_KEY, editable_cols=_JS_EDIT, schema_types=_JS_SCHEMA,
-        sheet_row_to_dict=_map_job_specs,
-        where_filters={"연도": year} if year else None
-    )
-    for batch in _batched(to_db, 300):
-        supabase.table("job_specs").upsert(batch, on_conflict="연도,사번,버전").execute()
-    _sheet_batch_patch(ws, to_sh, _JS_KEY)
-    st.success(f"[job_specs] 시트↔DB 결손 채움: 시트→DB {len(to_db)} / DB→시트 {len(to_sh)}")
-
-def sync_sheet_to_supabase_job_specs_approvals_v1():
-    import streamlit as st
-    ws = _get_ws("직무기술서_승인")
-    year = st.session_state.get("filter_year")
-    to_db, to_sh = _bisync_missing_only_table(
-        supabase=supabase, sheet=ws, table_name="job_specs_approvals",
-        key_cols=_JSA_KEY, editable_cols=_JSA_EDIT, schema_types=_JSA_SCHEMA,
-        sheet_row_to_dict=_map_js_approvals,
-        where_filters={"연도": year} if year else None
-    )
-    for batch in _batched(to_db, 500):
-        supabase.table("job_specs_approvals").upsert(batch, on_conflict="연도,사번,버전,승인자사번").execute()
-    _sheet_batch_patch(ws, to_sh, _JSA_KEY)
-    st.success(f"[job_specs_approvals] 시트↔DB 결손 채움: 시트→DB {len(to_db)} / DB→시트 {len(to_sh)}")
-
-def sync_sheet_to_supabase_competency_evals_v1():
-    import streamlit as st
-    ws = _get_ws("직무능력평가")
-    year = st.session_state.get("filter_year")
-    to_db, to_sh = _bisync_missing_only_table(
-        supabase=supabase, sheet=ws, table_name="competency_evals",
-        key_cols=_CPE_KEY, editable_cols=_CPE_EDIT, schema_types=_CPE_SCHEMA,
-        sheet_row_to_dict=_map_competency_evals,
-        where_filters={"연도": year} if year else None
-    )
-    for batch in _batched(to_db, 500):
-        supabase.table("competency_evals").upsert(batch, on_conflict="연도,평가대상사번,평가자사번").execute()
-    _sheet_batch_patch(ws, to_sh, _CPE_KEY)
-    st.success(f"[competency_evals] 시트↔DB 결손 채움: 시트→DB {len(to_db)} / DB→시트 {len(to_sh)}")
-
-def sync_sheet_to_supabase_eval_responses_v1():
-    import streamlit as st
-    ws = _get_ws("인사평가")
-    year = st.session_state.get("filter_year")
-    to_db, to_sh = _bisync_missing_only_table(
-        supabase=supabase, sheet=ws, table_name="eval_responses",
-        key_cols=_EVR_KEY, editable_cols=_EVR_EDIT, schema_types=_EVR_SCHEMA,
-        sheet_row_to_dict=_map_eval_responses,
-        where_filters={"연도": year} if year else None
-    )
-    for batch in _batched(to_db, 500):
-        supabase.table("eval_responses").upsert(batch, on_conflict="연도,평가유형,평가대상사번,평가자사번").execute()
-    _sheet_batch_patch(ws, to_sh, _EVR_KEY)
-    st.success(f"[eval_responses] 시트↔DB 결손 채움: 시트→DB {len(to_db)} / DB→시트 {len(to_sh)}")
-
-# ===== End of Missing-Only Bi-Sync Patch =====
+def sync_competency_evals_fill_blanks():
+    return sync_fill_blanks("직무능력평가", "competency_evals", ["연도","평가대상사번","평가자사번"], ["잠금"])
