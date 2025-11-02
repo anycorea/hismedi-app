@@ -3740,3 +3740,125 @@ def gs_flush():
                 raise
     st.session_state.gs_queue = []
 # ===== End helpers =====
+
+
+
+# ============================================================================
+# === DB-FIRST OVERRIDE SECTION (app ↔ DB as primary; Sheets as fallback) ====
+# This block keeps ALL original code above intact, but overrides specific
+# read_* functions to prefer Supabase. Safe for rollback by deleting this block.
+# ============================================================================
+import pandas as _pd
+
+def _to_bool(v):
+    s = str(v).strip().lower()
+    if s in ("1","true","t","y","yes","예","네"): return True
+    if s in ("0","false","f","n","no"): return False
+    return False
+
+def _db_select_all(table: str):
+    try:
+        res = supabase.table(table).select("*").execute()
+        data = getattr(res, "data", []) or []
+        return _pd.DataFrame(data)
+    except Exception as e:
+        try: st.warning(f"DB 조회 실패({table}): {e}")
+        except Exception: pass
+        return _pd.DataFrame()
+
+def _db_upsert(table: str, df: _pd.DataFrame, on_conflict: str):
+    if df is None or df.empty: return 0
+    try:
+        supabase.table(table).upsert(df.to_dict(orient="records"), on_conflict=on_conflict).execute()
+        return len(df)
+    except Exception as e:
+        try: st.warning(f"DB 업서트 실패({table}): {e}")
+        except Exception: pass
+        return 0
+
+# ---- employees
+def read_emp_df() -> pd.DataFrame:
+    """직원: DB 우선, 비어있으면 시트 폴백 후 DB 업서트"""
+    _df = _db_select_all("employees")
+    if not _df.empty:
+        if "사번" in _df.columns:
+            _df["사번"] = _df["사번"].astype(str)
+        for c in ("재직여부","적용여부"):
+            if c in _df.columns:
+                _df[c] = _df[c].map(_to_bool)
+        return _df
+    df_sheet = read_sheet_df(EMP_SHEET)
+    if not df_sheet.empty:
+        _db_upsert("employees", df_sheet, on_conflict="사번")
+        return df_sheet
+    return _df
+
+# ---- eval_items
+def read_eval_items_df() -> pd.DataFrame:
+    _df = _db_select_all("eval_items")
+    if not _df.empty:
+        return _df
+    df_sheet = read_sheet_df("평가_항목")
+    if not df_sheet.empty:
+        _db_upsert("eval_items", df_sheet, on_conflict="항목ID")
+        return df_sheet
+    return _df
+
+# ---- acl
+def read_acl_df() -> pd.DataFrame:
+    _df = _db_select_all("acl")
+    if not _df.empty:
+        return _df
+    df_sheet = read_sheet_df("권한")
+    if not df_sheet.empty:
+        _db_upsert("acl", df_sheet, on_conflict="사번,역할")
+        return df_sheet
+    return _df
+
+# ---- eval_responses
+def read_eval_responses_df() -> pd.DataFrame:
+    _df = _db_select_all("eval_responses")
+    if not _df.empty:
+        return _df
+    df_sheet = read_sheet_df("인사평가")
+    if not df_sheet.empty:
+        _db_upsert("eval_responses", df_sheet, on_conflict="연도,평가유형,평가대상사번,평가자사번")
+        return df_sheet
+    return _df
+
+# ---- job_specs
+def read_job_specs_df() -> pd.DataFrame:
+    _df = _db_select_all("job_specs")
+    if not _df.empty:
+        return _df
+    df_sheet = read_sheet_df("직무기술서")
+    if not df_sheet.empty:
+        _db_upsert("job_specs", df_sheet, on_conflict="연도,사번,버전")
+        return df_sheet
+    return _df
+
+# ---- job_specs_approvals
+def read_job_specs_approvals_df() -> pd.DataFrame:
+    _df = _db_select_all("job_specs_approvals")
+    if not _df.empty:
+        return _df
+    df_sheet = read_sheet_df("직무기술서_승인")
+    if not df_sheet.empty:
+        _db_upsert("job_specs_approvals", df_sheet, on_conflict="연도,사번,버전,승인자사번")
+        return df_sheet
+    return _df
+
+# ---- competency_evals
+def read_competency_evals_df() -> pd.DataFrame:
+    _df = _db_select_all("competency_evals")
+    if not _df.empty:
+        return _df
+    df_sheet = read_sheet_df("직무능력평가")
+    if not df_sheet.empty:
+        _db_upsert("competency_evals", df_sheet, on_conflict="연도,평가대상사번,평가자사번")
+        return df_sheet
+    return _df
+
+# ============================================================================
+# === END OF DB-FIRST OVERRIDE SECTION =======================================
+# ============================================================================
