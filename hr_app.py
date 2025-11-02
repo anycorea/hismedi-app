@@ -3793,7 +3793,7 @@ def read_emp_df() -> pd.DataFrame:
 
 def read_eval_items_df() -> pd.DataFrame:
     _df = _db_select_all("eval_items")
-    if not _df.empty":
+    if not _df.empty:
         return _df
     df_sheet = read_sheet_df("평가_항목")
     if not df_sheet.empty:
