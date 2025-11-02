@@ -3836,32 +3836,94 @@ def _col_to_a1(idx: int) -> str:
         s = chr(65+r)+s
     return s
 
+
 def _sheet_batch_patch(ws, patches: List[Tuple[Tuple[Any, ...], Dict[str, Any]]], key_cols: List[str]):
-    if not patches: return
+    """
+    Apply partial updates to Google Sheet.
+    - If the row for a key doesn't exist, append a new row with BOTH key columns and editable cols.
+    - Try batch update via values_batch_update; fallback to values_update for each range.
+    """
+    if not patches:
+        return
+
     headers, row_by_key, col_index = _sheet_build_row_index_by_key(ws, key_cols)
-    if not headers: return
-    data_payload = []
-    for key, colvals in patches:
-        key_as_strs = tuple("" if v is None else str(v) for v in key)
+    if not headers:
+        # Without headers, we cannot map columns—abort safely.
+        return
+
+    # Helpers
+    def _a1_col(idx: int) -> str:
+        s=""; x=idx+1
+        while x:
+            x, r = divmod(x-1, 26)
+            s = chr(65+r)+s
+        return s
+
+    data_payload = []  # for batch update
+    appended = 0
+
+    for key_tuple, colvals in patches:
+        key_as_strs = tuple("" if v is None else str(v) for v in key_tuple)
         row_i = row_by_key.get(key_as_strs)
+
         if not row_i:
+            # Build a brand-new row skeleton and fill BOTH key columns and provided editable values.
             new_row = [""] * len(headers)
-            for c,v in colvals.items():
+
+            # 1) place keys
+            for k_name, k_val in zip(key_cols, key_as_strs):
+                if k_name in col_index:
+                    new_row[col_index[k_name]] = k_val
+
+            # 2) place editable patch
+            for c, v in colvals.items():
                 if c in col_index:
                     new_row[col_index[c]] = "" if v is None else v
+
             ws.append_row(new_row, value_input_option="USER_ENTERED")
-        else:
-            for c,v in colvals.items():
-                if c not in col_index: continue
-                a1 = f"{ws.title}!{_col_to_a1(col_index[c])}{row_i}"
-                data_payload.append({"range": a1, "values": [[ "" if v is None else v ]]})
+            appended += 1
 
+            # Update in-memory index so subsequent patches in same run can find this row
+            # Recompute the row index as last row = header(1) + existing rows + appended
+            # Simpler approach: rebuild index at end; for now we skip in-run addressability.
+            continue
+
+        # Row exists: queue single-cell range updates
+        for c, v in colvals.items():
+            if c not in col_index:
+                continue
+            a1 = f"{ws.title}!{_a1_col(col_index[c])}{row_i}"
+            data_payload.append({
+                "range": a1,
+                "values": [[ "" if v is None else v ]]
+            })
+
+    # Apply queued updates
     if data_payload:
-        ws.spreadsheet.values_batch_update({
-            "valueInputOption":"USER_ENTERED",
-            "data": data_payload
-        })
+        # Prefer values_batch_update if available (gspread >=5.7 has it); otherwise fallback to values_update loop.
+        spreadsheet = ws.spreadsheet
+        try:
+            updater = getattr(spreadsheet, "values_batch_update", None)
+            if callable(updater):
+                updater({
+                    "valueInputOption": "USER_ENTERED",
+                    "data": data_payload
+                })
+            else:
+                # Fallback: call values_update per range
+                for item in data_payload:
+                    spreadsheet.values_update(
+                        item["range"],
+                        params={"valueInputOption": "USER_ENTERED"},
+                        body={"values": item["values"]}
+                    )
+        except Exception as e:
+            # As a last resort, try per-cell ws.update with A1 ranges
+            for item in data_payload:
+                ws.update(item["range"], item["values"], value_input_option="USER_ENTERED")
+    # Done
 
+# --- Generic engine ---
 # --- Generic engine ---
 def _bisync_missing_only_table(*, supabase, sheet, table_name: str,
                                key_cols: List[str], editable_cols: List[str],
