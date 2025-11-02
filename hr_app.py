@@ -31,13 +31,13 @@ DB_FIRST = True
 
 # Map sheet titles to Supabase tables and their conflict keys
 _SHEET_DB_MAP = {
-    "직원": {"table": "employees", "pk": ["사번"]},
-    "평가_항목": {"table": "eval_items", "pk": ["항목ID"]},
-    "권한": {"table": "acl", "pk": ["사번","역할"]},
-    "인사평가": {"table": "eval_responses", "pk": ["연도","평가유형","평가대상사번","평가자사번"]},
-    "직무기술서": {"table": "job_specs", "pk": ["연도","사번","버전"]},
-    "직무기술서_승인": {"table": "job_specs_approvals", "pk": ["연도","사번","버전","승인자사번"]},
-    "직무능력평가": {"table": "competency_evals", "pk": ["연도","평가대상사번","평가자사번"]},
+    "직원": {"table": "employees", "key_cols": ["사번"]},
+    "평가_항목": {"table": "eval_items", "key_cols": ["항목ID"]},
+    "권한": {"table": "acl", "key_cols": ["사번","역할"]},
+    "인사평가": {"table": "eval_responses", "key_cols": ["연도","평가유형","평가대상사번","평가자사번"]},
+    "직무기술서": {"table": "job_specs", "key_cols": ["연도","사번","버전"]},
+    "직무기술서_승인": {"table": "job_specs_approvals", "key_cols": ["연도","사번","버전","승인자사번"]},
+    "직무능력평가": {"table": "competency_evals", "key_cols": ["연도","평가대상사번","평가자사번"]},
 }
 
 def _table_conflict_clause(pk_cols):
@@ -159,17 +159,17 @@ def _get_ws(sheet_title: str):
             try:
                 # touch eval_latest to warm headers (ignore errors)
                 _ = supabase.table("eval_latest").select("*").limit(1).execute()
-                proxy = _WSProxy(sheet_title, "eval_responses", cfg["pk"])
+                proxy = _WSProxy(sheet_title, "eval_responses", cfg.get("key_cols") or cfg.get("pk"))
                 # prefer headers from eval_latest if exists
                 rec = supabase.table("eval_latest").select("*").limit(1).execute().data
                 if rec:
                     proxy._headers_cache = list(rec[0].keys())
                 return proxy
             except Exception:
-                return _WSProxy(sheet_title, cfg["table"], cfg["pk"])
-        return _WSProxy(sheet_title, cfg["table"], cfg["pk"])
+                return _WSProxy(sheet_title, cfg["table"], cfg.get("key_cols") or cfg.get("pk"))
+        return _WSProxy(sheet_title, cfg["table"], cfg.get("key_cols") or cfg.get("pk"))
     # default: original Sheets behavior
-    return _ORIG__get_ws(sheet_title)
+    return _ORIG__get_ws(sheet_title) if _ORIG__get_ws else (_raise_no_orig())
 # ────────────────────────────────────────
   # config 이후에 출력
 # ────────────────────────────────────────────────────────────────
@@ -3915,5 +3915,8 @@ def _get_ws(sheet_title: str):
         )
     # fallback
     if _ORIG__get_ws is not None:
-        return _ORIG__get_ws(sheet_title)
+        return _ORIG__get_ws(sheet_title) if _ORIG__get_ws else (_raise_no_orig())
     raise RuntimeError("Original _get_ws is not available and sheet_title is not mapped for DB proxy.")
+
+# Alias for uniform naming
+WSProxy = _WSProxy
