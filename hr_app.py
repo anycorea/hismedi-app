@@ -151,9 +151,6 @@ class _WSProxy:
             return
         self.update_cell(row, col, values[0][0])
 
-# Override _get_ws to return proxy for 7 target sheets
-_ORIG__get_ws = _get_ws  # keep fallback
-
 def _get_ws(sheet_title: str):
     if DB_FIRST and sheet_title in _SHEET_DB_MAP:
         cfg = _SHEET_DB_MAP[sheet_title]
@@ -3890,3 +3887,33 @@ def gs_flush():
                 raise
     st.session_state.gs_queue = []
 # ===== End helpers =====
+
+# ────────────────────────────────────────────────────────────────
+# Safe late patch: override _get_ws after original is defined
+# ────────────────────────────────────────────────────────────────
+try:
+    _ORIG__get_ws  # noqa: F401
+except NameError:  # first time
+    try:
+        _ORIG__get_ws = _get_ws  # keep original sheet getter
+    except NameError:
+        _ORIG__get_ws = None
+
+def _get_ws(sheet_title: str):
+    """Return a worksheet-like object.
+    - For 7 target sheets, return WSProxy that talks to Supabase.
+    - Otherwise, fall back to original Google Sheet getter if available.
+    """
+    if DB_FIRST and sheet_title in _SHEET_DB_MAP:
+        cfg = _SHEET_DB_MAP[sheet_title]
+        return WSProxy(
+            supabase,
+            cfg["table"],
+            cfg["key_cols"],
+            sheet_title,
+            cfg.get("view_for_read")
+        )
+    # fallback
+    if _ORIG__get_ws is not None:
+        return _ORIG__get_ws(sheet_title)
+    raise RuntimeError("Original _get_ws is not available and sheet_title is not mapped for DB proxy.")
