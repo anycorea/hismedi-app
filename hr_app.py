@@ -102,7 +102,7 @@ def sync_sheet_to_supabase_employees_v1(*args, **kwargs):
 def _get_ws(*args, **kwargs):
     """[A-Plan] Disabled Google Sheets helper (stub)."""
     return {"status": "disabled", "reason": "sheets path removed"}
-turn {"status": "disabled", "reason": "sheets path removed"}
+return {"status": "disabled", "reason": "sheets path removed"}
 def sync_sheet_to_supabase_job_specs_v1(*args, **kwargs):
     """[A-Plan] Disabled Google Sheets helper (stub)."""
     return {"status": "disabled", "reason": "sheets path removed"}
