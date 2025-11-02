@@ -3975,3 +3975,49 @@ def read_sheet_df(sheet_name, *args, **kwargs):
     raise RuntimeError(f"[A-Plan] Unknown sheet name for Supabase mapping: {sheet_name!r}")
 
 # --- End of A-Plan Monkey Patch ---
+
+# ========================= A-Plan tail override (final) =========================
+try:
+    # rebind to Supabase overrides (defined earlier by the patch)
+    read_sheet_df = _ap_read_sheet_df_override
+    write_sheet_df = _ap_write_sheet_df_override
+except NameError:
+    # if not yet defined for some reason, define minimal fallbacks
+    def _ap_get_supabase_client():
+        import os, streamlit as st
+        from supabase import create_client
+        url = os.environ.get("SUPABASE_URL","").strip()
+        key = os.environ.get("SUPABASE_ANON_KEY","").strip() or os.environ.get("SUPABASE_SERVICE_ROLE_KEY","").strip()
+        if not url or not key:
+            st.error("SUPABASE_URL / SUPABASE_ANON_KEY 필요(A-Plan)")
+            raise RuntimeError("Missing Supabase credentials")
+        return create_client(url, key)
+    def _ap_sb_select(table): 
+        from pandas import DataFrame
+        sb = _ap_get_supabase_client()
+        return DataFrame((sb.table(table).select("*").execute().data) or [])
+    def _ap_sb_upsert(table, payload, on_conflict_cols=None):
+        from pandas import DataFrame, Series
+        sb = _ap_get_supabase_client()
+        if isinstance(payload, Series): payload = payload.to_frame().T
+        if isinstance(payload, DataFrame): payload = payload.fillna(None).to_dict(orient="records")
+        if isinstance(payload, dict): payload=[payload]
+        if on_conflict_cols: res = sb.table(table).upsert(payload, on_conflict=",".join(on_conflict_cols)).execute()
+        else: res = sb.table(table).upsert(payload).execute()
+        return {"status":"ok","count":len(res.data or []),"data":res.data}
+    _AP_READ_MAP = {"직원":"employees","employees":"employees","평가_항목":"eval_items","eval_items":"eval_items","권한":"acl","acl":"acl","인사평가":"eval_latest","eval_latest":"eval_latest","직무기술서":"job_specs","job_specs":"job_specs","직무기술서_승인":"job_specs_approvals","job_specs_approvals":"job_specs_approvals","직무능력평가":"competency_evals","competency_evals":"competency_evals"}
+    _AP_WRITE_MAP = {"직원":("employees",["사번"]),"employees":("employees",["사번"]),"평가_항목":("eval_items",["항목ID"]),"eval_items":("eval_items",["항목ID"]),"권한":("acl",["ID"]),"acl":("acl",["ID"]),"인사평가":("eval_latest",["ID"]),"eval_latest":("eval_latest",["ID"]),"직무기술서":("job_specs",["사번","연도","버전"]),"job_specs":("job_specs",["사번","연도","버전"]),"직무기술서_승인":("job_specs_approvals",["사번","연도","버전","승인자사번"]),"job_specs_approvals":("job_specs_approvals",["사번","연도","버전","승인자사번"]),"직무능력평가":("competency_evals",["연도","평가대상사번","평가자사번"]),"competency_evals":("competency_evals",["연도","평가대상사번","평가자사번"])}
+    def read_sheet_df(sheet_name, *_, **__):
+        t = _AP_READ_MAP.get(str(sheet_name)) or _AP_READ_MAP.get(str(sheet_name).lower())
+        if t: return _ap_sb_select(t)
+        raise RuntimeError(f"[A-Plan] Unknown sheet name: {sheet_name!r}")
+    def write_sheet_df(sheet_name, df, *_, **__):
+        table, conflict = _AP_WRITE_MAP[str(sheet_name)] if str(sheet_name) in _AP_WRITE_MAP else (None, None)
+        if not table: raise RuntimeError(f"[A-Plan] write blocked: unknown sheet '{sheet_name}'")
+        return _ap_sb_upsert(table, df, conflict)
+
+# legacy sheets helpers are force-disabled (safety)
+def _ws(*args, **kwargs): return {"status":"disabled","reason":"A-Plan: _ws disabled"}
+def get_book(*args, **kwargs): return {"status":"disabled","reason":"A-Plan: get_book disabled"}
+def get_client(*args, **kwargs): return {"status":"disabled","reason":"A-Plan: get_client disabled"}
+# ================================================================================
