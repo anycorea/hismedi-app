@@ -1,4 +1,3 @@
-# [A-Plan] Safe refactor from original to disable Sheets paths.
 # -*- coding: utf-8 -*-
 
 # ────────────────────────────────────────────────────────────────
@@ -89,30 +88,360 @@ def _sync_truthy_v1(x):
     s = str(x).strip().lower()
     return s in ("1","y","yes","true","t","o","on","true()")
 
-def _get_gspread_client_for_sync_v1(*args, **kwargs):
+def _get_gspread_client_for_sync_v1():
+    try:
+        return gc  # 앱에 이미 gspread 클라이언트가 있으면 재사용
+    except NameError:
+        import gspread
+        from google.oauth2.service_account import Credentials
+        import streamlit as _st
+        sa = _st.secrets["gcp_service_account"]
+        scopes = [
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive",
+        ]
+        creds = Credentials.from_service_account_info(sa, scopes=scopes)
+        return gspread.authorize(creds)
 
-    """[A-Plan] Disabled Google Sheets function (stub)."""
+def sync_sheet_to_supabase_employees_v1():
+    gclient = _get_gspread_client_for_sync_v1()
+    sh = gclient.open_by_key(st.secrets["sheets"]["HR_SHEET_ID"])
+    ws = sh.worksheet("직원")
+    df = _pd.DataFrame(ws.get_all_records())
+    if df.empty:
+        st.warning("직원 시트가 비어있습니다.")
+        return
 
-    return {"status": "disabled", "reason": "sheets path removed"}
+    for col in ["적용여부", "재직여부"]:
+        if col in df.columns:
+            df[col] = df[col].map(_sync_truthy_v1)
 
-def sync_sheet_to_supabase_employees_v1(*args, **kwargs):
+    # 업서트 (기준: 사번)
+    supabase.table("employees").upsert(
+        df.to_dict(orient="records"),
+        on_conflict="사번"
+    ).execute()
 
-    """[A-Plan] Disabled Google Sheets function (stub)."""
+    st.success(f"직원 {len(df)}건 Supabase 업서트 완료", icon="✅")
 
-    return {"status": "disabled", "reason": "sheets path removed"}
-def _get_ws(*args, **kwargs):
-    """[A-Plan] Disabled Google Sheets function (stub)."""
-    return {"status": "disabled", "reason": "sheets path removed"}
-    return {"status": "disabled", "reason": "sheets path removed"}
-def sync_sheet_to_supabase_job_specs_v1(*args, **kwargs):
-    """[A-Plan] Disabled Google Sheets function (stub)."""
-    return {"status": "disabled", "reason": "sheets path removed"}
-def sync_sheet_to_supabase_job_specs_approvals_v1(*args, **kwargs):
-    """[A-Plan] Disabled Google Sheets function (stub)."""
-    return {"status": "disabled", "reason": "sheets path removed"}
-def sync_sheet_to_supabase_competency_evals_v1(*args, **kwargs):
-    """[A-Plan] Disabled Google Sheets function (stub)."""
-    return {"status": "disabled", "reason": "sheets path removed"}
+# === 평가_항목: 시트 → Supabase 동기화 ===
+def _get_ws(sheet_title: str):
+    gclient = _get_gspread_client_for_sync_v1()
+    sh = gclient.open_by_key(st.secrets["sheets"]["HR_SHEET_ID"])
+    return sh.worksheet(sheet_title)
+
+def sync_sheet_to_supabase_eval_items_v1():
+    ws = _get_ws("평가_항목")
+    df = _pd.DataFrame(ws.get_all_records())
+    if df.empty:
+        st.warning("평가_항목 시트가 비어있습니다.")
+        return
+    # bool 정리
+    if "활성" in df.columns:
+        df["활성"] = df["활성"].map(_sync_truthy_v1)
+    supabase.table("eval_items").upsert(
+        df.to_dict(orient="records"),
+        on_conflict="항목ID"
+    ).execute()
+    st.success(f"평가_항목 {len(df)}건 업서트 완료", icon="✅")
+
+# === 인사평가: 시트 → Supabase 동기화 ===
+def sync_sheet_to_supabase_eval_responses_v1():
+    ws = _get_ws("인사평가")
+    df = _pd.DataFrame(ws.get_all_records())
+    if df.empty:
+        st.warning("인사평가 시트가 비어있습니다.")
+        return
+
+    # --- 컬럼 존재 보정(시트 헤더 변동 방지) ---
+    base_cols = [
+        "연도","평가유형","평가대상사번","평가대상이름",
+        "평가자사번","평가자이름","총점","상태","제출시각","잠금"
+    ]
+    for c in base_cols:
+        if c not in df.columns:
+            df[c] = _pd.NA
+
+    # --- 문자열 공백 정리 ---
+    for c in ["평가유형","평가대상사번","평가대상이름","평가자사번","평가자이름","상태"]:
+        if c in df.columns:
+            df[c] = df[c].astype(str).str.strip()
+
+    # --- 연도/총점 숫자 변환 ---
+    if "연도" in df.columns:
+        df["연도"] = _pd.to_numeric(df["연도"], errors="coerce").astype("Int64")
+    if "총점" in df.columns:
+        df["총점"] = _pd.to_numeric(df["총점"], errors="coerce")
+
+    # --- 잠금(boolean) 정리: 예/Y/TRUE/1 등 truthy → True ---
+    if "잠금" in df.columns:
+        df["잠금"] = df["잠금"].map(_sync_truthy_v1)
+
+    # --- 제출시각: 문자열→datetime→문자열(ISO) ---
+    if "제출시각" in df.columns:
+        dt = _pd.to_datetime(df["제출시각"], errors="coerce")
+        # 타임존 없이 저장(서버측에서 timestamptz 자동 파싱 가능), 불가 시 ISO 포맷으로
+        df["제출시각"] = dt.dt.strftime("%Y-%m-%d %H:%M:%S")
+
+    # --- 항목 점수 컬럼 자동 탐색 & 숫자화 ---
+    itm_cols = [c for c in df.columns if c.startswith("점수_ITM")]
+    for c in itm_cols:
+        df[c] = _pd.to_numeric(df[c], errors="coerce")
+
+    # --- None 처리: NaN → None (Supabase JSON 직렬화 호환) ---
+    df = df.where(~df.isna(), None)
+
+    # --- 업서트 (연도,평가유형,평가대상사번,평가자사번 기준) ---
+    on_conflict_key = "연도,평가유형,평가대상사번,평가자사번"
+    supabase.table("eval_responses").upsert(
+        df.to_dict(orient="records"),
+        on_conflict=on_conflict_key
+    ).execute()
+
+    st.success(f"인사평가 {len(df)}건 업서트 완료", icon="✅")
+
+# === 권한: 시트 → Supabase 동기화 ===
+def sync_sheet_to_supabase_acl_v1():
+    ws = _get_ws("권한")
+    df = _pd.DataFrame(ws.get_all_records())
+    if df.empty:
+        st.warning("권한 시트가 비어있습니다.")
+        return
+
+    # 1) 필수 컬럼 확보
+    required = ["사번","이름","역할","범위유형","부서1","부서2","대상사번","활성","비고"]
+    for c in required:
+        if c not in df.columns:
+            df[c] = ""
+
+    # 2) 문자열/공백 정리
+    for c in ["사번","이름","역할","범위유형","부서1","부서2","대상사번","비고"]:
+        df[c] = df[c].astype(str).fillna("").map(lambda s: s.strip())
+
+    # 3) 불리언 정리
+    df["활성"] = df["활성"].map(_sync_truthy_v1).fillna(False).astype(bool)
+
+    # 4) (최소 키) 결측 제거 → B안에서는 사번/역할만 필수
+    before = len(df)
+    df = df[(df["사번"]!="") & (df["역할"]!="")]
+    dropped_nullkey = before - len(df)
+    if dropped_nullkey > 0:
+        st.info(f"빈 사번/역할 제외: {dropped_nullkey}건")
+
+    if df.empty:
+        st.warning("업서트할 권한 데이터가 없습니다.")
+        return
+
+    # 5) 동일한 6-키 완전중복만 제거(같은 행이 시트에 2번 있는 경우 방지)
+    conflict_keys = ["사번","역할","범위유형","부서1","부서2","대상사번"]
+    before_dups = len(df)
+    df = df.drop_duplicates(subset=conflict_keys, keep="first")
+    removed_dups = before_dups - len(df)
+    if removed_dups > 0:
+        st.info(f"완전중복 제거: {removed_dups}건 (키: {', '.join(conflict_keys)})")
+
+    # 6) 업서트 (B안: 6개 컬럼 조합을 고유로)
+    try:
+        supabase.table("acl").upsert(
+            df.to_dict(orient="records"),
+            on_conflict="사번,역할,범위유형,부서1,부서2,대상사번"
+        ).execute()
+        st.success(f"권한 {len(df)}건 업서트 완료", icon="✅")
+    except Exception as e:
+        st.exception(e)
+        st.error("권한 업서트 실패: 고유인덱스/키 중복/타입을 확인해 주세요.")
+
+# === 직무기술서: 시트 → Supabase 동기화 ===
+def sync_sheet_to_supabase_job_specs_v1():
+    """
+    시트 '직무기술서'를 Supabase public.job_specs로 업서트
+    - on_conflict: "연도,사번,버전"
+    - 시트 헤더(고정): 사번/이름/연도/버전/부서1/부서2/작성자사번/작성자이름/직군/직종/직무명/제정일/개정일/검토주기/직무개요/주업무/기타업무/필요학력/전공계열/직원공통필수교육/보수교육/기타교육/특성화교육/면허/경력(자격요건)/비고/제출시각
+    """
+    ws = _get_ws("직무기술서")
+    import pandas as _pd
+    df = _pd.DataFrame(ws.get_all_records())
+    if df.empty:
+        st.warning("직무기술서 시트가 비어있습니다.")
+        return
+
+    # 1) 필수 컬럼 보정
+    cols = ["사번","이름","연도","버전","부서1","부서2","작성자사번","작성자이름","직군","직종",
+            "직무명","제정일","개정일","검토주기","직무개요","주업무","기타업무",
+            "필요학력","전공계열","직원공통필수교육","보수교육","기타교육","특성화교육",
+            "면허","경력(자격요건)","비고","제출시각"]
+    for c in cols:
+        if c not in df.columns:
+            df[c] = _pd.NA
+
+    # 2) 트림/타입 정리
+    str_cols = ["이름","부서1","부서2","작성자이름","직군","직종","직무명","검토주기","직무개요","주업무",
+                "기타업무","필요학력","전공계열","직원공통필수교육","보수교육","기타교육","특성화교육",
+                "면허","경력(자격요건)","비고"]
+    for c in str_cols:
+        df[c] = df[c].astype(str).where(~df[c].isna(), "").str.strip()
+
+    # 숫자 변환
+    df["사번"] = _pd.to_numeric(df["사번"], errors="coerce").astype("Int64")
+    df["작성자사번"] = _pd.to_numeric(df["작성자사번"], errors="coerce").astype("Int64")
+    df["연도"] = _pd.to_numeric(df["연도"], errors="coerce").astype("Int64")
+    df["버전"] = _pd.to_numeric(df["버전"], errors="coerce").astype("Int64")
+
+    # 날짜/시각 변환
+    for dcol in ["제정일","개정일"]:
+        dt = _pd.to_datetime(df[dcol], errors="coerce").dt.date
+        # date는 문자열 'YYYY-MM-DD'로 저장해도 Supabase가 파싱 가능
+        df[dcol] = _pd.to_datetime(dt, errors="coerce").dt.strftime("%Y-%m-%d")
+    if "제출시각" in df.columns:
+        dt = _pd.to_datetime(df["제출시각"], errors="coerce")
+        df["제출시각"] = dt.dt.strftime("%Y-%m-%d %H:%M:%S")
+
+    # NaN → None
+    df = df.where(~df.isna(), None)
+
+    # 키 결측 제거
+    before = len(df)
+    df = df[(df["연도"].notnull()) & (df["사번"].notnull()) & (df["버전"].notnull())]
+    dropped = before - len(df)
+    if dropped > 0:
+        st.info(f"키 결측으로 제외: {dropped}건 (연도/사번/버전이 비어있음)")
+
+    if df.empty:
+        st.warning("업서트할 직무기술서 데이터가 없습니다.")
+        return
+
+    # 3) 업서트
+    try:
+        supabase.table("job_specs").upsert(
+            df.to_dict(orient="records"),
+            on_conflict="연도,사번,버전"
+        ).execute()
+        st.success(f"직무기술서 {len(df)}건 업서트 완료", icon="✅")
+    except Exception as e:
+        st.exception(e)
+        st.error("직무기술서 업서트 실패: FK(사번/작성자사번) 또는 타입/키 중복을 확인하세요.")
+
+# === 직무기술서_승인: 시트 → Supabase 동기화 ================================
+def sync_sheet_to_supabase_job_specs_approvals_v1():
+    """
+    시트 '직무기술서_승인' -> public.job_specs_approvals 업서트
+    on_conflict: "연도,사번,버전,승인자사번"
+    헤더: 연도/사번/이름/버전/승인자사번/승인자이름/상태/승인시각/비고
+    """
+    ws = _get_ws("직무기술서_승인")
+    import pandas as _pd
+    df = _pd.DataFrame(ws.get_all_records())
+    if df.empty:
+        st.warning("직무기술서_승인 시트가 비어있습니다."); return
+
+    need = ["연도","사번","이름","버전","승인자사번","승인자이름","상태","승인시각","비고"]
+    for c in need:
+        if c not in df.columns:
+            df[c] = _pd.NA
+
+    # 타입 보정
+    df["연도"] = _pd.to_numeric(df["연도"], errors="coerce").astype("Int64")
+    df["사번"] = _pd.to_numeric(df["사번"], errors="coerce").astype("Int64")
+    df["버전"] = _pd.to_numeric(df["버전"], errors="coerce").astype("Int64")
+    df["승인자사번"] = _pd.to_numeric(df["승인자사번"], errors="coerce").astype("Int64")
+
+    text_cols = ["이름","승인자이름","상태","비고"]
+    for c in text_cols:
+        df[c] = df[c].astype(str).where(~df[c].isna(), "").str.strip()
+
+    # 시간 통일 (경고 억제)
+    df["승인시각"] = _normalize_ts_series(df["승인시각"])
+
+    # NaN -> None
+    df = df.where(~df.isna(), None)
+
+    # 키 유효 필터
+    before = len(df)
+    df = df[(df["연도"].notnull()) & (df["사번"].notnull()) & (df["버전"].notnull()) & (df["승인자사번"].notnull())]
+    dropn = before - len(df)
+    if dropn > 0:
+        st.info(f"키 결측 제외: {dropn}건 (연도/사번/버전/승인자사번)")
+
+    if df.empty:
+        st.warning("업서트할 직무기술서_승인 데이터가 없습니다."); return
+
+    try:
+        supabase.table("job_specs_approvals").upsert(
+            df.to_dict(orient="records"),
+            on_conflict="연도,사번,버전,승인자사번"
+        ).execute()
+        st.success(f"직무기술서_승인 {len(df)}건 업서트 완료", icon="✅")
+    except Exception as e:
+        st.exception(e)
+        st.error("직무기술서_승인 업서트 실패: FK(사번/승인자사번/직무기술서 존재) 또는 타입/키 중복을 확인하세요.")
+
+# === 직무능력평가: 시트 → Supabase 동기화 ==================================
+def sync_sheet_to_supabase_competency_evals_v1():
+    """
+    시트 '직무능력평가' -> public.competency_evals 업서트
+    on_conflict: "연도,평가대상사번,평가자사번"
+    헤더: 연도/평가대상사번/평가대상이름/평가자사번/평가자이름/주업무평가/기타업무평가/교육이수/자격유지/종합의견/상태/제출시각/잠금
+    """
+    ws = _get_ws("직무능력평가")
+    import pandas as _pd
+    df = _pd.DataFrame(ws.get_all_records())
+    if df.empty:
+        st.warning("직무능력평가 시트가 비어있습니다."); return
+
+    need = ["연도","평가대상사번","평가대상이름","평가자사번","평가자이름",
+            "주업무평가","기타업무평가","교육이수","자격유지","종합의견","상태","제출시각","잠금"]
+    for c in need:
+        if c not in df.columns:
+            df[c] = _pd.NA
+
+    # 타입 보정
+    df["연도"] = _pd.to_numeric(df["연도"], errors="coerce").astype("Int64")
+    df["평가대상사번"] = _pd.to_numeric(df["평가대상사번"], errors="coerce").astype("Int64")
+    df["평가자사번"] = _pd.to_numeric(df["평가자사번"], errors="coerce").astype("Int64")
+
+    # 텍스트 정리
+    text_cols = ["평가대상이름","평가자이름","주업무평가","기타업무평가","교육이수","자격유지","종합의견","상태"]
+    for c in text_cols:
+        df[c] = df[c].astype(str).where(~df[c].isna(), "").str.strip()
+
+    # 잠금: 다양한 입력(True/False/1/0/예/아니오) 허용
+    _true_vals = {"true","1","y","yes","t","on","예","확정","잠금","locked"}
+    def _to_bool(x):
+        s = str(x).strip().lower()
+        if s in _true_vals: return True
+        try:
+            return bool(int(s))
+        except Exception:
+            return False
+    df["잠금"] = df["잠금"].apply(_to_bool)
+
+    # 제출시각 정규화
+    df["제출시각"] = _normalize_ts_series(df["제출시각"])
+
+    # NaN -> None
+    df = df.where(~df.isna(), None)
+
+    # 키 필터
+    before = len(df)
+    df = df[(df["연도"].notnull()) & (df["평가대상사번"].notnull()) & (df["평가자사번"].notnull())]
+    dropn = before - len(df)
+    if dropn > 0:
+        st.info(f"키 결측 제외: {dropn}건 (연도/평가대상사번/평가자사번)")
+
+    if df.empty:
+        st.warning("업서트할 직무능력평가 데이터가 없습니다."); return
+
+    try:
+        supabase.table("competency_evals").upsert(
+            df.to_dict(orient="records"),
+            on_conflict="연도,평가대상사번,평가자사번"
+        ).execute()
+        st.success(f"직무능력평가 {len(df)}건 업서트 완료", icon="✅")
+    except Exception as e:
+        st.exception(e)
+        st.error("직무능력평가 업서트 실패: FK(사번) 또는 타입/키 중복을 확인하세요.")
+
+# === 공통: 제출시각 파싱 유틸 (경고 억제 & 포맷 통일) ===========================
 def _normalize_ts_series(_s):
     """시리즈 내 각 원소를 datetime으로 파싱 후 'YYYY-MM-DD HH:MM:SS' 문자열로 통일.
     - 여러 포맷 시도 후 실패는 None 반환
@@ -158,7 +487,7 @@ def _normalize_ts_series(_s):
 
 def _is_quota_429(err) -> bool:
     try:
-# [A-Plan removed]         from gspread.exceptions import APIError as _APIError
+        from gspread.exceptions import APIError as _APIError
 
         if isinstance(err, _APIError):
             resp = getattr(err, "response", None)
@@ -284,19 +613,19 @@ except Exception:
     def tz_kst(): return pytz.timezone(st.secrets.get("app", {}).get("TZ", "Asia/Seoul"))
 
 # gspread (배포 최적화: 자동 pip 설치 제거, 의존성 사전 설치 전제)
-# [A-Plan removed] from google.oauth2.service_account import Credentials
-# [A-Plan removed] from gspread.exceptions import WorksheetNotFound, APIError
-# [A-Plan removed] from gspread.utils import rowcol_to_a1
+from google.oauth2.service_account import Credentials
+from gspread.exceptions import WorksheetNotFound, APIError
+from gspread.utils import rowcol_to_a1
 
 # --- Safe shim for batch helpers: defined early to avoid NameError ---
-# [A-Plan removed] import gspread
+import gspread
 
 try:
     _ = rowcol_to_a1  # ensure imported
     if 'gs_enqueue_range' not in globals():
-        def gs_enqueue_range(*args, **kwargs):
-            """[A-Plan] Disabled Google Sheets function (stub)."""
-            return {"status": "disabled", "reason": "sheets path removed"}
+        def gs_enqueue_range(ws, a1, values, value_input_option="USER_ENTERED"):
+            ws.update(values, range_name=a1, value_input_option=value_input_option)
+    if 'gs_enqueue_cell' not in globals():
         def gs_enqueue_cell(ws, row, col, value, value_input_option="USER_ENTERED"):
             ws.update(rowcol_to_a1(int(row), int(col)), [[value]], value_input_option=value_input_option)
     if 'gs_flush' not in globals():
@@ -666,11 +995,15 @@ _WS_TTL, _HDR_TTL = 120, 120
 _VAL_CACHE: dict[str, Tuple[float, list]] = {}
 _VAL_TTL = 90
 
-def _ws_values(*args, **kwargs):
-
-    """[A-Plan] Disabled Google Sheets function (stub)."""
-
-    return {"status": "disabled", "reason": "sheets path removed"}
+def _ws_values(ws, key: str | None = None):
+    key = key or getattr(ws, 'title', '') or 'ws_values'
+    now = time.time()
+    hit = _VAL_CACHE.get(key)
+    if hit and (now - hit[0] < _VAL_TTL):
+        return hit[1]
+    vals = _retry(ws.get_all_values)
+    _VAL_CACHE[key] = (now, vals)
+    return vals
 
 def _ws(title: str):
     now=time.time(); hit=_WS_CACHE.get(title)
@@ -1291,11 +1624,116 @@ def read_eval_items_df(only_active: bool = False) -> pd.DataFrame:
             df = df.sort_values("순서", na_position="last")
     return df
 
-def _ensure_eval_resp_sheet(*args, **kwargs):
+def _ensure_eval_resp_sheet(year:int, item_ids:list[str]):
+    name=_eval_sheet_name(year)
+    wb=get_book()
+    try:
+        ws=_ws(name)
+    except WorksheetNotFound:
+        ws=_retry(wb.add_worksheet, title=name, rows=5000, cols=max(50, len(item_ids)+16))
+        _WS_CACHE[name]=(time.time(), ws)
+    need=list(EVAL_BASE_HEADERS)+[f"점수_{iid}" for iid in item_ids]
+    header,_=_hdr(ws, name)
+    if not header:
+        _retry(ws.update, "1:1", [need]); _HDR_CACHE[name]=(time.time(), need, {n:i+1 for i,n in enumerate(need)})
+    else:
+        miss=[h for h in need if h not in header]
+        if miss:
+            new=header+miss; _retry(ws.update, "1:1", [new])
+            _HDR_CACHE[name]=(time.time(), new, {n:i+1 for i,n in enumerate(new)})
+    return ws
 
-    """[A-Plan] Disabled Google Sheets function (stub)."""
+def _emp_name_by_sabun(emp_df: pd.DataFrame, sabun: str) -> str:
+    row=emp_df.loc[emp_df["사번"].astype(str)==str(sabun)]
+    return "" if row.empty else str(row.iloc[0].get("이름",""))
 
-    return {"status": "disabled", "reason": "sheets path removed"}
+def upsert_eval_response(emp_df: pd.DataFrame, year: int, eval_type: str,
+                         target_sabun: str, evaluator_sabun: str,
+                         scores: dict[str,int], status="제출")->dict:
+    """
+    DB-first: eval_responses 업서트(on_conflict: 연도,평가유형,평가대상사번,평가자사번)
+    - 시트는 더 이상 직접 쓰지 않음 (관리자 버튼으로 DB→시트 반영 가능)
+    """
+    import pandas as _pd
+    # 1) 항목
+    items = read_eval_items_df(True)
+    item_ids = [str(x) for x in items["항목ID"].tolist()]
+    # 2) 점수 보정 및 총점
+    def _c5(v):
+        try: v = int(v)
+        except Exception: v = 3
+        return min(5, max(1, v))
+    scores_list = [_c5(scores.get(i, 3)) for i in item_ids]
+    total = round(sum(scores_list)*(100.0/max(1,len(item_ids)*5)), 1)
+    # 3) 메타
+    tname = _emp_name_by_sabun(emp_df, target_sabun)
+    ename = _emp_name_by_sabun(emp_df, evaluator_sabun)
+    try:
+        now = kst_now_str()
+    except Exception:
+        import datetime
+        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # 4) payload
+    payload = {
+        "연도": int(year),
+        "평가유형": str(eval_type),
+        "평가대상사번": str(target_sabun),
+        "평가대상이름": str(tname),
+        "평가자사번": str(evaluator_sabun),
+        "평가자이름": str(ename),
+        "총점": total,
+        "상태": status,
+        "제출시각": now,
+        "잠금": "",
+    }
+    for iid, sc in zip(item_ids, scores_list):
+        payload[f"점수_{iid}"] = sc
+    # 5) Supabase 업서트
+    res = supabase.table("eval_responses").upsert(payload, on_conflict="연도,평가유형,평가대상사번,평가자사번").execute()
+    try:
+        st.cache_data.clear()
+    except Exception:
+        pass
+    return {"action": "upsert", "total": total, "rows": len(res.data or [])}
+
+@st.cache_data(ttl=300, show_spinner=False)
+def read_my_eval_rows(year: int, sabun: str) -> pd.DataFrame:
+    """
+    DB-first 조회: eval_responses에서 평가자사번 기준 조회
+    - 실패 시 기존 시트 데이터로 안전 폴백
+    """
+    import pandas as _pd
+    try:
+        res = supabase.table("eval_responses").select("*").eq("연도", int(year)).eq("평가자사번", str(sabun)).execute()
+        data = res.data or []
+        df = _pd.DataFrame(data)
+        if df.empty:
+            return _pd.DataFrame(columns=EVAL_BASE_HEADERS)
+        sort_cols = [c for c in ["평가유형","평가대상사번","제출시각"] if c in df.columns]
+        if sort_cols:
+            df = df.sort_values(sort_cols, ascending=[True, True, False]).reset_index(drop=True)
+        return df
+    except Exception as e:
+        try:
+            name = _eval_sheet_name(year)
+            ws = _ws(name)
+            df = _pd.DataFrame(_ws_get_all_records(ws))
+            if "평가자사번" in df.columns:
+                df = df[df["평가자사번"].astype(str) == str(sabun)]
+            return df
+        except Exception:
+            return _pd.DataFrame(columns=EVAL_BASE_HEADERS)
+
+def read_my_eval_rows(year: int, sabun: str) -> pd.DataFrame:
+    name=_eval_sheet_name(year)
+    try:
+        ws=_ws(name); df=pd.DataFrame(_ws_get_all_records(ws))
+    except Exception: return pd.DataFrame(columns=EVAL_BASE_HEADERS)
+    if df.empty: return df
+    if "평가자사번" in df.columns: df=df[df["평가자사번"].astype(str)==str(sabun)]
+    sort_cols=[c for c in ["평가유형","평가대상사번","제출시각"] if c in df.columns]
+    if sort_cols: df=df.sort_values(sort_cols, ascending=[True,True,False]).reset_index(drop=True)
+    return df
 
 def tab_eval(emp_df: pd.DataFrame):
     """인사평가 탭 (심플·자동 라우팅)
@@ -2623,11 +3061,11 @@ REQ_EMP_COLS = [
     "PIN_hash","PIN_No"
 ]
 
-def _get_ws_and_headers(*args, **kwargs):
-
-    """[A-Plan] Disabled Google Sheets function (stub)."""
-
-    return {"status": "disabled", "reason": "sheets path removed"}
+def _get_ws_and_headers(sheet_name: str):
+    ws=_ws(sheet_name)
+    header,_h=_hdr(ws, sheet_name)
+    if not header: raise RuntimeError(f"'{sheet_name}' 헤더(1행) 없음")
+    return ws, header, _h
 
 def ensure_emp_sheet_columns():
     ws, header, hmap = _get_ws_and_headers(EMP_SHEET)
@@ -3271,11 +3709,10 @@ def _gs_queue_init():
     if "gs_queue" not in st.session_state:
         st.session_state.gs_queue = []
 
-def gs_enqueue_range(*args, **kwargs):
-
-    """[A-Plan] Disabled Google Sheets function (stub)."""
-
-    return {"status": "disabled", "reason": "sheets path removed"}
+def gs_enqueue_range(ws, range_a1, values_2d, value_input_option="USER_ENTERED"):
+    _gs_queue_init()
+    rng = range_a1 if "!" in range_a1 else f"{ws.title}!{range_a1}"
+    st.session_state.gs_queue.append({"range": rng, "values": values_2d, "value_input_option": value_input_option})
 
 def gs_enqueue_cell(ws, row, col, value, value_input_option="USER_ENTERED"):
     _gs_queue_init()
@@ -3303,3 +3740,102 @@ def gs_flush():
                 raise
     st.session_state.gs_queue = []
 # ===== End helpers =====
+
+
+
+# =============================================================
+# [A-Plan Monkey Patch] Supabase-only overrides (appended)
+# - Avoids Google Sheets usage; routes sheet reads to Supabase.
+# - Prevents NameError for APIError by defining a shim.
+# - Last-definition-wins: this overrides earlier read_sheet_df.
+# =============================================================
+
+# --- Shim for APIError (from removed Google libs) ---
+class APIError(Exception):
+    """Shim: Google Sheets APIError disabled under A-Plan."""
+    pass
+
+# --- Supabase helpers ---
+try:
+    from supabase import create_client, Client
+except Exception as _e:
+    create_client = None
+    Client = None
+
+def _get_supabase_client():
+    import streamlit as st
+    url = os.environ.get("SUPABASE_URL", "").strip()
+    key = os.environ.get("SUPABASE_ANON_KEY", "").strip() or os.environ.get("SUPABASE_SERVICE_ROLE_KEY","").strip()
+    if not url or not key:
+        st.error("SUPABASE_URL / SUPABASE_ANON_KEY 환경변수가 필요합니다 (A-Plan).")
+        raise RuntimeError("Missing Supabase credentials")
+    return create_client(url, key)
+
+def _sb_select(table_name:str, select_cols=None):
+    import pandas as pd
+    sb = _get_supabase_client()
+    q = sb.table(table_name).select(",".join(select_cols) if select_cols else "*")
+    res = q.execute()
+    data = res.data or []
+    return pd.DataFrame(data)
+
+# --- Override: read_sheet_df ---
+def read_sheet_df(sheet_name, *args, **kwargs):
+    """
+    A-Plan override:
+    - Intercept sheet reads and pull from Supabase instead.
+    - Recognizes known sheet names and maps to table names.
+    """
+    # Known mappings (both Korean sheet names and table names accepted)
+    mapping = {
+        "직원": "employees",
+        "평가_항목": "eval_items",
+        "권한": "acl",
+        "인사평가": "eval_latest",
+        "직무기술서": "job_specs",
+        "직무기술서_승인": "job_specs_approvals",
+        "직무능력평가": "competency_evals",
+
+        # Also accept table-name inputs directly
+        "employees": "employees",
+        "eval_items": "eval_items",
+        "acl": "acl",
+        "eval_latest": "eval_latest",
+        "job_specs": "job_specs",
+        "job_specs_approvals": "job_specs_approvals",
+        "competency_evals": "competency_evals",
+    }
+
+    # Try also to match against constants like EMP_SHEET if they exist
+    try:
+        if 'EMP_SHEET' in globals() and sheet_name == globals().get('EMP_SHEET'):
+            return _sb_select("employees")
+        if 'EVAL_ITEMS_SHEET' in globals() and sheet_name == globals().get('EVAL_ITEMS_SHEET'):
+            return _sb_select("eval_items")
+        if 'ACL_SHEET' in globals() and sheet_name == globals().get('ACL_SHEET'):
+            return _sb_select("acl")
+        if 'EVAL_SHEET' in globals() and sheet_name == globals().get('EVAL_SHEET'):
+            return _sb_select("eval_latest")
+        if 'JD_SHEET' in globals() and sheet_name == globals().get('JD_SHEET'):
+            return _sb_select("job_specs")
+        if 'JD_APPROVAL_SHEET' in globals() and sheet_name == globals().get('JD_APPROVAL_SHEET'):
+            return _sb_select("job_specs_approvals")
+        if 'COMP_EVAL_SHEET' in globals() and sheet_name == globals().get('COMP_EVAL_SHEET'):
+            return _sb_select("competency_evals")
+    except Exception:
+        # Fallback to name mapping
+        pass
+
+    key = str(sheet_name)
+    table = mapping.get(key)
+    if table:
+        return _sb_select(table)
+
+    # As a last resort, try to use a lowercased key
+    table = mapping.get(key.lower())
+    if table:
+        return _sb_select(table)
+
+    raise RuntimeError(f"[A-Plan] Unknown sheet name for Supabase mapping: {sheet_name!r}")
+
+# --- End of A-Plan Monkey Patch ---
