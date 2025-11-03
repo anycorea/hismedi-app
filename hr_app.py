@@ -81,12 +81,13 @@ def _normalize_private_key(raw: str) -> str:
 
 # === Supabase<->Sheets 동기화 유틸 (직원) ===
 import pandas as _pd
+from datetime import datetime, timedelta
 
 def _sync_truthy_v1(x):
     if isinstance(x, bool):
         return x
     s = str(x).strip().lower()
-    return s in ("1","y","yes","true","t","o","on","true()")
+    return s in ("1","y","yes","true","t","o","on","true()","예","재직","사용","활성")
 
 def _get_gspread_client_for_sync_v1():
     try:
@@ -103,31 +104,61 @@ def _get_gspread_client_for_sync_v1():
         creds = Credentials.from_service_account_info(sa, scopes=scopes)
         return gspread.authorize(creds)
 
+def _norm_date(v):
+    s = "" if v is None else str(v).strip()
+    if s == "" or s.lower() in ("nan","none","null"):
+        return None
+    for fmt in ("%Y-%m-%d","%Y/%m/%d","%Y.%m.%d","%Y%m%d"):
+        try:
+            return datetime.strptime(s, fmt).date().isoformat()
+        except Exception:
+            pass
+    # 엑셀 직렬값 케이스
+    try:
+        n = float(s); base = datetime(1899,12,30)
+        return (base + timedelta(days=int(n))).date().isoformat()
+    except Exception:
+        return None
+
 def sync_sheet_to_supabase_employees_v1():
     gclient = _get_gspread_client_for_sync_v1()
     sh = gclient.open_by_key(st.secrets["sheets"]["HR_SHEET_ID"])
     ws = sh.worksheet("직원")
 
-    # ★ 선행 0 보존: 표시된 텍스트 그대로 가져오기
+    # 시트 표시값 그대로(선행 0 보존)
     df = _pd.DataFrame(ws.get_all_records(value_render_option="FORMATTED_VALUE"))
     if df.empty:
         st.warning("직원 시트가 비어있습니다.")
         return
+
+    # 사번/문자 컬럼 정리
+    if "사번" in df.columns:
+        df["사번"] = df["사번"].map(lambda v: str(v).strip())
 
     # 불리언 정리
     for col in ["적용여부", "재직여부"]:
         if col in df.columns:
             df[col] = df[col].map(_sync_truthy_v1)
 
-    # (필요시) 날짜 정규화 이미 하셨다면 유지
+    # 날짜 정규화(시트에 있으면만)
+    for col in ["입사일", "퇴사일", "생년월일"]:
+        if col in df.columns:
+            df[col] = df[col].map(_norm_date)
 
-    # ★ PIN_No를 문자열로 고정(빈칸은 NULL)
-    if "PIN_No" in df.columns:
-        df["PIN_No"] = df["PIN_No"].map(lambda v: None if str(v).strip()=="" else str(v))
+    # ⚠️ 보안: 평문 PIN은 절대 DB로 보내지 않음
+    # 시트에 남아 있어도 업서트 직전에 제거
+    for sensitive in ["PIN_No", "PIN", "핀번호"]:
+        if sensitive in df.columns:
+            df.drop(columns=[sensitive], inplace=True)
+
+    # (선택) 해시 컬럼만 사용하려면, 시트에 PIN_hash가 있을 때만 문자열화
+    if "PIN_hash" in df.columns:
+        df["PIN_hash"] = df["PIN_hash"].map(lambda v: None if str(v).strip()=="" else str(v))
 
     # NaN -> None
     df = df.where(_pd.notnull(df), None)
 
+    # 업서트 (기준: 사번)
     supabase.table("employees").upsert(
         df.to_dict(orient="records"),
         on_conflict="사번"
