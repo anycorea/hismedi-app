@@ -423,7 +423,8 @@ except NameError:
 
     df = _pd.DataFrame(ws.get_all_records())
     if df.empty:
-        st.warning("직무기술서_승인 시트가 비어있습니다."); return
+        st.warning("직무기술서_승인 시트가 비어있습니다.")
+        return 0
 
     need = ["연도","사번","이름","버전","승인자사번","승인자이름","상태","승인시각","비고"]
     for c in need:
@@ -454,7 +455,8 @@ except NameError:
         st.info(f"키 결측 제외: {dropn}건 (연도/사번/버전/승인자사번)")
 
     if df.empty:
-        st.warning("업서트할 직무기술서_승인 데이터가 없습니다."); return
+        st.warning("업서트할 직무기술서_승인 데이터가 없습니다.")
+        return 0
 
     try:
         supabase.table("job_specs_approvals").upsert(
@@ -477,7 +479,8 @@ def sync_sheet_to_supabase_competency_evals_v1():
     import pandas as _pd
     df = _pd.DataFrame(ws.get_all_records())
     if df.empty:
-        st.warning("직무능력평가 시트가 비어있습니다."); return
+        st.warning("직무능력평가 시트가 비어있습니다.")
+        return 0
 
     need = ["연도","평가대상사번","평가대상이름","평가자사번","평가자이름",
             "주업무평가","기타업무평가","교육이수","자격유지","종합의견","상태","제출시각","잠금"]
@@ -520,7 +523,8 @@ def sync_sheet_to_supabase_competency_evals_v1():
         st.info(f"키 결측 제외: {dropn}건 (연도/평가대상사번/평가자사번)")
 
     if df.empty:
-        st.warning("업서트할 직무능력평가 데이터가 없습니다."); return
+        st.warning("업서트할 직무능력평가 데이터가 없습니다.")
+        return 0
 
     try:
         supabase.table("competency_evals").upsert(
