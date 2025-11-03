@@ -81,16 +81,35 @@ def _normalize_private_key(raw: str) -> str:
 
 # === Supabase<->Sheets 동기화 유틸 (직원) ===
 import pandas as _pd
+from datetime import datetime, timedelta
 
 def _sync_truthy_v1(x):
     if isinstance(x, bool):
         return x
     s = str(x).strip().lower()
-    return s in ("1","y","yes","true","t","o","on","true()")
+    return s in ("1","y","yes","true","t","o","on","true()","예","재직","사용","활성")
+
+def _to_date_or_none(v):
+    s = "" if v is None else str(v).strip()
+    if s == "" or s.lower() in ("nan","none","null"):
+        return None
+    # 포맷 시도
+    for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y.%m.%d", "%Y%m%d"):
+        try:
+            return datetime.strptime(s, fmt).date().isoformat()
+        except ValueError:
+            pass
+    # 엑셀 직렬값 케이스
+    try:
+        n = float(s)
+        base = datetime(1899, 12, 30)
+        return (base + timedelta(days=int(n))).date().isoformat()
+    except Exception:
+        return None  # 해석 실패 시 NULL
 
 def _get_gspread_client_for_sync_v1():
     try:
-        return gc  # 앱에 이미 gspread 클라이언트가 있으면 재사용
+        return gc
     except NameError:
         import gspread
         from google.oauth2.service_account import Credentials
@@ -112,9 +131,18 @@ def sync_sheet_to_supabase_employees_v1():
         st.warning("직원 시트가 비어있습니다.")
         return
 
+    # 불리언 정리
     for col in ["적용여부", "재직여부"]:
         if col in df.columns:
             df[col] = df[col].map(_sync_truthy_v1)
+
+    # 날짜 컬럼 정규화 (시트 헤더에 있는 것만 적용)
+    for col in ["입사일", "퇴사일", "생년월일"]:
+        if col in df.columns:
+            df[col] = df[col].map(_to_date_or_none)
+
+    # NaN -> None (빈칸을 전부 NULL로; 문자열 빈칸은 그대로 두고 싶으면 제거)
+    df = df.where(_pd.notnull(df), None)
 
     # 업서트 (기준: 사번)
     supabase.table("employees").upsert(
@@ -208,43 +236,36 @@ def sync_sheet_to_supabase_acl_v1():
         st.warning("권한 시트가 비어있습니다.")
         return
 
-    # 1) 필수 컬럼 확보
     required = ["사번","이름","역할","범위유형","부서1","부서2","대상사번","활성","비고"]
     for c in required:
         if c not in df.columns:
             df[c] = ""
 
-    # 2) 문자열/공백 정리
     for c in ["사번","이름","역할","범위유형","부서1","부서2","대상사번","비고"]:
         df[c] = df[c].astype(str).fillna("").map(lambda s: s.strip())
 
-    # 3) 불리언 정리
     df["활성"] = df["활성"].map(_sync_truthy_v1).fillna(False).astype(bool)
 
-    # 4) (최소 키) 결측 제거 → B안에서는 사번/역할만 필수
+    # 키 결측 제거 (사번/역할만 필수)
     before = len(df)
     df = df[(df["사번"]!="") & (df["역할"]!="")]
-    dropped_nullkey = before - len(df)
-    if dropped_nullkey > 0:
-        st.info(f"빈 사번/역할 제외: {dropped_nullkey}건")
+    if before - len(df) > 0:
+        st.info(f"빈 사번/역할 제외: {before-len(df)}건")
 
     if df.empty:
         st.warning("업서트할 권한 데이터가 없습니다.")
         return
 
-    # 5) 동일한 6-키 완전중복만 제거(같은 행이 시트에 2번 있는 경우 방지)
-    conflict_keys = ["사번","역할","범위유형","부서1","부서2","대상사번"]
-    before_dups = len(df)
-    df = df.drop_duplicates(subset=conflict_keys, keep="first")
-    removed_dups = before_dups - len(df)
-    if removed_dups > 0:
-        st.info(f"완전중복 제거: {removed_dups}건 (키: {', '.join(conflict_keys)})")
+    # 완전중복 제거(보조)
+    df = df.drop_duplicates(
+        subset=["사번","역할","범위유형","부서1","부서2","대상사번"], keep="first"
+    )
 
-    # 6) 업서트 (B안: 6개 컬럼 조합을 고유로)
+    # ✅ DB에 (사번,역할) PK/Unique가 있다는 전제
     try:
         supabase.table("acl").upsert(
             df.to_dict(orient="records"),
-            on_conflict="사번,역할,범위유형,부서1,부서2,대상사번"
+            on_conflict="사번,역할"
         ).execute()
         st.success(f"권한 {len(df)}건 업서트 완료", icon="✅")
     except Exception as e:
