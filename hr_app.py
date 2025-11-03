@@ -369,6 +369,58 @@ def sync_sheet_to_supabase_job_specs_approvals_v1():
     """
     ws = _get_ws("직무기술서_승인")
     import pandas as _pd
+# ======================================================================
+# GPT PATCH BANNER — 2025-11-03.v4
+# This banner ensures Git detects a content change and includes a global
+# datetime parser guard for sync buttons.
+# ======================================================================
+__APP_PATCH_VERSION__ = "2025-11-03.v4"
+
+# ---- Global DateTime Parser Guard ----
+try:
+    _parse_dt_series_to_iso
+except NameError:
+    try:
+        _pd
+    except NameError:
+        import pandas as _pd  # fallback alias for pandas
+    def _parse_dt_series_to_iso(s: "_pd.Series") -> "_pd.Series":
+        if not isinstance(s, _pd.Series):
+            s = _pd.Series(s)
+        s = s.astype(str).str.strip().replace({"": None, "NaT": None, "nan": None})
+        formats = [
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%d %H:%M",
+            "%Y-%m-%d",
+            "%Y/%m/%d %H:%M:%S",
+            "%Y/%m/%d %H:%M",
+            "%Y/%m/%d",
+            "%Y.%m.%d %H:%M:%S",
+            "%Y.%m.%d %H:%M",
+            "%Y.%m.%d",
+        ]
+        result = _pd.Series([_pd.NaT] * len(s))
+        mask_remaining = _pd.isna(result)
+        for fmt in formats:
+            if not mask_remaining.any():
+                break
+            parsed = _pd.to_datetime(s[mask_remaining], format=fmt, errors="coerce")
+            result.loc[mask_remaining] = parsed
+            mask_remaining = _pd.isna(result)
+        if mask_remaining.any():
+            fallback = _pd.to_datetime(s[mask_remaining], errors="coerce", utc=False)
+            result.loc[mask_remaining] = fallback
+        try:
+            if hasattr(result.dt, "tz"):
+                aware_mask = result.dt.tz.notna()
+                if aware_mask.any():
+                    result.loc[aware_mask] = result[aware_mask].dt.tz_convert(None)
+        except Exception:
+            pass
+        result = result.dt.floor("S")
+        return result.dt.strftime("%Y-%m-%d %H:%M:%S")
+# ======================================================================
+
     df = _pd.DataFrame(ws.get_all_records())
     if df.empty:
         st.warning("직무기술서_승인 시트가 비어있습니다."); return
