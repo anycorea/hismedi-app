@@ -83,6 +83,90 @@ def _normalize_private_key(raw: str) -> str:
 import pandas as _pd
 from datetime import datetime, timedelta
 
+# Robust datetime parser for "제출시각" and similar columns to avoid pandas inferring warnings.
+# - Tries a whitelist of common formats first (fast, no warnings)
+# - Falls back to pandas to_datetime with dayfirst=False and exact=False
+# - Normalizes to naive local time (Asia/Seoul) and formats as "YYYY-MM-DD HH:MM:SS"
+from zoneinfo import ZoneInfo
+
+def _parse_dt_series_to_iso(series, tz_name: str = "Asia/Seoul"):
+    if series is None:
+        return series
+    tz = ZoneInfo(tz_name)
+    def _parse_one(x):
+        if x is None:
+            return None
+        # Already a pandas/py datetime?
+        if isinstance(x, (datetime, )):
+            dt = x
+        else:
+            s = str(x).strip()
+            if not s:
+                return None
+            # Excel serial date (integer or float)
+            try:
+                if s.isdigit() or re.fullmatch(r"\d+\.\d+", s):
+                    n = float(s)
+                    if 20000 <= n <= 80000:
+                        base = datetime(1899,12,30)  # Excel serial date base
+                        dt = base + timedelta(days=n)
+                        return dt.strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                pass
+
+            # Try explicit formats (no warnings)
+            fmts = [
+                "%Y-%m-%d %H:%M:%S",
+                "%Y-%m-%d %H:%M",
+                "%Y/%m/%d %H:%M:%S",
+                "%Y/%m/%d %H:%M",
+                "%Y.%m.%d %H:%M:%S",
+                "%Y.%m.%d %H:%M",
+                "%Y%m%d %H:%M:%S",
+                "%Y%m%d %H:%M",
+                "%Y-%m-%d",
+                "%Y/%m/%d",
+                "%Y.%m.%d",
+                "%Y%m%d",
+                "%m/%d/%Y %H:%M:%S",
+                "%m/%d/%Y %H:%M",
+                "%m/%d/%Y",
+            ]
+            dt = None
+            for fmt in fmts:
+                try:
+                    dt = datetime.strptime(s, fmt)
+                    break
+                except Exception:
+                    continue
+            if dt is None:
+                # Fallback: pandas parser (slower, but robust). No infer warning because we're not calling without format in a vectorized way here.
+                try:
+                    dt = _pd.to_datetime(s, errors="coerce", dayfirst=False, utc=False)
+                    if _pd.isna(dt):
+                        return None
+                    if isinstance(dt, _pd.Timestamp):
+                        dt = dt.to_pydatetime()
+                except Exception:
+                    return None
+
+        # Attach timezone if naive, then convert to local tz and drop tzinfo
+        try:
+            if dt.tzinfo is None:
+                dt_local = dt.replace(tzinfo=tz)
+            else:
+                dt_local = dt.astimezone(tz)
+            # Return ISO-like format without timezone
+            return dt_local.strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            try:
+                return dt.strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                return None
+
+    return series.map(_parse_one)
+
+
 def _sync_truthy_v1(x):
     if isinstance(x, bool):
         return x
@@ -221,9 +305,7 @@ def sync_sheet_to_supabase_eval_responses_v1():
 
     # --- 제출시각: 문자열→datetime→문자열(ISO) ---
     if "제출시각" in df.columns:
-        dt = _pd.to_datetime(df["제출시각"], errors="coerce")
-        # 타임존 없이 저장(서버측에서 timestamptz 자동 파싱 가능), 불가 시 ISO 포맷으로
-        df["제출시각"] = dt.dt.strftime("%Y-%m-%d %H:%M:%S")
+        df["제출시각"] = _parse_dt_series_to_iso(df["제출시각"])
 
     # --- 항목 점수 컬럼 자동 탐색 & 숫자화 ---
     itm_cols = [c for c in df.columns if c.startswith("점수_ITM")]
@@ -335,8 +417,7 @@ def sync_sheet_to_supabase_job_specs_v1():
         # date는 문자열 'YYYY-MM-DD'로 저장해도 Supabase가 파싱 가능
         df[dcol] = _pd.to_datetime(dt, errors="coerce").dt.strftime("%Y-%m-%d")
     if "제출시각" in df.columns:
-        dt = _pd.to_datetime(df["제출시각"], errors="coerce")
-        df["제출시각"] = dt.dt.strftime("%Y-%m-%d %H:%M:%S")
+        df["제출시각"] = _parse_dt_series_to_iso(df["제출시각"])
 
     # NaN → None
     df = df.where(~df.isna(), None)
