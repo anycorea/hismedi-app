@@ -221,7 +221,9 @@ def sync_sheet_to_supabase_eval_responses_v1():
 
     # --- 제출시각: 문자열→datetime→문자열(ISO) ---
     if "제출시각" in df.columns:
-        df["제출시각"] = _parse_dt_series_to_iso(df["제출시각"])
+        dt = _pd.to_datetime(df["제출시각"], errors="coerce")
+        # 타임존 없이 저장(서버측에서 timestamptz 자동 파싱 가능), 불가 시 ISO 포맷으로
+        df["제출시각"] = dt.dt.strftime("%Y-%m-%d %H:%M:%S")
 
     # --- 항목 점수 컬럼 자동 탐색 & 숫자화 ---
     itm_cols = [c for c in df.columns if c.startswith("점수_ITM")]
@@ -333,7 +335,8 @@ def sync_sheet_to_supabase_job_specs_v1():
         # date는 문자열 'YYYY-MM-DD'로 저장해도 Supabase가 파싱 가능
         df[dcol] = _pd.to_datetime(dt, errors="coerce").dt.strftime("%Y-%m-%d")
     if "제출시각" in df.columns:
-        df["제출시각"] = _parse_dt_series_to_iso(df["제출시각"])
+        dt = _pd.to_datetime(df["제출시각"], errors="coerce")
+        df["제출시각"] = dt.dt.strftime("%Y-%m-%d %H:%M:%S")
 
     # NaN → None
     df = df.where(~df.isna(), None)
@@ -369,62 +372,9 @@ def sync_sheet_to_supabase_job_specs_approvals_v1():
     """
     ws = _get_ws("직무기술서_승인")
     import pandas as _pd
-    # ======================================================================
-    # GPT PATCH BANNER — 2025-11-03.v4
-    # This banner ensures Git detects a content change and includes a global
-    # datetime parser guard for sync buttons.
-    # ======================================================================
-    __APP_PATCH_VERSION__ = "2025-11-03.v4"
-
-    # ---- Global DateTime Parser Guard ----
-    try:
-        _parse_dt_series_to_iso
-    except NameError:
-        try:
-            _pd
-        except NameError:
-            import pandas as _pd  # fallback alias for pandas
-        def _parse_dt_series_to_iso(s: "_pd.Series") -> "_pd.Series":
-            if not isinstance(s, _pd.Series):
-                s = _pd.Series(s)
-            s = s.astype(str).str.strip().replace({"": None, "NaT": None, "nan": None})
-            formats = [
-                "%Y-%m-%d %H:%M:%S",
-                "%Y-%m-%d %H:%M",
-                "%Y-%m-%d",
-                "%Y/%m/%d %H:%M:%S",
-                "%Y/%m/%d %H:%M",
-                "%Y/%m/%d",
-                "%Y.%m.%d %H:%M:%S",
-                "%Y.%m.%d %H:%M",
-                "%Y.%m.%d",
-            ]
-            result = _pd.Series([_pd.NaT] * len(s))
-            mask_remaining = _pd.isna(result)
-            for fmt in formats:
-                if not mask_remaining.any():
-                    break
-                parsed = _pd.to_datetime(s[mask_remaining], format=fmt, errors="coerce")
-                result.loc[mask_remaining] = parsed
-                mask_remaining = _pd.isna(result)
-            if mask_remaining.any():
-                fallback = _pd.to_datetime(s[mask_remaining], errors="coerce", utc=False)
-                result.loc[mask_remaining] = fallback
-            try:
-                if hasattr(result.dt, "tz"):
-                    aware_mask = result.dt.tz.notna()
-                    if aware_mask.any():
-                        result.loc[aware_mask] = result[aware_mask].dt.tz_convert(None)
-            except Exception:
-                pass
-            result = result.dt.floor("S")
-            return result.dt.strftime("%Y-%m-%d %H:%M:%S")
-    # ======================================================================
-
     df = _pd.DataFrame(ws.get_all_records())
     if df.empty:
-        st.warning("직무기술서_승인 시트가 비어있습니다.")
-        return 0
+        st.warning("직무기술서_승인 시트가 비어있습니다."); return
 
     need = ["연도","사번","이름","버전","승인자사번","승인자이름","상태","승인시각","비고"]
     for c in need:
@@ -455,8 +405,7 @@ def sync_sheet_to_supabase_job_specs_approvals_v1():
         st.info(f"키 결측 제외: {dropn}건 (연도/사번/버전/승인자사번)")
 
     if df.empty:
-        st.warning("업서트할 직무기술서_승인 데이터가 없습니다.")
-        return 0
+        st.warning("업서트할 직무기술서_승인 데이터가 없습니다."); return
 
     try:
         supabase.table("job_specs_approvals").upsert(
@@ -479,8 +428,7 @@ def sync_sheet_to_supabase_competency_evals_v1():
     import pandas as _pd
     df = _pd.DataFrame(ws.get_all_records())
     if df.empty:
-        st.warning("직무능력평가 시트가 비어있습니다.")
-        return 0
+        st.warning("직무능력평가 시트가 비어있습니다."); return
 
     need = ["연도","평가대상사번","평가대상이름","평가자사번","평가자이름",
             "주업무평가","기타업무평가","교육이수","자격유지","종합의견","상태","제출시각","잠금"]
@@ -523,8 +471,7 @@ def sync_sheet_to_supabase_competency_evals_v1():
         st.info(f"키 결측 제외: {dropn}건 (연도/평가대상사번/평가자사번)")
 
     if df.empty:
-        st.warning("업서트할 직무능력평가 데이터가 없습니다.")
-        return 0
+        st.warning("업서트할 직무능력평가 데이터가 없습니다."); return
 
     try:
         supabase.table("competency_evals").upsert(
@@ -3959,51 +3906,3 @@ def sync_sheet_to_supabase_job_specs_v1():
         SHEET["JD"], TABLE["JD"], on_conflict="연도,사번,버전",
         postprocess=_post
     )
-
-
-
-# ======================================================================
-# DATETIME GUARD (2025-11-03): Ensure _parse_dt_series_to_iso exists
-# ======================================================================
-import pandas as _pd  # ensure pandas alias is available
-
-try:
-    _parse_dt_series_to_iso
-except NameError:
-    import pandas as _pd
-    def _parse_dt_series_to_iso(s: _pd.Series) -> _pd.Series:
-        if not isinstance(s, _pd.Series):
-            s = _pd.Series(s)
-        s = s.astype(str).str.strip().replace({"": None, "NaT": None, "nan": None})
-        formats = [
-            "%Y-%m-%d %H:%M:%S",
-            "%Y-%m-%d %H:%M",
-            "%Y-%m-%d",
-            "%Y/%m/%d %H:%M:%S",
-            "%Y/%m/%d %H:%M",
-            "%Y/%m/%d",
-            "%Y.%m.%d %H:%M:%S",
-            "%Y.%m.%d %H:%M",
-            "%Y.%m.%d",
-        ]
-        result = _pd.Series([_pd.NaT] * len(s))
-        mask_remaining = _pd.isna(result)
-        for fmt in formats:
-            if not mask_remaining.any():
-                break
-            parsed = _pd.to_datetime(s[mask_remaining], format=fmt, errors="coerce")
-            result.loc[mask_remaining] = parsed
-            mask_remaining = _pd.isna(result)
-        if mask_remaining.any():
-            fallback = _pd.to_datetime(s[mask_remaining], errors="coerce", utc=False)
-            result.loc[mask_remaining] = fallback
-        try:
-            if hasattr(result.dt, "tz"):
-                aware_mask = result.dt.tz.notna()
-                if aware_mask.any():
-                    result.loc[aware_mask] = result[aware_mask].dt.tz_convert(None)
-        except Exception:
-            pass
-        result = result.dt.floor("S")
-        return result.dt.strftime("%Y-%m-%d %H:%M:%S")
-# ======================================================================
