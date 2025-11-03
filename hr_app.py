@@ -107,16 +107,27 @@ def sync_sheet_to_supabase_employees_v1():
     gclient = _get_gspread_client_for_sync_v1()
     sh = gclient.open_by_key(st.secrets["sheets"]["HR_SHEET_ID"])
     ws = sh.worksheet("직원")
-    df = _pd.DataFrame(ws.get_all_records())
+
+    # ★ 선행 0 보존: 표시된 텍스트 그대로 가져오기
+    df = _pd.DataFrame(ws.get_all_records(value_render_option="FORMATTED_VALUE"))
     if df.empty:
         st.warning("직원 시트가 비어있습니다.")
         return
 
+    # 불리언 정리
     for col in ["적용여부", "재직여부"]:
         if col in df.columns:
             df[col] = df[col].map(_sync_truthy_v1)
 
-    # 업서트 (기준: 사번)
+    # (필요시) 날짜 정규화 이미 하셨다면 유지
+
+    # ★ PIN_No를 문자열로 고정(빈칸은 NULL)
+    if "PIN_No" in df.columns:
+        df["PIN_No"] = df["PIN_No"].map(lambda v: None if str(v).strip()=="" else str(v))
+
+    # NaN -> None
+    df = df.where(_pd.notnull(df), None)
+
     supabase.table("employees").upsert(
         df.to_dict(orient="records"),
         on_conflict="사번"
