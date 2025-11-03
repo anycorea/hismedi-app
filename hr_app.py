@@ -5,29 +5,6 @@
 # ────────────────────────────────────────────────────────────────
 import os
 import streamlit as st
-
-# === [Added: 2025-11-03] Simplification constants & settings ===
-CACHE_TTL = 300  # seconds (cache ttl for @st.cache_data)
-
-SHEET = {
-    "EMP": "직원",
-    "ITEMS": "평가_항목",
-    "ACL": "권한",
-    "EVAL": "인사평가",
-    "JD": "직무기술서",
-    "JD_APPR": "직무기술서_승인",
-    "COMP": "직무능력평가",
-}
-
-TABLE = {
-    "EMP": "employees",
-    "ITEMS": "eval_items",
-    "ACL": "acl",
-    "EVAL": "eval_responses",
-    "JD": "job_specs",
-    "JD_APPR": "job_specs_approvals",
-    "COMP": "competency_evals",
-}
 from supabase import create_client, Client
 
 APP_TITLE = st.secrets.get("app", {}).get("TITLE", "HISMEDI - 인사/HR")
@@ -144,140 +121,333 @@ def _norm_date(v):
         return None
 
 def sync_sheet_to_supabase_employees_v1():
-    # 단순화: 공통 제너릭 사용 + 기존 로직 보존을 위한 후처리
-    def _post(df):
-        # 사번 문자열화
-        if "사번" in df.columns:
-            df["사번"] = df["사번"].map(lambda v: str(v).strip())
-        # 불리언 정리
-        for col in ["적용여부", "재직여부"]:
-            if col in df.columns:
-                df[col] = df[col].map(_sync_truthy_v1)
-        # 날짜 정규화
-        for col in ["입사일", "퇴사일", "생년월일"]:
-            if col in df.columns:
-                df[col] = df[col].map(_norm_date)
-        # 평문 PIN 제거 + 해시 컬럼 보존
-        if "PIN" in df.columns:
-            df = df.drop(columns=["PIN"])
-        return df
-    return sync_sheet_to_supabase_generic_v2(SHEET["EMP"], TABLE["EMP"], on_conflict="사번",
-                                            postprocess=_post, value_render_option="FORMATTED_VALUE")
+    gclient = _get_gspread_client_for_sync_v1()
+    sh = gclient.open_by_key(st.secrets["sheets"]["HR_SHEET_ID"])
+    ws = sh.worksheet("직원")
+
+    # 시트 표시값 그대로(선행 0 보존)
+    df = _pd.DataFrame(ws.get_all_records(value_render_option="FORMATTED_VALUE"))
+    if df.empty:
+        st.warning("직원 시트가 비어있습니다.")
+        return
+
+    # 사번/문자 컬럼 정리
+    if "사번" in df.columns:
+        df["사번"] = df["사번"].map(lambda v: str(v).strip())
+
+    # 불리언 정리
+    for col in ["적용여부", "재직여부"]:
+        if col in df.columns:
+            df[col] = df[col].map(_sync_truthy_v1)
+
+    # 날짜 정규화(시트에 있으면만)
+    for col in ["입사일", "퇴사일", "생년월일"]:
+        if col in df.columns:
+            df[col] = df[col].map(_norm_date)
+
+    # ⚠️ 보안: 평문 PIN은 절대 DB로 보내지 않음
+    # 시트에 남아 있어도 업서트 직전에 제거
+    for sensitive in ["PIN_No", "PIN", "핀번호"]:
+        if sensitive in df.columns:
+            df.drop(columns=[sensitive], inplace=True)
+
+    # (선택) 해시 컬럼만 사용하려면, 시트에 PIN_hash가 있을 때만 문자열화
+    if "PIN_hash" in df.columns:
+        df["PIN_hash"] = df["PIN_hash"].map(lambda v: None if str(v).strip()=="" else str(v))
+
+    # NaN -> None
+    df = df.where(_pd.notnull(df), None)
+
+    # 업서트 (기준: 사번)
+    supabase.table("employees").upsert(
+        df.to_dict(orient="records"),
+        on_conflict="사번"
+    ).execute()
+
+    st.success(f"직원 {len(df)}건 Supabase 업서트 완료", icon="✅")
+
+# === 평가_항목: 시트 → Supabase 동기화 ===
 def _get_ws(sheet_title: str):
     gclient = _get_gspread_client_for_sync_v1()
     sh = gclient.open_by_key(st.secrets["sheets"]["HR_SHEET_ID"])
     return sh.worksheet(sheet_title)
 
-# === [Added: 2025-11-03] Generic sheet→DB sync helper ===
-def sync_sheet_to_supabase_generic_v2(sheet_title: str, table_name: str, on_conflict: str,
-                                      postprocess=None, value_render_option: str=None):
-    ws = _get_ws(sheet_title)
-    if value_render_option:
-        df = _pd.DataFrame(ws.get_all_records(value_render_option=value_render_option))
-    else:
-        df = _pd.DataFrame(ws.get_all_records())
-    if df.empty:
-        st.warning(f"{sheet_title} 시트가 비어있습니다.")
-        return 0
-    if postprocess:
-        df = postprocess(df)
-    # NaN → None (Supabase JSON 직렬화)
-    df = df.where(~df.isna(), None)
-    supabase.table(table_name).upsert(
-        df.to_dict(orient="records"),
-        on_conflict=on_conflict
-    ).execute()
-    st.success(f"[{sheet_title}] → [{table_name}] 업서트 완료: {len(df)}건", icon="✅")
-    return len(df)
-
 def sync_sheet_to_supabase_eval_items_v1():
-    def _post(df):
-        if "활성" in df.columns:
-            df["활성"] = df["활성"].map(_sync_truthy_v1)
-        return df
-    return sync_sheet_to_supabase_generic_v2(SHEET["ITEMS"], TABLE["ITEMS"], on_conflict="항목ID", postprocess=_post)
+    ws = _get_ws("평가_항목")
+    df = _pd.DataFrame(ws.get_all_records())
+    if df.empty:
+        st.warning("평가_항목 시트가 비어있습니다.")
+        return
+    # bool 정리
+    if "활성" in df.columns:
+        df["활성"] = df["활성"].map(_sync_truthy_v1)
+    supabase.table("eval_items").upsert(
+        df.to_dict(orient="records"),
+        on_conflict="항목ID"
+    ).execute()
+    st.success(f"평가_항목 {len(df)}건 업서트 완료", icon="✅")
+
+# === 인사평가: 시트 → Supabase 동기화 ===
 def sync_sheet_to_supabase_eval_responses_v1():
-    def _post(df):
-        base_cols = ["연도","평가유형","평가대상사번","평가대상이름","평가자사번","평가자이름","총점","상태","제출시각","잠금"]
-        for c in base_cols:
-            if c not in df.columns:
-                df[c] = _pd.NA
-        for c in ["평가유형","평가대상사번","평가대상이름","평가자사번","평가자이름","상태"]:
-            if c in df.columns:
-                df[c] = df[c].astype(str).str.strip()
-        # 수치/불리언/날짜 정리
-        if "연도" in df.columns:
-            df["연도"] = _pd.to_numeric(df["연도"], errors="coerce").fillna(0).astype(int)
-        if "총점" in df.columns:
-            df["총점"] = _pd.to_numeric(df["총점"], errors="coerce")
-        for c in ["잠금"]:
-            if c in df.columns:
-                df[c] = df[c].map(_sync_truthy_v1)
-        if "제출시각" in df.columns:
-            df["제출시각"] = df["제출시각"].map(_norm_date)
-        return df
-    return sync_sheet_to_supabase_generic_v2(SHEET["EVAL"], TABLE["EVAL"], on_conflict="연도,평가유형,평가대상사번,평가자사번", postprocess=_post)
+    ws = _get_ws("인사평가")
+    df = _pd.DataFrame(ws.get_all_records())
+    if df.empty:
+        st.warning("인사평가 시트가 비어있습니다.")
+        return
+
+    # --- 컬럼 존재 보정(시트 헤더 변동 방지) ---
+    base_cols = [
+        "연도","평가유형","평가대상사번","평가대상이름",
+        "평가자사번","평가자이름","총점","상태","제출시각","잠금"
+    ]
+    for c in base_cols:
+        if c not in df.columns:
+            df[c] = _pd.NA
+
+    # --- 문자열 공백 정리 ---
+    for c in ["평가유형","평가대상사번","평가대상이름","평가자사번","평가자이름","상태"]:
+        if c in df.columns:
+            df[c] = df[c].astype(str).str.strip()
+
+    # --- 연도/총점 숫자 변환 ---
+    if "연도" in df.columns:
+        df["연도"] = _pd.to_numeric(df["연도"], errors="coerce").astype("Int64")
+    if "총점" in df.columns:
+        df["총점"] = _pd.to_numeric(df["총점"], errors="coerce")
+
+    # --- 잠금(boolean) 정리: 예/Y/TRUE/1 등 truthy → True ---
+    if "잠금" in df.columns:
+        df["잠금"] = df["잠금"].map(_sync_truthy_v1)
+
+    # --- 제출시각: 문자열→datetime→문자열(ISO) ---
+    if "제출시각" in df.columns:
+        dt = _pd.to_datetime(df["제출시각"], errors="coerce")
+        # 타임존 없이 저장(서버측에서 timestamptz 자동 파싱 가능), 불가 시 ISO 포맷으로
+        df["제출시각"] = dt.dt.strftime("%Y-%m-%d %H:%M:%S")
+
+    # --- 항목 점수 컬럼 자동 탐색 & 숫자화 ---
+    itm_cols = [c for c in df.columns if c.startswith("점수_ITM")]
+    for c in itm_cols:
+        df[c] = _pd.to_numeric(df[c], errors="coerce")
+
+    # --- None 처리: NaN → None (Supabase JSON 직렬화 호환) ---
+    df = df.where(~df.isna(), None)
+
+    # --- 업서트 (연도,평가유형,평가대상사번,평가자사번 기준) ---
+    on_conflict_key = "연도,평가유형,평가대상사번,평가자사번"
+    supabase.table("eval_responses").upsert(
+        df.to_dict(orient="records"),
+        on_conflict=on_conflict_key
+    ).execute()
+
+    st.success(f"인사평가 {len(df)}건 업서트 완료", icon="✅")
+
+# === 권한: 시트 → Supabase 동기화 ===
 def sync_sheet_to_supabase_acl_v1():
-    def _post(df):
-        # 필수 컬럼 확보
-        for c in ["사번","이름","역할","범위유형","부서1","부서2","대상사번","활성","비고"]:
-            if c not in df.columns:
-                df[c] = _pd.NA
-        # 문자열/불리언/범위 문자열 정리
-        str_cols = ["사번","이름","역할","범위유형","부서1","부서2","대상사번","비고"]
-        for c in str_cols:
-            if c in df.columns:
-                df[c] = df[c].astype(str).str.strip()
-        if "활성" in df.columns:
-            df["활성"] = df["활성"].map(_sync_truthy_v1)
-        # 범위유형 whitelist
-        if "범위유형" in df.columns:
-            df["범위유형"] = df["범위유형"].apply(lambda s: s if s in ("회사","부서","사번","전체") else "회사")
-        return df
-    return sync_sheet_to_supabase_generic_v2(SHEET["ACL"], TABLE["ACL"], on_conflict="사번", postprocess=_post)
+    ws = _get_ws("권한")
+    df = _pd.DataFrame(ws.get_all_records())
+    if df.empty:
+        st.warning("권한 시트가 비어있습니다.")
+        return
+
+    # 1) 필수 컬럼 확보
+    required = ["사번","이름","역할","범위유형","부서1","부서2","대상사번","활성","비고"]
+    for c in required:
+        if c not in df.columns:
+            df[c] = ""
+
+    # 2) 문자열/공백 정리
+    for c in ["사번","이름","역할","범위유형","부서1","부서2","대상사번","비고"]:
+        df[c] = df[c].astype(str).fillna("").map(lambda s: s.strip())
+
+    # 3) 불리언 정리
+    df["활성"] = df["활성"].map(_sync_truthy_v1).fillna(False).astype(bool)
+
+    # 4) (최소 키) 결측 제거 → B안에서는 사번/역할만 필수
+    before = len(df)
+    df = df[(df["사번"]!="") & (df["역할"]!="")]
+    dropped_nullkey = before - len(df)
+    if dropped_nullkey > 0:
+        st.info(f"빈 사번/역할 제외: {dropped_nullkey}건")
+
+    if df.empty:
+        st.warning("업서트할 권한 데이터가 없습니다.")
+        return
+
+    # 5) 동일한 6-키 완전중복만 제거(같은 행이 시트에 2번 있는 경우 방지)
+    conflict_keys = ["사번","역할","범위유형","부서1","부서2","대상사번"]
+    before_dups = len(df)
+    df = df.drop_duplicates(subset=conflict_keys, keep="first")
+    removed_dups = before_dups - len(df)
+    if removed_dups > 0:
+        st.info(f"완전중복 제거: {removed_dups}건 (키: {', '.join(conflict_keys)})")
+
+    # 6) 업서트 (B안: 6개 컬럼 조합을 고유로)
+    try:
+        supabase.table("acl").upsert(
+            df.to_dict(orient="records"),
+            on_conflict="사번,역할,범위유형,부서1,부서2,대상사번"
+        ).execute()
+        st.success(f"권한 {len(df)}건 업서트 완료", icon="✅")
+    except Exception as e:
+        st.exception(e)
+        st.error("권한 업서트 실패: 고유인덱스/키 중복/타입을 확인해 주세요.")
+
+# === 직무기술서: 시트 → Supabase 동기화 ===
 def sync_sheet_to_supabase_job_specs_v1():
-    def _post(df):
-        # 결측 컬럼 채움
-        need = ["연도","사번","버전","작성자사번","작성시각","수정시각","상태"]
-        for c in need:
-            if c not in df.columns: df[c] = _pd.NA
-        # 타입 보정
-        if "연도" in df.columns:
-            df["연도"] = _pd.to_numeric(df["연도"], errors="coerce").fillna(0).astype(int)
-        if "버전" in df.columns:
-            df["버전"] = _pd.to_numeric(df["버전"], errors="coerce").fillna(1).astype(int)
-        for c in ["작성시각","수정시각"]:
-            if c in df.columns:
-                df[c] = df[c].map(_norm_date)
-        return df
-    return sync_sheet_to_supabase_generic_v2(SHEET["JD"], TABLE["JD"], on_conflict="연도,사번,버전", postprocess=_post)
+    """
+    시트 '직무기술서'를 Supabase public.job_specs로 업서트
+    - on_conflict: "연도,사번,버전"
+    - 시트 헤더(고정): 사번/이름/연도/버전/부서1/부서2/작성자사번/작성자이름/직군/직종/직무명/제정일/개정일/검토주기/직무개요/주업무/기타업무/필요학력/전공계열/직원공통필수교육/보수교육/기타교육/특성화교육/면허/경력(자격요건)/비고/제출시각
+    """
+    ws = _get_ws("직무기술서")
+    import pandas as _pd
+    df = _pd.DataFrame(ws.get_all_records())
+    if df.empty:
+        st.warning("직무기술서 시트가 비어있습니다.")
+        return
+
+    # 1) 필수 컬럼 보정
+    cols = ["사번","이름","연도","버전","부서1","부서2","작성자사번","작성자이름","직군","직종",
+            "직무명","제정일","개정일","검토주기","직무개요","주업무","기타업무",
+            "필요학력","전공계열","직원공통필수교육","보수교육","기타교육","특성화교육",
+            "면허","경력(자격요건)","비고","제출시각"]
+    for c in cols:
+        if c not in df.columns:
+            df[c] = _pd.NA
+
+    # 2) 트림/타입 정리
+    str_cols = ["이름","부서1","부서2","작성자이름","직군","직종","직무명","검토주기","직무개요","주업무",
+                "기타업무","필요학력","전공계열","직원공통필수교육","보수교육","기타교육","특성화교육",
+                "면허","경력(자격요건)","비고"]
+    for c in str_cols:
+        df[c] = df[c].astype(str).where(~df[c].isna(), "").str.strip()
+
+    # 숫자 변환
+    df["사번"] = _pd.to_numeric(df["사번"], errors="coerce").astype("Int64")
+    df["작성자사번"] = _pd.to_numeric(df["작성자사번"], errors="coerce").astype("Int64")
+    df["연도"] = _pd.to_numeric(df["연도"], errors="coerce").astype("Int64")
+    df["버전"] = _pd.to_numeric(df["버전"], errors="coerce").astype("Int64")
+
+    # 날짜/시각 변환
+    for dcol in ["제정일","개정일"]:
+        dt = _pd.to_datetime(df[dcol], errors="coerce").dt.date
+        # date는 문자열 'YYYY-MM-DD'로 저장해도 Supabase가 파싱 가능
+        df[dcol] = _pd.to_datetime(dt, errors="coerce").dt.strftime("%Y-%m-%d")
+    if "제출시각" in df.columns:
+        dt = _pd.to_datetime(df["제출시각"], errors="coerce")
+        df["제출시각"] = dt.dt.strftime("%Y-%m-%d %H:%M:%S")
+
+    # NaN → None
+    df = df.where(~df.isna(), None)
+
+    # 키 결측 제거
+    before = len(df)
+    df = df[(df["연도"].notnull()) & (df["사번"].notnull()) & (df["버전"].notnull())]
+    dropped = before - len(df)
+    if dropped > 0:
+        st.info(f"키 결측으로 제외: {dropped}건 (연도/사번/버전이 비어있음)")
+
+    if df.empty:
+        st.warning("업서트할 직무기술서 데이터가 없습니다.")
+        return
+
+    # 3) 업서트
+    try:
+        supabase.table("job_specs").upsert(
+            df.to_dict(orient="records"),
+            on_conflict="연도,사번,버전"
+        ).execute()
+        st.success(f"직무기술서 {len(df)}건 업서트 완료", icon="✅")
+    except Exception as e:
+        st.exception(e)
+        st.error("직무기술서 업서트 실패: FK(사번/작성자사번) 또는 타입/키 중복을 확인하세요.")
+
+# === 직무기술서_승인: 시트 → Supabase 동기화 ================================
 def sync_sheet_to_supabase_job_specs_approvals_v1():
-    def _post(df):
-        need = ["연도","사번","버전","승인자사번","승인시각","상태"]
-        for c in need:
-            if c not in df.columns: df[c] = _pd.NA
-        if "연도" in df.columns:
-            df["연도"] = _pd.to_numeric(df["연도"], errors="coerce").fillna(0).astype(int)
-        if "버전" in df.columns:
-            df["버전"] = _pd.to_numeric(df["버전"], errors="coerce").fillna(1).astype(int)
-        if "승인시각" in df.columns:
-            df["승인시각"] = df["승인시각"].map(_norm_date)
-        return df
-    return sync_sheet_to_supabase_generic_v2(SHEET["JD_APPR"], TABLE["JD_APPR"], on_conflict="연도,사번,버전,승인자사번", postprocess=_post)
+    """
+    시트 '직무기술서_승인' -> public.job_specs_approvals 업서트
+    on_conflict: "연도,사번,버전,승인자사번"
+    헤더: 연도/사번/이름/버전/승인자사번/승인자이름/상태/승인시각/비고
+    """
+    ws = _get_ws("직무기술서_승인")
+    import pandas as _pd
+    df = _pd.DataFrame(ws.get_all_records())
+    if df.empty:
+        st.warning("직무기술서_승인 시트가 비어있습니다."); return
+
+    need = ["연도","사번","이름","버전","승인자사번","승인자이름","상태","승인시각","비고"]
+    for c in need:
+        if c not in df.columns:
+            df[c] = _pd.NA
+
+    # 타입 보정
+    df["연도"] = _pd.to_numeric(df["연도"], errors="coerce").astype("Int64")
+    df["사번"] = _pd.to_numeric(df["사번"], errors="coerce").astype("Int64")
+    df["버전"] = _pd.to_numeric(df["버전"], errors="coerce").astype("Int64")
+    df["승인자사번"] = _pd.to_numeric(df["승인자사번"], errors="coerce").astype("Int64")
+
+    text_cols = ["이름","승인자이름","상태","비고"]
+    for c in text_cols:
+        df[c] = df[c].astype(str).where(~df[c].isna(), "").str.strip()
+
+    # 시간 통일 (경고 억제)
+    df["승인시각"] = _normalize_ts_series(df["승인시각"])
+
+    # NaN -> None
+    df = df.where(~df.isna(), None)
+
+    # 키 유효 필터
+    before = len(df)
+    df = df[(df["연도"].notnull()) & (df["사번"].notnull()) & (df["버전"].notnull()) & (df["승인자사번"].notnull())]
+    dropn = before - len(df)
+    if dropn > 0:
+        st.info(f"키 결측 제외: {dropn}건 (연도/사번/버전/승인자사번)")
+
+    if df.empty:
+        st.warning("업서트할 직무기술서_승인 데이터가 없습니다."); return
+
+    try:
+        supabase.table("job_specs_approvals").upsert(
+            df.to_dict(orient="records"),
+            on_conflict="연도,사번,버전,승인자사번"
+        ).execute()
+        st.success(f"직무기술서_승인 {len(df)}건 업서트 완료", icon="✅")
+    except Exception as e:
+        st.exception(e)
+        st.error("직무기술서_승인 업서트 실패: FK(사번/승인자사번/직무기술서 존재) 또는 타입/키 중복을 확인하세요.")
+
+# === 직무능력평가: 시트 → Supabase 동기화 ==================================
 def sync_sheet_to_supabase_competency_evals_v1():
-    def _post(df):
-        need = ["연도","평가대상사번","평가대상이름","평가자사번","평가자이름","주업무평가","기타업무평가","교육이수","자격유지","종합의견","상태","제출시각","잠금"]
-        for c in need:
-            if c not in df.columns: df[c] = _pd.NA
-        if "연도" in df.columns:
-            df["연도"] = _pd.to_numeric(df["연도"], errors="coerce").fillna(0).astype(int)
-        if "제출시각" in df.columns:
-            df["제출시각"] = df["제출시각"].map(_norm_date)
-        for c in ["잠금"]:
-            if c in df.columns:
-                df[c] = df[c].map(_sync_truthy_v1)
-        return df
-    return sync_sheet_to_supabase_generic_v2(SHEET["COMP"], TABLE["COMP"], on_conflict="연도,평가대상사번,평가자사번", postprocess=_post)
+    """
+    시트 '직무능력평가' -> public.competency_evals 업서트
+    on_conflict: "연도,평가대상사번,평가자사번"
+    헤더: 연도/평가대상사번/평가대상이름/평가자사번/평가자이름/주업무평가/기타업무평가/교육이수/자격유지/종합의견/상태/제출시각/잠금
+    """
+    ws = _get_ws("직무능력평가")
+    import pandas as _pd
+    df = _pd.DataFrame(ws.get_all_records())
+    if df.empty:
+        st.warning("직무능력평가 시트가 비어있습니다."); return
+
+    need = ["연도","평가대상사번","평가대상이름","평가자사번","평가자이름",
+            "주업무평가","기타업무평가","교육이수","자격유지","종합의견","상태","제출시각","잠금"]
+    for c in need:
+        if c not in df.columns:
+            df[c] = _pd.NA
+
+    # 타입 보정
+    df["연도"] = _pd.to_numeric(df["연도"], errors="coerce").astype("Int64")
+    df["평가대상사번"] = _pd.to_numeric(df["평가대상사번"], errors="coerce").astype("Int64")
+    df["평가자사번"] = _pd.to_numeric(df["평가자사번"], errors="coerce").astype("Int64")
+
+    # 텍스트 정리
+    text_cols = ["평가대상이름","평가자이름","주업무평가","기타업무평가","교육이수","자격유지","종합의견","상태"]
+    for c in text_cols:
+        df[c] = df[c].astype(str).where(~df[c].isna(), "").str.strip()
+
+    # 잠금: 다양한 입력(True/False/1/0/예/아니오) 허용
+    _true_vals = {"true","1","y","yes","t","on","예","확정","잠금","locked"}
     def _to_bool(x):
         s = str(x).strip().lower()
         if s in _true_vals: return True
@@ -3587,3 +3757,152 @@ def gs_flush():
                 raise
     st.session_state.gs_queue = []
 # ===== End helpers =====
+
+
+
+# ======================================================================
+# PATCH (2025-11-03): 동기화 오류 핫픽스
+# - employees: PIN_No 처리 + 화이트리스트
+# - acl: on_conflict "사번,역할"
+# - job_specs: 불필요 컬럼('상태') 제거 + 화이트리스트
+# - generic_v2: value_render_option 지원
+# ======================================================================
+
+import pandas as _pd
+
+def _sha256_hex(txt: str) -> str:
+    import hashlib
+    return hashlib.sha256(str(txt).encode("utf-8")).hexdigest()
+
+def sync_sheet_to_supabase_generic_v2(sheet_title: str, table_name: str, on_conflict: str,
+                                      postprocess=None, value_render_option: str=None):
+    ws = _get_ws(sheet_title)
+    # Read as formatted values when requested (avoids Excel serials for now)
+    if value_render_option:
+        rows = ws.get_all_records(value_render_option=value_render_option)
+    else:
+        rows = ws.get_all_records()
+    df = _pd.DataFrame(rows)
+    if df.empty:
+        st.warning(f"{sheet_title} 시트가 비어있습니다.")
+        return 0
+    if postprocess:
+        df = postprocess(df)
+    # NaN → None for JSON
+    df = df.where(~df.isna(), None)
+    supabase.table(table_name).upsert(
+        df.to_dict(orient="records"),
+        on_conflict=on_conflict
+    ).execute()
+    st.success(f"[{sheet_title}] → [{table_name}] 업서트 완료: {len(df)}건", icon="✅")
+    return len(df)
+
+def sync_sheet_to_supabase_employees_v1():
+    def _post(df):
+        # 사번 표준화
+        if "사번" in df.columns:
+            df["사번"] = df["사번"].map(lambda v: str(v).strip())
+        elif "직원번호" in df.columns:
+            df = df.rename(columns={"직원번호":"사번"})
+            df["사번"] = df["사번"].map(lambda v: str(v).strip())
+
+        # 불리언 정리
+        for col in ["적용여부", "재직여부", "활성"]:
+            if col in df.columns:
+                df[col] = df[col].map(_sync_truthy_v1)
+
+        # 날짜 정규화
+        for col in ["입사일", "퇴사일", "생년월일"]:
+            if col in df.columns:
+                df[col] = df[col].map(_norm_date)
+
+        # PIN 처리: PIN_No → PIN_hash, 평문 제거
+        if "PIN_No" in df.columns:
+            df["PIN_hash"] = df["PIN_No"].apply(lambda x: _sha256_hex(str(x)) if str(x) else None)
+            df = df.drop(columns=["PIN_No"])
+        if "PIN" in df.columns:
+            df = df.drop(columns=["PIN"])
+
+        # employees 테이블 컬럼 화이트리스트
+        allowed = {"사번","이름","부서1","부서2","직급","직무","직군",
+                   "입사일","퇴사일","생년월일","기타1","기타2","적용여부","재직여부","PIN_hash"}
+        keep = [c for c in df.columns if c in allowed]
+        if keep:
+            df = df[keep]
+        return df
+    return sync_sheet_to_supabase_generic_v2(
+        SHEET["EMP"], TABLE["EMP"], on_conflict="사번",
+        postprocess=_post, value_render_option="FORMATTED_VALUE"
+    )
+
+def sync_sheet_to_supabase_acl_v1():
+    def _post(df):
+        # 필수 컬럼 확보
+        for c in ["사번","이름","역할","범위유형","부서1","부서2","대상사번","활성","비고"]:
+            if c not in df.columns:
+                df[c] = _pd.NA
+        # 문자열/불리언 정리
+        str_cols = ["사번","이름","역할","범위유형","부서1","부서2","대상사번","비고"]
+        for c in str_cols:
+            if c in df.columns:
+                df[c] = df[c].astype(str).str.strip()
+        if "활성" in df.columns:
+            df["활성"] = df["활성"].map(_sync_truthy_v1)
+        # 범위유형 whitelist
+        if "범위유형" in df.columns:
+            df["범위유형"] = df["범위유형"].apply(lambda s: s if s in ("회사","부서","사번","전체") else "회사")
+        return df
+    return sync_sheet_to_supabase_generic_v2(
+        SHEET["ACL"], TABLE["ACL"],
+        on_conflict="사번,역할",
+        postprocess=_post
+    )
+
+def sync_sheet_to_supabase_job_specs_v1():
+    def _post(df):
+        # 기본 컬럼 채움/표준화
+        if "연도" not in df.columns and "년도" in df.columns:
+            df = df.rename(columns={"년도":"연도"})
+        if "사번" not in df.columns and "직원번호" in df.columns:
+            df = df.rename(columns={"직원번호":"사번"})
+        if "버전" not in df.columns:
+            df["버전"] = 1
+
+        # 타입 보정
+        if "연도" in df.columns:
+            df["연도"] = _pd.to_numeric(df["연도"], errors="coerce").fillna(0).astype(int)
+        if "버전" in df.columns:
+            df["버전"] = _pd.to_numeric(df["버전"], errors="coerce").fillna(1).astype(int)
+        if "사번" in df.columns:
+            df["사번"] = df["사번"].astype(str).str.strip()
+
+        # 시각/날짜
+        for c in ("작성시각","수정시각","제정일","개정일","제출시각"):
+            if c in df.columns:
+                df[c] = df[c].map(_norm_date)
+
+        # 불리언
+        for c in df.columns:
+            if c.endswith("여부") or c in ("활성","적용여부"):
+                df[c] = df[c].map(_sync_truthy_v1)
+
+        # JD 스키마에 없는 '상태' 제거
+        if "상태" in df.columns:
+            df = df.drop(columns=["상태"])
+
+        # 허용 컬럼만 유지
+        allowed = {
+            "사번","이름","연도","버전","부서1","부서2","작성자사번","작성자이름","직군","직종","직무명",
+            "제정일","개정일","검토주기","직무개요","권한과책임","의사결정","조직관계","보고체계",
+            "승진경로","직무환경","필수역량","필수자격요건","선택자격요건","필수능력","선택능력",
+            "주업무","기타업무","필요학력","전공계열","직원공통필수교육","보수교육","기타교육",
+            "특성화교육","면허","경력(자격요건)","비고","제출시각"
+        }
+        keep = [c for c in df.columns if c in allowed]
+        if keep:
+            df = df[keep]
+        return df
+    return sync_sheet_to_supabase_generic_v2(
+        SHEET["JD"], TABLE["JD"], on_conflict="연도,사번,버전",
+        postprocess=_post
+    )
