@@ -221,7 +221,9 @@ def sync_sheet_to_supabase_eval_responses_v1():
 
     # --- 제출시각: 문자열→datetime→문자열(ISO) ---
     if "제출시각" in df.columns:
-        df["제출시각"] = _parse_dt_series_to_iso(df["제출시각"])
+        dt = _pd.to_datetime(df["제출시각"], errors="coerce")
+        # 타임존 없이 저장(서버측에서 timestamptz 자동 파싱 가능), 불가 시 ISO 포맷으로
+        df["제출시각"] = dt.dt.strftime("%Y-%m-%d %H:%M:%S")
 
     # --- 항목 점수 컬럼 자동 탐색 & 숫자화 ---
     itm_cols = [c for c in df.columns if c.startswith("점수_ITM")]
@@ -333,7 +335,8 @@ def sync_sheet_to_supabase_job_specs_v1():
         # date는 문자열 'YYYY-MM-DD'로 저장해도 Supabase가 파싱 가능
         df[dcol] = _pd.to_datetime(dt, errors="coerce").dt.strftime("%Y-%m-%d")
     if "제출시각" in df.columns:
-        df["제출시각"] = _parse_dt_series_to_iso(df["제출시각"])
+        dt = _pd.to_datetime(df["제출시각"], errors="coerce")
+        df["제출시각"] = dt.dt.strftime("%Y-%m-%d %H:%M:%S")
 
     # NaN → None
     df = df.where(~df.isna(), None)
@@ -3903,3 +3906,51 @@ def sync_sheet_to_supabase_job_specs_v1():
         SHEET["JD"], TABLE["JD"], on_conflict="연도,사번,버전",
         postprocess=_post
     )
+
+
+
+# ======================================================================
+# DATETIME GUARD (2025-11-03): Ensure _parse_dt_series_to_iso exists
+# ======================================================================
+import pandas as _pd as __pd_dt_guard  # ensure pandas alias for guard scope
+
+try:
+    _parse_dt_series_to_iso
+except NameError:
+    import pandas as _pd
+    def _parse_dt_series_to_iso(s: _pd.Series) -> _pd.Series:
+        if not isinstance(s, _pd.Series):
+            s = _pd.Series(s)
+        s = s.astype(str).str.strip().replace({"": None, "NaT": None, "nan": None})
+        formats = [
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%d %H:%M",
+            "%Y-%m-%d",
+            "%Y/%m/%d %H:%M:%S",
+            "%Y/%m/%d %H:%M",
+            "%Y/%m/%d",
+            "%Y.%m.%d %H:%M:%S",
+            "%Y.%m.%d %H:%M",
+            "%Y.%m.%d",
+        ]
+        result = _pd.Series([_pd.NaT] * len(s))
+        mask_remaining = _pd.isna(result)
+        for fmt in formats:
+            if not mask_remaining.any():
+                break
+            parsed = _pd.to_datetime(s[mask_remaining], format=fmt, errors="coerce")
+            result.loc[mask_remaining] = parsed
+            mask_remaining = _pd.isna(result)
+        if mask_remaining.any():
+            fallback = _pd.to_datetime(s[mask_remaining], errors="coerce", utc=False)
+            result.loc[mask_remaining] = fallback
+        try:
+            if hasattr(result.dt, "tz"):
+                aware_mask = result.dt.tz.notna()
+                if aware_mask.any():
+                    result.loc[aware_mask] = result[aware_mask].dt.tz_convert(None)
+        except Exception:
+            pass
+        result = result.dt.floor("S")
+        return result.dt.strftime("%Y-%m-%d %H:%M:%S")
+# ======================================================================
