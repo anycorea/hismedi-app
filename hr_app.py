@@ -1650,80 +1650,55 @@ def _emp_name_by_sabun(emp_df: pd.DataFrame, sabun: str) -> str:
 def upsert_eval_response(emp_df: pd.DataFrame, year: int, eval_type: str,
                          target_sabun: str, evaluator_sabun: str,
                          scores: dict[str,int], status="제출")->dict:
-    """
-    DB-first: eval_responses 업서트(on_conflict: 연도,평가유형,평가대상사번,평가자사번)
-    - 시트는 더 이상 직접 쓰지 않음 (관리자 버튼으로 DB→시트 반영 가능)
-    """
-    import pandas as _pd
-    # 1) 항목
-    items = read_eval_items_df(True)
-    item_ids = [str(x) for x in items["항목ID"].tolist()]
-    # 2) 점수 보정 및 총점
-    def _c5(v):
-        try: v = int(v)
-        except Exception: v = 3
-        return min(5, max(1, v))
-    scores_list = [_c5(scores.get(i, 3)) for i in item_ids]
-    total = round(sum(scores_list)*(100.0/max(1,len(item_ids)*5)), 1)
-    # 3) 메타
-    tname = _emp_name_by_sabun(emp_df, target_sabun)
-    ename = _emp_name_by_sabun(emp_df, evaluator_sabun)
-    try:
-        now = kst_now_str()
-    except Exception:
-        import datetime
-        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    # 4) payload
-    payload = {
-        "연도": int(year),
-        "평가유형": str(eval_type),
-        "평가대상사번": str(target_sabun),
-        "평가대상이름": str(tname),
-        "평가자사번": str(evaluator_sabun),
-        "평가자이름": str(ename),
-        "총점": total,
-        "상태": status,
-        "제출시각": now,
-        "잠금": "",
-    }
-    for iid, sc in zip(item_ids, scores_list):
-        payload[f"점수_{iid}"] = sc
-    # 5) Supabase 업서트
-    res = supabase.table("eval_responses").upsert(payload, on_conflict="연도,평가유형,평가대상사번,평가자사번").execute()
-    try:
+    items=read_eval_items_df(True); item_ids=[str(x) for x in items["항목ID"].tolist()]
+    ws=_ensure_eval_resp_sheet(year, item_ids)
+    header=_retry(ws.row_values, 1); hmap={n:i+1 for i,n in enumerate(header)}
+    def c5(v):
+        try: v=int(v)
+        except: v=3
+        return min(5,max(1,v))
+    scores_list=[c5(scores.get(i,3)) for i in item_ids]
+    total=round(sum(scores_list)*(100.0/max(1,len(item_ids)*5)),1)
+    tname=_emp_name_by_sabun(emp_df, target_sabun); ename=_emp_name_by_sabun(emp_df, evaluator_sabun)
+    now=kst_now_str()
+    values = _ws_values(ws); cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
+    row_idx=0
+    for i in range(2, len(values)+1):
+        r=values[i-1]
+        try:
+            if (str(r[cY-1]).strip()==str(year) and str(r[cT-1]).strip()==eval_type and
+                str(r[cTS-1]).strip()==str(target_sabun) and str(r[cES-1]).strip()==str(evaluator_sabun)):
+                row_idx=i; break
+        except: pass
+    if row_idx==0:
+        buf=[""]*len(header)
+        def put(k,v): c=hmap.get(k); buf[c-1]=v if c else ""
+        put("연도", int(year)); put("평가유형", eval_type)
+        put("평가대상사번", str(target_sabun)); put("평가대상이름", tname)
+        put("평가자사번", str(evaluator_sabun)); put("평가자이름", ename)
+        put("총점", total); put("상태", status); put("제출시각", now)
+        for iid, sc in zip(item_ids, scores_list):
+            c=hmap.get(f"점수_{iid}")
+            if c: buf[c-1]=sc
+        _retry(ws.append_row, buf, value_input_option="USER_ENTERED")
         st.cache_data.clear()
-    except Exception:
-        pass
-    return {"action": "upsert", "total": total, "rows": len(res.data or [])}
+        return {"action":"insert","total":total}
+    else:
+        payload={"총점": total, "상태": status, "제출시각": now, "평가대상이름": tname, "평가자이름": ename}
+        for iid, sc in zip(item_ids, scores_list): payload[f"점수_{iid}"]=sc
+        def _batch_row(ws, idx, hmap, kv):
+            upd=[]
+            for k,v in kv.items():
+                c=hmap.get(k)
+                if c:
+                    a1=gspread.utils.rowcol_to_a1(idx, c)
+                    upd.append({"range": a1, "values": [[v]]})
+            if upd: _retry(ws.batch_update, upd)
+        _batch_row(ws, row_idx, hmap, payload)
+        st.cache_data.clear()
+        return {"action":"update","total":total}
 
 @st.cache_data(ttl=300, show_spinner=False)
-def read_my_eval_rows(year: int, sabun: str) -> pd.DataFrame:
-    """
-    DB-first 조회: eval_responses에서 평가자사번 기준 조회
-    - 실패 시 기존 시트 데이터로 안전 폴백
-    """
-    import pandas as _pd
-    try:
-        res = supabase.table("eval_responses").select("*").eq("연도", int(year)).eq("평가자사번", str(sabun)).execute()
-        data = res.data or []
-        df = _pd.DataFrame(data)
-        if df.empty:
-            return _pd.DataFrame(columns=EVAL_BASE_HEADERS)
-        sort_cols = [c for c in ["평가유형","평가대상사번","제출시각"] if c in df.columns]
-        if sort_cols:
-            df = df.sort_values(sort_cols, ascending=[True, True, False]).reset_index(drop=True)
-        return df
-    except Exception as e:
-        try:
-            name = _eval_sheet_name(year)
-            ws = _ws(name)
-            df = _pd.DataFrame(_ws_get_all_records(ws))
-            if "평가자사번" in df.columns:
-                df = df[df["평가자사번"].astype(str) == str(sabun)]
-            return df
-        except Exception:
-            return _pd.DataFrame(columns=EVAL_BASE_HEADERS)
-
 def read_my_eval_rows(year: int, sabun: str) -> pd.DataFrame:
     name=_eval_sheet_name(year)
     try:
@@ -3740,102 +3715,3 @@ def gs_flush():
                 raise
     st.session_state.gs_queue = []
 # ===== End helpers =====
-
-
-
-# =============================================================
-# [A-Plan Monkey Patch] Supabase-only overrides (appended)
-# - Avoids Google Sheets usage; routes sheet reads to Supabase.
-# - Prevents NameError for APIError by defining a shim.
-# - Last-definition-wins: this overrides earlier read_sheet_df.
-# =============================================================
-
-# --- Shim for APIError (from removed Google libs) ---
-class APIError(Exception):
-    """Shim: Google Sheets APIError disabled under A-Plan."""
-    pass
-
-# --- Supabase helpers ---
-try:
-    from supabase import create_client, Client
-except Exception as _e:
-    create_client = None
-    Client = None
-
-def _get_supabase_client():
-    import streamlit as st
-    url = os.environ.get("SUPABASE_URL", "").strip()
-    key = os.environ.get("SUPABASE_ANON_KEY", "").strip() or os.environ.get("SUPABASE_SERVICE_ROLE_KEY","").strip()
-    if not url or not key:
-        st.error("SUPABASE_URL / SUPABASE_ANON_KEY 환경변수가 필요합니다 (A-Plan).")
-        raise RuntimeError("Missing Supabase credentials")
-    return create_client(url, key)
-
-def _sb_select(table_name:str, select_cols=None):
-    import pandas as pd
-    sb = _get_supabase_client()
-    q = sb.table(table_name).select(",".join(select_cols) if select_cols else "*")
-    res = q.execute()
-    data = res.data or []
-    return pd.DataFrame(data)
-
-# --- Override: read_sheet_df ---
-def read_sheet_df(sheet_name, *args, **kwargs):
-    """
-    A-Plan override:
-    - Intercept sheet reads and pull from Supabase instead.
-    - Recognizes known sheet names and maps to table names.
-    """
-    # Known mappings (both Korean sheet names and table names accepted)
-    mapping = {
-        "직원": "employees",
-        "평가_항목": "eval_items",
-        "권한": "acl",
-        "인사평가": "eval_latest",
-        "직무기술서": "job_specs",
-        "직무기술서_승인": "job_specs_approvals",
-        "직무능력평가": "competency_evals",
-
-        # Also accept table-name inputs directly
-        "employees": "employees",
-        "eval_items": "eval_items",
-        "acl": "acl",
-        "eval_latest": "eval_latest",
-        "job_specs": "job_specs",
-        "job_specs_approvals": "job_specs_approvals",
-        "competency_evals": "competency_evals",
-    }
-
-    # Try also to match against constants like EMP_SHEET if they exist
-    try:
-        if 'EMP_SHEET' in globals() and sheet_name == globals().get('EMP_SHEET'):
-            return _sb_select("employees")
-        if 'EVAL_ITEMS_SHEET' in globals() and sheet_name == globals().get('EVAL_ITEMS_SHEET'):
-            return _sb_select("eval_items")
-        if 'ACL_SHEET' in globals() and sheet_name == globals().get('ACL_SHEET'):
-            return _sb_select("acl")
-        if 'EVAL_SHEET' in globals() and sheet_name == globals().get('EVAL_SHEET'):
-            return _sb_select("eval_latest")
-        if 'JD_SHEET' in globals() and sheet_name == globals().get('JD_SHEET'):
-            return _sb_select("job_specs")
-        if 'JD_APPROVAL_SHEET' in globals() and sheet_name == globals().get('JD_APPROVAL_SHEET'):
-            return _sb_select("job_specs_approvals")
-        if 'COMP_EVAL_SHEET' in globals() and sheet_name == globals().get('COMP_EVAL_SHEET'):
-            return _sb_select("competency_evals")
-    except Exception:
-        # Fallback to name mapping
-        pass
-
-    key = str(sheet_name)
-    table = mapping.get(key)
-    if table:
-        return _sb_select(table)
-
-    # As a last resort, try to use a lowercased key
-    table = mapping.get(key.lower())
-    if table:
-        return _sb_select(table)
-
-    raise RuntimeError(f"[A-Plan] Unknown sheet name for Supabase mapping: {sheet_name!r}")
-
-# --- End of A-Plan Monkey Patch ---
