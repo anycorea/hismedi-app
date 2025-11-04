@@ -30,8 +30,6 @@ import re as _re_local
 import pandas as pd
 from datetime import datetime
 
-# -*- coding: utf-8 -*-
-
 # ────────────────────────────────────────────────────────────────
 # Page config -> 반드시 가장 먼저 호출
 # ────────────────────────────────────────────────────────────────
