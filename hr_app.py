@@ -1,5 +1,16 @@
 # -*- coding: utf-8 -*-
 # =============================================================
+# --- UI style tweaks (title & tabs) ------------------------------------------
+def _ui_inject_css():
+    st.markdown(
+        '''
+        <style>
+        .app-big-title { font-size: 2rem; font-weight: 800; letter-spacing: 0.3px; margin: 8px 0 12px 0; }
+        div[data-baseweb="tab"] button { font-size: 1rem !important; font-weight: 700 !important; }
+        div[data-baseweb="tab-list"] > div { gap: 14px !important; }
+        </style>
+        ''', unsafe_allow_html=True
+    )
 # HR App (Supabase Sync · CLEAN CONSOLIDATED VERSION)
 # Refactor date: 2025-11-04 (Asia/Seoul)
 # Notes:
@@ -35,7 +46,7 @@ from datetime import datetime
 # Page config -> 반드시 가장 먼저 호출
 # ────────────────────────────────────────────────────────────────
 
-APP_TITLE = st.secrets.get("app", {}).get("TITLE", "HISMEDI - 인사/HR")
+APP_TITLE = st.secrets.get("app", {}).get("TITLE", "HISMEDI  †  HR · JD")
 st.set_page_config(page_title=APP_TITLE, layout="wide")
 
 # ────────────────────────────────────────────────────────────────
@@ -2757,7 +2768,7 @@ def tab_competency(emp_df: pd.DataFrame):
     except Exception:
         pass
 
-    with st.expander("직무기술서 요약", expanded=True):
+    with st.expander('직무기술서 요약', expanded=False):
         jd=_jd_latest_for_comp(sel_sab, int(year))
         if jd:
             def V(key): return (_html_escape((jd.get(key,"") or "").strip()) or "—")
@@ -3311,7 +3322,7 @@ def main():
         render_staff_picker_left(emp_df)
 
     with right:
-        tabs = st.tabs(["인사평가","직무기술서","직무능력평가","관리자","도움말"])
+        tabs = st.tabs(['인사평가', '직무기술서', '직무능력평가', '관리자', '도움말'])
 
         with tabs[0]:
             tab_eval(emp_df)
