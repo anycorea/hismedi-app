@@ -9,6 +9,32 @@ import re
 # - No functional changes intended
 # =============================================================
 import streamlit as st
+
+
+# ---- UI Tweaks (2025-11-04) ----
+def _inject_global_css():
+    import streamlit as st
+    st.markdown(
+        """
+        <style>
+        .block-container { padding-top: 0.5rem !important; }
+        /* Tabs: bold + wider spacing */
+        div[data-baseweb="tab-list"] button { 
+            font-weight: 700 !important; 
+            margin-right: 20px !important;
+        }
+        /* App Title: a bit larger & heavier, but smaller than user heading */
+        .app-title-hrjd { 
+            font-size: 1.6rem; 
+            font-weight: 800; 
+            line-height: 1.15; 
+            margin-bottom: 0.5rem;
+        }
+        </style>
+        """, unsafe_allow_html=True
+    )
+# ---- end UI Tweaks ----
+
 from typing import Any, Tuple
 import re, time, random, hashlib, secrets as pysecrets
 from typing import Any, Optional
