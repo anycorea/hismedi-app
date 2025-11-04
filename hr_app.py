@@ -10,17 +10,13 @@ import re
 # =============================================================
 import streamlit as st
 
-
-
 # ---- UI Tweaks (2025-11-04) ----
 def _inject_global_css():
     import streamlit as st
     st.markdown(
         """
-<style>
+        <style>
         .block-container { padding-top: 0rem !important; }
-    [data-testid="stAppViewContainer"] > .main { padding-top: 0rem !important; }
-    .main .block-container { padding-top: 0rem !important; }
         /* Tabs: bold + wider spacing */
         div[data-baseweb="tab-list"] button { 
             font-weight: 700 !important; 
@@ -40,18 +36,8 @@ def _inject_global_css():
         .stTabs button[role="tab"] { font-weight: 700 !important; }
         .stTabs [data-baseweb="tab-list"] button { margin-right: 20px !important; font-weight:700 !important; }
     
-
-        /* Ultra selectors for tabs */
-        .stTabs [role="tab"] { font-weight: 800 !important; }
-        .stTabs [role="tablist"] { gap: 24px !important; }
-        .stTabs button[role="tab"] { font-weight: 800 !important; }
-        div[data-baseweb="tab-list"] button { margin-right: 24px !important; font-weight:800 !important; }
-    
 </style>
         """, unsafe_allow_html=True
-    )
-# ---- end UI Tweaks ----
-""", unsafe_allow_html=True
     )
 # ---- end UI Tweaks ----
 
@@ -81,11 +67,9 @@ from datetime import datetime
 # ────────────────────────────────────────────────────────────────
 # Page config -> 반드시 가장 먼저 호출
 # ────────────────────────────────────────────────────────────────
-APP_TITLE = "HISMEDI † HR · JD"
+APP_TITLE = st.secrets.get("app", {}).get("TITLE", "HISMEDI † HR · JD")
 st.set_page_config(page_title=APP_TITLE, layout="wide")
 
-_inject_global_css()
-st.markdown(f\'<div class="app-title-hrjd">{APP_TITLE}</div>\', unsafe_allow_html=True)
 # ────────────────────────────────────────────────────────────────
 # 공용 유틸
 # ────────────────────────────────────────────────────────────────
