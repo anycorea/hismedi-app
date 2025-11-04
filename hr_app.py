@@ -62,6 +62,16 @@ st.markdown("""
 # 제목은 한 번만 여기서 출력 (로그인 전/후 공통으로 최상단에 고정)
 st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=True)
 
+st.markdown("""
+<style>
+  /* st.success / st.warning / st.info */
+  [data-testid="stNotification"], .stAlert { margin: .6rem 0 !important; }
+
+  /* st.expander */
+  [data-testid="stExpander"]{ margin: .6rem 0 !important; }
+</style>
+""", unsafe_allow_html=True)
+
 # ────────────────────────────────────────────────────────────────
 # 공용 유틸
 # ────────────────────────────────────────────────────────────────
