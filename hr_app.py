@@ -1,13 +1,6 @@
 # -*- coding: utf-8 -*-
-# =============================================================
+
 import re
-# HR App (Supabase Sync · CLEAN CONSOLIDATED VERSION)
-# Refactor date: 2025-11-04 (Asia/Seoul)
-# Notes:
-# - Imports deduplicated; from-imports kept conservatively to avoid NameError
-# - Helper shims appended for backward compatibility
-# - No functional changes intended
-# =============================================================
 import streamlit as st
 from typing import Any, Tuple
 import re, time, random, hashlib, secrets as pysecrets
@@ -64,9 +57,14 @@ st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=
 
 st.markdown("""
 <style>
-/* 탭 안에서 st.warning(노란바) 바로 아래 요소만 위로부터 여백 */
-.stTabs [role="tabpanel"] :is(.stAlert,[data-testid="stNotification"]) + *{
-  margin-top: .6rem !important;  /* 필요시 .4rem ~ .8rem로 조절 */
+/* 모든 탭에서 st.warning(노란바) 컴포넌트 자체에 하단 간격 부여 */
+:where(.stTabs [role="tabpanel"]) :where([data-testid="stNotification"], .stAlert){
+  margin-bottom: .6rem !important;   /* 필요시 .4~.8rem 조정 */
+}
+
+/* 스트림릿 버전에 따라 마진이 무시될 때를 대비한 보강(패딩으로 간격 확보) */
+:where(.stTabs [role="tabpanel"]) :where([data-testid="stNotification"], .stAlert) > div{
+  padding-bottom: .6rem !important;
 }
 </style>
 """, unsafe_allow_html=True)
