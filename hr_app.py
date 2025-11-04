@@ -55,6 +55,23 @@ st.markdown("""
 # 제목은 한 번만 여기서 출력 (로그인 전/후 공통으로 최상단에 고정)
 st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=True)
 
+st.markdown("""
+<style>
+/* 탭 패널 내 경고(제출시각) 상단 들뜸 제거 + 하단만 균일 간격 */
+.stTabs [role="tabpanel"] :where([data-testid="stNotification"], .stAlert){
+  margin-top: 0 !important;          /* ← 위쪽 내림 현상 제거 */
+  margin-bottom: .6rem !important;   /* ← 아래만 일정 간격 */
+  /* 혹시 테마에 따라 내부 padding이 과하면 다음 줄도 조절 가능
+     padding-top: .4rem !important;  */
+}
+
+/* 패널 첫 요소가 경고일 때, 위 공백 완전 제거(안전망) */
+.stTabs [role="tabpanel"] > div > :first-child:is([data-testid="stNotification"], .stAlert){
+  margin-top: 0 !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 # ────────────────────────────────────────────────────────────────
 # 공용 유틸
 # ────────────────────────────────────────────────────────────────
