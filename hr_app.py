@@ -62,6 +62,15 @@ st.markdown("""
 # 제목은 한 번만 여기서 출력 (로그인 전/후 공통으로 최상단에 고정)
 st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=True)
 
+st.markdown("""
+<style>
+/* 탭 안에서 st.warning(노란바) 바로 아래 요소만 위로부터 여백 */
+.stTabs [role="tabpanel"] :is(.stAlert,[data-testid="stNotification"]) + *{
+  margin-top: .6rem !important;  /* 필요시 .4rem ~ .8rem로 조절 */
+}
+</style>
+""", unsafe_allow_html=True)
+
 # ────────────────────────────────────────────────────────────────
 # 공용 유틸
 # ────────────────────────────────────────────────────────────────
