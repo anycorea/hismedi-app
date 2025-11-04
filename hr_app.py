@@ -55,20 +55,6 @@ st.markdown("""
 # 제목은 한 번만 여기서 출력 (로그인 전/후 공통으로 최상단에 고정)
 st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=True)
 
-st.markdown("""
-<style>
-/* 모든 탭에서 st.warning(노란바) 컴포넌트 자체에 하단 간격 부여 */
-:where(.stTabs [role="tabpanel"]) :where([data-testid="stNotification"], .stAlert){
-  margin-bottom: .6rem !important;   /* 필요시 .4~.8rem 조정 */
-}
-
-/* 스트림릿 버전에 따라 마진이 무시될 때를 대비한 보강(패딩으로 간격 확보) */
-:where(.stTabs [role="tabpanel"]) :where([data-testid="stNotification"], .stAlert) > div{
-  padding-bottom: .6rem !important;
-}
-</style>
-""", unsafe_allow_html=True)
-
 # ────────────────────────────────────────────────────────────────
 # 공용 유틸
 # ────────────────────────────────────────────────────────────────
