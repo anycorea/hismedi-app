@@ -10,37 +10,37 @@ import re
 # =============================================================
 import streamlit as st
 
-
-# ---- UI Tweaks (2025-11-04) ----
-def _inject_global_css():
+# ---- UI Tweaks · safe (2025-11-04) ----
+def inject_ui_safe():
     import streamlit as st
-    st.markdown(
-        """
-        <style>
-        .block-container { padding-top: 0rem !important; }
-        /* Tabs: bold + wider spacing */
-        div[data-baseweb="tab-list"] button { 
-            font-weight: 700 !important; 
-            margin-right: 20px !important;
-        }
-        /* App Title: a bit larger & heavier, but smaller than user heading */
-        .app-title-hrjd { 
-            font-size: 1.6rem; 
-            font-weight: 800; 
-            line-height: 1.15; 
-            margin-bottom: 0.5rem;
-        }
-        
-        /* Extra selectors for Streamlit >=1.30 tabs */
-        .stTabs [role="tab"] { font-weight: 700 !important; }
-        .stTabs [role="tablist"] { gap: 20px !important; }
-        .stTabs button[role="tab"] { font-weight: 700 !important; }
-        .stTabs [data-baseweb="tab-list"] button { margin-right: 20px !important; font-weight:700 !important; }
-    
-</style>
-        """, unsafe_allow_html=True
-    )
-# ---- end UI Tweaks ----
+    st.markdown("""
+    <style>
+      /* 상단 여백만 살짝 줄이기 (폭/너비는 건드리지 않음) */
+      .block-container { padding-top: 0.25rem !important; }
+
+      /* 앱 제목: 통일 · 굵게 · 약간 크게 */
+      .app-title-hrjd{
+        font-size: 1.7rem;
+        font-weight: 800;
+        line-height: 1.15;
+        margin: 0 0 .5rem 0;
+      }
+
+      /* 탭: 볼드 + 간격 확대 (신/구 DOM 동시 대응) */
+      .stTabs [role="tab"]{ font-weight: 700 !important; }
+      .stTabs [role="tablist"]{ gap: 20px !important; }
+      .stTabs button[role="tab"]{ font-weight: 700 !important; margin-right: 20px !important; }
+      div[data-baseweb="tab-list"] button{
+        font-weight: 700 !important; margin-right: 20px !important;
+      }
+    </style>
+    """, unsafe_allow_html=True)
+
+def render_title():
+    import streamlit as st
+    st.markdown('<div class="app-title-hrjd">HISMEDI † HR · JD</div>', unsafe_allow_html=True)
+# ---- end ----
+
 
 from typing import Any, Tuple
 import re, time, random, hashlib, secrets as pysecrets
