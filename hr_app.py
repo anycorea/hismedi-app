@@ -55,6 +55,34 @@ st.markdown("""
 # 제목은 한 번만 여기서 출력 (로그인 전/후 공통으로 최상단에 고정)
 st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=True)
 
+st.markdown("""
+<style>
+/* 1) 알림 래퍼(data-testid)와 본체(role=alert) 둘 다: 위 마진 제거, 아래만 고정 간격 */
+.stTabs [role="tabpanel"] [data-testid="stNotification"],
+.stTabs [role="tabpanel"] [role="alert"]{
+  margin-top: 0 !important;
+  margin-bottom: .4rem !important;  /* ← 여기서만 수치 조절 */
+}
+
+/* 2) 알림 내부 문단(p) 기본 마진이 들뜸을 유발할 수 있어 0으로 리셋 */
+.stTabs [role="tabpanel"] [role="alert"] p{
+  margin: 0 !important;
+}
+
+/* 3) 일부 테마/버전에서 마진이 상쇄될 때 대비: 내부 패딩으로 간격 보강 */
+.stTabs [role="tabpanel"] [data-testid="stNotification"] > div,
+.stTabs [role="tabpanel"] [role="alert"] > div{
+  padding-top: .2rem !important;
+  padding-bottom: .2rem !important;
+}
+
+/* 4) 패널의 첫 요소가 알림일 때, 위쪽 공백 완전 제거(안전망) */
+.stTabs [role="tabpanel"] > div > :first-child:is([data-testid="stNotification"], [role="alert"]){
+  margin-top: 0 !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 # ────────────────────────────────────────────────────────────────
 # 공용 유틸
 # ────────────────────────────────────────────────────────────────
