@@ -35,7 +35,7 @@ from datetime import datetime
 # ────────────────────────────────────────────────────────────────
 # Page config -> 반드시 가장 먼저 호출
 # ────────────────────────────────────────────────────────────────
-APP_TITLE = st.secrets.get("app", {}).get("TITLE", "HISMEDI  †  HR · JD")
+APP_TITLE = st.secrets.get("app", {}).get("TITLE", "HISMEDI † HR · JD")
 st.set_page_config(page_title=APP_TITLE, layout="wide")
 
 # ────────────────────────────────────────────────────────────────
@@ -54,7 +54,7 @@ def _ensure_capacity(ws, min_row: int, min_col: int):
         # 시트 객체가 예상과 다르거나 권한 문제 등으로 실패해도 앱이 죽지 않도록 방어
         pass
 
-# HISMEDI  †  HR · JD  app
+# HISMEDI † HR · JD  app
 # Tabs: 인사평가 / 직무기술서 / 직무능력평가 / 관리자 / 도움말
 
 # ═════════════════════════════════════════════════════════════════════════════
