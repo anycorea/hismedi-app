@@ -35,8 +35,7 @@ from datetime import datetime
 # ────────────────────────────────────────────────────────────────
 # Page config -> 반드시 가장 먼저 호출
 # ────────────────────────────────────────────────────────────────
-
-APP_TITLE = st.secrets.get("app", {}).get("TITLE", "HISMEDI - 인사/HR")
+APP_TITLE = st.secrets.get("app", {}).get("TITLE", "HISMEDI  †  HR · JD")
 st.set_page_config(page_title=APP_TITLE, layout="wide")
 
 # ────────────────────────────────────────────────────────────────
@@ -55,7 +54,7 @@ def _ensure_capacity(ws, min_row: int, min_col: int):
         # 시트 객체가 예상과 다르거나 권한 문제 등으로 실패해도 앱이 죽지 않도록 방어
         pass
 
-# HISMEDI HR App
+# HISMEDI  †  HR · JD  app
 # Tabs: 인사평가 / 직무기술서 / 직무능력평가 / 관리자 / 도움말
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -3577,11 +3576,11 @@ def gs_flush():
         # 성공/실패와 상관없이 큐 비움(중복전송 방지)
         st.session_state.gs_queue = []
 # ===== End helpers =====
+
 # --- Compatibility shim ----------------------------------------------
 def _kst_now_str_safe():
     """Backwards-compat helper; delegates to kst_now_str()."""
     return kst_now_str()
-
 
 # --- Compatibility shim ----------------------------------------------
 def _ws_batch_row_v2(ws, idx: int, hmap: dict, kv: dict):
