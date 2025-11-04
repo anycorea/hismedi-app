@@ -60,7 +60,7 @@ st.markdown("""
 /* 탭 패널 내 경고(제출시각) 상단 들뜸 제거 + 하단만 균일 간격 */
 .stTabs [role="tabpanel"] :where([data-testid="stNotification"], .stAlert){
   margin-top: 0 !important;          /* ← 위쪽 내림 현상 제거 */
-  margin-bottom: .6rem !important;   /* ← 아래만 일정 간격 */
+  margin-bottom: .4rem !important;   /* ← 아래만 일정 간격 */
   /* 혹시 테마에 따라 내부 padding이 과하면 다음 줄도 조절 가능
      padding-top: .4rem !important;  */
 }
