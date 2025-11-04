@@ -11,13 +11,13 @@ import re
 import streamlit as st
 
 
+
 # ---- UI Tweaks (2025-11-04) ----
-def _inject_global_css()
-st.markdown(f'<div class="app-title-hrjd">{APP_TITLE}</div>', unsafe_allow_html=True):
+def _inject_global_css():
     import streamlit as st
     st.markdown(
         """
-        <style>
+<style>
         .block-container { padding-top: 0rem !important; }
     [data-testid="stAppViewContainer"] > .main { padding-top: 0rem !important; }
     .main .block-container { padding-top: 0rem !important; }
@@ -51,6 +51,9 @@ st.markdown(f'<div class="app-title-hrjd">{APP_TITLE}</div>', unsafe_allow_html=
         """, unsafe_allow_html=True
     )
 # ---- end UI Tweaks ----
+""", unsafe_allow_html=True
+    )
+# ---- end UI Tweaks ----
 
 from typing import Any, Tuple
 import re, time, random, hashlib, secrets as pysecrets
@@ -81,6 +84,8 @@ from datetime import datetime
 APP_TITLE = "HISMEDI † HR · JD"
 st.set_page_config(page_title=APP_TITLE, layout="wide")
 
+_inject_global_css()
+st.markdown(f\'<div class="app-title-hrjd">{APP_TITLE}</div>\', unsafe_allow_html=True)
 # ────────────────────────────────────────────────────────────────
 # 공용 유틸
 # ────────────────────────────────────────────────────────────────
