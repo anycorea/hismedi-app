@@ -17,7 +17,7 @@ def _inject_global_css():
     st.markdown(
         """
         <style>
-        .block-container { padding-top: 0.5rem !important; }
+        .block-container { padding-top: 0rem !important; }
         /* Tabs: bold + wider spacing */
         div[data-baseweb="tab-list"] button { 
             font-weight: 700 !important; 
@@ -30,7 +30,14 @@ def _inject_global_css():
             line-height: 1.15; 
             margin-bottom: 0.5rem;
         }
-        </style>
+        
+        /* Extra selectors for Streamlit >=1.30 tabs */
+        .stTabs [role="tab"] { font-weight: 700 !important; }
+        .stTabs [role="tablist"] { gap: 20px !important; }
+        .stTabs button[role="tab"] { font-weight: 700 !important; }
+        .stTabs [data-baseweb="tab-list"] button { margin-right: 20px !important; font-weight:700 !important; }
+    
+</style>
         """, unsafe_allow_html=True
     )
 # ---- end UI Tweaks ----
@@ -3293,8 +3300,7 @@ def tab_admin_acl(emp_df: pd.DataFrame):
 
 def tab_help():
     st.markdown("""
-    **도움말**
-    - 좌측에서 `검색(사번/이름)` 후 **Enter** → 첫 번째 결과가 자동으로 선택됩니다.
+        - 좌측에서 `검색(사번/이름)` 후 **Enter** → 첫 번째 결과가 자동으로 선택됩니다.
     - 대상선택(드롭다운박스)로 직원을 선택해도 됩니다.
     - 선택된 직원은 우측 모든 탭과 동기화됩니다.
     - 권한(ACL)에 따라 보이는 직원 범위가 달라집니다. 관리자는 전 직원이 보입니다.
