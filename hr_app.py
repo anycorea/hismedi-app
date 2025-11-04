@@ -1,16 +1,5 @@
 # -*- coding: utf-8 -*-
 # =============================================================
-# --- UI style tweaks (title & tabs) ------------------------------------------
-def _ui_inject_css():
-    st.markdown(
-        '''
-        <style>
-        .app-big-title { font-size: 2rem; font-weight: 800; letter-spacing: 0.3px; margin: 8px 0 12px 0; }
-        div[data-baseweb="tab"] button { font-size: 1rem !important; font-weight: 700 !important; }
-        div[data-baseweb="tab-list"] > div { gap: 14px !important; }
-        </style>
-        ''', unsafe_allow_html=True
-    )
 # HR App (Supabase Sync · CLEAN CONSOLIDATED VERSION)
 # Refactor date: 2025-11-04 (Asia/Seoul)
 # Notes:
@@ -46,7 +35,7 @@ from datetime import datetime
 # Page config -> 반드시 가장 먼저 호출
 # ────────────────────────────────────────────────────────────────
 
-APP_TITLE = st.secrets.get("app", {}).get("TITLE", "HISMEDI  †  HR · JD")
+APP_TITLE = st.secrets.get("app", {}).get("TITLE", "HISMEDI † HR · JD")
 st.set_page_config(page_title=APP_TITLE, layout="wide")
 
 # ────────────────────────────────────────────────────────────────
@@ -344,7 +333,7 @@ try:
     if 'gs_enqueue_range' not in globals():
         def gs_enqueue_range(ws, a1, values, value_input_option="USER_ENTERED"):
             # ✅ gspread 시그니처: update(range_name, values, ...)
-            ws.update(a1, values, value_input_option=value_input_option)
+            ws.update( values, a1, value_input_option=value_input_option)
 
     if 'gs_enqueue_cell' not in globals():
         def gs_enqueue_cell(ws, row, col, value, value_input_option="USER_ENTERED"):
@@ -2768,7 +2757,7 @@ def tab_competency(emp_df: pd.DataFrame):
     except Exception:
         pass
 
-    with st.expander('직무기술서 요약', expanded=False):
+    with st.expander("직무기술서 요약", expanded=True):
         jd=_jd_latest_for_comp(sel_sab, int(year))
         if jd:
             def V(key): return (_html_escape((jd.get(key,"") or "").strip()) or "—")
@@ -3290,6 +3279,12 @@ def tab_help():
 # Main App
 # ═════════════════════════════════════════════════════════════════════════════
 def main():
+    # UI: title & tabs styling
+    st.markdown('''<style>
+    .app-title-hero{font-size:1.9rem;font-weight:800;margin:4px 0 12px 0;letter-spacing:.2px}
+    .stTabs [data-baseweb="tab-list"]{gap:14px}
+    .stTabs [data-baseweb="tab"] button{font-size:1rem;font-weight:700}
+    </style>''', unsafe_allow_html=True)
     emp_df = read_emp_df()
     st.session_state["emp_df"] = emp_df.copy()
 
@@ -3322,7 +3317,7 @@ def main():
         render_staff_picker_left(emp_df)
 
     with right:
-        tabs = st.tabs(['인사평가', '직무기술서', '직무능력평가', '관리자', '도움말'])
+        tabs = st.tabs(["인사평가","직무기술서","직무능력평가","관리자","도움말"])
 
         with tabs[0]:
             tab_eval(emp_df)
@@ -3586,3 +3581,4 @@ def _kst_now_str_safe():
 def _ws_batch_row_v2(ws, idx: int, hmap: dict, kv: dict):
     """Alias to _ws_batch_row for backward compatibility."""
     return _ws_batch_row(ws, idx, hmap, kv)
+
