@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 # =============================================================
+import re
 # HR App (Supabase Sync · CLEAN CONSOLIDATED VERSION)
 # Refactor date: 2025-11-04 (Asia/Seoul)
 # Notes:
@@ -35,7 +36,7 @@ from datetime import datetime
 # Page config -> 반드시 가장 먼저 호출
 # ────────────────────────────────────────────────────────────────
 
-APP_TITLE = st.secrets.get("app", {}).get("TITLE", "HISMEDI † HR · JD")
+APP_TITLE = st.secrets.get("app", {}).get("TITLE", "HISMEDI - 인사/HR")
 st.set_page_config(page_title=APP_TITLE, layout="wide")
 
 # ────────────────────────────────────────────────────────────────
@@ -333,7 +334,7 @@ try:
     if 'gs_enqueue_range' not in globals():
         def gs_enqueue_range(ws, a1, values, value_input_option="USER_ENTERED"):
             # ✅ gspread 시그니처: update(range_name, values, ...)
-            ws.update( values, a1, value_input_option=value_input_option)
+            ws.update(a1, values, value_input_option=value_input_option)
 
     if 'gs_enqueue_cell' not in globals():
         def gs_enqueue_cell(ws, row, col, value, value_input_option="USER_ENTERED"):
@@ -643,6 +644,17 @@ def _retry(fn, *args, **kwargs):
     last = None
     for b in API_BACKOFF_SEC:
         try:
+            # gspread Worksheet.update positional-order fix
+            try:
+                fn_name = getattr(fn, '__name__', '')
+                fn_qual = getattr(fn, '__qualname__', '')
+                if 'update' == fn_name or fn_qual.endswith('.update'):
+                    if len(args) >= 2 and 'range_name' not in kwargs and 'values' not in kwargs:
+                        a1, a2 = args[0], args[1]
+                        if isinstance(a1, str) and (':' in a1 or '!' in a1 or re.match(r'^[A-Za-z]+\d+(?::[A-Za-z]+\d+)?$', a1)):
+                            args = (a2, a1) + tuple(args[2:])
+            except Exception:
+                pass
             return fn(*args, **kwargs)
         except APIError as e:
             status = None
@@ -3279,12 +3291,6 @@ def tab_help():
 # Main App
 # ═════════════════════════════════════════════════════════════════════════════
 def main():
-    # UI: title & tabs styling
-    st.markdown('''<style>
-    .app-title-hero{font-size:1.9rem;font-weight:800;margin:4px 0 12px 0;letter-spacing:.2px}
-    .stTabs [data-baseweb="tab-list"]{gap:14px}
-    .stTabs [data-baseweb="tab"] button{font-size:1rem;font-weight:700}
-    </style>''', unsafe_allow_html=True)
     emp_df = read_emp_df()
     st.session_state["emp_df"] = emp_df.copy()
 
@@ -3581,4 +3587,3 @@ def _kst_now_str_safe():
 def _ws_batch_row_v2(ws, idx: int, hmap: dict, kv: dict):
     """Alias to _ws_batch_row for backward compatibility."""
     return _ws_batch_row(ws, idx, hmap, kv)
-
