@@ -10,35 +10,44 @@ import re
 # =============================================================
 import streamlit as st
 
+
 # ---- UI Tweaks (2025-11-04) ----
-def _inject_global_css():
+def inject_ui():
     import streamlit as st
-    st.markdown(
-        """
-        <style>
-        .block-container { padding-top: 0rem !important; }
-        /* Tabs: bold + wider spacing */
-        div[data-baseweb="tab-list"] button { 
-            font-weight: 700 !important; 
-            margin-right: 20px !important;
-        }
-        /* App Title: a bit larger & heavier, but smaller than user heading */
-        .app-title-hrjd { 
-            font-size: 1.6rem; 
-            font-weight: 800; 
-            line-height: 1.15; 
-            margin-bottom: 0.5rem;
-        }
-        
-        /* Extra selectors for Streamlit >=1.30 tabs */
-        .stTabs [role="tab"] { font-weight: 700 !important; }
-        .stTabs [role="tablist"] { gap: 20px !important; }
-        .stTabs button[role="tab"] { font-weight: 700 !important; }
-        .stTabs [data-baseweb="tab-list"] button { margin-right: 20px !important; font-weight:700 !important; }
-    
-</style>
-        """, unsafe_allow_html=True
-    )
+    # 1) 페이지 설정은 반드시 최초 1회, 화면에 그리기 전에
+    st.set_page_config(page_title="HISMEDI † HR · JD", layout="wide")
+
+    # 2) 전역 CSS 주입: 상단 여백 최소화 + 탭 두껍게/간격 확대 + 앱 제목 스타일
+    st.markdown("""
+    <style>
+      /* 상단 여백 최소화 (Streamlit 버전별 안전 셀렉터) */
+      :where([data-testid="stAppViewContainer"]) .block-container { padding-top: 0.25rem !important; }
+      :where([data-testid="stMain"]) { padding-top: 0 !important; }
+
+      /* 앱 제목: 좀 더 크게 & 두껍게 */
+      .app-title-hrjd{
+        font-size: 1.7rem;
+        font-weight: 800;
+        line-height: 1.15;
+        margin: 0 0 .5rem 0;
+      }
+
+      /* 탭: 볼드 + 간격 확장 (신/구 DOM 모두 대응) */
+      .stTabs [role="tab"]{ font-weight: 700 !important; }
+      .stTabs [role="tablist"]{ gap: 20px !important; }
+      .stTabs button[role="tab"]{ font-weight: 700 !important; margin-right: 20px !important; }
+      /* baseweb 기반 구버전 탭 지원 */
+      div[data-baseweb="tab-list"] button{
+        font-weight: 700 !important;
+        margin-right: 20px !important;
+      }
+    </style>
+    """, unsafe_allow_html=True)
+
+def render_title():
+    import streamlit as st
+    # 3) st.title 대신 커스텀 마크업으로 동일한 제목을 강제 렌더
+    st.markdown('<div class="app-title-hrjd">HISMEDI † HR · JD</div>', unsafe_allow_html=True)
 # ---- end UI Tweaks ----
 
 from typing import Any, Tuple
@@ -68,7 +77,7 @@ from datetime import datetime
 # Page config -> 반드시 가장 먼저 호출
 # ────────────────────────────────────────────────────────────────
 APP_TITLE = st.secrets.get("app", {}).get("TITLE", "HISMEDI † HR · JD")
-st.set_page_config(page_title=APP_TITLE, layout="wide")
+# [patched] st.set_page_config(page_title=APP_TITLE, layout="wide")
 
 # ────────────────────────────────────────────────────────────────
 # 공용 유틸
