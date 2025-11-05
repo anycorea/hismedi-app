@@ -57,7 +57,7 @@ st.markdown("""
   /* ── Right column spacing using :has() + marker ───────────────── */
   div[data-testid="column"]:has([data-rp="right-pane"]) 
     [data-testid="stVerticalBlock"] + [data-testid="stVerticalBlock"]{
-      margin-top: 12px !important;   /* ← 간격 조절 숫자 */
+      margin-top: 20px !important;   /* ← 간격 조절 숫자 */
   }
   /* Optional: bar styles */
   .bar{ padding:.35rem .6rem; border-radius:.375rem; font-weight:700; }
