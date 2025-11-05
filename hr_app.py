@@ -51,6 +51,24 @@ st.markdown("""
   .stTabs [role='tablist']{ gap: 18px !important; }
   .stTabs button[role='tab']{ font-weight:700 !important; margin-right:18px !important; }
   div[data-baseweb="tab-list"] button{ font-weight:700 !important; margin-right:18px !important; }
+
+  /* A) DB연결 캡션 ↔ 사용자 줄 */
+  :where([data-testid="stCaptionContainer"]) 
+  + :where([data-testid="element-container"]){
+    margin-top: -0.18rem !important;   /* ← 값(양수↓/음수↑)을 -0.10 ~ -0.30 사이로 조정 */
+  }
+
+  /* B) "총 00명" 캡션 ↔ "대시보드 보기" 체크박스 (첫 체크박스) */
+  :where([data-testid="stCaptionContainer"]) 
+  + :where([data-testid="element-container"]:has([data-testid="stCheckbox"])){
+    margin-top: -0.16rem !important;   /* 권장 범위: -0.08 ~ -0.24rem */
+  }
+
+  /* C) "대시보드 보기" 체크박스 ↔ 표(첫 표) */
+  :where([data-testid="element-container"]:has([data-testid="stCheckbox"])) 
+  + :where([data-testid="element-container"]:has([data-testid="stDataFrame"], [data-testid="stTable"])){
+    margin-top: -0.12rem !important;   /* 권장 범위: -0.06 ~ -0.20rem */
+  }
 </style>
 """, unsafe_allow_html=True)
 
