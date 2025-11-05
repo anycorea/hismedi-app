@@ -51,10 +51,10 @@ st.markdown("""
 
   /* ② 총 00명 ↔ 대시보드 보기 (필요 시 아래 숫자만 조정) */
   :where([data-testid="stCaptionContainer"]){
-    margin-block-end: .04rem !important; /* ← 총원 캡션의 아래쪽 간격 */
+    margin-block-end: .02rem !important; /* ← 총원 캡션의 아래쪽 간격 */
   }
   :where([data-testid="stCheckbox"]){
-    margin: 0 0 .14rem !important;       /* ← 체크박스 아래쪽 간격 */
+    margin: 0 0 .02rem !important;       /* ← 체크박스 아래쪽 간격 */
   }
 
   /* ③ 대시보드 보기 ↔ 표 */
