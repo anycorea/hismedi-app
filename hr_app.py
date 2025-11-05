@@ -124,6 +124,78 @@ def sync_sheet_to_supabase_employees_v1():
 
     st.success(f"직원 {len(df)}건 Supabase 업서트 완료", icon="✅")
 
+# === 평가_항목: 시트 → Supabase 동기화 ===
+def _get_ws(sheet_title: str):
+    gclient = _get_gspread_client_for_sync_v1()
+    sh = gclient.open_by_key(st.secrets["sheets"]["HR_SHEET_ID"])
+    return sh.worksheet(sheet_title)
+
+def sync_sheet_to_supabase_eval_items_v1():
+    ws = _get_ws("평가_항목")
+    df = _pd.DataFrame(ws.get_all_records())
+    if df.empty:
+        st.warning("평가_항목 시트가 비어있습니다.")
+        return
+    # bool 정리
+    if "활성" in df.columns:
+        df["활성"] = df["활성"].map(_sync_truthy_v1)
+    supabase.table("eval_items").upsert(
+        df.to_dict(orient="records"),
+        on_conflict="항목ID"
+    ).execute()
+    st.success(f"평가_항목 {len(df)}건 업서트 완료", icon="✅")
+
+# === 권한: 시트 → Supabase 동기화 ===
+def sync_sheet_to_supabase_acl_v1():
+    ws = _get_ws("권한")
+    df = _pd.DataFrame(ws.get_all_records())
+    if df.empty:
+        st.warning("권한 시트가 비어있습니다.")
+        return
+
+    # 1) 필수 컬럼 확보
+    required = ["사번","이름","역할","범위유형","부서1","부서2","대상사번","활성","비고"]
+    for c in required:
+        if c not in df.columns:
+            df[c] = ""
+
+    # 2) 문자열/공백 정리
+    for c in ["사번","이름","역할","범위유형","부서1","부서2","대상사번","비고"]:
+        df[c] = df[c].astype(str).fillna("").map(lambda s: s.strip())
+
+    # 3) 불리언 정리
+    df["활성"] = df["활성"].map(_sync_truthy_v1).fillna(False).astype(bool)
+
+    # 4) (최소 키) 결측 제거 → B안에서는 사번/역할만 필수
+    before = len(df)
+    df = df[(df["사번"]!="") & (df["역할"]!="")]
+    dropped_nullkey = before - len(df)
+    if dropped_nullkey > 0:
+        st.info(f"빈 사번/역할 제외: {dropped_nullkey}건")
+
+    if df.empty:
+        st.warning("업서트할 권한 데이터가 없습니다.")
+        return
+
+    # 5) 동일한 6-키 완전중복만 제거(같은 행이 시트에 2번 있는 경우 방지)
+    conflict_keys = ["사번","역할","범위유형","부서1","부서2","대상사번"]
+    before_dups = len(df)
+    df = df.drop_duplicates(subset=conflict_keys, keep="first")
+    removed_dups = before_dups - len(df)
+    if removed_dups > 0:
+        st.info(f"완전중복 제거: {removed_dups}건 (키: {', '.join(conflict_keys)})")
+
+    # 6) 업서트 (B안: 6개 컬럼 조합을 고유로)
+    try:
+        supabase.table("acl").upsert(
+            df.to_dict(orient="records"),
+            on_conflict="사번,역할,범위유형,부서1,부서2,대상사번"
+        ).execute()
+        st.success(f"권한 {len(df)}건 업서트 완료", icon="✅")
+    except Exception as e:
+        st.exception(e)
+        st.error("권한 업서트 실패: 고유인덱스/키 중복/타입을 확인해 주세요.")
+
 # ═════════════════════════════════════════════════════════════════════════════
 # Helpers
 # ═════════════════════════════════════════════════════════════════════════════
@@ -147,59 +219,73 @@ AUTO_FIX_HEADERS = False
 # ===== Cached summary helpers (performance) =====
 @st.cache_data(ttl=300, show_spinner=False)
 def get_eval_summary_map_cached(_year: int, _rev: int = 0) -> dict:
-    """Return {(사번, 평가유형)->(총점, 제출시각)} for the year."""
+    """Return {(사번, 평가유형)->(총점, 제출시각)} for the year (robust to header variants)."""
     items = read_eval_items_df(True)
     item_ids = [str(x) for x in items["항목ID"].tolist()] if not items.empty else []
     try:
         ws = _ensure_eval_resp_sheet(int(_year), item_ids)
         header = _retry(ws.row_values, 1) or []
-        hmap = {n:i+1 for i,n in enumerate(header)}
+        hmap = {n: i + 1 for i, n in enumerate(header)}
         values = _ws_values(ws)
     except Exception:
         return {}
-    cY=hmap.get("연도"); cT=hmap.get("평가유형"); cTS=hmap.get("평가대상사번"); cTot=hmap.get("총점"); cSub=hmap.get("제출시각")
-    out = {}
-    for i in range(2, len(values)+1):
-        r = values[i-1]
+    cY = hmap.get('연도') or hmap.get('년도')
+    cType = hmap.get('평가유형')
+    cTS = hmap.get('평가대상사번') or hmap.get('사번')
+    cTot = hmap.get('총점')
+    cSub = hmap.get('제출시각') or hmap.get('제출일시') or hmap.get('제출시간')
+    out: dict[tuple[str, str], tuple[str, str]] = {}
+    for i in range(2, len(values) + 1):
+        r = values[i - 1]
         try:
-            if str(r[cY-1]).strip() != str(_year): continue
-            k = (str(r[cTS-1]).strip(), str(r[cT-1]).strip())
-            tot = r[cTot-1] if (cTot and cTot-1 < len(r)) else ""
-            sub = r[cSub-1] if (cSub and cSub-1 < len(r)) else ""
+            ry = (str(r[cY - 1]).strip() if cY else _extract_year(r[cSub - 1] if cSub else ''))
+            if str(ry) != str(_year):
+                continue
+            k = (str(r[cTS - 1]).strip() if cTS else '', str(r[cType - 1]).strip() if cType else '')
+            tot = r[cTot - 1] if cTot else ''
+            sub = r[cSub - 1] if cSub else ''
+            if not k[0]:
+                continue
             if k not in out or str(out[k][1]) < str(sub):
-                out[k] = (tot, sub)
+                out[k] = (str(tot), str(sub))
         except Exception:
             pass
     return out
-
 @st.cache_data(ttl=300, show_spinner=False)
 def get_comp_summary_map_cached(_year: int, _rev: int = 0) -> dict:
-    """Return {사번->(주업무, 기타업무, 자격유지, 제출시각)} for the year."""
+    """Return {사번->(주업무, 기타업무, 자격유지, 제출시각)} for the year (robust to header variants)."""
     try:
         ws = _ensure_comp_simple_sheet(int(_year))
-        header = _retry(ws.row_values,1) or []
-        hmap = {n:i+1 for i,n in enumerate(header)}
+        header = _retry(ws.row_values, 1) or []
+        hmap = {n: i + 1 for i, n in enumerate(header)}
         values = _ws_values(ws)
     except Exception:
         return {}
-    cY=hmap.get("연도"); cTS=hmap.get("평가대상사번"); cMain=hmap.get("주업무평가")
-    cExtra=hmap.get("기타업무평가"); cQual=hmap.get("자격유지"); cSub=hmap.get("제출시각")
-    out = {}
-    for i in range(2, len(values)+1):
-        r = values[i-1]
+    cY = hmap.get('연도') or hmap.get('년도')
+    cTS = hmap.get('평가대상사번') or hmap.get('사번')
+    cMain = hmap.get('주업무평가') or hmap.get('주업무')
+    cExtra = hmap.get('기타업무평가') or hmap.get('기타업무')
+    cQual = hmap.get('자격유지') or hmap.get('자격')
+    cSub = hmap.get('제출시각') or hmap.get('제출일시') or hmap.get('제출시간')
+    out: dict[str, tuple[str, str, str, str]] = {}
+    for i in range(2, len(values) + 1):
+        r = values[i - 1]
         try:
-            if cY and str(r[cY-1]).strip()!=str(_year): continue
-            sab = str(r[cTS-1]).strip()
-            main = r[cMain-1] if cMain else ""
-            extra = r[cExtra-1] if cExtra else ""
-            qual = r[cQual-1] if cQual else ""
-            sub = r[cSub-1] if cSub else ""
+            ry = (str(r[cY - 1]).strip() if cY else _extract_year(r[cSub - 1] if cSub else ''))
+            if str(ry) != str(_year):
+                continue
+            sab = str(r[cTS - 1]).strip() if cTS else ''
+            main = r[cMain - 1] if cMain else ''
+            extra = r[cExtra - 1] if cExtra else ''
+            qual = r[cQual - 1] if cQual else ''
+            sub = r[cSub - 1] if cSub else ''
+            if not sab:
+                continue
             if sab not in out or str(out[sab][3]) < str(sub):
-                out[sab] = (main, extra, qual, sub)
+                out[sab] = (str(main), str(extra), str(qual), str(sub))
         except Exception:
             pass
     return out
-
 @st.cache_data(ttl=120, show_spinner=False)
 def get_jd_approval_map_cached(_year: int, _rev: int = 0) -> dict:
     """Return {(사번, 최신버전)->(상태, 승인시각)} for the year from 직무기술서_승인."""
@@ -390,14 +476,117 @@ def kst_now_str(): return datetime.now(tz=tz_kst()).strftime("%Y-%m-%d %H:%M:%S 
 
 def _jd_plain_html(text: str) -> str:
     import html
-
     if text is None:
         text = ""
-    s = str(text).replace("\r\n","\n").replace("\r","\n")
-    # Escape HTML and convert newlines to <br> so Markdown won't turn '-' into <li>
+    s = str(text).replace("\r\n", "\n").replace("\r", "\n")
     return '<div class="jd-tight">' + html.escape(s).replace("\n", "<br>") + "</div>"
 
+# --- Year normalization helper ----------------------------------------------
+def _extract_year(val):
+    try:
+        s = str(val).strip()
+        if not s:
+            return ""
+        import re as _re
+        m = _re.search(r'(19|20)\d{2}', s)
+        return m.group(0) if m else ""
+    except Exception:
+        return ""
+
+# --- Dashboard year-scoped helpers (robust) -----------------------------------
+def _dash_eval_scores_for_year(_year: int) -> dict:
+    """Return {(sabun, eval_type)->(total, submitted_at)} for the given year.
+    - Accepts header variants and parses year from 제출시각 if needed."""
+    try:
+        ws = _ws(EVAL_RESP_SHEET_NAME)  # "인사평가"
+        df = pd.DataFrame(_ws_get_all_records(ws))
+    except Exception:
+        return {}
+    if df.empty:
+        return {}
+
+    col = lambda *names: next((n for n in names if n in df.columns), None)
+    cY    = col("연도","년도")
+    cTS   = col("평가대상사번","사번")
+    cType = col("평가유형","유형")
+    cTot  = col("총점","합계","점수")
+    cSub  = col("제출시각","제출일시","제출시간")
+
+    # Year filter
+    if cY:
+        df = df[df[cY].astype(str) == str(_year)]
+    elif cSub:
+        df = df[(df[cSub].astype(str).map(_extract_year).astype(str) == str(_year))]
+    else:
+        return {}
+
+    # Normalize 평가유형 -> {'자기','1차','2차'}
+    def norm_type(x: str) -> str:
+        s = str(x or "").strip().lower()
+        if s in ("자기","self","self-eval","자기평가","본인","본인평가"): return "자기"
+        if s in ("1차","1차평가","manager","mgr","상급자","부서장","부서장평가"): return "1차"
+        if s in ("2차","2차평가","admin","hr","최종","인사","경영진"): return "2차"
+        return str(x).strip() or ""
+
+    df["_T"]   = df[cType].map(norm_type) if cType else ""
+    df["_SUB"] = df[cSub].astype(str) if cSub else ""
+
+    out: dict[tuple[str,str], tuple[str,str]] = {}
+    for _, r in df.iterrows():
+        sab = str(r.get(cTS, "")).strip()
+        tp  = str(r.get("_T","")).strip()
+        tot = str(r.get(cTot, "")) if cTot else ""
+        sub = str(r.get("_SUB",""))
+        if not sab or not tp:
+            continue
+        k = (sab, tp)
+        if k not in out or str(out[k][1]) < str(sub):
+            out[k] = (tot, sub)
+    return out
+
+def _dash_comp_status_for_year(_year: int) -> dict:
+    """Return {sabun->(main, extra, qual, submitted_at)} for the given year.
+    - Accepts header variants and parses year from 제출시각 if needed."""
+    try:
+        ws = _ws(COMP_SIMPLE_NAME)  # "직무능력평가"
+        df = pd.DataFrame(_ws_get_all_records(ws))
+    except Exception:
+        return {}
+    if df.empty:
+        return {}
+
+    col = lambda *names: next((n for n in names if n in df.columns), None)
+    cY    = col("연도","년도")
+    cTS   = col("평가대상사번","사번")
+    cMain = col("주업무평가","주업무")
+    cExtra= col("기타업무평가","기타업무")
+    cQual = col("자격유지","자격")
+    cSub  = col("제출시각","제출일시","제출시간")
+
+    # Year filter
+    if cY:
+        df = df[df[cY].astype(str) == str(_year)]
+    elif cSub:
+        df = df[(df[cSub].astype(str).map(_extract_year).astype(str) == str(_year))]
+    else:
+        return {}
+
+    df["_SUB"] = df[cSub].astype(str) if cSub else ""
+    out: dict[str, tuple[str,str,str,str]] = {}
+    for _, r in df.iterrows():
+        sab  = str(r.get(cTS, "")).strip()
+        main = str(r.get(cMain, "")) if cMain else ""
+        extra= str(r.get(cExtra, "")) if cExtra else ""
+        qual = str(r.get(cQual, "")) if cQual else ""
+        sub  = str(r.get("_SUB",""))
+        if not sab:
+            continue
+        if sab not in out or str(out[sab][3]) < str(sub):
+            out[sab] = (main, extra, qual, sub)
+    return out
+
 def _sha256_hex(s: str) -> str: return hashlib.sha256(str(s).encode()).hexdigest()
+
 def _pin_hash(pin: str, sabun: str) -> str:
     return hashlib.sha256(f"{str(sabun).strip()}:{str(pin).strip()}".encode()).hexdigest()
 
@@ -622,6 +811,38 @@ def read_emp_df() -> pd.DataFrame:
 
     return df
 
+def read_acl_df(only_enabled: bool = True) -> pd.DataFrame:
+    """권한(acl): Supabase 우선 → 비어 있으면 시트에서 로드 후 업서트"""
+    try:
+        q = supabase.table("acl").select("*")
+        if only_enabled:
+            q = q.eq("활성", True)
+        res = q.execute()
+        data = res.data or []
+        if data:
+            return pd.DataFrame(data)
+    except Exception as e:
+        st.warning(f"Supabase 권한 조회 실패: {e}")
+
+    # 폴백: 시트 -> Supabase 업서트(초기/수동 동기화 대체)
+    gclient = _get_gspread_client_for_sync_v1()
+    sh = gclient.open_by_key(st.secrets["sheets"]["HR_SHEET_ID"])
+    ws = sh.worksheet("권한")
+    df = pd.DataFrame(ws.get_all_records())
+
+    if not df.empty:
+        if "활성" in df.columns:
+            df["활성"] = df["활성"].map(_sync_truthy_v1)
+        try:
+            supabase.table("acl").upsert(
+                df.to_dict(orient="records"),
+                on_conflict="사번,역할"
+            ).execute()
+        except Exception as e:
+            st.warning(f"권한 업서트 실패: {e}")
+
+    return df
+
 # ═════════════════════════════════════════════════════════════════════════════
 # Login + Session
 # ═════════════════════════════════════════════════════════════════════════════
@@ -747,23 +968,50 @@ AUTH_SHEET="권한"
 
 EVAL_ITEMS_SHEET = st.secrets.get("sheets", {}).get("EVAL_ITEMS_SHEET", "평가_항목")
 EVAL_ITEM_HEADERS = ["항목ID","항목","내용","순서","활성","비고","설명","유형","구분"]
-EVAL_RESP_SHEET_PREFIX = "인사평가_"
+EVAL_RESP_SHEET_NAME = "인사평가"
 EVAL_BASE_HEADERS = ["연도","평가유형","평가대상사번","평가대상이름","평가자사번","평가자이름","총점","상태","제출시각","잠금"]
 
 AUTH_HEADERS=["사번","이름","역할","범위유형","부서1","부서2","대상사번","활성","비고"]
 
+AUTH_SHEET = "권한"
+AUTH_HEADERS = ["사번","이름","역할","범위유형","부서1","부서2","대상사번","활성","비고"]
+
 @st.cache_data(ttl=300, show_spinner=False)
-def read_auth_df()->pd.DataFrame:
+def read_auth_df(only_enabled: bool = True) -> pd.DataFrame:
+    """
+    권한 시트 우선 로딩 → 누락 시 빈 df.
+    필수 컬럼 보강, dtype 정리, boolean 정규화까지 한 번에.
+    """
     try:
-        ws=_ws(AUTH_SHEET); df=pd.DataFrame(_ws_get_all_records(ws))
+        ws = get_book().worksheet(AUTH_SHEET)
+        raw = _ws_get_all_records(ws)
+        df = pd.DataFrame(raw)
     except Exception:
-        return pd.DataFrame(columns=AUTH_HEADERS)
-    if df.empty: return pd.DataFrame(columns=AUTH_HEADERS)
+        df = pd.DataFrame(columns=AUTH_HEADERS)
+
+    # 필수 컬럼 보강
     for c in AUTH_HEADERS:
-        if c not in df.columns: df[c]=""
-    df["사번"]=df["사번"].astype(str)
-    if "활성" in df.columns: df["활성"]=df["활성"].map(_to_bool)
-    return df
+        if c not in df.columns:
+            df[c] = ""
+
+    # dtype 정리
+    df["사번"] = df["사번"].astype(str).str.strip()
+    df["이름"] = df["이름"].astype(str).str.strip()
+    df["역할"] = df["역할"].astype(str).str.strip()
+    df["범위유형"] = df["범위유형"].astype(str).str.strip()
+    for c in ["부서1","부서2","대상사번","비고"]:
+        df[c] = df[c].astype(str)
+
+    # 활성 → bool
+    if "활성" in df.columns:
+        df["활성"] = df["활성"].map(lambda v: str(v).strip().lower() in ("true","1","y","yes","t"))
+    else:
+        df["활성"] = True
+
+    if only_enabled:
+        df = df[df["활성"] == True]
+
+    return df.reset_index(drop=True)
 
 def is_admin(sabun:str)->bool:
     try:
@@ -773,25 +1021,55 @@ def is_admin(sabun:str)->bool:
         return not q.empty
     except Exception: return False
 
-def get_allowed_sabuns(emp_df:pd.DataFrame, sabun:str, include_self:bool=True)->set[str]:
-    sabun=str(sabun); allowed=set([sabun]) if include_self else set()
-    df=read_auth_df()
-    if not df.empty:
-        mine=df[(df["사번"].astype(str)==sabun) & (df["활성"]==True)]
-        # 공란 범위유형이 하나라도 있으면 전체 허용
-        if not mine.empty and any(str(x).strip()=="" for x in mine.get("범위유형", [])):
-            return set(emp_df["사번"].astype(str).tolist())
-        for _,r in mine.iterrows():
-            t=str(r.get("범위유형","")).strip()
-            if t=="부서":
-                d1=str(r.get("부서1","")).strip(); d2=str(r.get("부서2","")).strip()
-                tgt=emp_df.copy()
-                if d1: tgt=tgt[tgt["부서1"].astype(str)==d1]
-                if d2: tgt=tgt[tgt["부서2"].astype(str)==d2]
-                allowed.update(tgt["사번"].astype(str).tolist())
-            elif t=="개별":
-                for p in re.split(r"[,\s]+", str(r.get("대상사번","")).strip()):
-                    if p: allowed.add(p)
+def get_allowed_sabuns(emp_df: pd.DataFrame, sabun: str, include_self: bool = True) -> set[str]:
+    """
+    내 권한 규칙에 따라 접근 가능한 사번 집합을 계산.
+    - 역할: "master"는 전체(+옵션), 그외는 범위유형에 따름
+    - 범위유형: (공란) 전체 / "부서" / "개별"
+    """
+    sabun = str(sabun)
+    allowed = {sabun} if include_self else set()
+
+    df = read_auth_df(only_enabled=True)
+    if df.empty:
+        return allowed
+
+    mine = df[(df["사번"].astype(str) == sabun) & (df["활성"] == True)]
+
+    # (1) master 전체 허용
+    if not mine.empty and any(r.strip().lower() == "master" for r in mine["역할"].astype(str)):
+        # 전체 직원
+        try:
+            return set(emp_df["사번"].astype(str).tolist()) if not emp_df.empty else allowed
+        except Exception:
+            return allowed
+
+    # (2) 범위유형 해석
+    for _, r in mine.iterrows():
+        t = str(r.get("범위유형", "")).strip()
+        if t == "":
+            # 전체 허용
+            try:
+                return set(emp_df["사번"].astype(str).tolist()) if not emp_df.empty else allowed
+            except Exception:
+                return allowed
+        elif t == "부서":
+            d1 = str(r.get("부서1", "")).strip()
+            d2 = str(r.get("부서2", "")).strip()
+            tgt = emp_df.copy()
+            tgt["사번"] = tgt["사번"].astype(str)
+            if "재직여부" in tgt.columns:
+                tgt = tgt[tgt["재직여부"] == True]
+            if d1:
+                tgt = tgt[tgt["부서1"].astype(str) == d1]
+            if d2:
+                tgt = tgt[tgt["부서2"].astype(str) == d2]
+            allowed.update(tgt["사번"].astype(str).tolist())
+        elif t == "개별":
+            for p in re.split(r"[,\s]+", str(r.get("대상사번", "")).strip()):
+                if p:
+                    allowed.add(p)
+
     return allowed
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -934,8 +1212,8 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
         this_year = current_year()
         dash_year = st.number_input("연도(현황판)", min_value=2000, max_value=2100, value=int(this_year), step=1, key="left_dash_year")
 
-        eval_map = get_eval_summary_map_cached(int(dash_year), st.session_state.get("eval_rev", 0))
-        comp_map = get_comp_summary_map_cached(int(dash_year), st.session_state.get("comp_rev", 0))
+        eval_map = _dash_eval_scores_for_year(int(dash_year))
+        comp_map = _dash_comp_status_for_year(int(dash_year))
         appr_map = get_jd_approval_map_cached(int(dash_year), st.session_state.get("appr_rev", 0))
 
         # view에 컬럼 합치기
@@ -1000,7 +1278,7 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
     else:
         st.dataframe(view[cols], use_container_width=True, height=(360 if not show_dashboard_cols else 420), hide_index=True)
 
-def _eval_sheet_name(year: int | str) -> str: return f"{EVAL_RESP_SHEET_PREFIX}{int(year)}"
+def _eval_sheet_name(year: int | str) -> str: return EVAL_RESP_SHEET_NAME
 
 def ensure_eval_items_sheet():
     wb=get_book()
@@ -1029,27 +1307,37 @@ def ensure_eval_items_sheet():
             raise
 
 @st.cache_data(ttl=300, show_spinner=False)
-def read_eval_items_df(only_active: bool = True) -> pd.DataFrame:
-    ensure_eval_items_sheet()
-    ws=_ws(EVAL_ITEMS_SHEET)
+def read_eval_items_df(only_active: bool = False) -> pd.DataFrame:
     try:
-        df=pd.DataFrame(_ws_get_all_records(ws))
+        q = supabase.table("eval_items").select("*")
+        if only_active:
+            q = q.eq("활성", True)
+        res = q.execute()
+        data = res.data or []
+        if data:
+            df = pd.DataFrame(data)
+            if "순서" in df.columns:
+                df = df.sort_values("순서", na_position="last")
+            return df
     except Exception as e:
-        if _is_quota_429(e):
-            try: st.warning('구글시트 읽기 할당량(1분) 초과. 잠시 후 "동기화"를 눌러 다시 시도해 주세요.', icon="⏳")
-            except Exception: pass
-            return pd.DataFrame(columns=EVAL_ITEM_HEADERS)
-        raise
-    if df.empty: return pd.DataFrame(columns=EVAL_ITEM_HEADERS)
-    if "순서" in df.columns:
-        def _i(x):
-            try: return int(float(str(x).strip()))
-            except: return 0
-        df["순서"]=df["순서"].apply(_i)
-    if "활성" in df.columns: df["활성"]=df["활성"].map(_to_bool)
-    cols=[c for c in ["순서","항목"] if c in df.columns]
-    if cols: df=df.sort_values(cols).reset_index(drop=True)
-    if only_active and "활성" in df.columns: df=df[df["활성"]==True]
+        st.warning(f"Supabase 평가_항목 조회 실패: {e}")
+
+    # 폴백: 시트 로드 + 업서트
+    st.info("Supabase 평가_항목 비어있음 → 시트에서 로드하여 Supabase에 업서트")
+    ws = _get_ws("평가_항목")
+    df = pd.DataFrame(ws.get_all_records())
+    if not df.empty:
+        if "활성" in df.columns:
+            df["활성"] = df["활성"].map(_sync_truthy_v1)
+        try:
+            supabase.table("eval_items").upsert(
+                df.to_dict(orient="records"),
+                on_conflict="항목ID"
+            ).execute()
+        except Exception as e:
+            st.warning(f"평가_항목 업서트 실패: {e}")
+        if "순서" in df.columns:
+            df = df.sort_values("순서", na_position="last")
     return df
 
 def _ensure_eval_resp_sheet(year:int, item_ids:list[str]):
@@ -2235,13 +2523,13 @@ def tab_job_desc(emp_df: pd.DataFrame):
 # ═════════════════════════════════════════════════════════════════════════════
 # 직무능력평가 + JD 요약 스크롤
 # ═════════════════════════════════════════════════════════════════════════════
-COMP_SIMPLE_PREFIX = "직무능력평가_"
+COMP_SIMPLE_NAME = "직무능력평가"
 COMP_SIMPLE_HEADERS = [
     "연도","평가대상사번","평가대상이름","평가자사번","평가자이름",
     "주업무평가","기타업무평가","교육이수","자격유지","종합의견",
     "상태","제출시각","잠금"
 ]
-def _simp_sheet_name(year:int|str)->str: return f"{COMP_SIMPLE_PREFIX}{int(year)}"
+def _simp_sheet_name(year:int|str)->str: return COMP_SIMPLE_NAME
 
 def _ensure_comp_simple_sheet(year:int):
     wb=get_book(); name=_simp_sheet_name(year)
@@ -2325,7 +2613,7 @@ def read_my_comp_simple_rows(year:int, sabun:str)->pd.DataFrame:
         df=pd.DataFrame(_ws_get_all_records(ws))
     except Exception: return pd.DataFrame(columns=COMP_SIMPLE_HEADERS)
     if df.empty: return df
-    df=df[df["평가자사번"].astype(str)==str(sabun)]
+    df=df[(df["평가자사번"].astype(str)==str(sabun)) & (df.get("연도").astype(str)==str(year) if "연도" in df.columns else True)]
     sort_cols=[c for c in ["평가대상사번","제출시각"] if c in df.columns]
     if sort_cols: df=df.sort_values(sort_cols, ascending=[True,False,False])
     return df.reset_index(drop=True)
@@ -2780,146 +3068,105 @@ def tab_admin_eval_items():
                 except Exception as e:
                     st.exception(e)
 
+# ===== [BEGIN ACL_EDIT_RIGHTS] ===============================================
 def tab_admin_acl(emp_df: pd.DataFrame):
-    """권한 관리(간소/고속): 편집 시 시트 접근 없음, 저장 시 전체 반영."""
+    """권한 관리: master/admin 편집 허용, 저장은 시트 전체 덮어쓰기."""
     me = st.session_state.get("user", {})
-    am_admin = is_admin(str(me.get("사번","")))
-    if not am_admin:
-        st.error("Master만 저장할 수 있습니다. (표/저장 모두 비활성화)", icon="🛡️")
 
-    # 직원 라벨/룩업
+    # 내 역할 목록 로드 (활성만)
+    try:
+        auth_df = read_auth_df(only_enabled=True)
+        rows = auth_df.loc[
+            auth_df["사번"].astype(str) == str(st.session_state.get("user", {}).get("사번", "")),
+            "역할"
+        ].astype(str)
+        my_roles = [r.strip().lower() for r in rows if r.strip()]
+    except Exception:
+        my_roles = []
+
+    # master 또는 admin 이면 편집 가능
+    can_edit = any(r in {"master", "admin"} for r in my_roles)
+
+    st.caption(f"내 역할: {', '.join(my_roles) or '없음'} / 편집권한: {'O' if can_edit else 'X'}")
+
+    if not can_edit:
+        st.error("admin 이상만 저장할 수 있습니다. (표/저장 비활성화)", icon="🛡️")
+# ===== [END ACL_EDIT_RIGHTS] =================================================
+
+    # 직원 룩업
     base = emp_df[["사번","이름","부서1","부서2"]].copy() if not emp_df.empty else pd.DataFrame(columns=["사번","이름","부서1","부서2"])
     base["사번"] = base["사번"].astype(str).str.strip()
     emp_lookup = {str(r["사번"]).strip(): str(r.get("이름","")).strip() for _, r in base.iterrows()}
-    sabuns = sorted(emp_lookup.keys())
-    labels, label_by_sabun, sabun_by_label = [], {}, {}
-    for s in sabuns:
-        nm = emp_lookup[s]
-        lab = f"{s} - {nm}" if nm else s
-        labels.append(lab)
-        label_by_sabun[s] = lab
-        sabun_by_label[lab] = s
 
-    # 최초 1회만 시트 → 세션 로드
-    if "acl_df" not in st.session_state:
-        try:
-            ws = get_book().worksheet(AUTH_SHEET)
-            header = _retry(ws.row_values, 1) or AUTH_HEADERS
-            vals = _retry(ws.get_all_values) or []
-            rows = vals[1:] if len(vals) > 1 else []
-            df_auth = pd.DataFrame(rows, columns=header).fillna("")
-        except Exception:
-            header = AUTH_HEADERS
-            df_auth = pd.DataFrame(columns=header)
-        # 표시용 사번 라벨 변환
-        df_disp = df_auth.copy()
-        if "사번" in df_disp.columns:
-            df_disp["사번"] = df_disp["사번"].map(lambda v: label_by_sabun.get(str(v).strip(), str(v).strip()))
-        st.session_state["acl_header"] = header
-        st.session_state["acl_df"] = df_disp
+    # 현재 권한 불러오기
+    df = read_auth_df(only_enabled=False).copy()
+    for c in AUTH_HEADERS:
+        if c not in df.columns:
+            df[c] = ""
 
-    header = st.session_state["acl_header"]
-    work = st.session_state["acl_df"].copy()
+    # 편집용 보기: 사번 라벨을 "사번 - 이름"으로
+    label_by_sabun = {s: (f"{s} - {n}" if n else s) for s, n in emp_lookup.items()}
+    df["사번"] = df["사번"].map(lambda s: label_by_sabun.get(str(s).strip(), str(s).strip()))
 
-    # 드롭다운 옵션(직원 시트 유니크)
-    dept1_options = [""] + sorted({str(x).strip() for x in base.get("부서1", pd.Series(dtype=str)).dropna().unique().tolist() if str(x).strip()})
-    dept2_options = [""] + sorted({str(x).strip() for x in base.get("부서2", pd.Series(dtype=str)).dropna().unique().tolist() if str(x).strip()})
+    # 에디터
+    role_options = ["", "master", "admin", "manager", "employee"]
+    scope_options = ["", "부서", "개별"]
 
-    # 컬럼 구성: '이름'은 에디터에서 제외
-    column_config = {
-        "사번": st.column_config.SelectboxColumn("사번 - 이름", options=labels),
-        "역할": st.column_config.SelectboxColumn("역할", options=["admin","manager"]),
-        "범위유형": st.column_config.SelectboxColumn("범위유형", options=["","부서","개별"]),
-        "부서1": st.column_config.SelectboxColumn("부서1", options=dept1_options),
-        "부서2": st.column_config.SelectboxColumn("부서2", options=dept2_options),
-        "대상사번": st.column_config.TextColumn("대상사번"),
-        "활성": st.column_config.CheckboxColumn("활성"),
-        "비고": st.column_config.TextColumn("비고"),
+    colcfg = {
+        "사번":     st.column_config.SelectboxColumn("사번", options=list(label_by_sabun.values())),
+        "이름":     st.column_config.TextColumn("이름", disabled=True),
+        "역할":     st.column_config.SelectboxColumn("역할", options=role_options),
+        "범위유형": st.column_config.SelectboxColumn("범위유형", options=scope_options),
+        "부서1":    st.column_config.TextColumn("부서1"),
+        "부서2":    st.column_config.TextColumn("부서2"),
+        "대상사번": st.column_config.TextColumn("대상사번", help="쉼표/공백 구분"),
+        "활성":     st.column_config.CheckboxColumn("활성"),
+        "비고":     st.column_config.TextColumn("비고"),
     }
-    edit_cols = [c for c in header if c != "이름" and c in work.columns]
 
+    st.info("사번은 '사번 - 이름' 라벨로 선택하세요. 저장 시 실제 사번으로 변환됩니다.", icon="ℹ️")
     edited = st.data_editor(
-        work[edit_cols],
-        key="acl_editor",
+        df[AUTH_HEADERS],
         use_container_width=True,
-        hide_index=True,
-        num_rows="dynamic",
         height=520,
-        disabled=not am_admin,
-        column_config=column_config,
+        hide_index=True,
+        column_config=colcfg,
+        disabled=not can_edit,
+        num_rows="dynamic",
     )
 
-    # ✅ 새 행/삭제까지 정확히 반영: 부분 대입 대신 "전체 교체"
-    if not edited.equals(work[edit_cols]):
-        new_df = edited.copy().reset_index(drop=True)
-        # 누락 컬럼 채움(저장 시 '이름'은 파생하므로 비워둬도 됨)
-        for col in header:
-            if col not in new_df.columns:
-                new_df[col] = ""
-        # 세션 저장(표시는 편집 컬럼 중심으로 유지)
-        st.session_state["acl_df"] = new_df[[c for c in work.columns if c in new_df.columns]].copy()
-
-    # 저장 버튼(전체 반영: 헤더+모든 행 덮어쓰기, '이름'은 저장 직전에 파생)
-    if st.button("권한 전체 반영", type="primary", use_container_width=True, disabled=not am_admin):
+    # 저장: 전체 덮어쓰기
+    if st.button("권한 전체 반영 (시트 저장)", type="primary", use_container_width=True, disabled=not can_edit):
         try:
-            ws = get_book().worksheet(AUTH_SHEET)
-            header = [*st.session_state.get("acl_header", AUTH_HEADERS)] or AUTH_HEADERS
-
-            # 1) 헤더 덮어쓰기
-            _retry(ws.update, "1:1", [header], value_input_option="USER_ENTERED")
-
-            # 2) 편집본에서 저장용 DF 생성: '사번'은 라벨→실사번, '이름'은 사번으로부터 파생
-            save_df = st.session_state["acl_df"].copy()
-
-            def _sab_from_label(v: str):
-                s = str(v).strip()
-                return sabun_by_label.get(s) or (s.split(" - ", 1)[0].strip() if " - " in s else s)
-
-            if "사번" in save_df.columns:
-                save_df["사번"] = save_df["사번"].map(_sab_from_label)
-
-            # 이름 파생(저장 직전)
-            if "이름" not in save_df.columns:
-                save_df.insert(1, "이름", "")
+            # 사번 라벨 → 실제 사번
+            inv_label = {v: k for k, v in label_by_sabun.items()}
+            save_df = edited.copy()
+            save_df["사번"] = save_df["사번"].map(lambda v: inv_label.get(str(v).strip(), str(v).split(" - ",1)[0].strip()))
+            # 이름 파생
             save_df["이름"] = save_df["사번"].map(lambda s: emp_lookup.get(str(s).strip(), "")).fillna("").astype(str)
 
-            # 저장 순서 헤더 정렬
-            for col in header:
-                if col not in save_df.columns:
-                    save_df[col] = ""
-            save_df = save_df[header]
+            # 헤더/값 준비
+            ws = get_book().worksheet(AUTH_SHEET)
+            _retry(ws.update, "1:1", [AUTH_HEADERS], value_input_option="USER_ENTERED")
 
-            # 체크박스 보장
-            if "활성" in save_df.columns:
-                def _to_bool_local(x):
-                    if isinstance(x, bool): return x
-                    s = str(x).strip().lower()
-                    return s in ("true","1","y","yes","t","on","checked")
-                save_df["활성"] = save_df["활성"].map(_to_bool_local)
+            values = []
+            for _, r in save_df[AUTH_HEADERS].iterrows():
+                values.append([r.get(c, "") for c in AUTH_HEADERS])
 
-            # 완전 빈 행 제거
-            save_df = save_df[
-                save_df.astype(str).apply(lambda r: "".join(r.values).strip() != "", axis=1)
-            ]
+            if values:
+                _retry(ws.update, f"2:{len(values)+1}", values, value_input_option="USER_ENTERED")
+            # 값이 0개면 헤더 아래를 정리
+            else:
+                try:
+                    ws.resize(rows=2)
+                except Exception:
+                    pass
 
-            # 3) 본문 전부 덮어쓰기 (기존 행 깨끗이 정리)
-            data = save_df.fillna("").values.tolist()
-
-            # 시트를 데이터 크기에 맞춰 정리(남는 행 제거)
             try:
-                # 먼저 충분히 키우고
-                _ensure_capacity(ws, (len(data) + 1) if data else 1, max(1, len(header)))
-                # 본문 덮어쓰기
-                if data:
-                    _retry(ws.update, "A2", data, value_input_option="USER_ENTERED")
-                # 남는 행 잘라내기(헤더 포함 총 len(data)+1행만 유지)
-                _retry(ws.resize, rows=max(1, len(data) + 1))
+                st.cache_data.clear()
             except Exception:
-                # 최소 보루: 그래도 값만은 쓰기
-                if data:
-                    _retry(ws.update, "A2", data, value_input_option="USER_ENTERED")
-
-            st.success(f"업데이트 완료: {len(data)}행", icon="✅")
+                pass
+            st.success("권한 시트 저장 완료", icon="✅")
         except Exception as e:
             st.exception(e)
 
@@ -2938,10 +3185,10 @@ def tab_help():
         - 직원: `직원` 시트
         - 권한: `권한` 시트 (역할=admin/manager, 범위유형: 공란=전체 · 부서 · 개별)
         - 평가 항목: `평가_항목` 시트
-        - 인사평가: `인사평가_YYYY` 시트
+        - 인사평가: `인사평가` 시트
         - 직무기술서: `직무기술서` 시트
         - 직무기술서(부서장 승인): `직무기술서_승인` 시트
-        - 직무능력평가: `직무능력평가_YYYY` 시트
+        - 직무능력평가: `직무능력평가` 시트
     """)
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -2991,18 +3238,30 @@ def main():
             if not is_admin(me):
                 st.warning("관리자 전용 메뉴입니다.", icon="🔒")
             else:
-                # (선택) 동기화 버튼(수동)
+                # 동기화 도구(직원)
                 with st.expander("🔁 동기화 도구 (시트 ↔ Supabase)", expanded=False):
-                    c1, c2 = st.columns([1, 1])
+                    c1, c2, c3 = st.columns(3)
                     with c1:
-                        if st.button("직원 동기화 (시트 → Supabase)"):
+                        if st.button("직원 동기화"):
                             sync_sheet_to_supabase_employees_v1()
-                    with c2:
                         try:
                             cnt = supabase.table("employees").select("사번", count="exact").execute().count
-                            st.caption(f"현재 Supabase employees 행수: {cnt}")
-                        except Exception:
-                            st.caption("행수 확인 불가")
+                            st.caption(f"employees: {cnt}")
+                        except Exception: pass
+                    with c2:
+                        if st.button("평가_항목 동기화"):
+                            sync_sheet_to_supabase_eval_items_v1()
+                        try:
+                            cnt = supabase.table("eval_items").select("항목ID", count="exact").execute().count
+                            st.caption(f"eval_items: {cnt}")
+                        except Exception: pass
+                    with c3:
+                        if st.button("권한 동기화"):
+                            sync_sheet_to_supabase_acl_v1()
+                        try:
+                            cnt = supabase.table("acl").select("사번", count="exact").execute().count
+                            st.caption(f"acl: {cnt}")
+                        except Exception: pass
 
                 a1, a2, a3, a4 = st.tabs(["직원","PIN 관리","평가 항목 관리","권한 관리"])
                 with a1:
