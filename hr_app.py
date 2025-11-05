@@ -32,10 +32,10 @@ st.set_page_config(page_title=APP_TITLE, layout="wide")
 # ▼ 바로 아래에 추가 (레이아웃 폭은 건드리지 않음)
 st.markdown("""
 <style>
-  /* 상단 여백만 살짝 유지 */
+  /* 상단 여백만 살짝 줄임 */
   :where([data-testid="stAppViewContainer"]) .block-container { padding-top: 0.4rem !important; }
 
-  /* 제목 */
+  /* 제목: 통일/굵게/약간 크게 */
   .app-title-hero{
     font-weight: 800; 
     font-size: 1.6rem; 
@@ -50,33 +50,27 @@ st.markdown("""
   .stTabs button[role='tab']{ font-weight:700 !important; margin-right:18px !important; }
   div[data-baseweb="tab-list"] button{ font-weight:700 !important; margin-right:18px !important; }
 
-  /* ★ 오른쪽 메뉴 전용 래퍼: 자식들 간격은 gap으로 일괄 관리 */
+  /* ★ 오른쪽 메뉴 전용 래퍼: 자식들 간격을 gap으로 일괄 관리 */
   .right-pane{
     display: flex;
     flex-direction: column;
     gap: 10px;               /* 기본 항목 간 간격 */
   }
 
-  /* 바(연두/노랑)가 마크다운/상자일 때 위아래 균등하게 보이도록 보정(선택) */
-  .right-pane .bar{ padding: .35rem .6rem; border-radius: .375rem; font-weight: 700; }
-  .right-pane .bar-target{ background: #e6f6e6; }  /* ✅ 대상자 (연두) */
-  .right-pane .bar-time{   background: #fff5cc; }  /* 🕒 제출시각 (노랑) */
+  /* 선택: 연두/노랑 바 일관 스타일(있을 때만) */
+  .right-pane .bar{ padding: .35rem .6rem; border-radius: .375rem; font-weight:700; }
+  .right-pane .bar-target{ background:#e6f6e6; }  /* ✅ 대상자 */
+  .right-pane .bar-time{   background:#fff5cc; }  /* 🕒 제출시각 */
 
-  /* “제출시각(노란색바)” 위/아래 간격을 ‘대상자’와 동일하게 강제 */
-  .right-pane .bar-time + *{ margin-top: 0 !important; }  /* 개별 컴포넌트가 가진 상단마진 무시 */
-  .right-pane{ --time-gap: 10px; }                         /* 필요시 숫자만 바꿔 조절 */
-  .right-pane .bar-time{ margin-bottom: 0 !important; }
-  .right-pane .bar-target{ margin-bottom: 0 !important; }
+  /* 제출시각 위/아래 간격 균등 보정 */
+  .right-pane > *{ margin-top:0 !important; margin-bottom:0 !important; }
+  .right-pane > * + *{ margin-top:10px !important; }
 
-  /* Streamlit 기본 마진이 섞여 불규칙해지는 것을 방지 (직계 자식에만 규칙 적용) */
-  .right-pane > *{ margin-top: 0 !important; margin-bottom: 0 !important; }
-  .right-pane > * + *{ margin-top: var(--time-gap) !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# 제목은 한 번만
+# 제목은 한 번만 여기서 출력 (로그인 전/후 공통으로 최상단에 고정)
 st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=True)
-
 
 # ────────────────────────────────────────────────────────────────
 # 공용 유틸
@@ -3364,13 +3358,19 @@ def main():
         tabs = st.tabs(["인사평가","직무기술서","직무능력평가","관리자","도움말"])
 
         with tabs[0]:
+            st.markdown('<div class="right-pane">', unsafe_allow_html=True)
             tab_eval(emp_df)
+            st.markdown('</div>', unsafe_allow_html=True)
 
         with tabs[1]:
+            st.markdown('<div class="right-pane">', unsafe_allow_html=True)
             tab_job_desc(emp_df)
+            st.markdown('</div>', unsafe_allow_html=True)
 
         with tabs[2]:
+            st.markdown('<div class="right-pane">', unsafe_allow_html=True)
             tab_competency(emp_df)
+            st.markdown('</div>', unsafe_allow_html=True)
 
         with tabs[3]:
             me = str(st.session_state.get("user", {}).get("사번", ""))
