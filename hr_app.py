@@ -43,7 +43,7 @@ st.markdown("""
 
   /* ① DB연결 ↔ 사용자 */
   :where([data-testid="stCaptionContainer"]){
-    margin: .05rem 0 .05rem !important; /* ← 마지막 값이 아래쪽 간격 */
+    margin: .05rem 0 .02rem !important; /* ← 마지막 값이 아래쪽 간격 */
     line-height: 1.25;
   }
   :where([data-testid="stMarkdownContainer"]) ul{ margin: 0 0 .40rem !important; }
@@ -51,7 +51,7 @@ st.markdown("""
 
   /* ② 총 00명 ↔ 대시보드 보기 (필요 시 아래 숫자만 조정) */
   :where([data-testid="stCaptionContainer"]){
-    margin-block-end: .14rem !important; /* ← 총원 캡션의 아래쪽 간격 */
+    margin-block-end: .04rem !important; /* ← 총원 캡션의 아래쪽 간격 */
   }
   :where([data-testid="stCheckbox"]){
     margin: 0 0 .14rem !important;       /* ← 체크박스 아래쪽 간격 */
