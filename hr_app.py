@@ -52,26 +52,8 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown("""
-<style>
-  /* ── Right column spacing using :has() + marker ───────────────── */
-  div[data-testid="column"]:has([data-rp="right-pane"]) 
-    [data-testid="stVerticalBlock"] + [data-testid="stVerticalBlock"]{
-      margin-top: 20px !important;   /* ← 간격 조절 숫자 */
-  }
-  /* Optional: bar styles */
-  .bar{ padding:.35rem .6rem; border-radius:.375rem; font-weight:700; }
-  .bar-target{ background:#e6f6e6; }  /* ✅ 대상자 */
-  .bar-time{   background:#fff5cc; }  /* 🕒 제출시각 */
-</style>
-""", unsafe_allow_html=True)
-
 # 제목은 한 번만 여기서 출력 (로그인 전/후 공통으로 최상단에 고정)
 st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=True)
-
-def mark_right_pane():
-    """오른쪽 컬럼 시작 직후에 한 번 호출하세요 (DOM 식별 마커)."""
-    st.markdown('<i data-rp="right-pane"></i>', unsafe_allow_html=True)
 
 # ────────────────────────────────────────────────────────────────
 # 공용 유틸
@@ -3356,7 +3338,6 @@ def main():
         render_staff_picker_left(emp_df)
 
     with right:
-        mark_right_pane()
         tabs = st.tabs(["인사평가","직무기술서","직무능력평가","관리자","도움말"])
 
         with tabs[0]:
