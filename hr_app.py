@@ -32,46 +32,27 @@ st.set_page_config(page_title=APP_TITLE, layout="wide")
 # ▼ 바로 아래에 둡니다 (레이아웃 폭은 건드리지 않음)
 st.markdown("""
 <style>
-  /* 상단 여백만 살짝 */
-  :where([data-testid="stAppViewContainer"]) .block-container { padding-top: .1rem !important; }
+  /* 상단 여백만 살짝 줄임 */
+  :where([data-testid="stAppViewContainer"]) .block-container { padding-top: 0.1rem !important; }
 
-  /* 제목 */
+  /* 제목: 통일/굵게/약간 크게 */
   .app-title-hero{
-    font-weight:800; font-size:1.6rem; line-height:1.15; margin:.1rem 0 .2rem !important;
+    font-weight: 800; font-size: 1.6rem; line-height: 1.15; margin: .1rem 0 .2rem !important;
   }
   @media (min-width:1400px){ .app-title-hero{ font-size:1.75rem; } }
 
-  /* ───────── 이 세 값만 바꾸면 전체 세로 간격이 바로 줄어듭니다 ───────── */
-  /* 1) 세로 블록 기본 간격(모든 위젯 사이의 기본 gutter) */
-  :where([data-testid="stVerticalBlock"]){
-    gap: .10rem !important;            /* ← 여기 숫자 줄이면 전반 간격이 확 줄어요 */
-    row-gap: .10rem !important;        /* (구 버전 호환) */
+  /* 캡션(“DB연결 …”) 위/아래 간격도 축소 */
+  :where([data-testid="stCaptionContainer"]){
+    margin: .05rem 0 .15rem !important; line-height: 1.25;
   }
 
-  /* 2) 각 위젯 래퍼의 안쪽패딩(세로 간격 보정) */
-  :where([data-testid="element-container"]){
-    padding-top: .04rem !important;    /* ← 위 */
-    padding-bottom: .04rem !important; /* ← 아래 */
-    margin: 0 !important;
-  }
-
-  /* 3) 표 위쪽만 추가로 조정(대시보드 ↔ 표) */
-  :where([data-testid="stDataFrame"]), :where([data-testid="stTable"]){
-    margin-top: .08rem !important;     /* 더 붙이고 싶으면 .04rem 등으로 */
-  }
-  /* ─────────────────────────────────────────────────────────── */
-
-  /* (선택) 불필요한 기본 마진 최소화 */
-  :where([data-testid="stMarkdownContainer"]) :is(p,ul){ margin:.04rem 0 !important; }
-  :where([data-testid="stCaptionContainer"]){ margin:.02rem 0 .04rem !important; line-height:1.25; }
-
-  /* 탭 굵게/간격 */
-  .stTabs [role='tab'], .stTabs button[role='tab'], div[data-baseweb="tab-list"] button{ font-weight:700 !important; }
+  /* 탭: 볼드 + 간격 확장 (신/구 DOM 동시 대응) */
+  .stTabs [role='tab']{ font-weight:700 !important; }
   .stTabs [role='tablist']{ gap: 18px !important; }
-  .stTabs button[role='tab'], div[data-baseweb="tab-list"] button{ margin-right:18px !important; }
+  .stTabs button[role='tab']{ font-weight:700 !important; margin-right:18px !important; }
+  div[data-baseweb="tab-list"] button{ font-weight:700 !important; margin-right:18px !important; }
 </style>
 """, unsafe_allow_html=True)
-
 
 # 제목은 한 번만 여기서 출력 (로그인 전/후 공통, 최상단 고정)
 st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=True)
