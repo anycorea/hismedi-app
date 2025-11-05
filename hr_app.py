@@ -51,16 +51,16 @@ st.markdown("""
 
   /* ② 총 00명 ↔ 대시보드 보기 (필요 시 아래 숫자만 조정) */
   :where([data-testid="stCaptionContainer"]){
-    margin-block-end: .26rem !important; /* ← 총원 캡션의 아래쪽 간격 */
+    margin-block-end: .14rem !important; /* ← 총원 캡션의 아래쪽 간격 */
   }
   :where([data-testid="stCheckbox"]){
-    margin: 0 0 .18rem !important;       /* ← 체크박스 아래쪽 간격 */
+    margin: 0 0 .14rem !important;       /* ← 체크박스 아래쪽 간격 */
   }
 
   /* ③ 대시보드 보기 ↔ 표 */
   :where([data-testid="stDataFrame"]), 
   :where([data-testid="stTable"]){
-    margin-top: .18rem !important;       /* ← 표 위쪽 간격 */
+    margin-top: .14rem !important;       /* ← 표 위쪽 간격 */
   }
   /* ──────────────────────────────────────────────────────── */
 
