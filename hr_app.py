@@ -44,6 +44,13 @@ st.markdown("""
   }
   @media (min-width:1400px){ .app-title-hero{ font-size:1.75rem; } }
 
+  /* 탭: 볼드 + 간격 확장 (신/구 DOM 동시 대응) */
+  .stTabs [role='tab']{ font-weight:700 !important; }
+  .stTabs [role='tablist']{ gap: 18px !important; }
+  .stTabs button[role='tab']{ font-weight:700 !important; margin-right:18px !important; }
+  div[data-baseweb="tab-list"] button{ font-weight:700 !important; margin-right:18px !important; }
+</style>
+""", unsafe_allow_html=True)
 
 # 제목은 한 번만 여기서 출력 (로그인 전/후 공통으로 최상단에 고정)
 st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=True)
