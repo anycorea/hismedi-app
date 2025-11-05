@@ -49,6 +49,18 @@ st.markdown("""
   .stTabs [role='tablist']{ gap: 18px !important; }
   .stTabs button[role='tab']{ font-weight:700 !important; margin-right:18px !important; }
   div[data-baseweb="tab-list"] button{ font-weight:700 !important; margin-right:18px !important; }
+
+  /* 오른쪽 콘텐츠 영역만 간격 추가 */
+  .stContainer {
+    margin-top: 1rem !important;  /* 상단 여백 추가 */
+    margin-bottom: 1rem !important;  /* 하단 여백 추가 */
+  }
+
+  /* 오른쪽 메뉴 내에서만 여백을 줄 요소들 (예: 텍스트 필드, 버튼 등) */
+  .stContainer .stTextInput, .stContainer .stButton, .stContainer .stRadio, .stContainer .stSelectbox, .stContainer .stCheckbox, .stContainer .stMarkdown, .stContainer .stTable, .stContainer .stImage {
+    margin-top: 0.6rem !important;  /* 상단 여백 추가 */
+    margin-bottom: 0.6rem !important;  /* 하단 여백 추가 */
+  }
 </style>
 """, unsafe_allow_html=True)
 
