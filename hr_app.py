@@ -61,7 +61,7 @@ st.markdown("""
   /* B) "총 00명" 캡션 ↔ "대시보드 보기" 체크박스 (첫 체크박스) */
   :where([data-testid="stCaptionContainer"]) 
   + :where([data-testid="element-container"]:has([data-testid="stCheckbox"])){
-    margin-top: -0.16rem !important;   /* 권장 범위: -0.08 ~ -0.24rem */
+    margin-top: -0.24rem !important;   /* 권장 범위: -0.08 ~ -0.24rem */
   }
 
   /* C) "대시보드 보기" 체크박스 ↔ 표(첫 표) */
