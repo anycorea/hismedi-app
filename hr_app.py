@@ -41,28 +41,47 @@ st.markdown("""
   }
   @media (min-width:1400px){ .app-title-hero{ font-size:1.75rem; } }
 
+  /* ─────────────────────────────────────────────────────────────
+     아래 세 래퍼(element-container) 규칙이 '눈에 보이는 간격'을 직접 줄입니다.
+     A/B/C 숫자만 바꿔도 충분합니다.
+     ───────────────────────────────────────────────────────────── */
+
+  /* A) ① DB연결 캡션 ↔ 사용자 줄 (캡션 래퍼 간격) */
+  :where([data-testid="element-container"]:has([data-testid="stCaptionContainer"])){
+    padding-top:.04rem !important;  /* ← A-1 */
+    padding-bottom:.04rem !important; /* ← A-2 */
+    margin:0 !important;
+  }
+
+  /* B) ② 총원 캡션 ↔ 대시보드(체크박스) (체크박스 래퍼 간격) */
+  :where([data-testid="element-container"]:has([data-testid="stCheckbox"])){
+    padding-top:.04rem !important;  /* ← B-1 */
+    padding-bottom:.04rem !important; /* ← B-2 */
+    margin:.04rem 0 .04rem !important; /* ← B-3(위/아래) */
+  }
+
+  /* C) ③ 대시보드(체크박스) ↔ 표 (표 래퍼 위쪽 간격) */
+  :where([data-testid="element-container"]:has([data-testid="stDataFrame"], [data-testid="stTable"])){
+    margin-top:.10rem !important; /* ← C(더 붙이고 싶으면 .06rem 등) */
+    padding-top:0 !important;
+  }
+
+  /* 요소 자체의 기본 마진도 최소화(보조 조정용) */
   /* ① DB연결 ↔ 사용자 */
   :where([data-testid="stCaptionContainer"]){
-    margin: .05rem 0 .02rem !important; /* ← 마지막 값이 아래쪽 간격 */
-    line-height: 1.25;
+    margin:.03rem 0 .06rem !important; /* caption 자체 하단 여백 */
+    line-height:1.25;
   }
-  :where([data-testid="stMarkdownContainer"]) ul{ margin: 0 0 .40rem !important; }
-  :where([data-testid="stMarkdownContainer"]) li{ margin: 0 !important; }
+  :where([data-testid="stMarkdownContainer"]) ul{ margin:0 0 .04rem !important; } /* 사용자 줄 아래 */
+  :where([data-testid="stMarkdownContainer"]) li{ margin:0 !important; }
 
-  /* ② 총 00명 ↔ 대시보드 보기 (필요 시 아래 숫자만 조정) */
-  :where([data-testid="stCaptionContainer"]){
-    margin-block-end: .02rem !important; /* ← 총원 캡션의 아래쪽 간격 */
-  }
-  :where([data-testid="stCheckbox"]){
-    margin: 0 0 .02rem !important;       /* ← 체크박스 아래쪽 간격 */
-  }
+  /* ② 총 00명 ↔ 대시보드: 체크박스 자체의 아래쪽 여백(보조) */
+  :where([data-testid="stCheckbox"]){ margin:0 0 .06rem !important; }
 
-  /* ③ 대시보드 보기 ↔ 표 */
-  :where([data-testid="stDataFrame"]), 
-  :where([data-testid="stTable"]){
-    margin-top: .14rem !important;       /* ← 표 위쪽 간격 */
+  /* ③ 대시보드 ↔ 표: 표 위쪽 여백(보조) */
+  :where([data-testid="stDataFrame"]), :where([data-testid="stTable"]){
+    margin-top:.10rem !important;
   }
-  /* ──────────────────────────────────────────────────────── */
 
   /* 탭 굵게/간격 */
   .stTabs [role='tab'], .stTabs button[role='tab'], div[data-baseweb="tab-list"] button{ font-weight:700 !important; }
