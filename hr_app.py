@@ -49,6 +49,22 @@ st.markdown("""
   .stTabs [role='tablist']{ gap: 18px !important; }
   .stTabs button[role='tab']{ font-weight:700 !important; margin-right:18px !important; }
   div[data-baseweb="tab-list"] button{ font-weight:700 !important; margin-right:18px !important; }
+
+  /* ── 제출시각(노란바) 정렬/간격 보정 ───────────────────────────── */
+  /* 1) 알림 박스 자체: 위 들뜸 제거, 아래 간격 고정 */
+  :where(.stAlert,[data-testid="stNotification"],[role="alert"]){
+    margin-top: 0 !important;
+    margin-bottom: .5rem !important;   /* 필요시 .4~.6rem로 조절 */
+  }
+  /* 2) 내부 첫 문단/헤딩의 기본 margin-top 제거(들뜸 원인) */
+  :where(.stAlert,[data-testid="stNotification"],[role="alert"])
+    :is(p,h1,h2,h3,h4,h5,h6):first-child{
+    margin-top: 0 !important;
+  }
+  /* 3) 일부 테마에서 마진 상쇄 대비: 내부 상단 패딩으로 미세 보강 */
+  :where(.stAlert,[data-testid="stNotification"],[role="alert"]) > div:first-child{
+    padding-top: .35rem !important;    /* .3~.4rem 범위에서 미세조정 */
+  }
 </style>
 """, unsafe_allow_html=True)
 
