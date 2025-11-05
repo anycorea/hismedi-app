@@ -3305,6 +3305,7 @@ def main():
     st.session_state["emp_df"] = emp_df.copy()
 
     if not _session_valid():
+        st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=True)
         show_login(emp_df)
         return
 
@@ -3313,6 +3314,7 @@ def main():
     left, right = st.columns([1.35, 3.65], gap="large")
 
     with left:
+        st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=True)
         u = st.session_state.get("user", {})
         st.caption(f"DB연결 {kst_now_str()}")
         st.markdown(f"- 사용자: **{u.get('이름','')} ({u.get('사번','')})**")
