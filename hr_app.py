@@ -50,11 +50,6 @@ st.markdown("""
     line-height: 1.25;                    /* 필요 시 줄간격 */
   }
 
-  /* 탭: 볼드 + 간격 확장 (신/구 DOM 동시 대응) */
-  .stTabs [role='tab']{ font-weight:700 !important; }
-  .stTabs [role='tablist']{ gap: 18px !important; }
-  .stTabs button[role='tab']{ font-weight:700 !important; margin-right:18px !important; }
-  div[data-baseweb="tab-list"] button{ font-weight:700 !important; margin-right:18px !important; }
 </style>
 """, unsafe_allow_html=True)
 
