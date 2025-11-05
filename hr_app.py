@@ -29,7 +29,7 @@ from datetime import datetime
 APP_TITLE = st.secrets.get("app", {}).get("TITLE", "HISMEDI † HR · JD")
 st.set_page_config(page_title=APP_TITLE, layout="wide")
 
-# ▼ 바로 아래에 추가 (레이아웃 폭은 건드리지 않음)
+# ▼ 바로 아래에 둡니다 (레이아웃 폭은 건드리지 않음)
 st.markdown("""
 <style>
   /* 상단 여백만 살짝 줄임 */
@@ -52,7 +52,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 제목은 한 번만 여기서 출력 (로그인 전/후 공통으로 최상단에 고정)
+# 제목은 한 번만 여기서 출력 (로그인 전/후 공통, 최상단 고정)
 st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=True)
 
 # ────────────────────────────────────────────────────────────────
