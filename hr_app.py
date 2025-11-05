@@ -570,17 +570,12 @@ def _pin_hash(pin: str, sabun: str) -> str:
 def show_submit_banner(text: str):
     try:
         st.markdown(
-            "<div style=\"background:#FEF3C7;border:1px solid #FDE68A;"
-            "padding:.55rem .8rem;border-radius:.5rem;font-weight:600;line-height:1.35;\">"
+            "<div style=\"background:#FEF3C7;border:1px solid #FDE68A;padding:.55rem .8rem;border-radius:.5rem;font-weight:600;line-height:1.35;margin:0 0 12px 0;\">"
             f"{text}</div>",
             unsafe_allow_html=True
         )
     except Exception:
         st.info(text)
-
-# ────────────────────────────────────────────────────────────────────────────
-# PIN Utilities (hardened)
-# ────────────────────────────────────────────────────────────────────────────
 
 def _eq(a: str, b: str) -> bool:
     # 안전한 상수시간 비교 (hex 문자열 케이스)
@@ -3310,7 +3305,6 @@ def main():
     st.session_state["emp_df"] = emp_df.copy()
 
     if not _session_valid():
-        st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=True)
         show_login(emp_df)
         return
 
@@ -3320,7 +3314,6 @@ def main():
 
     with left:
         u = st.session_state.get("user", {})
-        st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=True)
         st.caption(f"DB연결 {kst_now_str()}")
         st.markdown(f"- 사용자: **{u.get('이름','')} ({u.get('사번','')})**")
 
