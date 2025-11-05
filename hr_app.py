@@ -54,7 +54,7 @@ st.markdown("""
   .right-pane{
     display: flex;
     flex-direction: column;
-    gap: 10px;               /* 기본 항목 간 간격 */
+    gap: 12px;               /* 기본 항목 간 간격 */
   }
 
   /* 선택: 연두/노랑 바 일관 스타일(있을 때만) */
