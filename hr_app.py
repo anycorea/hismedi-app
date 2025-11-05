@@ -49,6 +49,20 @@ st.markdown("""
   .stTabs [role='tablist']{ gap: 18px !important; }
   .stTabs button[role='tab']{ font-weight:700 !important; margin-right:18px !important; }
   div[data-baseweb="tab-list"] button{ font-weight:700 !important; margin-right:18px !important; }
+
+  /* 제출시각과 그 아래 요소들의 간격을 맞추기 */
+  .stTextInput, .stButton, .stRadio, .stSelectbox {
+    margin-top: 1rem !important;  /* 상단 여백 추가 */
+  }
+
+  .stMarkdown, .stTable, .stImage, .stCheckbox {
+    margin-bottom: 1rem !important;  /* 하단 여백 추가 */
+  }
+
+  /* 추가 여백을 원하는 곳에 적용 */
+  .stFormLabel {
+    margin-bottom: 1rem !important;
+  }
 </style>
 """, unsafe_allow_html=True)
 
