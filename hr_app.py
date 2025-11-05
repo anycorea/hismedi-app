@@ -49,23 +49,11 @@ st.markdown("""
   .stTabs [role='tablist']{ gap: 18px !important; }
   .stTabs button[role='tab']{ font-weight:700 !important; margin-right:18px !important; }
   div[data-baseweb="tab-list"] button{ font-weight:700 !important; margin-right:18px !important; }
-
-  /* 제출시각과 그 아래 요소들의 간격을 맞추기 */
-  .stTextInput, .stButton, .stRadio, .stSelectbox, .stMarkdown, .stTable, .stImage, .stCheckbox, .stFormLabel {
-    margin-top: 0.6rem !important;  /* 상단 여백 추가 */
-    margin-bottom: 0.6rem !important;  /* 하단 여백 추가 */
-  }
-
-  /* 로그인 화면이나 왼쪽 메뉴에 영향을 주지 않도록 범위 좁히기 */
-  .stSidebar, .stMarkdown, .stTextInput, .stButton, .stSelectbox {
-    margin: 0 !important;  /* 메뉴와 로그인 화면의 간격을 유지 */
-  }
 </style>
 """, unsafe_allow_html=True)
 
 # 제목은 한 번만 여기서 출력 (로그인 전/후 공통으로 최상단에 고정)
 st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=True)
-
 
 # ────────────────────────────────────────────────────────────────
 # 공용 유틸
