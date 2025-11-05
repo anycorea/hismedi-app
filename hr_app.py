@@ -48,21 +48,21 @@ st.markdown("""
 
   /* A) ① DB연결 캡션 ↔ 사용자 줄 (캡션 래퍼 간격) */
   :where([data-testid="element-container"]:has([data-testid="stCaptionContainer"])){
-    padding-top:.04rem !important;  /* ← A-1 */
-    padding-bottom:.02rem !important; /* ← A-2 */
+    padding-top:.01rem !important;  /* ← A-1 */
+    padding-bottom:.01rem !important; /* ← A-2 */
     margin:0 !important;
   }
 
   /* B) ② 총원 캡션 ↔ 대시보드(체크박스) (체크박스 래퍼 간격) */
   :where([data-testid="element-container"]:has([data-testid="stCheckbox"])){
-    padding-top:.04rem !important;  /* ← B-1 */
-    padding-bottom:.04rem !important; /* ← B-2 */
-    margin:.04rem 0 .04rem !important; /* ← B-3(위/아래) */
+    padding-top:.01rem !important;  /* ← B-1 */
+    padding-bottom:.01rem !important; /* ← B-2 */
+    margin:.04rem 0 .01rem !important; /* ← B-3(위/아래) */
   }
 
   /* C) ③ 대시보드(체크박스) ↔ 표 (표 래퍼 위쪽 간격) */
   :where([data-testid="element-container"]:has([data-testid="stDataFrame"], [data-testid="stTable"])){
-    margin-top:.10rem !important; /* ← C(더 붙이고 싶으면 .06rem 등) */
+    margin-top:.06rem !important; /* ← C(더 붙이고 싶으면 .06rem 등) */
     padding-top:0 !important;
   }
 
