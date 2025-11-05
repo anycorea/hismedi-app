@@ -57,30 +57,30 @@ st.markdown("""
   :where([data-testid="element-container"]:has([data-testid="stCheckbox"])){
     padding-top:.01rem !important;  /* ← B-1 */
     padding-bottom:.01rem !important; /* ← B-2 */
-    margin:.04rem 0 .01rem !important; /* ← B-3(위/아래) */
+    margin:.01rem 0 .01rem !important; /* ← B-3(위/아래) */
   }
 
   /* C) ③ 대시보드(체크박스) ↔ 표 (표 래퍼 위쪽 간격) */
   :where([data-testid="element-container"]:has([data-testid="stDataFrame"], [data-testid="stTable"])){
-    margin-top:.06rem !important; /* ← C(더 붙이고 싶으면 .06rem 등) */
+    margin-top:.01rem !important; /* ← C(더 붙이고 싶으면 .06rem 등) */
     padding-top:0 !important;
   }
 
   /* 요소 자체의 기본 마진도 최소화(보조 조정용) */
   /* ① DB연결 ↔ 사용자 */
   :where([data-testid="stCaptionContainer"]){
-    margin:.03rem 0 .06rem !important; /* caption 자체 하단 여백 */
+    margin:.01rem 0 .01rem !important; /* caption 자체 하단 여백 */
     line-height:1.25;
   }
-  :where([data-testid="stMarkdownContainer"]) ul{ margin:0 0 .04rem !important; } /* 사용자 줄 아래 */
+  :where([data-testid="stMarkdownContainer"]) ul{ margin:0 0 .01rem !important; } /* 사용자 줄 아래 */
   :where([data-testid="stMarkdownContainer"]) li{ margin:0 !important; }
 
   /* ② 총 00명 ↔ 대시보드: 체크박스 자체의 아래쪽 여백(보조) */
-  :where([data-testid="stCheckbox"]){ margin:0 0 .06rem !important; }
+  :where([data-testid="stCheckbox"]){ margin:0 0 .01rem !important; }
 
   /* ③ 대시보드 ↔ 표: 표 위쪽 여백(보조) */
   :where([data-testid="stDataFrame"]), :where([data-testid="stTable"]){
-    margin-top:.10rem !important;
+    margin-top:.01rem !important;
   }
 
   /* 탭 굵게/간격 */
