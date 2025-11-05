@@ -46,7 +46,7 @@ st.markdown("""
     margin: .05rem 0 .08rem !important; /* ← 마지막 값이 아래쪽 간격 */
     line-height: 1.25;
   }
-  :where([data-testid="stMarkdownContainer"]) ul{ margin: 0 0 .05rem !important; }
+  :where([data-testid="stMarkdownContainer"]) ul{ margin: 0 0 .40rem !important; }
   :where([data-testid="stMarkdownContainer"]) li{ margin: 0 !important; }
 
   /* ② 총 00명 ↔ 대시보드 보기 (필요 시 아래 숫자만 조정) */
