@@ -37,17 +37,38 @@ st.markdown("""
 
   /* 제목: 통일/굵게/약간 크게 */
   .app-title-hero{
-    font-weight: 800; 
-    font-size: 1.6rem; 
-    line-height: 1.15; 
-    margin: .1rem 0 .2rem !important;    /* ← 제목 아래 여백 더 줄임(.25rem→.2rem) */
+    font-weight: 800; font-size: 1.6rem; line-height: 1.15; margin: .1rem 0 .2rem !important;
   }
   @media (min-width:1400px){ .app-title-hero{ font-size:1.75rem; } }
 
   /* 캡션(“DB연결 …”) 위/아래 간격도 축소 */
   :where([data-testid="stCaptionContainer"]){
-    margin: .05rem 0 .15rem !important;   /* ← 숫자만 조절해서 미세 튜닝 */
-    line-height: 1.25;                    /* 필요 시 줄간격 */
+    margin: .05rem 0 .15rem !important; line-height: 1.25;
+  }
+
+  /* ① DB연결 캡션 ↔ 사용자 리스트 사이 */
+  :where([data-testid="stCaptionContainer"]){
+    /* 모든 st.caption 아래쪽 간격을 기본으로 줄임 */
+    margin-block: 0 var(--gap-user) !important;
+  }
+  /* 사용자 표시가 리스트(<ul><li>)로 렌더될 때 여백 최소화 */
+  :where([data-testid="stMarkdownContainer"]) ul{ margin: 0 0 calc(var(--gap-user)/3) !important; }
+  :where([data-testid="stMarkdownContainer"]) li{ margin: 0 !important; }
+
+  /* ② "총 00명" 캡션 ↔ 체크박스 사이 */
+  /* 캡션은 위에서 공통으로 margin-bottom이 적용됨 → var(--gap-total-dashboard)로 보정 */
+  :where([data-testid="stCaptionContainer"])
+  { margin-block-end: var(--gap-total-dashboard) !important; }
+
+  /* 체크박스 자체의 바깥 여백(아래쪽)도 살짝 통제 */
+  :where([data-testid="stCheckbox"]){
+    margin: 0 0 var(--gap-dashboard-table) !important;
+  }
+
+  /* ③ "대시보드 보기" ↔ 표 사이 */
+  :where([data-testid="stDataFrame"]), 
+  :where([data-testid="stTable"]){
+    margin-top: var(--gap-dashboard-table) !important;
   }
 
   /* 탭: 볼드 + 간격 확장 (신/구 DOM 동시 대응) */
