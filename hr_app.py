@@ -49,28 +49,29 @@ st.markdown("""
   .stTabs [role='tablist']{ gap: 18px !important; }
   .stTabs button[role='tab']{ font-weight:700 !important; margin-right:18px !important; }
   div[data-baseweb="tab-list"] button{ font-weight:700 !important; margin-right:18px !important; }
+</style>
+""", unsafe_allow_html=True)
 
-  /* ★ 오른쪽 메뉴 전용 래퍼: 자식들 간격을 gap으로 일괄 관리 */
-  .right-pane{
-    display: flex;
-    flex-direction: column;
-    gap: 5px;               /* 기본 항목 간 간격 */
+st.markdown("""
+<style>
+  /* ── Right column spacing using :has() + marker ───────────────── */
+  div[data-testid="column"]:has([data-rp="right-pane"]) 
+    [data-testid="stVerticalBlock"] + [data-testid="stVerticalBlock"]{
+      margin-top: 12px !important;   /* ← 간격 조절 숫자 */
   }
-
-  /* 선택: 연두/노랑 바 일관 스타일(있을 때만) */
-  .right-pane .bar{ padding: .35rem .6rem; border-radius: .375rem; font-weight:700; }
-  .right-pane .bar-target{ background:#e6f6e6; }  /* ✅ 대상자 */
-  .right-pane .bar-time{   background:#fff5cc; }  /* 🕒 제출시각 */
-
-  /* 제출시각 위/아래 간격 균등 보정 */
-  .right-pane > *{ margin-top:0 !important; margin-bottom:0 !important; }
-  .right-pane > * + *{ margin-top:10px !important; }
-
+  /* Optional: bar styles */
+  .bar{ padding:.35rem .6rem; border-radius:.375rem; font-weight:700; }
+  .bar-target{ background:#e6f6e6; }  /* ✅ 대상자 */
+  .bar-time{   background:#fff5cc; }  /* 🕒 제출시각 */
 </style>
 """, unsafe_allow_html=True)
 
 # 제목은 한 번만 여기서 출력 (로그인 전/후 공통으로 최상단에 고정)
 st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=True)
+
+def mark_right_pane():
+    """오른쪽 컬럼 시작 직후에 한 번 호출하세요 (DOM 식별 마커)."""
+    st.markdown('<i data-rp="right-pane"></i>', unsafe_allow_html=True)
 
 # ────────────────────────────────────────────────────────────────
 # 공용 유틸
@@ -3355,22 +3356,17 @@ def main():
         render_staff_picker_left(emp_df)
 
     with right:
+        mark_right_pane()
         tabs = st.tabs(["인사평가","직무기술서","직무능력평가","관리자","도움말"])
 
         with tabs[0]:
-            st.markdown('<div class="right-pane">', unsafe_allow_html=True)
             tab_eval(emp_df)
-            st.markdown('</div>', unsafe_allow_html=True)
 
         with tabs[1]:
-            st.markdown('<div class="right-pane">', unsafe_allow_html=True)
             tab_job_desc(emp_df)
-            st.markdown('</div>', unsafe_allow_html=True)
 
         with tabs[2]:
-            st.markdown('<div class="right-pane">', unsafe_allow_html=True)
             tab_competency(emp_df)
-            st.markdown('</div>', unsafe_allow_html=True)
 
         with tabs[3]:
             me = str(st.session_state.get("user", {}).get("사번", ""))
