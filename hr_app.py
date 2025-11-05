@@ -32,56 +32,38 @@ st.set_page_config(page_title=APP_TITLE, layout="wide")
 # ▼ 바로 아래에 둡니다 (레이아웃 폭은 건드리지 않음)
 st.markdown("""
 <style>
-  /* 상단 여백만 살짝 줄임 */
+  /* 상단 여백만 살짝 */
   :where([data-testid="stAppViewContainer"]) .block-container { padding-top: .1rem !important; }
 
   /* 제목 */
   .app-title-hero{
-    font-weight: 800; font-size: 1.6rem; line-height: 1.15; margin: .1rem 0 .2rem !important;
+    font-weight:800; font-size:1.6rem; line-height:1.15; margin:.1rem 0 .2rem !important;
   }
   @media (min-width:1400px){ .app-title-hero{ font-size:1.75rem; } }
 
-  /* ─────────────────────────────────────────────────────────────
-     아래 세 래퍼(element-container) 규칙이 '눈에 보이는 간격'을 직접 줄입니다.
-     A/B/C 숫자만 바꿔도 충분합니다.
-     ───────────────────────────────────────────────────────────── */
-
-  /* A) ① DB연결 캡션 ↔ 사용자 줄 (캡션 래퍼 간격) */
-  :where([data-testid="element-container"]:has([data-testid="stCaptionContainer"])){
-    padding-top:.01rem !important;  /* ← A-1 */
-    padding-bottom:.01rem !important; /* ← A-2 */
-    margin:0 !important;
+  /* ───────── 이 세 값만 바꾸면 전체 세로 간격이 바로 줄어듭니다 ───────── */
+  /* 1) 세로 블록 기본 간격(모든 위젯 사이의 기본 gutter) */
+  :where([data-testid="stVerticalBlock"]){
+    gap: .10rem !important;            /* ← 여기 숫자 줄이면 전반 간격이 확 줄어요 */
+    row-gap: .10rem !important;        /* (구 버전 호환) */
   }
 
-  /* B) ② 총원 캡션 ↔ 대시보드(체크박스) (체크박스 래퍼 간격) */
-  :where([data-testid="element-container"]:has([data-testid="stCheckbox"])){
-    padding-top:.01rem !important;  /* ← B-1 */
-    padding-bottom:.01rem !important; /* ← B-2 */
-    margin:.01rem 0 .01rem !important; /* ← B-3(위/아래) */
+  /* 2) 각 위젯 래퍼의 안쪽패딩(세로 간격 보정) */
+  :where([data-testid="element-container"]){
+    padding-top: .04rem !important;    /* ← 위 */
+    padding-bottom: .04rem !important; /* ← 아래 */
+    margin: 0 !important;
   }
 
-  /* C) ③ 대시보드(체크박스) ↔ 표 (표 래퍼 위쪽 간격) */
-  :where([data-testid="element-container"]:has([data-testid="stDataFrame"], [data-testid="stTable"])){
-    margin-top:.01rem !important; /* ← C(더 붙이고 싶으면 .06rem 등) */
-    padding-top:0 !important;
-  }
-
-  /* 요소 자체의 기본 마진도 최소화(보조 조정용) */
-  /* ① DB연결 ↔ 사용자 */
-  :where([data-testid="stCaptionContainer"]){
-    margin:.01rem 0 .01rem !important; /* caption 자체 하단 여백 */
-    line-height:1.25;
-  }
-  :where([data-testid="stMarkdownContainer"]) ul{ margin:0 0 .01rem !important; } /* 사용자 줄 아래 */
-  :where([data-testid="stMarkdownContainer"]) li{ margin:0 !important; }
-
-  /* ② 총 00명 ↔ 대시보드: 체크박스 자체의 아래쪽 여백(보조) */
-  :where([data-testid="stCheckbox"]){ margin:0 0 .01rem !important; }
-
-  /* ③ 대시보드 ↔ 표: 표 위쪽 여백(보조) */
+  /* 3) 표 위쪽만 추가로 조정(대시보드 ↔ 표) */
   :where([data-testid="stDataFrame"]), :where([data-testid="stTable"]){
-    margin-top:.01rem !important;
+    margin-top: .08rem !important;     /* 더 붙이고 싶으면 .04rem 등으로 */
   }
+  /* ─────────────────────────────────────────────────────────── */
+
+  /* (선택) 불필요한 기본 마진 최소화 */
+  :where([data-testid="stMarkdownContainer"]) :is(p,ul){ margin:.04rem 0 !important; }
+  :where([data-testid="stCaptionContainer"]){ margin:.02rem 0 .04rem !important; line-height:1.25; }
 
   /* 탭 굵게/간격 */
   .stTabs [role='tab'], .stTabs button[role='tab'], div[data-baseweb="tab-list"] button{ font-weight:700 !important; }
@@ -89,6 +71,7 @@ st.markdown("""
   .stTabs button[role='tab'], div[data-baseweb="tab-list"] button{ margin-right:18px !important; }
 </style>
 """, unsafe_allow_html=True)
+
 
 # 제목은 한 번만 여기서 출력 (로그인 전/후 공통, 최상단 고정)
 st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=True)
