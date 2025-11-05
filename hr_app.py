@@ -43,7 +43,7 @@ st.markdown("""
 
   /* ① DB연결 ↔ 사용자 */
   :where([data-testid="stCaptionContainer"]){
-    margin: .05rem 0 .16rem !important; /* ← 마지막 값이 아래쪽 간격 */
+    margin: .05rem 0 .08rem !important; /* ← 마지막 값이 아래쪽 간격 */
     line-height: 1.25;
   }
   :where([data-testid="stMarkdownContainer"]) ul{ margin: 0 0 .05rem !important; }
