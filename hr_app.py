@@ -32,39 +32,20 @@ st.set_page_config(page_title=APP_TITLE, layout="wide")
 # ▼ 바로 아래에 추가 (레이아웃 폭은 건드리지 않음)
 st.markdown("""
 <style>
-  /* 상단 여백만 살짝 줄임 */
-  :where([data-testid="stAppViewContainer"]) .block-container { padding-top: 0.4rem !important; }
+/* 제출시각(노란바) 시각적 ‘쳐짐’ 보정: 테두리 제거 + 패딩/라인하이트 통일 */
+.stTabs [role="tabpanel"] :is(.stAlert,[data-testid="stNotification"],[role="alert"]){
+  border: 0 !important;                 /* ← 얇은 테두리 제거 (쳐져 보이는 원인) */
+  box-shadow: none !important;           /* 테마에 따라 생기는 음영도 제거 */
+  padding: .55rem .75rem !important;     /* 위·아래 균일 */
+  line-height: 1.35 !important;          /* 텍스트 세로 밀도 통일 */
+  margin-top: 0 !important;              /* 위 들뜸 제거 */
+  margin-bottom: .5rem !important;       /* 아래 간격만 유지(탭 3곳 공통) */
+}
 
-  /* 제목: 통일/굵게/약간 크게 */
-  .app-title-hero{
-    font-weight: 800; 
-    font-size: 1.6rem; 
-    line-height: 1.15; 
-    margin: .2rem 0 .6rem;
-  }
-  @media (min-width:1400px){ .app-title-hero{ font-size:1.75rem; } }
-
-  /* 탭: 볼드 + 간격 확장 (신/구 DOM 동시 대응) */
-  .stTabs [role='tab']{ font-weight:700 !important; }
-  .stTabs [role='tablist']{ gap: 18px !important; }
-  .stTabs button[role='tab']{ font-weight:700 !important; margin-right:18px !important; }
-  div[data-baseweb="tab-list"] button{ font-weight:700 !important; margin-right:18px !important; }
-
-  /* ── 제출시각(노란바) 정렬/간격 보정 ───────────────────────────── */
-  /* 1) 알림 박스 자체: 위 들뜸 제거, 아래 간격 고정 */
-  :where(.stAlert,[data-testid="stNotification"],[role="alert"]){
-    margin-top: 0 !important;
-    margin-bottom: .5rem !important;   /* 필요시 .4~.6rem로 조절 */
-  }
-  /* 2) 내부 첫 문단/헤딩의 기본 margin-top 제거(들뜸 원인) */
-  :where(.stAlert,[data-testid="stNotification"],[role="alert"])
-    :is(p,h1,h2,h3,h4,h5,h6):first-child{
-    margin-top: 0 !important;
-  }
-  /* 3) 일부 테마에서 마진 상쇄 대비: 내부 상단 패딩으로 미세 보강 */
-  :where(.stAlert,[data-testid="stNotification"],[role="alert"]) > div:first-child{
-    padding-top: .35rem !important;    /* .3~.4rem 범위에서 미세조정 */
-  }
+/* 노란바 내부 첫 문단의 기본 위쪽 마진 제거(브라우저 기본값 상쇄) */
+.stTabs [role="tabpanel"] :is(.stAlert,[data-testid="stNotification"],[role="alert"]) p:first-child{
+  margin-top: 0 !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
