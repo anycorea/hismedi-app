@@ -32,68 +32,28 @@ st.set_page_config(page_title=APP_TITLE, layout="wide")
 # ▼ 바로 아래에 추가 (레이아웃 폭은 건드리지 않음)
 st.markdown("""
 <style>
-  /* 기본적인 여백 및 간격 처리 */
-  :where([data-testid="stAppViewContainer"]) .block-container {
-    padding-top: 1rem !important;  /* 상단 여백 */
-  }
+  /* 상단 여백만 살짝 줄임 */
+  :where([data-testid="stAppViewContainer"]) .block-container { padding-top: 0.4rem !important; }
 
-  /* 제목 스타일 */
-  .app-title-hero {
+  /* 제목: 통일/굵게/약간 크게 */
+  .app-title-hero{
     font-weight: 800; 
     font-size: 1.6rem; 
     line-height: 1.15; 
     margin: .2rem 0 .6rem;
   }
+  @media (min-width:1400px){ .app-title-hero{ font-size:1.75rem; } }
 
-  @media (min-width:1400px) { 
-    .app-title-hero {
-      font-size: 1.75rem;
-    }
-  }
-
-  /* 탭 버튼 스타일 */
-  .stTabs [role='tab'] {
-    font-weight: 700 !important;
-  }
-  .stTabs [role='tablist'] {
-    gap: 18px !important;
-  }
-  .stTabs button[role='tab'] {
-    font-weight: 700 !important;
-    margin-right: 18px !important;
-  }
-  div[data-baseweb="tab-list"] button {
-    font-weight: 700 !important;
-    margin-right: 18px !important;
-  }
-
-  /* 기본적인 여백 추가 (오른쪽 콘텐츠 및 기타 부분들) */
-  .stContainer {
-    margin-top: 1rem !important; /* 상단 여백 */
-    margin-bottom: 1rem !important; /* 하단 여백 */
-  }
-
-  .stTextInput, .stButton, .stRadio, .stSelectbox, .stCheckbox, .stMarkdown, .stTable, .stImage {
-    margin-top: 0.6rem !important;  /* 상단 여백 */
-    margin-bottom: 0.6rem !important; /* 하단 여백 */
-  }
-
-  /* "제출시각(노란색바)" 및 그 아래 항목들 간격 */
-  .stMarkdown, .stButton {
-    margin-top: 1rem !important; /* 위쪽 여백을 추가 */
-  }
-
-  /* 화면의 크기에 따라 자동으로 적용되는 기본 간격 */
-  .stTextInput, .stButton {
-    margin-bottom: 1rem !important;
-  }
-
+  /* 탭: 볼드 + 간격 확장 (신/구 DOM 동시 대응) */
+  .stTabs [role='tab']{ font-weight:700 !important; }
+  .stTabs [role='tablist']{ gap: 18px !important; }
+  .stTabs button[role='tab']{ font-weight:700 !important; margin-right:18px !important; }
+  div[data-baseweb="tab-list"] button{ font-weight:700 !important; margin-right:18px !important; }
 </style>
 """, unsafe_allow_html=True)
 
 # 제목은 한 번만 여기서 출력 (로그인 전/후 공통으로 최상단에 고정)
 st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=True)
-
 
 # ────────────────────────────────────────────────────────────────
 # 공용 유틸
