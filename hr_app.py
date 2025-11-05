@@ -33,49 +33,41 @@ st.set_page_config(page_title=APP_TITLE, layout="wide")
 st.markdown("""
 <style>
   /* 상단 여백만 살짝 줄임 */
-  :where([data-testid="stAppViewContainer"]) .block-container { padding-top: 0.1rem !important; }
+  :where([data-testid="stAppViewContainer"]) .block-container { padding-top: .1rem !important; }
 
-  /* 제목: 통일/굵게/약간 크게 */
+  /* 제목 */
   .app-title-hero{
     font-weight: 800; font-size: 1.6rem; line-height: 1.15; margin: .1rem 0 .2rem !important;
   }
   @media (min-width:1400px){ .app-title-hero{ font-size:1.75rem; } }
 
-  /* 캡션(“DB연결 …”) 위/아래 간격도 축소 */
+  /* ① DB연결 ↔ 사용자 */
   :where([data-testid="stCaptionContainer"]){
-    margin: .05rem 0 .15rem !important; line-height: 1.25;
+    margin: .05rem 0 .16rem !important; /* ← 마지막 값이 아래쪽 간격 */
+    line-height: 1.25;
   }
-
-  /* ① DB연결 캡션 ↔ 사용자 리스트 사이 */
-  :where([data-testid="stCaptionContainer"]){
-    /* 모든 st.caption 아래쪽 간격을 기본으로 줄임 */
-    margin-block: 0 var(--gap-user) !important;
-  }
-  /* 사용자 표시가 리스트(<ul><li>)로 렌더될 때 여백 최소화 */
-  :where([data-testid="stMarkdownContainer"]) ul{ margin: 0 0 calc(var(--gap-user)/3) !important; }
+  :where([data-testid="stMarkdownContainer"]) ul{ margin: 0 0 .05rem !important; }
   :where([data-testid="stMarkdownContainer"]) li{ margin: 0 !important; }
 
-  /* ② "총 00명" 캡션 ↔ 체크박스 사이 */
-  /* 캡션은 위에서 공통으로 margin-bottom이 적용됨 → var(--gap-total-dashboard)로 보정 */
-  :where([data-testid="stCaptionContainer"])
-  { margin-block-end: var(--gap-total-dashboard) !important; }
-
-  /* 체크박스 자체의 바깥 여백(아래쪽)도 살짝 통제 */
+  /* ② 총 00명 ↔ 대시보드 보기 (필요 시 아래 숫자만 조정) */
+  :where([data-testid="stCaptionContainer"]){
+    margin-block-end: .26rem !important; /* ← 총원 캡션의 아래쪽 간격 */
+  }
   :where([data-testid="stCheckbox"]){
-    margin: 0 0 var(--gap-dashboard-table) !important;
+    margin: 0 0 .18rem !important;       /* ← 체크박스 아래쪽 간격 */
   }
 
-  /* ③ "대시보드 보기" ↔ 표 사이 */
+  /* ③ 대시보드 보기 ↔ 표 */
   :where([data-testid="stDataFrame"]), 
   :where([data-testid="stTable"]){
-    margin-top: var(--gap-dashboard-table) !important;
+    margin-top: .18rem !important;       /* ← 표 위쪽 간격 */
   }
+  /* ──────────────────────────────────────────────────────── */
 
-  /* 탭: 볼드 + 간격 확장 (신/구 DOM 동시 대응) */
-  .stTabs [role='tab']{ font-weight:700 !important; }
+  /* 탭 굵게/간격 */
+  .stTabs [role='tab'], .stTabs button[role='tab'], div[data-baseweb="tab-list"] button{ font-weight:700 !important; }
   .stTabs [role='tablist']{ gap: 18px !important; }
-  .stTabs button[role='tab']{ font-weight:700 !important; margin-right:18px !important; }
-  div[data-baseweb="tab-list"] button{ font-weight:700 !important; margin-right:18px !important; }
+  .stTabs button[role='tab'], div[data-baseweb="tab-list"] button{ margin-right:18px !important; }
 </style>
 """, unsafe_allow_html=True)
 
