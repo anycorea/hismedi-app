@@ -49,7 +49,7 @@ st.markdown("""
   /* A) ① DB연결 캡션 ↔ 사용자 줄 (캡션 래퍼 간격) */
   :where([data-testid="element-container"]:has([data-testid="stCaptionContainer"])){
     padding-top:.04rem !important;  /* ← A-1 */
-    padding-bottom:.04rem !important; /* ← A-2 */
+    padding-bottom:.02rem !important; /* ← A-2 */
     margin:0 !important;
   }
 
