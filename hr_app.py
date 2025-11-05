@@ -61,6 +61,12 @@ st.markdown("""
     margin-top: 0.6rem !important;  /* 상단 여백 추가 */
     margin-bottom: 0.6rem !important;  /* 하단 여백 추가 */
   }
+
+  /* "제출시각(노란색바)"과 그 아래 항목들 간격 추가 */
+  .stMarkdown, .stButton {
+    margin-top: 1rem !important;  /* 위쪽 여백을 좀 더 추가 */
+  }
+
 </style>
 """, unsafe_allow_html=True)
 
