@@ -61,7 +61,7 @@ st.markdown("""
   :where([data-testid="column"]):first-of-type
   :where([data-testid="element-container"]:has([data-testid="stCaptionContainer"])) 
   ~ :where([data-testid="element-container"]):first-of-type{
-    transform: translateY(-.20rem);    /* ← A: -값 절댓값↑ = 더 붙음 */
+    transform: translateY(-.50rem);    /* ← A: -값 절댓값↑ = 더 붙음 */
   }
 
   /* B) 총 00명 ↔ 대시보드 보기 (첫 체크박스만 살짝 위로) */
