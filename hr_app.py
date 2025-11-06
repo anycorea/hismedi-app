@@ -29,67 +29,32 @@ from datetime import datetime
 APP_TITLE = st.secrets.get("app", {}).get("TITLE", "HISMEDI † HR · JD")
 st.set_page_config(page_title=APP_TITLE, layout="wide")
 
-# ▼ 바로 아래에 둡니다 (전역 레이아웃은 건드리지 않음)
+# ▼ 바로 아래에 둡니다 (레이아웃 폭은 건드리지 않음)
 st.markdown("""
 <style>
-  /* 상단 여백(제목 잘림 방지) */
-  :where([data-testid="stAppViewContainer"]) .block-container { padding-top: .1rem !important; }
+  /* 상단 여백만 살짝 줄임 */
+  :where([data-testid="stAppViewContainer"]) .block-container { padding-top: 0.1rem !important; }
 
-  /* 제목 */
+  /* 제목: 통일/굵게/약간 크게 */
   .app-title-hero{
-    font-weight:800; font-size:1.6rem; line-height:1.15; margin:.1rem 0 .2rem !important;
+    font-weight: 800; font-size: 1.6rem; line-height: 1.15; margin: .1rem 0 .2rem !important;
   }
   @media (min-width:1400px){ .app-title-hero{ font-size:1.75rem; } }
 
-  /* 캡션(전역 기본) */
+  /* 캡션(“DB연결 …”) 위/아래 간격도 축소 */
   :where([data-testid="stCaptionContainer"]){
-    margin:.05rem 0 .15rem !important; line-height:1.25;
+    margin: .05rem 0 .15rem !important; line-height: 1.25;
   }
-
-  /* ─────────────────────────────────────────────────────────
-     ⬇⬇⬇ 왼쪽 ‘첫 번째 컬럼’ 내부에서만 세로 간격 줄이기 ⬇⬇⬇
-     (제목/오른쪽 컬럼/전체 레이아웃엔 영향 없음)
-     숫자만 바꿔 조정하세요.
-     ───────────────────────────────────────────────────────── */
-
-  /* 0) 왼쪽 컬럼 내부 전체 기본 간격(부모 gap) — 너무 넓다면 여기부터 줄이세요 */
-  :where([data-testid="column"]):first-of-type :where([data-testid="stVerticalBlock"]){
-    gap: .22rem !important; row-gap: .22rem !important;  /* ← 기본 간격 */
-  }
-
-  /* A) DB연결 ↔ 사용자  (DB연결 캡션 ‘다음’ 블록 살짝 위로) */
-  :where([data-testid="column"]):first-of-type
-  :where([data-testid="element-container"]:has([data-testid="stCaptionContainer"])) 
-  ~ :where([data-testid="element-container"]):first-of-type{
-    transform: translateY(-.50rem);    /* ← A: -값 절댓값↑ = 더 붙음 */
-  }
-
-  /* B) 총 00명 ↔ 대시보드 보기 (첫 체크박스만 살짝 위로) */
-  :where([data-testid="column"]):first-of-type
-  :where([data-testid="element-container"]:has([data-testid="stCheckbox"])):first-of-type{
-    transform: translateY(-.12rem);    /* ← B */
-  }
-
-  /* C) 대시보드 보기 ↔ 표 (첫 표만 살짝 위로) */
-  :where([data-testid="column"]):first-of-type
-  :where([data-testid="element-container"]:has([data-testid="stDataFrame"], [data-testid="stTable"])):first-of-type{
-    transform: translateY(-.08rem);    /* ← C */
-  }
-
-  /* 보조: 사용자 줄이 <ul><li>일 때 여백 최소화 */
-  :where([data-testid="column"]):first-of-type 
-  :where([data-testid="stMarkdownContainer"]) ul{ margin:0 0 .04rem !important; }
-  :where([data-testid="column"]):first-of-type 
-  :where([data-testid="stMarkdownContainer"]) li{ margin:0 !important; }
 
   /* 탭: 볼드 + 간격 확장 (신/구 DOM 동시 대응) */
   .stTabs [role='tab']{ font-weight:700 !important; }
-  .stTabs [role='tablist']{ gap:18px !important; }
-  .stTabs button[role='tab'], div[data-baseweb="tab-list"] button{ font-weight:700 !important; margin-right:18px !important; }
+  .stTabs [role='tablist']{ gap: 18px !important; }
+  .stTabs button[role='tab']{ font-weight:700 !important; margin-right:18px !important; }
+  div[data-baseweb="tab-list"] button{ font-weight:700 !important; margin-right:18px !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# 제목은 한 번만 여기서 출력
+# 제목은 한 번만 여기서 출력 (로그인 전/후 공통, 최상단 고정)
 st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=True)
 
 # ────────────────────────────────────────────────────────────────
