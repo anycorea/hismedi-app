@@ -2782,7 +2782,7 @@ def tab_competency(emp_df: pd.DataFrame):
     except Exception:
         pass
 
-    with st.expander("직무기술서 요약", expanded=True):
+    with st.expander("직무기술서 요약", expanded=False):
         jd=_jd_latest_for_comp(sel_sab, int(year))
         if jd:
             def V(key): return (_html_escape((jd.get(key,"") or "").strip()) or "—")
