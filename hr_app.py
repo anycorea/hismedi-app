@@ -32,47 +32,23 @@ st.set_page_config(page_title=APP_TITLE, layout="wide")
 # ▼ 바로 아래에 추가 (레이아웃 폭은 건드리지 않음)
 st.markdown("""
 <style>
-  /* ✅ 상단 안전여백 복원 (탑 바이트 절삭 방지) */
-  :where([data-testid="stAppViewContainer"]) .block-container{
-    /* 노치/툴바 대응: safe-area와 적절한 기본값 중 큰 값 사용 */
-    padding-top: max(.9rem, env(safe-area-inset-top)) !important;
-  }
+  /* 상단 여백만 살짝 줄임 */
+  :where([data-testid="stAppViewContainer"]) .block-container { padding-top: 0.4rem !important; }
 
-  /* (나머지 기존 스타일은 그대로 유지) */
+  /* 제목: 통일/굵게/약간 크게 */
   .app-title-hero{
-    font-weight: 800; font-size: 1.6rem; line-height: 1.15; margin: .1rem 0 .2rem !important;
+    font-weight: 800; 
+    font-size: 1.6rem; 
+    line-height: 1.15; 
+    margin: .2rem 0 .6rem;
   }
   @media (min-width:1400px){ .app-title-hero{ font-size:1.75rem; } }
 
-  :where([data-testid="stCaptionContainer"]){
-    margin: .05rem 0 .15rem !important; line-height: 1.25;
-  }
-
-  :where([data-testid="stVerticalBlock"]){ gap: .55rem !important; }
-
-  :where([data-testid="stTextInputRoot"]) label{ margin-bottom: .25rem !important; }
-  :where([data-testid="stTextInputRoot"]),
-  :where([data-testid="stSelectbox"]){
-    padding-top:.05rem !important; padding-bottom:.05rem !important;
-  }
-
-  :where([data-testid="baseButton-secondary"], [data-testid="baseButton-primary"]){
-    margin-top:.15rem !important; margin-bottom:.15rem !important;
-  }
-
-  /* 탭이 너무 위로 붙어 보일 수 있어 약간 내립니다 */
-  .stTabs [role='tablist']{ gap: 18px !important; margin-top: .25rem !important; }
+  /* 탭: 볼드 + 간격 확장 (신/구 DOM 동시 대응) */
   .stTabs [role='tab']{ font-weight:700 !important; }
+  .stTabs [role='tablist']{ gap: 18px !important; }
+  .stTabs button[role='tab']{ font-weight:700 !important; margin-right:18px !important; }
   div[data-baseweb="tab-list"] button{ font-weight:700 !important; margin-right:18px !important; }
-
-  .login-two-col{ display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
-  @media (max-width: 900px){ .login-two-col{ grid-template-columns: 1fr; } }
-
-  .left-pane :where([data-testid="stMarkdownContainer"]) p{ margin: .1rem 0 !important; }
-  .left-pane :where([data-testid="stTextInputRoot"]){ margin-bottom: .35rem !important; }
-  .left-pane :where([data-testid="baseButton-secondary"], [data-testid="baseButton-primary"]){
-    margin-top:.2rem !important; margin-bottom:.2rem !important;
-  }
 </style>
 """, unsafe_allow_html=True)
 
@@ -1005,28 +981,11 @@ def _inject_login_keybinder():
     )
 
 def show_login(emp_df: pd.DataFrame):
-    # 페이지 상단 타이틀은 main()에서 공통 출력하므로 여기선 생략
     st.markdown("### 로그인")
-
-    # Enter 제출을 폼으로 처리 (키보드 UX 안정)
-    with st.form("login_form", clear_on_submit=False):
-        # 넓은 화면: 2열, 좁을 때 자동 1열 (위 CSS .login-two-col 사용)
-        st.markdown('<div class="login-two-col">', unsafe_allow_html=True)
-
-        c1, c2 = st.columns(2, gap="small")
-        with c1:
-            sabun = st.text_input("사번", key="login_sabun", placeholder="사번")
-        with c2:
-            pin = st.text_input("PIN (숫자)", type="password", key="login_pin", placeholder="****")
-
-        st.markdown('</div>', unsafe_allow_html=True)
-
-        # 로그인 버튼은 전체 폭
-        submit = st.form_submit_button("로그인", use_container_width=True, type="primary")
-
-    _inject_login_keybinder()  # (기존 단축키 로직 유지)
-
-    if submit:
+    sabun = st.text_input("사번", key="login_sabun")
+    pin   = st.text_input("PIN (숫자)", type="password", key="login_pin")
+    _inject_login_keybinder()
+    if st.button("로그인", type="primary"):
         if not sabun or not pin:
             st.error("사번과 PIN을 입력하세요."); st.stop()
         row=emp_df.loc[emp_df["사번"].astype(str)==str(sabun)]
@@ -3360,10 +3319,8 @@ def main():
     left, right = st.columns([1.35, 3.65], gap="large")
 
     with left:
-        st.markdown("<div class='left-pane'>", unsafe_allow_html=True)  # ← 추가
-
-        st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=True)
         u = st.session_state.get("user", {})
+        st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=True)
         st.caption(f"DB연결 {kst_now_str()}")
         st.markdown(f"- 사용자: **{u.get('이름','')} ({u.get('사번','')})**")
 
@@ -3373,15 +3330,12 @@ def main():
             if st.button("로그아웃", key="btn_logout", use_container_width=True):
                 logout()
         with c2:
-            clicked_sync = st.button("🔄 동기화", key="sync_left", use_container_width=True,
-                                     help="캐시를 비우고 구글시트에서 다시 불러옵니다.")
+            clicked_sync = st.button("🔄 동기화", key="sync_left", use_container_width=True, help="캐시를 비우고 구글시트에서 다시 불러옵니다.")
             if _debounce_passed("__sync_left", 1.0, clicked_sync):
                 force_sync(min_interval=25)
 
         # 좌측 메뉴
         render_staff_picker_left(emp_df)
-
-        st.markdown("</div>", unsafe_allow_html=True)
 
     with right:
         tabs = st.tabs(["인사평가","직무기술서","직무능력평가","관리자","도움말"])
