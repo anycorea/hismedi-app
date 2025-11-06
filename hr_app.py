@@ -1192,7 +1192,15 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
 
         eval_map = _dash_eval_scores_for_year(int(dash_year))
         comp_map = _dash_comp_status_for_year(int(dash_year))
-        appr_map = get_jd_approval_map_cached(int(dash_year), st.session_state.get("appr_rev", 0))
+
+        # ✅ 캐시 솔트(시트명/헤더 변화 반영)
+        _salt_sheet = globals().get("JD_APPROVAL_SHEET", "직무기술서_승인")
+        _salt_heads = globals().get("JD_APPROVAL_HEADERS", ["연도","사번","이름","버전","승인자사번","승인자이름","상태","승인시각","비고"])
+        appr_map = get_jd_approval_map_cached(
+            int(dash_year),
+            int(st.session_state.get("appr_rev", 0) or 0),
+            _cache_salt=f"{_salt_sheet}|{','.join(_salt_heads)}"
+        )
 
         # view에 컬럼 합치기
         ext_rows = []
@@ -3267,111 +3275,116 @@ def main():
 if __name__ == "__main__":
     main()
 
+def _norm_empno(x) -> str:
+    if pd.isna(x):
+        return ""
+    s = str(x).strip()
+    if s.endswith(".0"):
+        s = s[:-2]
+    s = s.replace(" ", "").replace("-", "")
+    if not s:
+        return ""
+    if not s.isdigit():
+        return ""           # 규칙 위반: 비숫자 포함
+    if len(s) > 6:
+        return ""           # 규칙 위반: 6자 초과는 허용하지 않음
+    return s.zfill(6)
+
 @st.cache_data(ttl=120, show_spinner=False)
-def get_jd_approval_map_cached(_year: int, _rev: int = 0) -> dict:
+def get_jd_approval_map_cached(
+    _year: int,
+    _rev: int = 0,
+    _cache_salt: str = ""
+) -> Dict[Tuple[str, int], Tuple[str, str]]:
     """
-    Returns mapping {(사번, 버전) -> (상태, 승인시각)} for the given year.
+    {(사번, 버전) -> (상태, 승인시각)} 맵을 반환.
     - 빈 시트/헤더 누락/타입 캐스팅 실패에도 안전
-    - 승인시각은 가급적 datetime으로 파싱하여 최신 정렬
-    - 가능한 경우 read_jd_approval_df(_rev) 재사용(캐시 일관)
+    - 승인시각은 datetime 파싱 후 (사번,버전) 그룹별 최신건 선택
+    - read_jd_approval_df(_rev) 우선 사용(캐시 일관성)
     """
-    sheet_name = globals().get("JD_APPROVAL_SHEET", "직무기술서_승인")
-    headers_default = ["연도","사번","이름","버전","승인자사번","승인자이름","상태","승인시각","비고"]
-    headers = list(globals().get("JD_APPROVAL_HEADERS", headers_default))
+    out: Dict[Tuple[str, int], Tuple[str, str]] = {}
 
-    # 1) 시트 보장
     try:
-        ensure_fn = globals().get("ensure_jd_approval_sheet")
-        if callable(ensure_fn):
-            ensure_fn()
-    except Exception:
-        pass
+        sheet_name = globals().get("JD_APPROVAL_SHEET", "직무기술서_승인")
+        headers_default = ["연도","사번","이름","버전","승인자사번","승인자이름","상태","승인시각","비고"]
+        headers = list(globals().get("JD_APPROVAL_HEADERS", headers_default))
 
-    # 2) 데이터 로드: read_jd_approval_df 우선
-    df = None
-    try:
-        _read = globals().get("read_jd_approval_df")
-        if callable(_read):
-            df = _read(_rev)
-    except Exception:
+        # 1) 시트 보장
+        try:
+            ensure_fn = globals().get("ensure_jd_approval_sheet")
+            if callable(ensure_fn):
+                ensure_fn()
+        except Exception:
+            pass
+
+        # 2) 데이터 로드: read_jd_approval_df 우선
         df = None
-
-    # 2-보: 직접 로드 (ws → records) 폴백
-    if df is None:
         try:
-            _ws_func = globals().get("_ws")
-            _get_records = globals().get("_ws_get_all_records")
-            if callable(_ws_func) and callable(_get_records):
-                ws = _ws_func(sheet_name)
-                raw = _get_records(ws)
-                df = pd.DataFrame(raw)
+            _read = globals().get("read_jd_approval_df")
+            if callable(_read):
+                df = _read(_rev)
         except Exception:
             df = None
 
-    # 2-폴백-2: 또 다른 헬퍼가 있으면 사용
-    if df is None:
-        try:
-            get_df = globals().get("get_sheet_as_df")
-            if callable(get_df):
-                df = get_df(sheet_name)
-        except Exception:
-            df = None
+        # 2-보: 직접 로드 (ws → records) 폴백
+        if df is None:
+            try:
+                _ws_func = globals().get("_ws")
+                _get_records = globals().get("_ws_get_all_records")
+                if callable(_ws_func) and callable(_get_records):
+                    ws = _ws_func(sheet_name)
+                    raw = _get_records(ws)
+                    df = pd.DataFrame(raw)
+            except Exception:
+                df = None
 
-    if df is None or df.empty:
-        df = pd.DataFrame(columns=headers)
+        # 2-폴백-2: 또 다른 헬퍼가 있으면 사용
+        if df is None:
+            try:
+                get_df = globals().get("get_sheet_as_df")
+                if callable(get_df):
+                    df = get_df(sheet_name)
+            except Exception:
+                df = None
 
-    # 3) 헤더 보강
-    for c in headers:
-        if c not in df.columns:
-            df[c] = ""
+        if df is None or df.empty:
+            df = pd.DataFrame(columns=headers)
 
-    # 4) 타입/정규화
-    df["연도"] = pd.to_numeric(df["연도"], errors="coerce").fillna(0).astype(int)
-    if "버전" in df.columns:
-        df["버전"] = pd.to_numeric(df["버전"], errors="coerce").fillna(0).astype(int)
-    else:
-        df["버전"] = 0
+        # 3) 헤더 보강
+        for c in headers:
+            if c not in df.columns:
+                df[c] = ""
 
-    for c in ["사번","상태","승인시각"]:
-        if c in df.columns:
-            df[c] = df[c].astype(str)
-        else:
-            df[c] = ""
+        # 4) 타입/정규화
+        df["연도"] = pd.to_numeric(df["연도"], errors="coerce").fillna(0).astype(int)
+        df["버전"] = pd.to_numeric(df.get("버전", 0), errors="coerce").fillna(0).astype(int)
 
-    # 승인시각 파싱 컬럼(정렬/최신 선택용)
-    try:
+        df["사번"] = df.get("사번", "").apply(_norm_empno)
+        df["상태"] = df.get("상태", "").fillna("").astype(str)
+        df["승인시각"] = df.get("승인시각", "").fillna("").astype(str)
+
+        # 승인시각 파싱/키
         df["_승인_dt"] = pd.to_datetime(df["승인시각"], errors="coerce")
-    except Exception:
-        df["_승인_dt"] = pd.NaT
-
-    # 5) 연도 필터
-    try:
-        df = df[df["연도"] == int(_year)]
-    except Exception:
-        df = df.iloc[0:0]
-
-    # 6) 결과 구성: (사번,버전)별 최신 승인시각 1건만 남김
-    out = {}
-    if not df.empty:
-        # 사번/버전 그룹으로 최신 승인시각 선택
-        # _승인_dt가 NaT인 경우를 대비해 보조키로 원본 문자열도 고려
-        df = df.copy()
         df["_승인_key"] = df["_승인_dt"].fillna(pd.Timestamp.min)
 
-        # 최신 승인시각으로 정렬 후 drop_duplicates(keep='last')도 가능하지만,
-        # 그룹집계가 좀 더 명시적
-        idx = (
-            df.sort_values(["사번","버전","_승인_key"], ascending=[True, True, True])
-              .groupby(["사번","버전"], as_index=False).tail(1).index
-        )
-        sub = df.loc[idx]
+        # 5) 연도 필터
+        try:
+            df = df[df["연도"] == int(_year)]
+        except Exception:
+            df = df.iloc[0:0]
 
-        # 사번,버전 오름차순으로 정렬(보기 일관성)
-        sub = sub.sort_values(["사번","버전"], kind="stable").reset_index(drop=True)
+        # 6) (사번,버전)별 최신 승인 1건
+        if not df.empty:
+            idx = df.groupby(["사번", "버전"], as_index=False)["_승인_key"].idxmax()
+            sub = df.loc[idx].sort_values(["사번", "버전"], kind="stable").reset_index(drop=True)
 
-        for _, rr in sub.iterrows():
-            k = (str(rr.get("사번","")), int(rr.get("버전",0)))
-            out[k] = (str(rr.get("상태","")), str(rr.get("승인시각","")))
+            for _, rr in sub.iterrows():
+                k = (str(rr.get("사번", "")), int(rr.get("버전", 0)))
+                out[k] = (str(rr.get("상태", "")), str(rr.get("승인시각", "")))
+
+    except Exception:
+        # 필요 시 여기서 st.warning/로그 남길 수 있음
+        pass
 
     return out
 
