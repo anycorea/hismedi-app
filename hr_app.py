@@ -982,7 +982,7 @@ def show_login(emp_df: pd.DataFrame):
     sabun = st.text_input("사번", key="login_sabun", placeholder="사번 6자리(******) 입력 Enter")
     pin   = st.text_input("PIN (숫자)", type="password", key="login_pin", placeholder="비밀번호 4자리(****) 입력 Enter")
     _inject_login_keybinder()
-    if st.button("로그인 Enter", type="primary"):
+    if st.button("로그인", type="primary"):
         if not sabun or not pin:
             st.error("사번과 PIN을 입력하세요."); st.stop()
         row=emp_df.loc[emp_df["사번"].astype(str)==str(sabun)]
