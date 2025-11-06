@@ -2563,7 +2563,7 @@ def upsert_comp_simple_response(emp_df: pd.DataFrame, year:int, target_sabun:str
 
     t_name = _emp_name_by_sabun(emp_df, target_sabun)
     e_name = _emp_name_by_sabun(emp_df, evaluator_sabun)
-    now = _kst_now_str_safe() if "kst_now_str" not in globals() else kst_now_str()
+    now = kst_now_str()
 
     values = _ws_values(ws)
     cY=hmap.get("연도"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
@@ -2593,7 +2593,7 @@ def upsert_comp_simple_response(emp_df: pd.DataFrame, year:int, target_sabun:str
         except Exception: pass
         return {"action":"insert"}
     else:
-        _ws_batch_row_v2(ws, row_idx, hmap, {
+        _ws_batch_row(ws, row_idx, hmap, {
             "주업무평가": main_grade,
             "기타업무평가": extra_grade,
             "교육이수": edu_status,
@@ -3488,13 +3488,3 @@ def gs_flush():
         # 성공/실패와 상관없이 큐 비움(중복전송 방지)
         st.session_state.gs_queue = []
 # ===== End helpers =====
-
-# --- Compatibility shim ----------------------------------------------
-def _kst_now_str_safe():
-    """Backwards-compat helper; delegates to kst_now_str()."""
-    return kst_now_str()
-
-# --- Compatibility shim ----------------------------------------------
-def _ws_batch_row_v2(ws, idx: int, hmap: dict, kv: dict):
-    """Alias to _ws_batch_row for backward compatibility."""
-    return _ws_batch_row(ws, idx, hmap, kv)
