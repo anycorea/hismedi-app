@@ -378,7 +378,7 @@ def _extract_year(val):
         s = str(val).strip()
         if not s:
             return ""
-        m = _re.search(r'(19|20)\d{2}', s)
+        m = re.search(r'(19|20)\d{2}', s)
         return m.group(0) if m else ""
     except Exception:
         return ""
@@ -2750,7 +2750,12 @@ def _find_row_by_sabun(ws, hmap, sabun: str) -> int:
 def tab_staff_admin(emp_df: pd.DataFrame):
     """직원 시트 편집: 부서 드롭다운 + 체크박스 저장(부분 갱신)."""
     # 1) 시트/헤더 확보
-    ws, header, hmap = ensure_emp_sheet_columns()
+    try:
+        ws, header, hmap = ensure_emp_sheet_columns()
+    except Exception as e:
+        st.error("구글시트 조회 한도를 잠시 초과했습니다. 잠시 후 다시 시도하세요.", icon="⏳")
+        st.caption(f"detail: {getattr(e, 'message', str(e))[:200]}")
+        return
     view = emp_df.copy()
 
     # 2) 민감 컬럼 숨기기
@@ -2926,7 +2931,7 @@ def tab_admin_eval_items():
                 # 범위 문자열 생성 도우미 (주어진 컬럼 인덱스 -> 'A2:A{n+1}' 형태)
 
                 def _col_range(col_idx: int, start_row: int, end_row: int) -> str:
-                    letters = _re_local.match(r"([A-Z]+)", gspread.utils.rowcol_to_a1(1, col_idx)).group(1)
+                    letters = re.match(r"([A-Z]+)", gspread.utils.rowcol_to_a1(1, col_idx)).group(1)
                     return f"{letters}{start_row}:{letters}{end_row}"
 
                 # D열(순서), E열(활성) 일괄 덮어쓰기 — 체크박스는 bool로
