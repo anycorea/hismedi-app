@@ -2563,7 +2563,7 @@ def upsert_comp_simple_response(emp_df: pd.DataFrame, year:int, target_sabun:str
 
     t_name = _emp_name_by_sabun(emp_df, target_sabun)
     e_name = _emp_name_by_sabun(emp_df, evaluator_sabun)
-    now = _kst_now_str_safe() if "kst_now_str" not in globals() else kst_now_str()
+    now = kst_now_str()
 
     values = _ws_values(ws)
     cY=hmap.get("연도"); cTS=hmap.get("평가대상사번"); cES=hmap.get("평가자사번")
@@ -2593,7 +2593,7 @@ def upsert_comp_simple_response(emp_df: pd.DataFrame, year:int, target_sabun:str
         except Exception: pass
         return {"action":"insert"}
     else:
-        _ws_batch_row_v2(ws, row_idx, hmap, {
+        _ws_batch_row(ws, row_idx, hmap, {
             "주업무평가": main_grade,
             "기타업무평가": extra_grade,
             "교육이수": edu_status,
@@ -3386,42 +3386,41 @@ def _gs_queue_init():
         st.session_state.gs_queue = []
 
 def gs_enqueue_range(ws, range_a1, values_2d, value_input_option="USER_ENTERED"):
-    """
-    하나의 A1 범위와 2차원 values를 큐에 적재.
-    - ws: gspread Worksheet
-    - range_a1: "A1:B9" 혹은 "Sheet1!A1:B9" (시트명 없으면 자동 부착)
-    - values_2d: [[...], [...], ...]
-    """
     if ws is None or range_a1 is None:
         return
     _gs_queue_init()
-    title = getattr(ws, "title", None) or ""
+    title = getattr(ws, "title", "") or ""
     rng = range_a1 if "!" in str(range_a1) else f"{title}!{range_a1}"
-    # None → "" (Sheets values API는 None을 허용하지 않음)
     safe_vals = [[("" if v is None else v) for v in (row or [])] for row in (values_2d or [[]])]
+    opt = (value_input_option or "USER_ENTERED").upper()
+    ssid = getattr(getattr(ws, "spreadsheet", None), "id", None)
+
     st.session_state.gs_queue.append({
+        "spreadsheet_id": ssid,
         "range": rng,
         "values": safe_vals,
-        "value_input_option": value_input_option or "USER_ENTERED",
+        "value_input_option": opt,
     })
 
 def gs_enqueue_cell(ws, row, col, value, value_input_option="USER_ENTERED"):
-    """
-    단일 셀 쓰기를 큐에 적재.
-    """
     if ws is None:
         return
     _gs_queue_init()
     a1 = _rowcol_to_a1(int(row), int(col))
-    title = getattr(ws, "title", None) or ""
+    title = getattr(ws, "title", "") or ""
     rng = f"{title}!{a1}"
+    opt = (value_input_option or "USER_ENTERED").upper()
+    ssid = getattr(getattr(ws, "spreadsheet", None), "id", None)
+
     st.session_state.gs_queue.append({
+        "spreadsheet_id": ssid,
         "range": rng,
         "values": [[("" if value is None else value)]],
-        "value_input_option": value_input_option or "USER_ENTERED",
+        "value_input_option": opt,
     })
 
 def _chunked(iterable, n):
+    n = max(1, int(n))  # 방어
     buf = []
     for x in iterable:
         buf.append(x)
@@ -3432,69 +3431,63 @@ def _chunked(iterable, n):
         yield buf
 
 def gs_flush():
-    """
-    큐에 쌓인 업데이트를 valueInputOption 별로 그룹핑하여
-    values_batch_update → (실패 시) batch_update 순으로 시도.
-    - 큰 페이로드는 500개 단위로 청크 분할
-    - 성공/실패와 무관하게 마지막엔 큐를 비움(중복 전송 방지)
-    """
     data = st.session_state.get("gs_queue") or []
     if not data:
         return
 
-    # 그룹핑: value_input_option 별
-    grouped = {}
+    # 문서별 → 모드별 그룹핑
+    by_book = {}
     total_cells = 0
     for item in data:
-        mode = item.get("value_input_option", "USER_ENTERED")
-        rng  = item.get("range")
-        vals = item.get("values") or [[]]
-        grouped.setdefault(mode, []).append({"range": rng, "values": vals})
-        # 셀 개수 대략 추산(방어용)
+        book_id = item.get("spreadsheet_id") or "default"
+        by_book.setdefault(book_id, {}).setdefault(item["value_input_option"], []).append({
+            "range": item["range"],
+            "values": item["values"],
+        })
         try:
-            total_cells += sum(len(r) for r in vals)
+            total_cells += sum(len(r) for r in (item["values"] or [[]]))
         except Exception:
             pass
 
-    # 너무 큰 페이로드 경고(실행은 계속)
     if total_cells > _GS_MAX_TOTAL_CELLS_HINT:
         try:
             st.warning(f"대량 업데이트 감지: 총 {total_cells:,} 셀. 일부 요청을 분할 전송합니다.", icon="⚠️")
         except Exception:
             pass
 
-    sh = get_book()  # gspread Spreadsheet
-    # 모드별로 전송
+    last_errors = []
     try:
-        for mode, payload in grouped.items():
-            # 500개 단위로 분할 전송
-            for chunk in _chunked(payload, _GS_MAX_ITEMS_PER_REQUEST):
-                body = {"valueInputOption": mode, "data": chunk}
-                try:
-                    # 우선 values_batch_update 사용(더 가벼움)
-                    sh.values_batch_update(body)
-                except Exception:
-                    # 폴백: batch_update
+        for book_id, grouped in by_book.items():
+            sh = get_book(book_id) if book_id != "default" else get_book()
+            for mode, payload in grouped.items():
+                for chunk in _chunked(payload, _GS_MAX_ITEMS_PER_REQUEST):
+                    body = {"valueInputOption": mode, "data": chunk}
                     try:
-                        sh.batch_update(body)
-                    except Exception as e:
-                        # 일부 실패 시 즉시 알리고 예외 전파
+                        sh.values_batch_update(body)
+                    except Exception as e1:
+                        # 재시도: 더 잘게 분할
                         try:
-                            st.warning("일부 값 저장에 실패했습니다. 동기화 후 다시 시도해 주세요.", icon="⚠️")
-                        except Exception:
-                            pass
-                        raise e
+                            for sub in _chunked(chunk, 100):
+                                try:
+                                    sh.values_batch_update({"valueInputOption": mode, "data": sub})
+                                except Exception as e2:
+                                    # 최후: 개별 update
+                                    for item in sub:
+                                        try:
+                                            sh.values_update(
+                                                item["range"],
+                                                params={"valueInputOption": mode},
+                                                body={"values": item["values"]},
+                                            )
+                                        except Exception as e3:
+                                            last_errors.append((book_id, item["range"], str(e3)))
+                        except Exception as e:
+                            last_errors.append((book_id, "<chunk>", str(e)))
+        if last_errors:
+            try:
+                st.warning(f"일부 값 저장에 실패했습니다. {len(last_errors)}개 항목 오류. 상세: session_state.last_gs_errors 참조", icon="⚠️")
+                st.session_state.last_gs_errors = last_errors
+            except Exception:
+                pass
     finally:
-        # 성공/실패와 상관없이 큐 비움(중복전송 방지)
         st.session_state.gs_queue = []
-# ===== End helpers =====
-
-# --- Compatibility shim ----------------------------------------------
-def _kst_now_str_safe():
-    """Backwards-compat helper; delegates to kst_now_str()."""
-    return kst_now_str()
-
-# --- Compatibility shim ----------------------------------------------
-def _ws_batch_row_v2(ws, idx: int, hmap: dict, kv: dict):
-    """Alias to _ws_batch_row for backward compatibility."""
-    return _ws_batch_row(ws, idx, hmap, kv)
