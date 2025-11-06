@@ -345,26 +345,6 @@ except Exception:
 
 # gspread (배포 최적화: 자동 pip 설치 제거, 의존성 사전 설치 전제)
 
-# --- Safe shim for batch helpers: defined early to avoid NameError ---
-try:
-    _ = rowcol_to_a1  # ensure imported
-
-    if 'gs_enqueue_range' not in globals():
-        def gs_enqueue_range(ws, a1, values, value_input_option="USER_ENTERED"):
-            # ✅ gspread 시그니처: update(range_name, values, ...)
-            ws.update(a1, values, value_input_option=value_input_option)
-
-    if 'gs_enqueue_cell' not in globals():
-        def gs_enqueue_cell(ws, row, col, value, value_input_option="USER_ENTERED"):
-            ws.update(rowcol_to_a1(int(row), int(col)), [[value]], value_input_option=value_input_option)
-
-    if 'gs_flush' not in globals():
-        def gs_flush():
-            return  # no-op (배치 큐가 아니라 즉시 업데이트 방식)
-except Exception:
-    pass
-# --- end shim ---
-
 # ═════════════════════════════════════════════════════════════════════════════
 # Sync Utility (Force refresh Google Sheets caches)
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1979,21 +1959,6 @@ def _jobdesc_next_version(sabun: str, year: int) -> int:
     if sub.empty:
         return 1
     return int(sub["버전"].max()) + 1
-
-def _ws_batch_row(ws, idx: int, hmap: dict, kv: dict):
-    """단일 행(idx)에 대해 key→value 매핑을 A1 좌표로 batch_update."""
-    upd = []
-    for k, v in kv.items():
-        c = hmap.get(k)
-        if not c:
-            continue
-        try:
-            a1 = gspread.utils.rowcol_to_a1(int(idx), int(c))
-            upd.append({"range": a1, "values": [[v]]})
-        except Exception:
-            pass
-    if upd:
-        _retry(ws.batch_update, upd)
 
 def upsert_jobdesc(rec: dict, as_new_version: bool = False) -> dict:
     ensure_jobdesc_sheet()
