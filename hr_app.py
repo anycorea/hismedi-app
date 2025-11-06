@@ -826,44 +826,6 @@ def read_emp_df() -> pd.DataFrame:
 
     return df
 
-@st.cache_data(ttl=600, show_spinner=False)
-def read_acl_df(only_enabled: bool = True) -> pd.DataFrame:
-    """권한(acl): **Google Sheets 전용** 로더.
-    - 시트: '권한'
-    - 컬럼 보강: 사번/역할 기본 보장
-    - only_enabled=True이면 '활성' 컬럼이 truthy인 행만 필터
-    """
-    try:
-        ws = _ws("권한")
-        df = pd.DataFrame(_ws_get_all_records(ws))
-    except Exception as e:
-        st.warning(f"권한 시트 로드 실패: {e}")
-        return pd.DataFrame(columns=["사번", "역할", "활성"])
-
-    if df.empty:
-        return pd.DataFrame(columns=["사번", "역할", "활성"])
-
-    # 문자열화/트림
-    for c in ["사번", "역할"]:
-        if c in df.columns:
-            df[c] = df[c].astype(str).str.strip()
-        else:
-            df[c] = ""  # 최소 보장
-
-    # 활성 컬럼 정리 (_to_bool 사용, 빈칸은 False로)
-    if "활성" in df.columns:
-        df["활성"] = df["활성"].map(lambda v: _to_bool(v, default=False)).astype(bool)
-    else:
-        df["활성"] = False
-
-    # 선택적 필터
-    if only_enabled:
-        df = df[df["활성"] == True]  # noqa: E712
-
-    # 키 최소 보장
-    df = df[(df["사번"] != "") & (df["역할"] != "")]
-    return df.reset_index(drop=True)
-
 # ═════════════════════════════════════════════════════════════════════════════
 # Login + Session
 # ═════════════════════════════════════════════════════════════════════════════
@@ -984,7 +946,7 @@ def require_login(emp_df: pd.DataFrame):
 # ═════════════════════════════════════════════════════════════════════════════
 # ACL (권한) + Staff Filters (TTL↑)
 # ═════════════════════════════════════════════════════════════════════════════
-AUTH_SHEET = "권한"
+AUTH_SHEET = st.secrets.get("sheets", {}).get("AUTH_SHEET", "권한")
 AUTH_HEADERS = ["사번","이름","역할","범위유형","부서1","부서2","대상사번","활성","비고"]
 
 EVAL_ITEMS_SHEET = st.secrets.get("sheets", {}).get("EVAL_ITEMS_SHEET", "평가_항목")
@@ -1443,18 +1405,6 @@ def upsert_eval_response(emp_df: pd.DataFrame, year: int, eval_type: str,
         _batch_row(ws, row_idx, hmap, payload)
         st.cache_data.clear()
         return {"action":"update","total":total}
-
-@st.cache_data(ttl=300, show_spinner=False)
-def read_my_eval_rows(year: int, sabun: str) -> pd.DataFrame:
-    name=_eval_sheet_name(year)
-    try:
-        ws=_ws(name); df=pd.DataFrame(_ws_get_all_records(ws))
-    except Exception: return pd.DataFrame(columns=EVAL_BASE_HEADERS)
-    if df.empty: return df
-    if "평가자사번" in df.columns: df=df[df["평가자사번"].astype(str)==str(sabun)]
-    sort_cols=[c for c in ["평가유형","평가대상사번","제출시각"] if c in df.columns]
-    if sort_cols: df=df.sort_values(sort_cols, ascending=[True,True,False]).reset_index(drop=True)
-    return df
 
 def tab_eval(emp_df: pd.DataFrame):
     """인사평가 탭 (심플·자동 라우팅)
@@ -2950,18 +2900,6 @@ def tab_staff_admin(emp_df: pd.DataFrame):
             st.success(f"저장 완료: {change_cnt}명 반영", icon="✅")
         except Exception as e:
             st.exception(e)
-
-def reissue_pin_inline(sabun: str, length: int = 4):
-    ws, header, hmap = ensure_emp_sheet_columns()
-    if "PIN_hash" not in hmap or "PIN_No" not in hmap: raise RuntimeError("PIN_hash/PIN_No 필요")
-    row_idx=_find_row_by_sabun(ws, hmap, str(sabun))
-    if row_idx==0: raise RuntimeError("사번을 찾지 못했습니다.")
-    pin = "".join(pysecrets.choice("0123456789") for _ in range(length))
-    ph  = _pin_hash(pin, str(sabun))
-    _retry(ws.update_cell, row_idx, hmap["PIN_hash"], ph)
-    _retry(ws.update_cell, row_idx, hmap["PIN_No"], pin)
-    st.cache_data.clear()
-    return {"PIN_No": pin, "PIN_hash": ph}
 
 def tab_admin_pin(emp_df):
     ws, header, hmap = ensure_emp_sheet_columns()
