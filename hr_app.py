@@ -1296,7 +1296,7 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
         # 연도(현황판): – [Select] + [올해] 초간단 콤팩트
         c1, c2, c3, c4 = st.columns([1, 3, 1, 1], gap="small")
         # 현재값(없으면 올해)
-        _base = _dt.date.today().year
+        _base = datetime.now().year
         st.session_state.setdefault("left_dash_year", _base)
         y = int(st.session_state["left_dash_year"])
 
@@ -1558,7 +1558,7 @@ def tab_eval(emp_df: pd.DataFrame):
     """
 
 # --- 기본값/데이터 로드 -------------------------------
-    _base = _dt.date.today().year
+    _base = datetime.now().year
     st.session_state.setdefault("eval2_year", _base)
     cur = int(st.session_state["eval2_year"])
 
@@ -2386,7 +2386,7 @@ def set_jd_approval(year: int, sabun: str, name: str, version: int,
         return {"action": "insert", "row": len(values) + 1}
 
 def tab_job_desc(emp_df: pd.DataFrame):
-    _base = _dt.date.today().year
+    _base = datetime.now().year
     st.session_state.setdefault("jd2_year", _base)
     cur = int(st.session_state["jd2_year"])
 
@@ -2826,7 +2826,7 @@ def tab_competency(emp_df: pd.DataFrame):
         st.warning('권한이 없습니다. 관리자/평가 권한자만 접근할 수 있습니다.', icon='🔒')
         return
 
-    _base = _dt.date.today().year
+    _base = datetime.now().year
     st.session_state.setdefault("cmpS_year", _base)
     cur = int(st.session_state["cmpS_year"])
 
@@ -3407,11 +3407,6 @@ def main():
     emp_df = read_emp_df()
     st.session_state["emp_df"] = emp_df.copy()
 
-    if not _session_valid():
-        st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=True)
-        show_login(emp_df)
-        return
-
     require_login(emp_df)
 
     left, right = st.columns([1.35, 3.65], gap="large")
@@ -3419,7 +3414,6 @@ def main():
     with left:
         st.markdown("<div class='left-pane'>", unsafe_allow_html=True)
 
-        st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=True)
         u = st.session_state.get("user", {})
         st.caption(f"DB연결 {kst_now_str()}")
         st.markdown(f"- 사용자: **{u.get('이름','')} ({u.get('사번','')})**")
