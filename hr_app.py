@@ -80,128 +80,46 @@ def _ensure_capacity(ws, min_row: int, min_col: int):
 # Helper Utilities (pure functions) — hardened
 # ==============================================================================
 
-def _to_bool(x: Any, *, default: bool = False) -> bool:
-    """
-    문자열/숫자/불리언을 안전하게 bool로 변환한다.
-    - True로 인식: "true","1","y","yes","t","on","enabled","enable","ok","예","응","그래"
-    - False로 인식: "false","0","n","no","f","off","disabled","disable","아니오","아냐","아니","ㄴ"
-    - 불리언이면 그대로 반환.
-    - int/float는 0이면 False, 그 외는 True.
-    - None 또는 공백/미매핑 문자열은 default 반환(기본 False).
-    변환은 대소문자/공백/양끝 따옴표를 무시하고 처리한다.
-    """
+def to_bool(x, default: bool = False) -> bool:
     if isinstance(x, bool):
         return x
     if x is None:
         return default
-
-    s = str(x).strip().strip('\'"').lower()
-
-    truthy = {
-        "true","1","y","yes","t","on","enabled","enable","ok",
-        "예","응","그래"
-    }
-    falsy = {
-        "false","0","n","no","f","off","disabled","disable",
-        "아니오","아냐","아니","ㄴ"
-    }
-
-    if s in truthy:
+    s = str(x).strip().lower()
+    if s in ("true", "t", "1"):
         return True
-    if s in falsy:
+    if s in ("false", "f", "0"):
         return False
-
-    # 숫자 문자열일 수 있음
-    try:
-        num = float(s)
-        return num != 0.0
-    except Exception:
-        pass
-
     return default
 
 def _normalize_private_key(raw: Optional[str]) -> Optional[str]:
-    """
-    Secrets/환경변수에 PEM/OPENSSH 개인키가 '이스케이프된 문자열'로 저장된 경우
-    (예: '\\n', '\\r\\n', '\\t'가 리터럴 문자로 들어간 상태) 실제 제어문자로 복원한다.
-    또한 줄바꿈/경계선/말미 개행 등 포맷을 최대한 표준에 가깝게 정돈한다.
-
-    처리 내용:
-    1) None/빈값은 그대로 반환.
-    2) 리터럴 "\\r\\n" → "\n", "\\n" → "\n", "\\t" → "\t"
-    3) 실제로 섞여 들어간 "\r" 제거(모두 LF로 변환).
-    4) 다양한 프롤로그에 대응: "BEGIN PRIVATE KEY", "BEGIN RSA PRIVATE KEY",
-       "BEGIN OPENSSH PRIVATE KEY" 모두 지원.
-    5) BEGIN/END 라인이 양끝 공백 없이 '단독 라인'이 되도록 트리밍.
-    6) 파일 끝에 개행 1개를 보장(일부 라이브러리에서 필요).
-    7) 이미 정상 포맷이면 idempotent하게 동일 문자열을 돌려줌.
-    """
     if not raw:
         return raw
-
-    s = str(raw)
-
-    # 1) 우선 흔한 리터럴 이스케이프를 실제 제어문자로 복원
-    #    (환경에 따라 이미 실제 제어문자일 수 있으므로 두 경우 모두 안전)
-    s = s.replace("\\r\\n", "\n")
-    s = s.replace("\\n", "\n")
-    s = s.replace("\\t", "\t")
-
-    # 2) CRLF → LF 통일
-    s = s.replace("\r\n", "\n").replace("\r", "\n")
-
-    # 3) BEGIN/END 가 포함된 PEM/OPENSSH 키인지 식별
-    markers = (
-        "BEGIN PRIVATE KEY",
-        "BEGIN RSA PRIVATE KEY",
-        "BEGIN OPENSSH PRIVATE KEY",
-    )
-    if not any(m in s for m in markers):
-        # 키 포맷 문구가 없다면, 단순히 줄바꿈/탭만 정리한 결과를 반환
-        # (불필요한 과도한 가공을 피함)
-        return s
-
-    # 4) 라인 단위로 정리: 트레일링 스페이스 제거, 빈줄 정리
-    lines = s.split("\n")
-
-    def _trim_boundary(line: str) -> str:
-        # '-----BEGIN ...-----' 또는 '-----END ...-----' 라인은 앞뒤 공백 제거
-        t = line.strip()
-        if t.startswith("-----BEGIN ") or t.startswith("-----END "):
-            return t
-        return line.rstrip()  # 중간 라인은 오른쪽 공백만 제거
-
-    lines = [_trim_boundary(ln) for ln in lines]
-
-    # 5) BEGIN/END 경계 보정: 경계가 중간에 끼어 있거나 공백 라인에 둘러싸여도 정돈
-    #    불필요한 앞뒤 빈 라인 제거
-    while lines and not lines[0].startswith("-----BEGIN "):
-        # BEGIN 전의 잡다한 라인은 제거(환경변수 주석 등)
-        if lines[0].strip() == "":
-            lines.pop(0)
-        else:
-            break
-    while lines and lines[-1].strip() == "":
-        lines.pop()
-
-    # 6) 마지막에 정확히 하나의 개행 보장
-    normalized = "\n".join(lines)
-    if not normalized.endswith("\n"):
-        normalized += "\n"
-
-    return normalized
+    s = str(raw).replace("\\r\\n", "\n").replace("\\n", "\n").replace("\r\n", "\n").replace("\r", "\n")
+    if not s.endswith("\n"):
+        s += "\n"
+    return s
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Helpers
 # ═════════════════════════════════════════════════════════════════════════════
 
 def _is_quota_429(err) -> bool:
-    """gspread APIError의 429(쿼터 초과) 감지."""
+    """429(쿼터/요청 과다) 감지: gspread APIError, googleapiclient HttpError 모두 지원."""
     try:
+        # gspread
+        from gspread.exceptions import APIError as _APIError
         if isinstance(err, _APIError):
             resp = getattr(err, "response", None)
             code = getattr(resp, "status_code", None)
             return code == 429
+    except Exception:
+        pass
+    try:
+        # googleapiclient
+        from googleapiclient.errors import HttpError
+        if isinstance(err, HttpError):
+            return getattr(err, "resp", None) and err.resp.status == 429
     except Exception:
         pass
     return False
@@ -210,49 +128,100 @@ AUTO_FIX_HEADERS = False
 
 # ===== Cached summary helpers (performance) =====
 @st.cache_data(ttl=300, show_spinner=False)
-def get_eval_summary_map_cached(_year: int, _rev: int = 0) -> dict:
+def get_eval_summary_map_cached(_year: int, _rev: int = 0, _cache_salt: str = "") -> Dict[Tuple[str, str], Tuple[str, str]]:
     """
-    {(사번, 평가유형)->(총점, 제출시각)} for the year (헤더 변형에 강건).
-    의존: read_eval_items_df, _ensure_eval_resp_sheet, _retry, _ws_values, _extract_year
+    {(사번, 평가유형) -> (총점, 제출시각)} for the given year.
+    - 헤더 변형/순서 변경에 강건
+    - 제출시각은 datetime 파싱 후 최신 1건만 반영
+    - 의존: read_eval_items_df, _ensure_eval_resp_sheet, _retry, _ws_values, _extract_year, _norm_empno
     """
+    # 0) 평가항목 로드 (시트 보장/헤더 구성에 사용)
     items = read_eval_items_df(True)
     item_ids = [str(x) for x in items["항목ID"].tolist()] if not items.empty else []
+
+    # 1) 시트/헤더 확보
     try:
         ws = _ensure_eval_resp_sheet(int(_year), item_ids)
         header = _retry(ws.row_values, 1) or []
-        hmap = {n: i + 1 for i, n in enumerate(header)}
-        values = _ws_values(ws)
+        hmap = {n: i + 1 for i, n in enumerate(header)}  # 1-based
+        values = _ws_values(ws) or []
     except Exception:
         return {}
 
-    cY   = hmap.get('연도') or hmap.get('년도')
-    cType= hmap.get('평가유형')
-    cTS  = hmap.get('평가대상사번') or hmap.get('사번')
-    cTot = hmap.get('총점')
-    cSub = hmap.get('제출시각') or hmap.get('제출일시') or hmap.get('제출시간')
+    # 2) 관심 컬럼 인덱스(0-based로 변환)
+    cY   = (hmap.get('연도') or hmap.get('년도')) or None
+    cType= hmap.get('평가유형') or None
+    cTS  = (hmap.get('평가대상사번') or hmap.get('사번')) or None
+    cTot = hmap.get('총점') or None
+    cSub = (hmap.get('제출시각') or hmap.get('제출일시') or hmap.get('제출시간')) or None
 
-    # 필수 키가 하나도 없으면 빈 결과
     if not cTS:
         return {}
 
-    out: dict[tuple[str, str], tuple[str, str]] = {}
-    for i in range(2, len(values) + 1):
-        r = values[i - 1]
+    idxY   = cY  - 1 if cY   else None
+    idxType= cType- 1 if cType else None
+    idxTS  = cTS - 1
+    idxTot = cTot- 1 if cTot else None
+    idxSub = cSub- 1 if cSub else None
+
+    # 3) 본문 데이터만 순회 (header 제외)
+    rows = values[1:] if values else []
+
+    out: Dict[Tuple[str, str], Tuple[str, str]] = {}
+    latest: Dict[Tuple[str, str], pd.Timestamp] = {}
+
+    for r in rows:
         try:
-            ry = (str(r[cY - 1]).strip() if cY else _extract_year(r[cSub - 1] if cSub else ''))
-            if str(ry) != str(_year):
+            # 연도 판별: 연도 칼럼이 없으면 제출시각에서 추출
+            if idxY is not None and idxY < len(r):
+                ry_raw = r[idxY]
+                ry = int(pd.to_numeric(ry_raw, errors="coerce")) if pd.notna(ry_raw) else None
+            else:
+                # 제출시각이 있다면 from it, 없으면 스킵
+                if idxSub is None or idxSub >= len(r):
+                    continue
+                ry = _extract_year(str(r[idxSub]).strip())
+
+            if ry is None or int(ry) != int(_year):
                 continue
-            k0 = str(r[cTS - 1]).strip() if cTS else ''
-            k1 = str(r[cType - 1]).strip() if cType else ''
-            if not k0:
+
+            # 키: (사번, 평가유형)
+            emp = _norm_empno(r[idxTS] if idxTS < len(r) else "")
+            if not emp:
                 continue
-            tot = str(r[cTot - 1]) if cTot else ''
-            sub = str(r[cSub - 1]) if cSub else ''
-            k = (k0, k1)
-            if k not in out or str(out[k][1]) < sub:
-                out[k] = (tot, sub)
+            etype = str(r[idxType]).strip() if (idxType is not None and idxType < len(r)) else ""
+
+            # 값: (총점, 제출시각)
+            tot = str(r[idxTot]) if (idxTot is not None and idxTot < len(r)) else ""
+            sub_raw = r[idxSub] if (idxSub is not None and idxSub < len(r)) else ""
+            sub_str = str(sub_raw) if sub_raw is not None else ""
+
+            # 제출시각 파싱(문자열 형식 다양성 대비)
+            sub_dt = pd.to_datetime(sub_str, errors="coerce", utc=False)
+
+            k = (emp, etype)
+            prev_dt = latest.get(k)
+
+            # 최신 판별: datetime이 있으면 그것으로, 없으면 문자열 비교 보조
+            is_newer = False
+            if pd.notna(sub_dt):
+                if (prev_dt is None) or (pd.isna(prev_dt)) or (sub_dt > prev_dt):
+                    is_newer = True
+            else:
+                # 둘 다 파싱 실패 시 문자열 비교(ISO 형식이면 안전, 아니면 best-effort)
+                prev_pair = out.get(k)
+                prev_sub = prev_pair[1] if prev_pair else ""
+                if sub_str and (sub_str > prev_sub):
+                    is_newer = True
+
+            if is_newer or (k not in out):
+                out[k] = (tot, sub_str)
+                latest[k] = sub_dt
+
         except Exception:
-            pass
+            # 행 단위 오류는 무시하고 계속
+            continue
+
     return out
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -345,33 +314,28 @@ except Exception:
 # Sync Utility (Force refresh Google Sheets caches)
 # ═════════════════════════════════════════════════════════════════════════════
 def force_sync(min_interval: int = 25):
-    """Safely refresh data caches. Throttle & lock; keep session/auth stable.
-    - Throttle: ignore if called within min_interval seconds of last run
-    - Lock: prevent re-entrancy while running
-    - Clear only data cache (keep resource cache warm)
-    - Preserve key session values
-    """
-    now = time.time()
 
-    # Re-entrancy guard
+    # 1) 시간 소스는 monotonic 사용(시계 보정 무시)
+    now = time.monotonic()
+
+    # 2) Re-entrancy guard
     if st.session_state.get("_sync_lock", False):
         return
 
-    # Throttle
+    # 3) Throttle
     last_ts = float(st.session_state.get("_last_sync_ts", 0.0) or 0.0)
-    if now - last_ts < float(min_interval):
+    if (now - last_ts) < float(min_interval):
         return
 
     st.session_state["_sync_lock"] = True
     try:
-        # Clear only data cache (avoid cold starts on resources/auth)
+        # 4) Clear only data cache (avoid cold starts on resources/auth)
         try:
-            # streamlit >=1.18
             st.cache_data.clear()
         except Exception:
             pass
 
-        # Clear module-level lightweight caches
+        # 5) Clear module-level lightweight caches
         for _c in ('_WS_CACHE', '_HDR_CACHE', '_VAL_CACHE'):
             d = globals().get(_c, None)
             if isinstance(d, dict):
@@ -380,12 +344,24 @@ def force_sync(min_interval: int = 25):
                 except Exception:
                     pass
 
-        # Session pruning (keep user/auth & selections)
+        # 6) Google Sheets batch 큐/오류 로그 초기화 (중복 전송 방지)
+        try:
+            st.session_state.gs_queue = []
+        except Exception:
+            pass
+        try:
+            if "last_gs_errors" in st.session_state:
+                del st.session_state["last_gs_errors"]
+        except Exception:
+            pass
+
+        # 7) Session pruning (keep user/auth & selections)
         SAFE_KEEP = {
             "user","authed","auth_expires_at","_state_owner_sabun",
             "glob_target_sabun","glob_target_name",
             "left_pick","pick_q",
-            "_last_sync_ts","_sync_lock"
+            "left_dash_year","appr_rev",          # ✅ UI 상태 유지
+            "_last_sync_ts","_sync_lock","_gs_flushing"
         }
         PREFIXES = ("eval", "jd", "cmpS", "cmpD")
         ACL_KEYS  = {"acl_df", "acl_header", "acl_editor", "auth_editor"}
@@ -402,14 +378,14 @@ def force_sync(min_interval: int = 25):
         except Exception:
             pass
 
-        # Mark refreshed BEFORE rerun
+        # 8) Mark refreshed BEFORE rerun
         st.session_state["_last_sync_ts"] = now
 
     finally:
         # ✅ unlock BEFORE rerun to avoid rare lock persistence
         st.session_state["_sync_lock"] = False
 
-    # Trigger rerun last
+    # 9) Trigger rerun last
     st.rerun()
 
 # ═════════════════════════════════════════════════════════════════════════════
