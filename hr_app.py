@@ -32,7 +32,7 @@ st.set_page_config(page_title=APP_TITLE, layout="wide")
 # ▼ 바로 아래에 둡니다 (레이아웃 폭은 건드리지 않음)
 st.markdown("""
 <style>
-  /* 상단 여백만 살짝 줄임 */
+  /* 메인 컨테이너 상단 여백만 살짝 줄임 */
   :where([data-testid="stAppViewContainer"]) .block-container { padding-top: 0.1rem !important; }
 
   /* 제목: 통일/굵게/약간 크게 */
@@ -41,9 +41,24 @@ st.markdown("""
   }
   @media (min-width:1400px){ .app-title-hero{ font-size:1.75rem; } }
 
-  /* 캡션(“DB연결 …”) 위/아래 간격도 축소 */
+  /* 캡션(“DB연결 …”) 위/아래 간격 축소 */
   :where([data-testid="stCaptionContainer"]){
     margin: .05rem 0 .15rem !important; line-height: 1.25;
+  }
+
+  /* 전역: 세로 블록 간 기본 간격 소폭 축소(좌측 메뉴에 특히 효과) */
+  :where([data-testid="stVerticalBlock"]){ gap: .55rem !important; }
+
+  /* 입력 위젯: 라벨/필드 간격 정리 */
+  :where([data-testid="stTextInputRoot"]) label{ margin-bottom: .25rem !important; }
+  :where([data-testid="stTextInputRoot"]),
+  :where([data-testid="stSelectbox"]){
+    padding-top:.05rem !important; padding-bottom:.05rem !important;
+  }
+
+  /* 버튼: 기본 아래 마진 살짝 */
+  :where([data-testid="baseButton-secondary"], [data-testid="baseButton-primary"]){
+    margin-top:.15rem !important; margin-bottom:.15rem !important;
   }
 
   /* 탭: 볼드 + 간격 확장 (신/구 DOM 동시 대응) */
@@ -51,6 +66,17 @@ st.markdown("""
   .stTabs [role='tablist']{ gap: 18px !important; }
   .stTabs button[role='tab']{ font-weight:700 !important; margin-right:18px !important; }
   div[data-baseweb="tab-list"] button{ font-weight:700 !important; margin-right:18px !important; }
+
+  /* 로그인 레이아웃 보조: 좌/우 인풋 두 칸 → 좁은 화면에선 한 칸 */
+  .login-two-col{ display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
+  @media (max-width: 900px){ .login-two-col{ grid-template-columns: 1fr; } }
+
+  /* 좌측 메뉴 전용: 상단 타이틀/버튼/검색 간격 조금 더 촘촘히 */
+  .left-pane :where([data-testid="stMarkdownContainer"]) p{ margin: .1rem 0 !important; }
+  .left-pane :where([data-testid="stTextInputRoot"]) { margin-bottom: .35rem !important; }
+  .left-pane :where([data-testid="baseButton-secondary"], [data-testid="baseButton-primary"]){
+    margin-top:.2rem !important; margin-bottom:.2rem !important;
+  }
 </style>
 """, unsafe_allow_html=True)
 
@@ -978,11 +1004,28 @@ def _inject_login_keybinder():
     )
 
 def show_login(emp_df: pd.DataFrame):
+    # 페이지 상단 타이틀은 main()에서 공통 출력하므로 여기선 생략
     st.markdown("### 로그인")
-    sabun = st.text_input("사번", key="login_sabun")
-    pin   = st.text_input("PIN (숫자)", type="password", key="login_pin")
-    _inject_login_keybinder()
-    if st.button("로그인", type="primary"):
+
+    # Enter 제출을 폼으로 처리 (키보드 UX 안정)
+    with st.form("login_form", clear_on_submit=False):
+        # 넓은 화면: 2열, 좁을 때 자동 1열 (위 CSS .login-two-col 사용)
+        st.markdown('<div class="login-two-col">', unsafe_allow_html=True)
+
+        c1, c2 = st.columns(2, gap="small")
+        with c1:
+            sabun = st.text_input("사번", key="login_sabun", placeholder="사번")
+        with c2:
+            pin = st.text_input("PIN (숫자)", type="password", key="login_pin", placeholder="****")
+
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        # 로그인 버튼은 전체 폭
+        submit = st.form_submit_button("로그인", use_container_width=True, type="primary")
+
+    _inject_login_keybinder()  # (기존 단축키 로직 유지)
+
+    if submit:
         if not sabun or not pin:
             st.error("사번과 PIN을 입력하세요."); st.stop()
         row=emp_df.loc[emp_df["사번"].astype(str)==str(sabun)]
@@ -3316,6 +3359,8 @@ def main():
     left, right = st.columns([1.35, 3.65], gap="large")
 
     with left:
+        st.markdown("<div class='left-pane'>", unsafe_allow_html=True)
+
         st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=True)
         u = st.session_state.get("user", {})
         st.caption(f"DB연결 {kst_now_str()}")
@@ -3327,25 +3372,25 @@ def main():
             if st.button("로그아웃", key="btn_logout", use_container_width=True):
                 logout()
         with c2:
-            clicked_sync = st.button("🔄 동기화", key="sync_left", use_container_width=True, help="캐시를 비우고 구글시트에서 다시 불러옵니다.")
+            clicked_sync = st.button("🔄 동기화", key="sync_left", use_container_width=True,
+                                     help="캐시를 비우고 구글시트에서 다시 불러옵니다.")
             if _debounce_passed("__sync_left", 1.0, clicked_sync):
                 force_sync(min_interval=25)
 
         # 좌측 메뉴
         render_staff_picker_left(emp_df)
 
+        st.markdown("</div>", unsafe_allow_html=True)
+
     with right:
         tabs = st.tabs(["인사평가","직무기술서","직무능력평가","관리자","도움말"])
 
         with tabs[0]:
             tab_eval(emp_df)
-
         with tabs[1]:
             tab_job_desc(emp_df)
-
         with tabs[2]:
             tab_competency(emp_df)
-
         with tabs[3]:
             me = str(st.session_state.get("user", {}).get("사번", ""))
             if not is_admin(me):
@@ -3361,7 +3406,6 @@ def main():
                     tab_admin_eval_items()
                 with a4:
                     tab_admin_acl(emp_df)
-
         with tabs[4]:
             tab_help()
 
@@ -3507,9 +3551,7 @@ def gs_enqueue_range(ws, range_a1, values_2d, value_input_option="USER_ENTERED")
     })
 
 def gs_enqueue_cell(ws, row, col, value, value_input_option="USER_ENTERED"):
-    """
-    단일 셀 쓰기를 큐에 적재.
-    """
+
     if ws is None:
         return
     _gs_queue_init()
@@ -3533,12 +3575,7 @@ def _chunked(iterable, n):
         yield buf
 
 def gs_flush():
-    """
-    큐에 쌓인 업데이트를 valueInputOption 별로 그룹핑하여
-    values_batch_update → (실패 시) batch_update 순으로 시도.
-    - 큰 페이로드는 500개 단위로 청크 분할
-    - 성공/실패와 무관하게 마지막엔 큐를 비움(중복 전송 방지)
-    """
+
     data = st.session_state.get("gs_queue") or []
     if not data:
         return
