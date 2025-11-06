@@ -34,28 +34,28 @@ st.markdown("""
 <style>
   /* ✅ 상단 안전여백 복원 (탑 바이트 절삭 방지) */
   :where([data-testid="stAppViewContainer"]) .block-container{
-    padding-top: max(.9rem, env(safe-area-inset-top)) !ant;
+    padding-top: max(.9rem, env(safe-area-inset-top)) !important;
   }
 
   /* 제목: 통일/굵게/약간 크게 */
   .app-title-hero{
-    font-weight: 800; font-size: 1.6rem; line-height: 1.15; margin: .1rem 0 .2rem !ant;
+    font-weight: 800; font-size: 1.6rem; line-height: 1.15; margin: .1rem 0 .2rem !important;
   }
   @media (min-width:1400px){ .app-title-hero{ font-size:1.75rem; } }
 
   /* 캡션(“DB연결 …”) 위/아래 간격 축소 */
   :where([data-testid="stCaptionContainer"]){
-    margin: .05rem 0 .15rem !ant; line-height: 1.25;
+    margin: .05rem 0 .15rem !important; line-height: 1.25;
   }
 
   /* 전역: 세로 블록 간 기본 간격 소폭 축소(좌측 메뉴에 특히 효과) */
-  :where([data-testid="stVerticalBlock"]){ gap: .55rem !ant; }
+  :where([data-testid="stVerticalBlock"]){ gap: .55rem !important; }
 
   /* 입력 위젯: 라벨/필드 간격 정리 */
-  :where([data-testid="stTextInputRoot"]) label{ margin-bottom: .25rem !ant; }
+  :where([data-testid="stTextInputRoot"]) label{ margin-bottom: .25rem !important; }
   :where([data-testid="stTextInputRoot"]),
   :where([data-testid="stSelectbox"]){
-    padding-top:.05rem !ant; padding-bottom:.05rem !important;
+    padding-top:.05rem !important; padding-bottom:.05rem !important;
   }
 
   /* 버튼: 기본 아래 마진 살짝 */
@@ -1293,31 +1293,9 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
         am_admin_or_mgr = False
 
     if am_admin_or_mgr and not view.empty and show_dashboard_cols:
-        # 연도(현황판): – [Select] + [올해] 초간단 콤팩트
-        c1, c2, c3, c4 = st.columns([1, 3, 1, 1], gap="small")
-        # 현재값(없으면 올해)
-        _base = datetime.now().year
-        st.session_state.setdefault("left_dash_year", _base)
-        y = int(st.session_state["left_dash_year"])
-
-        with c1:
-            if st.button("–", use_container_width=True, key="left_dash_minus"):
-                st.session_state["left_dash_year"] = max(2000, y - 1); st.rerun()
-
-        with c2:
-            y = st.selectbox("연도(현황판)", list(range(2100, 1999, -1)), 
-                             index=(2100 - y), key="left_dash_select", label_visibility="collapsed")
-
-        with c3:
-            if st.button("+", use_container_width=True, key="left_dash_plus"):
-                st.session_state["left_dash_year"] = min(2100, y + 1); st.rerun()
-
-        with c4:
-            if st.button("올해", use_container_width=True, key="left_dash_this"):
-                st.session_state["left_dash_year"] = _base; st.rerun()
-
-        # 최종 선택값
-        dash_year = st.session_state["left_dash_year"] = int(y)
+        # 연도 선택 (기본=올해)
+        this_year = current_year()
+        dash_year = st.number_input("연도(현황판)", min_value=2000, max_value=2100, value=int(this_year), step=1, key="left_dash_year")
 
         eval_map = _dash_eval_scores_for_year(int(dash_year))
         comp_map = _dash_comp_status_for_year(int(dash_year))
@@ -1558,26 +1536,14 @@ def tab_eval(emp_df: pd.DataFrame):
     """
 
 # --- 기본값/데이터 로드 -------------------------------
-    _base = datetime.now().year
-    st.session_state.setdefault("eval2_year", _base)
-    cur = int(st.session_state["eval2_year"])
-
-    for col, yv in zip(st.columns(5, gap="small"), [_base-2, _base-1, _base, _base+1, _base+2]):
-        if 2000 <= yv <= 2100:
-            with col:
-                if st.button(f"{yv}", 
-                             type=("primary" if yv == cur else "secondary"), 
-                             use_container_width=True, key=f"eval2_q_{yv}"):
-                    st.session_state["eval2_year"] = int(yv); st.rerun()
-
-    year = st.slider("연도", 2000, 2100, st.session_state.get("eval2_year", _base), key="eval2_year_slider")
-    st.session_state["eval2_year"] = int(year)
+    this_year = current_year()
+    year = st.number_input("연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="eval2_year")
 
     u = st.session_state["user"]; me_sabun = str(u["사번"]); me_name = str(u["이름"])
 
     items = read_eval_items_df(True)
     if items.empty:
-        st.warning("활성화된 평가 항목이 없습니다.", icon="⚠️")
+        st.warning("활성화된 평가 항목이 없습니다.", icon=⚠️")
         return
     items_sorted = items.sort_values(["순서", "항목"]).reset_index(drop=True)
     item_ids = [str(x) for x in items_sorted["항목ID"].tolist()]
@@ -2386,20 +2352,9 @@ def set_jd_approval(year: int, sabun: str, name: str, version: int,
         return {"action": "insert", "row": len(values) + 1}
 
 def tab_job_desc(emp_df: pd.DataFrame):
-    _base = datetime.now().year
-    st.session_state.setdefault("jd2_year", _base)
-    cur = int(st.session_state["jd2_year"])
-
-    for col, yv in zip(st.columns(5, gap="small"), [_base-2, _base-1, _base, _base+1, _base+2]):
-        if 2000 <= yv <= 2100:
-            with col:
-                if st.button(f"{yv}", 
-                             type=("primary" if yv == cur else "secondary"), 
-                             use_container_width=True, key=f"jd2_q_{yv}"):
-                    st.session_state["jd2_year"] = int(yv); st.rerun()
-
-    year = st.slider("연도", 2000, 2100, st.session_state.get("jd2_year", _base), key="jd2_year_slider")
-    st.session_state["jd2_year"] = int(year)
+    """JD editor with 2-row header and 4-row education layout + print button order handled by _jd_print_html()."""
+    this_year = current_year()
+    year = st.number_input("연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="jd2_year")
 
     u = st.session_state["user"]
     me_sabun = str(u["사번"]); me_name = str(u["이름"])
@@ -2819,6 +2774,7 @@ def read_my_comp_simple_rows(year:int, sabun:str)->pd.DataFrame:
     return df.reset_index(drop=True)
 
 def tab_competency(emp_df: pd.DataFrame):
+    # 권한 게이트: 관리자/평가권한자만 접근 가능 (일반 직원 접근 불가)
     u_check = st.session_state.get('user', {})
     me_check = str(u_check.get('사번',''))
     am_admin_or_mgr = (is_admin(me_check) or len(get_allowed_sabuns(emp_df, me_check, include_self=False))>0)
@@ -2826,20 +2782,8 @@ def tab_competency(emp_df: pd.DataFrame):
         st.warning('권한이 없습니다. 관리자/평가 권한자만 접근할 수 있습니다.', icon='🔒')
         return
 
-    _base = datetime.now().year
-    st.session_state.setdefault("cmpS_year", _base)
-    cur = int(st.session_state["cmpS_year"])
-
-    for col, yv in zip(st.columns(5, gap="small"), [_base-2, _base-1, _base, _base+1, _base+2]):
-        if 2000 <= yv <= 2100:
-            with col:
-                if st.button(f"{yv}", 
-                             type=("primary" if yv == cur else "secondary"), 
-                             use_container_width=True, key=f"cmpS_q_{yv}"):
-                    st.session_state["cmpS_year"] = int(yv); st.rerun()
-
-    year = st.slider("연도", 2000, 2100, st.session_state.get("cmpS_year", _base), key="cmpS_year_slider")
-    st.session_state["cmpS_year"] = int(year)
+    this_year = current_year()
+    year = st.number_input("연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="cmpS_year")
 
     u=st.session_state.get("user",{}); me_sabun=str(u.get("사번","")); me_name=str(u.get("이름",""))
     allowed=set(map(str, get_allowed_sabuns(emp_df, me_sabun, include_self=True)))
@@ -3407,6 +3351,11 @@ def main():
     emp_df = read_emp_df()
     st.session_state["emp_df"] = emp_df.copy()
 
+    if not _session_valid():
+        st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=True)
+        show_login(emp_df)
+        return
+
     require_login(emp_df)
 
     left, right = st.columns([1.35, 3.65], gap="large")
@@ -3414,6 +3363,7 @@ def main():
     with left:
         st.markdown("<div class='left-pane'>", unsafe_allow_html=True)
 
+        st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=True)
         u = st.session_state.get("user", {})
         st.caption(f"DB연결 {kst_now_str()}")
         st.markdown(f"- 사용자: **{u.get('이름','')} ({u.get('사번','')})**")
