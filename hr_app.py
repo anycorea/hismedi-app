@@ -32,8 +32,10 @@ st.set_page_config(page_title=APP_TITLE, layout="wide")
 # ▼ 바로 아래에 둡니다 (레이아웃 폭은 건드리지 않음)
 st.markdown("""
 <style>
-  /* 메인 컨테이너 상단 여백만 살짝 줄임 */
-  :where([data-testid="stAppViewContainer"]) .block-container { padding-top: 0.1rem !important; }
+  /* ✅ 상단 안전여백 복원 (탑 바이트 절삭 방지) */
+  :where([data-testid="stAppViewContainer"]) .block-container{
+    padding-top: max(.9rem, env(safe-area-inset-top)) !important;
+  }
 
   /* 제목: 통일/굵게/약간 크게 */
   .app-title-hero{
