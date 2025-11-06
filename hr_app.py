@@ -29,20 +29,22 @@ from datetime import datetime
 APP_TITLE = st.secrets.get("app", {}).get("TITLE", "HISMEDI † HR · JD")
 st.set_page_config(page_title=APP_TITLE, layout="wide")
 
-# ▼ 바로 아래에 추가 (레이아웃 폭은 건드리지 않음)
+# ▼ 바로 아래에 둡니다 (레이아웃 폭은 건드리지 않음)
 st.markdown("""
 <style>
   /* 상단 여백만 살짝 줄임 */
-  :where([data-testid="stAppViewContainer"]) .block-container { padding-top: 0.4rem !important; }
+  :where([data-testid="stAppViewContainer"]) .block-container { padding-top: 0.1rem !important; }
 
   /* 제목: 통일/굵게/약간 크게 */
   .app-title-hero{
-    font-weight: 800; 
-    font-size: 1.6rem; 
-    line-height: 1.15; 
-    margin: .2rem 0 .6rem;
+    font-weight: 800; font-size: 1.6rem; line-height: 1.15; margin: .1rem 0 .2rem !important;
   }
   @media (min-width:1400px){ .app-title-hero{ font-size:1.75rem; } }
+
+  /* 캡션(“DB연결 …”) 위/아래 간격도 축소 */
+  :where([data-testid="stCaptionContainer"]){
+    margin: .05rem 0 .15rem !important; line-height: 1.25;
+  }
 
   /* 탭: 볼드 + 간격 확장 (신/구 DOM 동시 대응) */
   .stTabs [role='tab']{ font-weight:700 !important; }
@@ -52,7 +54,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 제목은 한 번만 여기서 출력 (로그인 전/후 공통으로 최상단에 고정)
+# 제목은 한 번만 여기서 출력 (로그인 전/후 공통, 최상단 고정)
 st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=True)
 
 # ────────────────────────────────────────────────────────────────
@@ -570,17 +572,12 @@ def _pin_hash(pin: str, sabun: str) -> str:
 def show_submit_banner(text: str):
     try:
         st.markdown(
-            "<div style=\"background:#FEF3C7;border:1px solid #FDE68A;"
-            "padding:.55rem .8rem;border-radius:.5rem;font-weight:600;line-height:1.35;\">"
+            "<div style=\"background:#FEF3C7;border:1px solid #FDE68A;padding:.55rem .8rem;border-radius:.5rem;font-weight:600;line-height:1.35;margin:0 0 12px 0;\">"
             f"{text}</div>",
             unsafe_allow_html=True
         )
     except Exception:
         st.info(text)
-
-# ────────────────────────────────────────────────────────────────────────────
-# PIN Utilities (hardened)
-# ────────────────────────────────────────────────────────────────────────────
 
 def _eq(a: str, b: str) -> bool:
     # 안전한 상수시간 비교 (hex 문자열 케이스)
@@ -3319,8 +3316,8 @@ def main():
     left, right = st.columns([1.35, 3.65], gap="large")
 
     with left:
-        u = st.session_state.get("user", {})
         st.markdown(f"<div class='app-title-hero'>{APP_TITLE}</div>", unsafe_allow_html=True)
+        u = st.session_state.get("user", {})
         st.caption(f"DB연결 {kst_now_str()}")
         st.markdown(f"- 사용자: **{u.get('이름','')} ({u.get('사번','')})**")
 
