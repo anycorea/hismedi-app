@@ -121,75 +121,12 @@ def _to_bool(x: Any, *, default: bool = False) -> bool:
     return default
 
 def _normalize_private_key(raw: Optional[str]) -> Optional[str]:
-    """
-    Secrets/환경변수에 PEM/OPENSSH 개인키가 '이스케이프된 문자열'로 저장된 경우
-    (예: '\\n', '\\r\\n', '\\t'가 리터럴 문자로 들어간 상태) 실제 제어문자로 복원한다.
-    또한 줄바꿈/경계선/말미 개행 등 포맷을 최대한 표준에 가깝게 정돈한다.
-
-    처리 내용:
-    1) None/빈값은 그대로 반환.
-    2) 리터럴 "\\r\\n" → "\n", "\\n" → "\n", "\\t" → "\t"
-    3) 실제로 섞여 들어간 "\r" 제거(모두 LF로 변환).
-    4) 다양한 프롤로그에 대응: "BEGIN PRIVATE KEY", "BEGIN RSA PRIVATE KEY",
-       "BEGIN OPENSSH PRIVATE KEY" 모두 지원.
-    5) BEGIN/END 라인이 양끝 공백 없이 '단독 라인'이 되도록 트리밍.
-    6) 파일 끝에 개행 1개를 보장(일부 라이브러리에서 필요).
-    7) 이미 정상 포맷이면 idempotent하게 동일 문자열을 돌려줌.
-    """
     if not raw:
         return raw
-
-    s = str(raw)
-
-    # 1) 우선 흔한 리터럴 이스케이프를 실제 제어문자로 복원
-    #    (환경에 따라 이미 실제 제어문자일 수 있으므로 두 경우 모두 안전)
-    s = s.replace("\\r\\n", "\n")
-    s = s.replace("\\n", "\n")
-    s = s.replace("\\t", "\t")
-
-    # 2) CRLF → LF 통일
-    s = s.replace("\r\n", "\n").replace("\r", "\n")
-
-    # 3) BEGIN/END 가 포함된 PEM/OPENSSH 키인지 식별
-    markers = (
-        "BEGIN PRIVATE KEY",
-        "BEGIN RSA PRIVATE KEY",
-        "BEGIN OPENSSH PRIVATE KEY",
-    )
-    if not any(m in s for m in markers):
-        # 키 포맷 문구가 없다면, 단순히 줄바꿈/탭만 정리한 결과를 반환
-        # (불필요한 과도한 가공을 피함)
-        return s
-
-    # 4) 라인 단위로 정리: 트레일링 스페이스 제거, 빈줄 정리
-    lines = s.split("\n")
-
-    def _trim_boundary(line: str) -> str:
-        # '-----BEGIN ...-----' 또는 '-----END ...-----' 라인은 앞뒤 공백 제거
-        t = line.strip()
-        if t.startswith("-----BEGIN ") or t.startswith("-----END "):
-            return t
-        return line.rstrip()  # 중간 라인은 오른쪽 공백만 제거
-
-    lines = [_trim_boundary(ln) for ln in lines]
-
-    # 5) BEGIN/END 경계 보정: 경계가 중간에 끼어 있거나 공백 라인에 둘러싸여도 정돈
-    #    불필요한 앞뒤 빈 라인 제거
-    while lines and not lines[0].startswith("-----BEGIN "):
-        # BEGIN 전의 잡다한 라인은 제거(환경변수 주석 등)
-        if lines[0].strip() == "":
-            lines.pop(0)
-        else:
-            break
-    while lines and lines[-1].strip() == "":
-        lines.pop()
-
-    # 6) 마지막에 정확히 하나의 개행 보장
-    normalized = "\n".join(lines)
-    if not normalized.endswith("\n"):
-        normalized += "\n"
-
-    return normalized
+    s = str(raw).replace("\\r\\n", "\n").replace("\\n", "\n").replace("\r\n", "\n").replace("\r", "\n")
+    if not s.endswith("\n"):
+        s += "\n"
+    return s
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Helpers
