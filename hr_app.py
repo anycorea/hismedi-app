@@ -979,8 +979,8 @@ def _inject_login_keybinder():
 
 def show_login(emp_df: pd.DataFrame):
     st.markdown("### 로그인")
-    sabun = st.text_input("사번", key="login_sabun", placeholder="사번 6자리(******) 입력 Enter")
-    pin   = st.text_input("PIN (숫자)", type="password", key="login_pin", placeholder="비밀번호 4자리(****) 입력 Enter")
+    sabun = st.text_input("사번", key="login_sabun", placeholder="사번 ******")
+    pin   = st.text_input("PIN (숫자)", type="password", key="login_pin", placeholder="비밀번호 ****")
     _inject_login_keybinder()
     if st.button("로그인", type="primary"):
         if not sabun or not pin:
