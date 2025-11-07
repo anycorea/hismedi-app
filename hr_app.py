@@ -856,24 +856,27 @@ def _inject_login_keybinder():
         height=0, width=0
     )
 
-def _tint_year_inputs():
+def _tint_year_boxes():
     components.html(
         """
         <script>
         (function(){
           const doc = window.parent.document;
+          const exact = t => [...doc.querySelectorAll('label')].find(l => (l.textContent||"").trim()===t);
           ["연도","연도(현황판)"].forEach(t=>{
-            const lab = [...doc.querySelectorAll('label')].find(l => (l.textContent||"").trim()===t);
-            if(!lab) return;
-            const inp = lab.closest('div[data-testid^="stNumberInput"]')?.querySelector('input');
-            if(inp){
-              inp.style.setProperty('background-color','#FFF8C5','important'); // 은은한 노랑
-              // 레이아웃 변형 방지를 위해 border/padding/height는 건드리지 않음
-            }
+            const lab = exact(t); if(!lab) return;
+            const root = lab.closest('div[data-testid^="stNumberInput"]'); if(!root) return;
+            // Streamlit 숫자입력 래퍼(div) 탐색: baseweb input 컨테이너
+            const wrap = root.querySelector('div[data-baseweb="input"]') || root.querySelector('div[role="spinbutton"]')?.parentElement;
+            if(!wrap) return;
+            // 레이아웃 영향 없는 배경만 적용 (padding/margin/height/box-shadow 미변경)
+            wrap.style.backgroundColor = '#FFF8C5';   // 연한 노랑
+            wrap.style.borderRadius = '8px';          // 모서리만 살짝
           });
         })();
         </script>
-        """, height=0, width=0
+        """,
+        height=0, width=0
     )
 
 def show_login(emp_df: pd.DataFrame):
@@ -1150,7 +1153,7 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
         # 연도 선택 (기본=올해)
         this_year = current_year()
         dash_year = st.number_input("연도(현황판)", min_value=2000, max_value=2100, value=int(this_year), step=1, key="left_dash_year")
-        _tint_year_inputs()
+        _tint_year_boxes()
 
         eval_map = _dash_eval_scores_for_year(int(dash_year))
         comp_map = _dash_comp_status_for_year(int(dash_year))
@@ -1381,7 +1384,7 @@ def tab_eval(emp_df: pd.DataFrame):
 # --- 기본값/데이터 로드 -------------------------------
     this_year = current_year()
     year = st.number_input("연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="eval2_year")
-    _tint_year_inputs()
+    _tint_year_boxes()
 
     u = st.session_state["user"]; me_sabun = str(u["사번"]); me_name = str(u["이름"])
 
@@ -2184,7 +2187,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
     """JD editor with 2-row header and 4-row education layout + print button order handled by _jd_print_html()."""
     this_year = current_year()
     year = st.number_input("연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="jd2_year")
-    _tint_year_inputs()
+    _tint_year_boxes()
 
     u = st.session_state["user"]
     me_sabun = str(u["사번"]); me_name = str(u["이름"])
@@ -2614,7 +2617,7 @@ def tab_competency(emp_df: pd.DataFrame):
 
     this_year = current_year()
     year = st.number_input("연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="cmpS_year")
-    _tint_year_inputs()
+    _tint_year_boxes()
 
     u=st.session_state.get("user",{}); me_sabun=str(u.get("사번","")); me_name=str(u.get("이름",""))
     allowed=set(map(str, get_allowed_sabuns(emp_df, me_sabun, include_self=True)))
