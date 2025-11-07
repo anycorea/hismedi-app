@@ -856,36 +856,28 @@ def _inject_login_keybinder():
         height=0, width=0
     )
 
-def _tint_year_inputs():
+def _mark_year_outline():
     components.html(
         """
         <script>
         (function(){
           const doc = window.parent.document;
-          function tint(labelText){
-            const lab = [...doc.querySelectorAll('label')]
-              .find(l => (l.textContent||"").trim() === labelText);
+          function mark(txt){
+            const lab=[...doc.querySelectorAll('label')].find(l=>(l.textContent||"").trim()===txt);
             if(!lab) return;
-
-            // 숫자입력 루트
-            const root = lab.closest('div[data-testid^="stNumberInput"]');
-            if(!root) return;
-
-            // baseweb input 컨테이너(실제 배경이 입혀지는 div)
-            const wrap = root.querySelector('div[data-baseweb="input"]');
+            const root=lab.closest('div[data-testid^="stNumberInput"]'); if(!root) return;
+            const wrap = root.querySelector('div[data-baseweb="input"]') 
+                      || root.querySelector('input[role="spinbutton"]')?.parentElement;
             if(!wrap) return;
-
-            // 레이아웃 영향 0: inset box-shadow로 내부만 채움
-            wrap.style.background = 'transparent';   // 기존 배경 그대로 두거나 투명
-            wrap.style.boxShadow  = 'inset 0 0 0 9999px rgba(255,248,197,1)'; // #FFF8C5
-            // 높이/패딩/보더 절대 변경하지 않음!
+            // 레이아웃 영향 0: outline만 사용(안쪽으로 당김)
+            wrap.style.outline = '2px solid #FDE68A';
+            wrap.style.outlineOffset = '-2px';
+            // 나머지 스타일(높이/패딩/보더/배경) 절대 변경 없음
           }
-
-          ["연도","연도(현황판)"].forEach(tint);
+          ["연도","연도(현황판)"].forEach(mark);
         })();
         </script>
-        """,
-        height=0, width=0
+        """, height=0, width=0
     )
 
 def show_login(emp_df: pd.DataFrame):
@@ -1162,7 +1154,7 @@ def render_staff_picker_left(emp_df: pd.DataFrame):
         # 연도 선택 (기본=올해)
         this_year = current_year()
         dash_year = st.number_input("연도(현황판)", min_value=2000, max_value=2100, value=int(this_year), step=1, key="left_dash_year")
-        _tint_year_inputs()
+        _mark_year_outline()
 
         eval_map = _dash_eval_scores_for_year(int(dash_year))
         comp_map = _dash_comp_status_for_year(int(dash_year))
@@ -1393,7 +1385,7 @@ def tab_eval(emp_df: pd.DataFrame):
 # --- 기본값/데이터 로드 -------------------------------
     this_year = current_year()
     year = st.number_input("연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="eval2_year")
-    _tint_year_inputs()
+    _mark_year_outline()
 
     u = st.session_state["user"]; me_sabun = str(u["사번"]); me_name = str(u["이름"])
 
@@ -2196,7 +2188,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
     """JD editor with 2-row header and 4-row education layout + print button order handled by _jd_print_html()."""
     this_year = current_year()
     year = st.number_input("연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="jd2_year")
-    _tint_year_inputs()
+    _mark_year_outline()
 
     u = st.session_state["user"]
     me_sabun = str(u["사번"]); me_name = str(u["이름"])
@@ -2626,7 +2618,7 @@ def tab_competency(emp_df: pd.DataFrame):
 
     this_year = current_year()
     year = st.number_input("연도", min_value=2000, max_value=2100, value=int(this_year), step=1, key="cmpS_year")
-    _tint_year_inputs()
+    _mark_year_outline()
 
     u=st.session_state.get("user",{}); me_sabun=str(u.get("사번","")); me_name=str(u.get("이름",""))
     allowed=set(map(str, get_allowed_sabuns(emp_df, me_sabun, include_self=True)))
