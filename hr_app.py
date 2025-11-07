@@ -828,6 +828,10 @@ def _inject_login_keybinder():
             const sab = byLabelStartsWith('사번');
             const pin = byLabelStartsWith('PIN');
             if(!sab || !pin) return false;
+            // 최초 1회: 로그인 화면 진입 시 '사번' 인풋에 자동 포커스/선택
+            if (!window.__sab_auto_focused) {
+              window.__sab_auto_focused = true; try { sab.focus(); sab.select(); } catch(e){}
+            }
             if(!sab._bound){
               sab._bound = true;
               sab.addEventListener('keydown', function(e){
