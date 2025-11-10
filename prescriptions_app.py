@@ -1,6 +1,3 @@
-# prescriptions_app.py
-# v2.2 — 내과 처방 조회 (코드+명 표시, 즉시 조회, 드롭다운 갱신 고정)
-
 import os
 import streamlit as st
 import pandas as pd
@@ -87,7 +84,32 @@ DIAG_CODE2NAME = {c: n for c, n in FREQUENT_DIAG_ITEMS}
 # 기본 UI
 # =========================
 st.set_page_config(page_title="내과 처방 조회", page_icon="💊", layout="wide")
-st.title("내과 처방 조회")
+
+# Top padding almost removed + moderate title size
+st.markdown(
+    """
+    <style>
+        .block-container {padding-top: 6px !important; padding-bottom: 1rem;}
+        h1, h2, h3 {margin-top: 0.2rem;}
+        .greybar {
+            background: #f1f5f9;
+            border: 1px solid #e2e8f0;
+            padding: 6px 10px;
+            border-radius: 8px;
+            font-size: 13px;
+            display: inline-block;
+            margin: 4px 0 12px 0;
+        }
+        .chip {
+            display:inline-block; padding:4px 10px; border-radius:999px;
+            background:#f1f5f9; border:1px solid #e2e8f0; font-size:12px;
+        }
+        .stDataFrame {margin-top: 0.25rem;}
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+st.markdown("### 내과 처방 조회")
 
 # =========================
 # Supabase 연결
@@ -109,18 +131,10 @@ TABLE = "prescriptions"  # 실제 테이블명에 맞추세요.
 # =========================
 # 유틸
 # =========================
-def chip(text: str):
-    st.markdown(
-        f"""<span style="display:inline-block;padding:4px 10px;border-radius:999px;
-        background:#f1f5f9;border:1px solid #e2e8f0;font-size:12px;">{text}</span>""",
-        unsafe_allow_html=True,
-    )
-
 def get_distinct(column: str, eq_filters: dict, limit: int = 10000):
     """
     현재 선택(진단코드 등)에 맞게 column의 고유값 목록을 가져옵니다.
-    - supabase의 distinct 인자가 깔끔하지 않아 일반 select 후 파이썬에서 set 처리
-    - 캐시를 두지 않아 선택 즉시 갱신 보장
+    캐시 없이 즉시 갱신.
     """
     if sb is None:
         return ["전체"]
@@ -158,26 +172,35 @@ for k, v in defaults.items():
         st.session_state[k] = v
 
 # =========================
-# 탭
+# 레이아웃: 왼쪽 메뉴 / 오른쪽 결과
 # =========================
-tab_view, tab_info = st.tabs(["조회", "설명(다빈도 진단)"])
+left, right = st.columns([1.1, 2.4], vertical_alignment="start")
 
-with tab_view:
-    st.caption("진단코드를 고르면 진단명이 함께 표시됩니다. 이후 드롭다운을 추가로 선택하면 조건이 누적됩니다.")
-
-    c1, c2, c3, c4 = st.columns([1.8, 1.4, 1.2, 1.2])
+with left:
+    st.caption("드롭다운을 추가로 선택하면 조건이 누적됩니다.")
 
     # (1) 진단코드: 코드+명 동시 표시 (값은 코드)
     code_options = ["전체"] + [c for c, _ in FREQUENT_DIAG_ITEMS]
-    sel_code = c1.selectbox(
+    sel_code = st.selectbox(
         "진단코드",
         code_options,
         index=code_options.index(st.session_state.sel_code) if st.session_state.sel_code in code_options else 0,
         format_func=lambda c: "전체" if c == "전체" else f"{c} · {DIAG_CODE2NAME.get(c, '')}",
         key="sel_code",
     )
-    # 진단명 표시
-    c1.caption(f"진단명: {DIAG_CODE2NAME.get(sel_code, '-') if sel_code != '전체' else '-'}")
+
+    # ▶ 즉시 조회 (버튼 없음) — 선택 누적
+    filters = {
+        "진단코드": st.session_state.sel_code,
+        "처방구분": st.session_state.sel_rx,
+        "환자번호": st.session_state.sel_pt,
+        "진료일":   st.session_state.sel_visit,
+    }
+    df, total = run_query(filters)
+
+    # 회색바: 총/표시 — 진단코드 드롭박스 다음 줄, 1줄
+    shown = 0 if df.empty else len(df)
+    st.markdown(f'<div class="greybar">총 {total:,}건 / 표시 {shown:,}건</div>', unsafe_allow_html=True)
 
     # (2) 처방구분 — 코드 기준으로 전체 후보 노출
     rx_options = get_distinct("처방구분", {"진단코드": sel_code})
@@ -191,7 +214,7 @@ with tab_view:
                  index=pt_options.index(st.session_state.sel_pt) if st.session_state.sel_pt in pt_options else 0,
                  key="sel_pt")
 
-    # (4) 진료일(텍스트) — 위 선택 누적
+    # (4) 진료일 — 위 선택 누적
     visit_options = get_distinct("진료일", {
         "진단코드": sel_code,
         "처방구분": st.session_state.sel_rx,
@@ -201,20 +224,21 @@ with tab_view:
                  index=visit_options.index(st.session_state.sel_visit) if st.session_state.sel_visit in visit_options else 0,
                  key="sel_visit")
 
-    st.divider()
-    free_q = st.text_input("통합 검색(선택): 진단코드·진단명·처방구분·환자번호·진료일 텍스트 전체에 부분일치")
+    # (5) 통합(단어)검색 — 텍스트 부분일치(클라이언트 필터)
+    free_q = st.text_input("통합(단어)검색", placeholder="코드·명·처방구분·환자번호·진료일 중 일부 입력")
 
-    # ▶ 즉시 조회 (버튼 없음)
+with right:
+    # 즉시 반영된 필터로 데이터 조회
     filters = {
         "진단코드": st.session_state.sel_code,
         "처방구분": st.session_state.sel_rx,
         "환자번호": st.session_state.sel_pt,
-        "진료일": st.session_state.sel_visit,
+        "진료일":   st.session_state.sel_visit,
     }
     df, total = run_query(filters)
 
     # 통합검색(클라이언트 필터)
-    if free_q.strip() and not df.empty:
+    if free_q and free_q.strip() and not df.empty:
         q = free_q.strip().lower()
         def match_row(row):
             values = [
@@ -227,44 +251,20 @@ with tab_view:
             return any(q in str(v).lower() for v in values)
         df = df[df.apply(match_row, axis=1)]
 
-    # 헤더/요약
-    left, right = st.columns([3, 2], vertical_alignment="center")
-    with left:
-        chip(f"총 {total:,}건")
-        chip(f"표시 {0 if df.empty else len(df):,}건")
-    with right:
-        if sel_code != "전체":
-            chip(f"{sel_code} · {DIAG_CODE2NAME.get(sel_code,'')}")
-
-    # 표
+    # 결과 표 (오른쪽 메뉴)
     if df.empty:
-        st.info("조회 결과가 없습니다.")
+        st.info("검색(필터) 결과가 없습니다.")
     else:
-        preferred = ["id","진단코드","진단명","진료과","진료일","환자번호","처방구분","처방명","created_at"]
+        # 진단명 보정
         if "진단명" not in df.columns:
             df["진단명"] = df["진단코드"].map(DIAG_CODE2NAME).fillna(df.get("진단명"))
-        ordered = [c for c in preferred if c in df.columns] + [c for c in df.columns if c not in preferred]
-        st.dataframe(df[ordered], use_container_width=True, hide_index=True)
 
-with tab_info:
-    st.subheader("우리병원의 다빈도 진단명")
-    st.caption("진단코드는 아래 목록을 기반으로 선택하며, 진단명은 자동 표시됩니다.")
-    df_info = pd.DataFrame(FREQUENT_DIAG_ITEMS, columns=["진단코드","진단명"])
-    q = st.text_input("다빈도 목록 검색", placeholder="코드 또는 명으로 검색 (부분일치)")
-    if q.strip():
-        ql = q.strip().lower()
-        df_show = df_info[
-            df_info["진단코드"].str.lower().str.contains(ql) |
-            df_info["진단명"].str.lower().str.contains(ql)
-        ]
-    else:
-        df_show = df_info
-    st.dataframe(df_show, use_container_width=True, hide_index=True)
+        # 숨길 컬럼(id, created_at) 제거
+        drop_cols = [c for c in ["id", "created_at"] if c in df.columns]
+        df_show = df.drop(columns=drop_cols)
 
-    st.markdown(
-        """
-        - 진단명은 선택 대상이 아니며, **진단코드 선택 시 자동 표시**됩니다.  
-        - **처방구분 → 환자번호 → 진료일** 순서로 드롭다운을 선택하면 조건이 누적되어 좁혀집니다.  
-        - 상단의 **통합 검색**은 결과표에서 부분일치로 추가 필터합니다.
-        """
-    )
+        # 선호 정렬
+        preferred = ["진단코드","진단명","진료과","진료일","환자번호","처방구분","처방명"]
+        ordered = [c for c in preferred if c in df_show.columns] + [c for c in df_show.columns if c not in preferred]
+
+        st.dataframe(df_show[ordered], use_container_width=True, hide_index=True)
