@@ -1,4 +1,3 @@
-
 import os
 import streamlit as st
 import pandas as pd
@@ -234,70 +233,83 @@ with left:
     free_q = st.text_input("통합(단어)검색", placeholder="코드·명·처방구분·환자번호·진료일 중 일부 입력")
 
 with right:
-    # 즉시 반영된 필터로 데이터 조회
-    filters = {
-        "진단코드": st.session_state.sel_code,
-        "처방구분": st.session_state.sel_rx,
-        "환자번호": st.session_state.sel_pt,
-        "진료일":   st.session_state.sel_visit,
-    }
-    df, total = run_query(filters)
+    # 조건이 하나도 선택되지 않으면 빈 화면 유지
+    show_results = (
+        (st.session_state.sel_code != "전체") or
+        (st.session_state.sel_rx != "전체") or
+        (st.session_state.sel_pt != "전체") or
+        (st.session_state.sel_visit != "전체") or
+        (free_q is not None and free_q.strip() != "")
+    )
 
-    # 통합검색(클라이언트 필터)
-    if free_q and free_q.strip() and not df.empty:
-        q = free_q.strip().lower()
-        def match_row(row):
-            values = [
-                row.get("진단코드", ""),
-                DIAG_CODE2NAME.get(row.get("진단코드",""), ""),
-                row.get("처방구분",""),
-                row.get("환자번호",""),
-                row.get("진료일",""),
-            ]
-            return any(q in str(v).lower() for v in values)
-        df = df[df.apply(match_row, axis=1)]
-
-    # 상단 정보(좌측 정렬): 총/표시 + 선택한 진단코드/진단명 칩
-    shown = 0 if df.empty else len(df)
-    st.markdown(f'<span class="greybar">총 {total:,}건 / 표시 {shown:,}건</span>', unsafe_allow_html=True)
-    if st.session_state.sel_code and st.session_state.sel_code != "전체":
-        sel_name = DIAG_CODE2NAME.get(st.session_state.sel_code, "")
-        st.markdown(f'<span class="chip">{st.session_state.sel_code} · {sel_name}</span>', unsafe_allow_html=True)
-
-    # 결과 표 (오른쪽 메뉴)
-    if df.empty:
-        st.info("검색(필터) 결과가 없습니다.")
+    if not show_results:
+        # 상단 안내+칩은 숨기고, 빈 표(헤더만) 렌더링해 레이아웃 고정
+        empty_cols = ["진료과","진료일","환자번호","처방구분","처방명"]
+        st.dataframe(pd.DataFrame(columns=empty_cols), use_container_width=True, hide_index=True, height=720)
     else:
-        # 진단명 보정(표시 컬럼에서는 제거하지만 검색/가공을 위해 유지)
-        if "진단명" not in df.columns and "진단코드" in df.columns:
-            df["진단명"] = df["진단코드"].map(DIAG_CODE2NAME).fillna(df.get("진단명"))
+        # 즉시 반영된 필터로 데이터 조회
+        filters = {
+            "진단코드": st.session_state.sel_code,
+            "처방구분": st.session_state.sel_rx,
+            "환자번호": st.session_state.sel_pt,
+            "진료일":   st.session_state.sel_visit,
+        }
+        df, total = run_query(filters)
 
-        # 숨길 컬럼(id, created_at) + 요구: 진단코드/진단명 제거
-        drop_cols = [c for c in ["id", "created_at", "진단코드", "진단명"] if c in df.columns]
-        df_show = df.drop(columns=drop_cols)
+        # 통합검색(클라이언트 필터)
+        if free_q and free_q.strip() and not df.empty:
+            q = free_q.strip().lower()
+            def match_row(row):
+                values = [
+                    row.get("진단코드", ""),
+                    DIAG_CODE2NAME.get(row.get("진단코드",""), ""),
+                    row.get("처방구분",""),
+                    row.get("환자번호",""),
+                    row.get("진료일",""),
+                ]
+                return any(q in str(v).lower() for v in values)
+            df = df[df.apply(match_row, axis=1)]
 
-        # 선호 정렬(진단코드/진단명 제외)
-        preferred = ["진료과","진료일","환자번호","처방구분","처방명"]
-        ordered = [c for c in preferred if c in df_show.columns] + [c for c in df_show.columns if c not in preferred]
+        # 상단 정보(좌측 정렬): 총/표시 + 선택한 진단코드/진단명 칩
+        shown = 0 if df.empty else len(df)
+        st.markdown(f'<span class="greybar">총 {total:,}건 / 표시 {shown:,}건</span>', unsafe_allow_html=True)
+        if st.session_state.sel_code and st.session_state.sel_code != "전체":
+            sel_name = DIAG_CODE2NAME.get(st.session_state.sel_code, "")
+            st.markdown(f'<span class="chip">{st.session_state.sel_code} · {sel_name}</span>', unsafe_allow_html=True)
 
-        # 컬럼 너비 구성 (진단코드/진단명 제거됨)
-        col_config = {}
-        if "진료과" in ordered:
-            col_config["진료과"] = st.column_config.TextColumn("진료과", width="small")
-        if "진료일" in ordered:
-            col_config["진료일"] = st.column_config.TextColumn("진료일", width="small")
-        if "환자번호" in ordered:
-            col_config["환자번호"] = st.column_config.TextColumn("환자번호", width="small")
-        if "처방구분" in ordered:
-            col_config["처방구분"] = st.column_config.TextColumn("처방구분", width="small")
-        if "처방명" in ordered:
-            col_config["처방명"] = st.column_config.TextColumn("처방명", width="large")
+        # 결과 표 (오른쪽 메뉴)
+        if df.empty:
+            st.info("검색(필터) 결과가 없습니다.")
+        else:
+            # 진단명 보정(표시 컬럼에서는 제거하지만 검색/가공을 위해 유지)
+            if "진단명" not in df.columns and "진단코드" in df.columns:
+                df["진단명"] = df["진단코드"].map(DIAG_CODE2NAME).fillna(df.get("진단명"))
 
-        # 더 많은 행을 보이도록 height 확대
-        st.dataframe(
-            df_show[ordered],
-            use_container_width=True,
-            hide_index=True,
-            column_config=col_config,
-            height=720
-        )
+            # 숨길 컬럼(id, created_at) + 요구: 진단코드/진단명 제거
+            drop_cols = [c for c in ["id", "created_at", "진단코드", "진단명"] if c in df.columns]
+            df_show = df.drop(columns=drop_cols)
+
+            # 선호 정렬(진단코드/진단명 제외)
+            preferred = ["진료과","진료일","환자번호","처방구분","처방명"]
+            ordered = [c for c in preferred if c in df_show.columns] + [c for c in df_show.columns if c not in preferred]
+
+            # 컬럼 너비 구성
+            col_config = {}
+            if "진료과" in ordered:
+                col_config["진료과"] = st.column_config.TextColumn("진료과", width="small")
+            if "진료일" in ordered:
+                col_config["진료일"] = st.column_config.TextColumn("진료일", width="small")
+            if "환자번호" in ordered:
+                col_config["환자번호"] = st.column_config.TextColumn("환자번호", width="small")
+            if "처방구분" in ordered:
+                col_config["처방구분"] = st.column_config.TextColumn("처방구분", width="small")
+            if "처방명" in ordered:
+                col_config["처방명"] = st.column_config.TextColumn("처방명", width="large")
+
+            st.dataframe(
+                df_show[ordered],
+                use_container_width=True,
+                hide_index=True,
+                column_config=col_config,
+                height=720
+            )
