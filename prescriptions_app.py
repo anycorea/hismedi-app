@@ -84,28 +84,7 @@ DIAG_CODE2NAME = {c: n for c, n in FREQUENT_DIAG_ITEMS}
 # 기본 UI
 # =========================
 st.set_page_config(page_title="내과 처방 조회", page_icon="💊", layout="wide")
-
-# Top padding almost removed + safe title spacing
-st.markdown(
-    """
-    <style>
-        .block-container {padding-top: 8px !important; padding-bottom: 1rem;}
-        h3.app-title {margin: 0 0 0.5rem 0; line-height: 1.25;}
-        .greybar {
-            background: #f1f5f9;
-            border: 1px solid #e2e8f0;
-            padding: 6px 10px;
-            border-radius: 8px;
-            font-size: 13px;
-            display: inline-block;
-            margin: 4px 0 12px 0;
-        }
-        .stDataFrame {margin-top: 0.25rem;}
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-st.markdown('<h3 class="app-title">내과 처방 조회</h3>', unsafe_allow_html=True)
+st.title("내과 처방 조회")
 
 # =========================
 # Supabase 연결
