@@ -1,9 +1,10 @@
+
 import os
 import streamlit as st
 import pandas as pd
 
 # ============= Page config must be first Streamlit command =============
-st.set_page_config(page_title="내과 처방 조회", page_icon="💊", layout="wide")
+st.set_page_config(page_title="내과 처방 조회(타병원)", page_icon="💊", layout="wide")
 
 try:
     from supabase import create_client, Client
@@ -86,7 +87,7 @@ DIAG_CODE2NAME = {c: n for c, n in FREQUENT_DIAG_ITEMS}
 # =========================
 # 제목 & 공통 스타일
 # =========================
-st.markdown("### 💊 내과 처방 조회")
+st.markdown("### 💊 내과 처방 조회(타병원)")
 
 st.markdown(
     """
@@ -101,6 +102,18 @@ st.markdown(
         border-radius: 8px;
         font-size: 13px;
         display: inline-block;
+        margin: 4px 8px 12px 0; /* right margin to separate from the chip */
+        vertical-align: middle;
+    }
+    .chip {
+        display: inline-block;
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: #eef2ff;
+        border: 1px solid #c7d2fe;
+        font-size: 12px;
+        color: #3730a3;
+        vertical-align: middle;
         margin: 4px 0 12px 0;
     }
     </style>
@@ -170,7 +183,20 @@ for k, v in defaults.items():
 left, right = st.columns([1.1, 2.4])
 
 with left:
-    st.caption("드롭다운을 추가로 선택하면 조건이 누적됩니다.")
+    # Caption + Help button (popover/expander) on the same row
+    c1, c2 = st.columns([1, 1])
+    with c1:
+        st.caption("드롭다운을 추가로 선택하면 조건이 누적됩니다.")
+    with c2:
+        # Try popover; fallback to expander if not available
+        diag_df = pd.DataFrame(FREQUENT_DIAG_ITEMS, columns=["진단코드", "진단명"])
+        try:
+            pop = st.popover("우리병원의 진단명(다빈도순)")
+            with pop:
+                st.dataframe(diag_df, use_container_width=True, hide_index=True, height=300)
+        except Exception:
+            with st.expander("우리병원의 진단명(다빈도순)"):
+                st.dataframe(diag_df, use_container_width=True, hide_index=True, height=300)
 
     # (1) 진단코드: 코드+명 동시 표시 (값은 코드)
     code_options = ["전체"] + [c for c, _ in FREQUENT_DIAG_ITEMS]
@@ -231,32 +257,31 @@ with right:
             return any(q in str(v).lower() for v in values)
         df = df[df.apply(match_row, axis=1)]
 
-    # 오른쪽 상단(좌측 정렬)에 카운트 배치: 총/표시
+    # 상단 정보(좌측 정렬): 총/표시 + 선택한 진단코드/진단명 칩
     shown = 0 if df.empty else len(df)
-    st.markdown(f'<div class="greybar">총 {total:,}건 / 표시 {shown:,}건</div>', unsafe_allow_html=True)
+    st.markdown(f'<span class="greybar">총 {total:,}건 / 표시 {shown:,}건</span>', unsafe_allow_html=True)
+    if st.session_state.sel_code and st.session_state.sel_code != "전체":
+        sel_name = DIAG_CODE2NAME.get(st.session_state.sel_code, "")
+        st.markdown(f'<span class="chip">{st.session_state.sel_code} · {sel_name}</span>', unsafe_allow_html=True)
 
     # 결과 표 (오른쪽 메뉴)
     if df.empty:
         st.info("검색(필터) 결과가 없습니다.")
     else:
-        # 진단명 보정
+        # 진단명 보정(표시 컬럼에서는 제거하지만 검색/가공을 위해 유지)
         if "진단명" not in df.columns and "진단코드" in df.columns:
             df["진단명"] = df["진단코드"].map(DIAG_CODE2NAME).fillna(df.get("진단명"))
 
-        # 숨길 컬럼(id, created_at) 제거
-        drop_cols = [c for c in ["id", "created_at"] if c in df.columns]
+        # 숨길 컬럼(id, created_at) + 요구: 진단코드/진단명 제거
+        drop_cols = [c for c in ["id", "created_at", "진단코드", "진단명"] if c in df.columns]
         df_show = df.drop(columns=drop_cols)
 
-        # 선호 정렬
-        preferred = ["진단코드","진단명","진료과","진료일","환자번호","처방구분","처방명"]
+        # 선호 정렬(진단코드/진단명 제외)
+        preferred = ["진료과","진료일","환자번호","처방구분","처방명"]
         ordered = [c for c in preferred if c in df_show.columns] + [c for c in df_show.columns if c not in preferred]
 
-        # 컬럼 너비 구성
+        # 컬럼 너비 구성 (진단코드/진단명 제거됨)
         col_config = {}
-        if "진단코드" in ordered:
-            col_config["진단코드"] = st.column_config.TextColumn("진단코드", width="small")
-        if "진단명" in ordered:
-            col_config["진단명"] = st.column_config.TextColumn("진단명", width="large")
         if "진료과" in ordered:
             col_config["진료과"] = st.column_config.TextColumn("진료과", width="small")
         if "진료일" in ordered:
@@ -266,11 +291,13 @@ with right:
         if "처방구분" in ordered:
             col_config["처방구분"] = st.column_config.TextColumn("처방구분", width="small")
         if "처방명" in ordered:
-            col_config["처방명"] = st.column_config.TextColumn("처방명", width="medium")
+            col_config["처방명"] = st.column_config.TextColumn("처방명", width="large")
 
+        # 더 많은 행을 보이도록 height 확대
         st.dataframe(
             df_show[ordered],
             use_container_width=True,
             hide_index=True,
-            column_config=col_config
+            column_config=col_config,
+            height=720
         )
