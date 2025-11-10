@@ -87,18 +87,16 @@ DIAG_CODE2NAME = {c: n for c, n in FREQUENT_DIAG_ITEMS}
 # 제목 & 공통 스타일
 # =========================
 st.markdown("### 💊 내과 처방 조회(타병원)")
+st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
 
 st.markdown(
     """
     <style>
-    .block-container { padding-top: 8px !important; }
-    h1,h2,h3 { margin-top: 0 !important; margin-bottom: 6px !important; line-height: 1.25; }
-    /* pull up first vertical blocks in columns */
-    .stColumn > div:first-child { margin-top: 0 !important; }
-    /* wrap cells so long text shows across lines */
+    /* DO NOT change page top padding; avoid clipping under host headers */
+    /* Wrap DF cells for long text */
     [data-testid="stDataFrame"] div[role="gridcell"] {white-space: normal !important;}
     [data-testid="stDataFrame"] div[role="gridcell"] p {margin: 0;}
-    .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 2px 0 6px 0; }
+    .toolbar { display: inline-flex; gap: 8px; align-items: center; flex-wrap: nowrap; margin: 2px 0 4px 0; }
     .greybar {
         background: #f1f5f9;
         border: 1px solid #e2e8f0;
@@ -107,6 +105,7 @@ st.markdown(
         font-size: 13px;
         display: inline-block;
         vertical-align: middle;
+        white-space: nowrap;
     }
     .chip {
         display: inline-block;
@@ -117,10 +116,9 @@ st.markdown(
         font-size: 12px;
         color: #3730a3;
         vertical-align: middle;
+        white-space: nowrap;
     }
-    /* Trim spacing before/after dataframe */
     [data-testid="stDataFrame"] { margin-top: 6px; }
-    /* Reduce caption top space */
     .stCaption { margin-top: 0 !important; }
     </style>
     """,
@@ -157,10 +155,11 @@ def get_distinct(column: str, eq_filters: dict, limit: int = 10000):
     try:
         data = q.limit(limit).execute()
         vals = [row.get(column) for row in (data.data or []) if row.get(column)]
-        vals = sorted(set(vals))
-        return ["전체"] + vals if vals else ["전체"]
     except Exception:
         return ["전체"]
+    vals = [v for v in vals if v not in (None, "")]
+    vals = sorted(set(vals))
+    return ["전체"] + vals if vals else ["전체"]
 
 def run_query(filters: dict, limit: int = 10000):
     if sb is None:
@@ -189,13 +188,11 @@ for k, v in defaults.items():
 left, right = st.columns([1.1, 2.4])
 
 with left:
-    # Caption + Help button on the same row, tight to top
     c1, c2 = st.columns([1, 1])
     with c1:
         st.caption("드롭다운을 추가로 선택하면 조건이 누적됩니다.")
     with c2:
         diag_df = pd.DataFrame(FREQUENT_DIAG_ITEMS, columns=["진단코드", "진단명"])
-        # popover if supported, else expander
         try:
             pop = st.popover("우리병원의 진단명(다빈도순)")
             with pop:
@@ -204,7 +201,6 @@ with left:
             with st.expander("우리병원의 진단명(다빈도순)"):
                 st.dataframe(diag_df, use_container_width=True, hide_index=True, height=300)
 
-    # (1) 진단코드: 코드+명 동시 표시 (값은 코드)
     code_options = ["전체"] + [c for c, _ in FREQUENT_DIAG_ITEMS]
     st.selectbox(
         "진단코드",
@@ -214,19 +210,16 @@ with left:
         key="sel_code",
     )
 
-    # (2) 처방구분 — 코드 기준으로 전체 후보 노출
     rx_options = get_distinct("처방구분", {"진단코드": st.session_state.sel_code})
     st.selectbox("처방구분", rx_options,
                  index=rx_options.index(st.session_state.sel_rx) if st.session_state.sel_rx in rx_options else 0,
                  key="sel_rx")
 
-    # (3) 환자번호 — 위 선택 누적
     pt_options = get_distinct("환자번호", {"진단코드": st.session_state.sel_code, "처방구분": st.session_state.sel_rx})
     st.selectbox("환자번호", pt_options,
                  index=pt_options.index(st.session_state.sel_pt) if st.session_state.sel_pt in pt_options else 0,
                  key="sel_pt")
 
-    # (4) 진료일 — 위 선택 누적
     visit_options = get_distinct("진료일", {
         "진단코드": st.session_state.sel_code,
         "처방구분": st.session_state.sel_rx,
@@ -236,11 +229,9 @@ with left:
                  index=visit_options.index(st.session_state.sel_visit) if st.session_state.sel_visit in visit_options else 0,
                  key="sel_visit")
 
-    # (5) 통합(단어)검색 — 텍스트 부분일치(클라이언트 필터)
     free_q = st.text_input("통합(단어)검색", placeholder="코드·명·처방구분·환자번호·진료일 중 일부 입력")
 
 with right:
-    # 조건이 하나도 선택되지 않으면 빈 화면 유지
     show_results = (
         (st.session_state.sel_code != "전체") or
         (st.session_state.sel_rx != "전체") or
@@ -252,7 +243,6 @@ with right:
     if not show_results:
         st.dataframe(pd.DataFrame(columns=["진료과","진료일","환자번호","처방구분","처방명"]), use_container_width=True, hide_index=True, height=720)
     else:
-        # 즉시 반영된 필터로 데이터 조회
         filters = {
             "진단코드": st.session_state.sel_code,
             "처방구분": st.session_state.sel_rx,
@@ -261,7 +251,6 @@ with right:
         }
         df, total = run_query(filters)
 
-        # 통합검색(클라이언트 필터)
         if free_q and free_q.strip() and not df.empty:
             q = free_q.strip().lower()
             def match_row(row):
@@ -275,16 +264,13 @@ with right:
                 return any(q in str(v).lower() for v in values)
             df = df[df.apply(match_row, axis=1)]
 
-        # === INLINE TOOLBAR (counts + selected chip in one row) ===
         shown = 0 if df.empty else len(df)
-        chip_html = ""
+        pieces = [f'<span class="greybar">총 {total:,}건 / 표시 {shown:,}건</span>']
         if st.session_state.sel_code and st.session_state.sel_code != "전체":
             sel_name = DIAG_CODE2NAME.get(st.session_state.sel_code, "")
-            chip_html = f'<span class="chip">{st.session_state.sel_code} · {sel_name}</span>'
-        toolbar = f'<div class="toolbar"><span class="greybar">총 {total:,}건 / 표시 {shown:,}건</span>{chip_html}</div>'
-        st.markdown(toolbar, unsafe_allow_html=True)
+            pieces.append(f'<span class="chip">{st.session_state.sel_code} · {sel_name}</span>')
+        st.markdown(f'<div class="toolbar">{"".join(pieces)}</div>', unsafe_allow_html=True)
 
-        # 결과 표
         if df.empty:
             st.info("검색(필터) 결과가 없습니다.")
         else:
