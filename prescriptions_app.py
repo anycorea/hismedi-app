@@ -204,11 +204,11 @@ with left:
     with c2:
         diag_df = pd.DataFrame(FREQUENT_DIAG_ITEMS, columns=["진단코드", "진단명"])
         try:
-            pop = st.popover("우리병원의 진단명(다빈도순)")
+            pop = st.popover("Hismedi Dx(다빈도순)")
             with pop:
                 st.dataframe(diag_df, use_container_width=True, hide_index=True, height=480)
         except Exception:
-            with st.expander("우리병원의 진단명(다빈도순)"):
+            with st.expander("Hismedi Dx(다빈도순)"):
                 st.dataframe(diag_df, use_container_width=True, hide_index=True, height=480)
     with c3:
         if st.button("검색 초기화", use_container_width=True):
