@@ -92,10 +92,6 @@ st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
 st.markdown(
     """
     <style>
-    /* DO NOT change page top padding; avoid clipping under host headers */
-    /* Wrap DF cells for long text */
-    [data-testid="stDataFrame"] div[role="gridcell"] {white-space: normal !important;}
-    [data-testid="stDataFrame"] div[role="gridcell"] p {margin: 0;}
     .toolbar { display: inline-flex; gap: 8px; align-items: center; flex-wrap: nowrap; margin: 2px 0 4px 0; }
     .greybar {
         background: #f1f5f9;
@@ -118,6 +114,9 @@ st.markdown(
         vertical-align: middle;
         white-space: nowrap;
     }
+    /* Wrap DF cells for long text */
+    [data-testid="stDataFrame"] div[role="gridcell"] {white-space: normal !important;}
+    [data-testid="stDataFrame"] div[role="gridcell"] p {margin: 0;}
     [data-testid="stDataFrame"] { margin-top: 6px; }
     .stCaption { margin-top: 0 !important; }
     </style>
@@ -174,6 +173,17 @@ def run_query(filters: dict, limit: int = 10000):
     df = pd.DataFrame(rows)
     return df, total
 
+def run_count_only(filters: dict):
+    """Return count quickly without fetching rows. Limit 1; count='exact' ensures full count."""
+    if sb is None:
+        return 0
+    q = sb.table(TABLE).select("id", count="exact")
+    for k, v in filters.items():
+        if v and v != "전체":
+            q = q.eq(k, v)
+    res = q.limit(1).execute()
+    return res.count or 0
+
 # =========================
 # 세션 (기본값)
 # =========================
@@ -188,6 +198,7 @@ for k, v in defaults.items():
 left, right = st.columns([1.1, 2.4])
 
 with left:
+    # Caption + Help button (roomier box)
     c1, c2 = st.columns([1, 1])
     with c1:
         st.caption("드롭다운을 추가로 선택하면 조건이 누적됩니다.")
@@ -196,10 +207,10 @@ with left:
         try:
             pop = st.popover("우리병원의 진단명(다빈도순)")
             with pop:
-                st.dataframe(diag_df, use_container_width=True, hide_index=True, height=300)
+                st.dataframe(diag_df, use_container_width=True, hide_index=True, height=480)
         except Exception:
             with st.expander("우리병원의 진단명(다빈도순)"):
-                st.dataframe(diag_df, use_container_width=True, hide_index=True, height=300)
+                st.dataframe(diag_df, use_container_width=True, hide_index=True, height=480)
 
     code_options = ["전체"] + [c for c, _ in FREQUENT_DIAG_ITEMS]
     st.selectbox(
@@ -232,7 +243,8 @@ with left:
     free_q = st.text_input("통합(단어)검색", placeholder="코드·명·처방구분·환자번호·진료일 중 일부 입력")
 
 with right:
-    show_results = (
+    # Determine if any filter/search is set
+    any_filter = (
         (st.session_state.sel_code != "전체") or
         (st.session_state.sel_rx != "전체") or
         (st.session_state.sel_pt != "전체") or
@@ -240,17 +252,26 @@ with right:
         (free_q is not None and free_q.strip() != "")
     )
 
-    if not show_results:
+    filters = {
+        "진단코드": st.session_state.sel_code,
+        "처방구분": st.session_state.sel_rx,
+        "환자번호": st.session_state.sel_pt,
+        "진료일":   st.session_state.sel_visit,
+    }
+
+    if not any_filter:
+        # Count only (no rows), then empty table
+        total = run_count_only(filters)
+        shown = 0
+        pieces = [f'<span class="greybar">총 {total:,}건 / 표시 {shown:,}건</span>']
+        # No chip when '전체'
+        st.markdown(f'<div class="toolbar">{"".join(pieces)}</div>', unsafe_allow_html=True)
         st.dataframe(pd.DataFrame(columns=["진료과","진료일","환자번호","처방구분","처방명"]), use_container_width=True, hide_index=True, height=720)
     else:
-        filters = {
-            "진단코드": st.session_state.sel_code,
-            "처방구분": st.session_state.sel_rx,
-            "환자번호": st.session_state.sel_pt,
-            "진료일":   st.session_state.sel_visit,
-        }
+        # Fetch rows
         df, total = run_query(filters)
 
+        # Apply free-text
         if free_q and free_q.strip() and not df.empty:
             q = free_q.strip().lower()
             def match_row(row):
