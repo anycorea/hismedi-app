@@ -174,7 +174,6 @@ def run_query(filters: dict, limit: int = 10000):
     return df, total
 
 def run_count_only(filters: dict):
-    """Return count quickly without fetching rows. Limit 1; count='exact' ensures full count."""
     if sb is None:
         return 0
     q = sb.table(TABLE).select("id", count="exact")
@@ -187,7 +186,7 @@ def run_count_only(filters: dict):
 # =========================
 # 세션 (기본값)
 # =========================
-defaults = {"sel_code": "전체", "sel_rx": "전체", "sel_pt": "전체", "sel_visit": "전체"}
+defaults = {"sel_code": "전체", "sel_rx": "전체", "sel_pt": "전체", "sel_visit": "전체", "free_q": ""}
 for k, v in defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
@@ -198,8 +197,8 @@ for k, v in defaults.items():
 left, right = st.columns([1.1, 2.4])
 
 with left:
-    # Caption + Help button (roomier box)
-    c1, c2 = st.columns([1, 1])
+    # Caption + Help button + Reset button (3 columns)
+    c1, c2, c3 = st.columns([1, 1, 0.8])
     with c1:
         st.caption("드롭다운을 추가로 선택하면 조건이 누적됩니다.")
     with c2:
@@ -211,7 +210,19 @@ with left:
         except Exception:
             with st.expander("우리병원의 진단명(다빈도순)"):
                 st.dataframe(diag_df, use_container_width=True, hide_index=True, height=480)
+    with c3:
+        if st.button("검색 초기화", use_container_width=True):
+            st.session_state.sel_code = "전체"
+            st.session_state.sel_rx = "전체"
+            st.session_state.sel_pt = "전체"
+            st.session_state.sel_visit = "전체"
+            st.session_state.free_q = ""
+            try:
+                st.rerun()
+            except Exception:
+                st.experimental_rerun()
 
+    # (1) 진단코드
     code_options = ["전체"] + [c for c, _ in FREQUENT_DIAG_ITEMS]
     st.selectbox(
         "진단코드",
@@ -221,16 +232,19 @@ with left:
         key="sel_code",
     )
 
+    # (2) 처방구분
     rx_options = get_distinct("처방구분", {"진단코드": st.session_state.sel_code})
     st.selectbox("처방구분", rx_options,
                  index=rx_options.index(st.session_state.sel_rx) if st.session_state.sel_rx in rx_options else 0,
                  key="sel_rx")
 
+    # (3) 환자번호
     pt_options = get_distinct("환자번호", {"진단코드": st.session_state.sel_code, "처방구분": st.session_state.sel_rx})
     st.selectbox("환자번호", pt_options,
                  index=pt_options.index(st.session_state.sel_pt) if st.session_state.sel_pt in pt_options else 0,
                  key="sel_pt")
 
+    # (4) 진료일
     visit_options = get_distinct("진료일", {
         "진단코드": st.session_state.sel_code,
         "처방구분": st.session_state.sel_rx,
@@ -240,7 +254,8 @@ with left:
                  index=visit_options.index(st.session_state.sel_visit) if st.session_state.sel_visit in visit_options else 0,
                  key="sel_visit")
 
-    free_q = st.text_input("통합(단어)검색", placeholder="코드·명·처방구분·환자번호·진료일 중 일부 입력")
+    # (5) 통합(단어)검색
+    st.text_input("통합(단어)검색", key="free_q", placeholder="코드·명·처방구분·환자번호·진료일 중 일부 입력")
 
 with right:
     # Determine if any filter/search is set
@@ -249,7 +264,7 @@ with right:
         (st.session_state.sel_rx != "전체") or
         (st.session_state.sel_pt != "전체") or
         (st.session_state.sel_visit != "전체") or
-        (free_q is not None and free_q.strip() != "")
+        (st.session_state.free_q.strip() != "")
     )
 
     filters = {
@@ -260,20 +275,16 @@ with right:
     }
 
     if not any_filter:
-        # Count only (no rows), then empty table
         total = run_count_only(filters)
         shown = 0
-        pieces = [f'<span class="greybar">총 {total:,}건 / 표시 {shown:,}건</span>']
-        # No chip when '전체'
-        st.markdown(f'<div class="toolbar">{"".join(pieces)}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="toolbar"><span class="greybar">총 {total:,}건 / 표시 {shown:,}건</span></div>', unsafe_allow_html=True)
         st.dataframe(pd.DataFrame(columns=["진료과","진료일","환자번호","처방구분","처방명"]), use_container_width=True, hide_index=True, height=720)
     else:
-        # Fetch rows
         df, total = run_query(filters)
 
         # Apply free-text
-        if free_q and free_q.strip() and not df.empty:
-            q = free_q.strip().lower()
+        if st.session_state.free_q.strip() and not df.empty:
+            q = st.session_state.free_q.strip().lower()
             def match_row(row):
                 values = [
                     row.get("진단코드", ""),
