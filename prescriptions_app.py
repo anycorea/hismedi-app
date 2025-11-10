@@ -2,18 +2,17 @@ import os
 import streamlit as st
 import pandas as pd
 
-# ============= Page config must be first Streamlit command =============
+# ==================== MUST be first Streamlit command ====================
 st.set_page_config(page_title="내과 처방 조회(타병원)", page_icon="💊", layout="wide")
 
+# -------------------- Optional Supabase import --------------------
 try:
     from supabase import create_client, Client
 except Exception:
     create_client = None
     Client = None
 
-# =========================
-# 다빈도 진단 목록 (코드-명 매핑)
-# =========================
+# ==================== Frequent Dx (code ↔ name) ====================
 FREQUENT_DIAG_ITEMS = [
     ("E785", "상세불명의 고지질혈증"),
     ("K210", "식도염을 동반한 위-식도역류병"),
@@ -83,55 +82,24 @@ FREQUENT_DIAG_ITEMS = [
 ]
 DIAG_CODE2NAME = {c: n for c, n in FREQUENT_DIAG_ITEMS}
 
-# =========================
-# 기본 UI
-# =========================
-st.markdown("<h4 class='page-title'>💊 내과 처방 조회(타병원)</h4>", unsafe_allow_html=True)
+# ==================== Lightweight CSS (performance-conscious) ====================
 st.markdown(
     """
     <style>
-    /* 헤더/여백 최소화 */
-    [data-testid="stHeader"] { height: 34px; padding: 0; background: transparent; }
-    section.main > div, div.block-container { padding-top: 10px !important; }
-
-    /* 심플 타이틀 */
-    .page-title { margin: 2px 0 6px 0; font-weight: 700; }
-
-    /* 좌측 툴바/칩 */
-    .toolbar { display: inline-flex; gap: 6px; align-items: center; flex-wrap: nowrap; margin: 0; }
-    .greybar {
-        background: #f8fafc;
-        border: 1px solid #e2e8f0;
-        padding: 2px 6px;                 /* 더 컴팩트 */
-        border-radius: 8px;
-        font-size: 11px;                  /* 더 작게 */
-        display: inline-block; vertical-align: middle; white-space: nowrap;
-    }
-    /* 오른쪽: 선택된 진단 표시용 옅은 파랑 "바" */
-    .lightbar {
-        background: #eff6ff;              /* 옅은 파랑 */
-        border: 1px solid #bfdbfe;        /* 파랑 계열 테두리 */
-        color: #1e40af;                   /* 글자 파랑 */
-        padding: 6px 10px;
-        border-radius: 10px;              /* 바 형태 (칩보다 덜 둥글게) */
-        font-size: 12px;
-        display: inline-block; white-space: nowrap;
-    }
-    .mt4 { margin-top: 6px; }             /* 카운트와 바 사이 간격 */
-    .stCaption { margin-top: 2px !important; }
-
-    /* DataFrame 래핑 */
-    [data-testid="stDataFrame"] { margin-top: 4px; }
-    [data-testid="stDataFrame"] div[role="gridcell"] { white-space: normal !important; }
-    [data-testid="stDataFrame"] div[role="gridcell"] p { margin: 0; }
+    [data-testid="stHeader"] {height:34px; padding:0; background:transparent;}
+    section.main > div, .block-container {padding-top:10px !important;}
+    .page-title {margin:2px 0 6px 0; font-weight:700;}
+    .toolbar {display:inline-flex; gap:6px; align-items:center; flex-wrap:nowrap;}
+    .greybar {background:#f8fafc; border:1px solid #e2e8f0; padding:2px 6px; border-radius:8px; font-size:11px; white-space:nowrap;}
+    .lightbar {background:#eff6ff; border:1px solid #bfdbfe; color:#1e40af; padding:6px 10px; border-radius:10px; font-size:12px; white-space:nowrap;}
+    .mt4 {margin-top:6px;}
+    [data-testid="stDataFrame"] {margin-top:6px;}
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-# =========================
-# Supabase 연결
-# =========================
+# ==================== Supabase helpers ====================
 @st.cache_resource(show_spinner=False)
 def get_supabase():
     url = os.getenv("SUPABASE_URL", "")
@@ -143,12 +111,9 @@ def get_supabase():
     except Exception:
         return None
 
-sb: Client = get_supabase()
-TABLE = "prescriptions"  # 실제 테이블명에 맞추세요.
+sb: "Client | None" = get_supabase()
+TABLE = "prescriptions"  # <-- 테이블명에 맞게 사용하세요.
 
-# =========================
-# 유틸
-# =========================
 def get_distinct(column: str, eq_filters: dict, limit: int = 10000):
     if sb is None:
         return ["전체"]
@@ -161,11 +126,10 @@ def get_distinct(column: str, eq_filters: dict, limit: int = 10000):
         vals = [row.get(column) for row in (data.data or []) if row.get(column)]
     except Exception:
         return ["전체"]
-    vals = [v for v in vals if v not in (None, "")]
-    vals = sorted(set(vals))
+    vals = sorted(set([v for v in vals if v not in (None, "")]))
     return ["전체"] + vals if vals else ["전체"]
 
-def run_query(filters: dict, limit: int = 10000):
+def run_query(filters: dict, limit: int = 1000):
     if sb is None:
         return pd.DataFrame(), 0
     q = sb.table(TABLE).select("*", count="exact").order("created_at", desc=True)
@@ -175,8 +139,7 @@ def run_query(filters: dict, limit: int = 10000):
     res = q.limit(limit).execute()
     rows = res.data or []
     total = res.count or 0
-    df = pd.DataFrame(rows)
-    return df, total
+    return pd.DataFrame(rows), total
 
 def run_count_only(filters: dict):
     if sb is None:
@@ -188,43 +151,40 @@ def run_count_only(filters: dict):
     res = q.limit(1).execute()
     return res.count or 0
 
-# =========================
-# 세션 (기본값)
-# =========================
+# ==================== Session defaults ====================
 defaults = {"sel_code": "전체", "sel_rx": "전체", "sel_pt": "전체", "sel_visit": "전체", "free_q": ""}
 for k, v in defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
-# =========================
-# 레이아웃: 왼쪽 메뉴 / 오른쪽 결과
-# =========================
+# ==================== Layout ====================
+st.markdown("<h4 class='page-title'>💊 내과 처방 조회(타병원)</h4>", unsafe_allow_html=True)
+
 left, right = st.columns([1.1, 2.4])
 
 with left:
-    # 안내문 + Hismedi Dx + 검색 초기화
-    st.markdown("드롭다운을 추가로 선택하면 조건이 누적됩니다.")
-    c1, c2 = st.columns([1.6, 0.5])
-    with c1:
+    # 안내문 — 일반 글꼴(볼드 X)
+    st.write("드롭다운을 추가로 선택하면 조건이 누적됩니다.")
+
+    # 상단 툴바: 좌측(Hismedi Dx 팝오버), 우측(검색 초기화)
+    lc, rc = st.columns([1.6, 0.5])
+    with lc:
         diag_df = pd.DataFrame(FREQUENT_DIAG_ITEMS, columns=["진단코드", "진단명"])
         try:
             pop = st.popover("Hismedi Dx(다빈도순)")
             with pop:
-                st.dataframe(diag_df, use_container_width=True, hide_index=True, height=480)
+                st.dataframe(diag_df, use_container_width=True, hide_index=True, height=420)
         except Exception:
             with st.expander("Hismedi Dx(다빈도순)"):
-                st.dataframe(diag_df, use_container_width=True, hide_index=True, height=480)
-    with c2:
+                st.dataframe(diag_df, use_container_width=True, hide_index=True, height=420)
+
+    with rc:
         if st.button("검색 초기화", use_container_width=True):
-            for k in ["sel_code","sel_rx","sel_pt","sel_visit","free_q"]:
+            for k in ["sel_code", "sel_rx", "sel_pt", "sel_visit", "free_q"]:
                 st.session_state[k] = "전체" if k != "free_q" else ""
-            try:
-                st.rerun()
-            except Exception:
-                st.experimental_rerun()
+            st.rerun()
 
-
-    # (1) 진단코드
+    # 필터 드롭다운
     code_options = ["전체"] + [c for c, _ in FREQUENT_DIAG_ITEMS]
     st.selectbox(
         "진단코드",
@@ -234,19 +194,16 @@ with left:
         key="sel_code",
     )
 
-    # (2) 처방구분
     rx_options = get_distinct("처방구분", {"진단코드": st.session_state.sel_code})
     st.selectbox("처방구분", rx_options,
                  index=rx_options.index(st.session_state.sel_rx) if st.session_state.sel_rx in rx_options else 0,
                  key="sel_rx")
 
-    # (3) 환자번호
     pt_options = get_distinct("환자번호", {"진단코드": st.session_state.sel_code, "처방구분": st.session_state.sel_rx})
     st.selectbox("환자번호", pt_options,
                  index=pt_options.index(st.session_state.sel_pt) if st.session_state.sel_pt in pt_options else 0,
                  key="sel_pt")
 
-    # (4) 진료일
     visit_options = get_distinct("진료일", {
         "진단코드": st.session_state.sel_code,
         "처방구분": st.session_state.sel_rx,
@@ -256,19 +213,17 @@ with left:
                  index=visit_options.index(st.session_state.sel_visit) if st.session_state.sel_visit in visit_options else 0,
                  key="sel_visit")
 
-    # (5) 통합(단어)검색
     st.text_input("통합(단어)검색", key="free_q", placeholder="코드·명·처방구분·환자번호·진료일 중 일부 입력")
 
 with right:
-    # Determine if any filter/search is set
-    any_filter = (
-        (st.session_state.sel_code != "전체") or
-        (st.session_state.sel_rx != "전체") or
-        (st.session_state.sel_pt != "전체") or
-        (st.session_state.sel_visit != "전체") or
-        (st.session_state.free_q.strip() != "")
-    )
-
+    # 우측 상단 카운트 (작은 글씨, greybar)
+    any_filter = any([
+        st.session_state.sel_code != "전체",
+        st.session_state.sel_rx != "전체",
+        st.session_state.sel_pt != "전체",
+        st.session_state.sel_visit != "전체",
+        st.session_state.free_q.strip() != ""
+    ])
     filters = {
         "진단코드": st.session_state.sel_code,
         "처방구분": st.session_state.sel_rx,
@@ -279,15 +234,13 @@ with right:
     if not any_filter:
         total = run_count_only(filters)
         shown = 0
-        st.markdown(
-            f'<div class="toolbar"><span class="greybar">총 {total:,}건 / 표시 {shown:,}건</span></div>',
-            unsafe_allow_html=True
-        )
-        st.dataframe(pd.DataFrame(columns=["진료과","진료일","환자번호","처방구분","처방명"]), use_container_width=True, hide_index=True, height=720)
+        st.markdown(f"<div class='toolbar'><span class='greybar'>총 {total:,}건 / 표시 {shown:,}건</span></div>", unsafe_allow_html=True)
+        st.dataframe(pd.DataFrame(columns=["진료과","진료일","환자번호","처방구분","처방명"]),
+                     use_container_width=True, hide_index=True, height=640)
     else:
-        df, total = run_query(filters)
+        df, total = run_query(filters, limit=1000)
 
-        # Apply free-text
+        # free text filter
         if st.session_state.free_q.strip() and not df.empty:
             q = st.session_state.free_q.strip().lower()
             def match_row(row):
@@ -302,46 +255,37 @@ with right:
             df = df[df.apply(match_row, axis=1)]
 
         shown = 0 if df.empty else len(df)
-        
-        # ① 카운트(작은 글씨)
-        st.markdown(
-            f'<div class="toolbar"><span class="greybar">총 {total:,}건 / 표시 {shown:,}건</span></div>',
-            unsafe_allow_html=True
-        )
-        # ② 선택 진단 바(옅은 파랑) — 카운트와 살짝 간격
+
+        st.markdown(f"<div class='toolbar'><span class='greybar'>총 {total:,}건 / 표시 {shown:,}건</span></div>", unsafe_allow_html=True)
+
+        # 선택된 진단코드·명 — 옅은 파랑 바 + 간격
         if st.session_state.sel_code and st.session_state.sel_code != "전체":
             sel_name = DIAG_CODE2NAME.get(st.session_state.sel_code, "")
-            st.markdown(
-                f'<div class="toolbar mt4"><span class="lightbar">{st.session_state.sel_code} · {sel_name}</span></div>',
-                unsafe_allow_html=True
-            )
+            st.markdown(f"<div class='toolbar mt4'><span class='lightbar'>{st.session_state.sel_code} · {sel_name}</span></div>", unsafe_allow_html=True)
 
         if df.empty:
             st.info("검색(필터) 결과가 없습니다.")
         else:
             if "진단명" not in df.columns and "진단코드" in df.columns:
                 df["진단명"] = df["진단코드"].map(DIAG_CODE2NAME).fillna(df.get("진단명"))
+            # 보기에서 원시코드/생성열은 숨김
             drop_cols = [c for c in ["id", "created_at", "진단코드", "진단명"] if c in df.columns]
             df_show = df.drop(columns=drop_cols)
+
             preferred = ["진료과","진료일","환자번호","처방구분","처방명"]
             ordered = [c for c in preferred if c in df_show.columns] + [c for c in df_show.columns if c not in preferred]
 
             col_config = {}
-            if "진료과" in ordered:
-                col_config["진료과"] = st.column_config.TextColumn("진료과", width="small")
-            if "진료일" in ordered:
-                col_config["진료일"] = st.column_config.TextColumn("진료일", width="small")
-            if "환자번호" in ordered:
-                col_config["환자번호"] = st.column_config.TextColumn("환자번호", width="small")
-            if "처방구분" in ordered:
-                col_config["처방구분"] = st.column_config.TextColumn("처방구분", width="small")
-            if "처방명" in ordered:
-                col_config["처방명"] = st.column_config.TextColumn("처방명", width="large")
+            if "진료과" in ordered: col_config["진료과"] = st.column_config.TextColumn("진료과", width="small")
+            if "진료일" in ordered: col_config["진료일"] = st.column_config.TextColumn("진료일", width="small")
+            if "환자번호" in ordered: col_config["환자번호"] = st.column_config.TextColumn("환자번호", width="small")
+            if "처방구분" in ordered: col_config["처방구분"] = st.column_config.TextColumn("처방구분", width="small")
+            if "처방명" in ordered: col_config["처방명"] = st.column_config.TextColumn("처방명", width="large")
 
             st.dataframe(
                 df_show[ordered],
                 use_container_width=True,
                 hide_index=True,
                 column_config=col_config,
-                height=720
+                height=640
             )
