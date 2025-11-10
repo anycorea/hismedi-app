@@ -86,39 +86,52 @@ DIAG_CODE2NAME = {c: n for c, n in FREQUENT_DIAG_ITEMS}
 # =========================
 # 제목 & 공통 스타일
 # =========================
-st.markdown("### 💊 내과 처방 조회(타병원)")
-st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
 
+st.markdown("<h3 class='page-title'>💊 내과 처방 조회(타병원)</h3>", unsafe_allow_html=True)
+
+# 공통 스타일: 상단 여백 최소 + 컴팩트 컴포넌트
 st.markdown(
     """
     <style>
-    .toolbar { display: inline-flex; gap: 8px; align-items: center; flex-wrap: nowrap; margin: 2px 0 4px 0; }
+    /* 상단 여백 최소화 (헤더/본문 둘 다) */
+    [data-testid="stHeader"] { height: 34px; padding: 0; background: transparent; }
+    section.main > div { padding-top: 6px !important; }        /* Streamlit 기본 top padding 줄이기 */
+    div.block-container { padding-top: 6px !important; }        /* 일부 버전 호환 */
+
+    /* 제목 컴팩트 */
+    .page-title { margin: 0 0 6px 0; line-height: 1.2; }
+
+    /* 툴바 컴팩트화 */
+    .toolbar { display: inline-flex; gap: 6px; align-items: center; flex-wrap: nowrap; margin: 0; }
     .greybar {
-        background: #f1f5f9;
+        background: #f8fafc;
         border: 1px solid #e2e8f0;
-        padding: 6px 10px;
+        padding: 4px 8px;
         border-radius: 8px;
-        font-size: 13px;
-        display: inline-block;
-        vertical-align: middle;
-        white-space: nowrap;
+        font-size: 12px;
+        display: inline-block; vertical-align: middle; white-space: nowrap;
     }
     .chip {
         display: inline-block;
-        padding: 6px 10px;
+        padding: 4px 8px;
         border-radius: 999px;
         background: #eef2ff;
         border: 1px solid #c7d2fe;
-        font-size: 12px;
+        font-size: 11px;
         color: #3730a3;
-        vertical-align: middle;
-        white-space: nowrap;
+        vertical-align: middle; white-space: nowrap;
     }
-    /* Wrap DF cells for long text */
-    [data-testid="stDataFrame"] div[role="gridcell"] {white-space: normal !important;}
-    [data-testid="stDataFrame"] div[role="gridcell"] p {margin: 0;}
-    [data-testid="stDataFrame"] { margin-top: 6px; }
-    .stCaption { margin-top: 0 !important; }
+
+    /* Markdown 기본 헤딩 마진도 살짝 축소 */
+    .stMarkdown h3, .stMarkdown h4 { margin: 0 0 6px 0; }
+
+    /* DataFrame: 위 마진/텍스트 래핑만 유지 */
+    [data-testid="stDataFrame"] { margin-top: 4px; }
+    [data-testid="stDataFrame"] div[role="gridcell"] { white-space: normal !important; }
+    [data-testid="stDataFrame"] div[role="gridcell"] p { margin: 0; }
+
+    /* 캡션 간격 */
+    .stCaption { margin-top: 2px !important; }
     </style>
     """,
     unsafe_allow_html=True,
