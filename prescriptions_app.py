@@ -84,59 +84,10 @@ FREQUENT_DIAG_ITEMS = [
 DIAG_CODE2NAME = {c: n for c, n in FREQUENT_DIAG_ITEMS}
 
 # =========================
-# 제목 & 공통 스타일
+# 기본 UI
 # =========================
-
-st.markdown("<h3 class='page-title'>💊 내과 처방 조회(타병원)</h3>", unsafe_allow_html=True)
-
-# 공통 스타일: 상단 여백 최소 + 컴팩트 컴포넌트
-st.markdown(
-    """
-    <style>
-    /* 상단 여백 최소화 (헤더/본문 둘 다) */
-    [data-testid="stHeader"] { height: 34px; padding: 0; background: transparent; }
-    section.main > div { padding-top: 10px !important; }        /* Streamlit 기본 top padding 줄이기 */
-    div.block-container { padding-top: 10px !important; }        /* 일부 버전 호환 */
-
-    /* 제목 컴팩트 */
-    .page-title { margin-top: 2px; }         /* 제목만 아주 살짝 내림 (+2px) */
-    [data-testid="stHeader"]{ height: 36px;} /* 헤더 높이 34→36로 2px 여유 */
-
-    /* 툴바 컴팩트화 */
-    .toolbar { display: inline-flex; gap: 6px; align-items: center; flex-wrap: nowrap; margin: 0; }
-    .greybar {
-        background: #f8fafc;
-        border: 1px solid #e2e8f0;
-        padding: 4px 8px;
-        border-radius: 8px;
-        font-size: 12px;
-        display: inline-block; vertical-align: middle; white-space: nowrap;
-    }
-    .chip {
-        display: inline-block;
-        padding: 4px 8px;
-        border-radius: 999px;
-        background: #eef2ff;
-        border: 1px solid #c7d2fe;
-        font-size: 11px;
-        color: #3730a3;
-        vertical-align: middle; white-space: nowrap;
-    }
-
-    /* Markdown 기본 헤딩 마진도 살짝 축소 */
-    .stMarkdown h3, .stMarkdown h4 { margin: 0 0 6px 0; }
-
-    /* DataFrame: 위 마진/텍스트 래핑만 유지 */
-    [data-testid="stDataFrame"] { margin-top: 4px; }
-    [data-testid="stDataFrame"] div[role="gridcell"] { white-space: normal !important; }
-    [data-testid="stDataFrame"] div[role="gridcell"] p { margin: 0; }
-
-    /* 캡션 간격 */
-    .stCaption { margin-top: 2px !important; }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+st.set_page_config(page_title="내과 처방 조회", page_icon="💊", layout="wide")
+st.title("내과 처방 조회")
 
 # =========================
 # Supabase 연결
@@ -211,11 +162,10 @@ for k, v in defaults.items():
 left, right = st.columns([1.1, 2.4])
 
 with left:
-    # Caption + Help button + Reset button (3 columns)
-    c1, c2, c3 = st.columns([1, 1, 0.8])
+    # 안내문 + Hismedi Dx + 검색 초기화
+    st.markdown("**드롭다운을 추가로 선택하면 조건이 누적됩니다.**")
+    c1, c2 = st.columns([1.6, 0.5])
     with c1:
-        st.caption("드롭다운을 추가로 선택하면 조건이 누적됩니다.")
-    with c2:
         diag_df = pd.DataFrame(FREQUENT_DIAG_ITEMS, columns=["진단코드", "진단명"])
         try:
             pop = st.popover("Hismedi Dx(다빈도순)")
@@ -224,17 +174,15 @@ with left:
         except Exception:
             with st.expander("Hismedi Dx(다빈도순)"):
                 st.dataframe(diag_df, use_container_width=True, hide_index=True, height=480)
-    with c3:
+    with c2:
         if st.button("검색 초기화", use_container_width=True):
-            st.session_state.sel_code = "전체"
-            st.session_state.sel_rx = "전체"
-            st.session_state.sel_pt = "전체"
-            st.session_state.sel_visit = "전체"
-            st.session_state.free_q = ""
+            for k in ["sel_code","sel_rx","sel_pt","sel_visit","free_q"]:
+                st.session_state[k] = "전체" if k != "free_q" else ""
             try:
                 st.rerun()
             except Exception:
                 st.experimental_rerun()
+
 
     # (1) 진단코드
     code_options = ["전체"] + [c for c, _ in FREQUENT_DIAG_ITEMS]
