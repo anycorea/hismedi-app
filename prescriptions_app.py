@@ -89,7 +89,7 @@ st.set_page_config(page_title="내과 처방 조회", page_icon="💊", layout="
 st.markdown(
     """
     <style>
-        .block-container {padding-top: 12px !important; padding-bottom: 1rem;}
+        .block-container {padding-top: 8px !important; padding-bottom: 1rem;}
         h3.app-title {margin: 0 0 0.5rem 0; line-height: 1.25;}
         .greybar {
             background: #f1f5f9;
