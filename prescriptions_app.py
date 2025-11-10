@@ -82,17 +82,33 @@ FREQUENT_DIAG_ITEMS = [
 ]
 DIAG_CODE2NAME = {c: n for c, n in FREQUENT_DIAG_ITEMS}
 
-# ==================== Lightweight CSS (performance-conscious) ====================
+# ==================== Minimal CSS (incl. requests) ====================
 st.markdown(
     """
     <style>
+    /* Header spacing */
     [data-testid="stHeader"] {height:34px; padding:0; background:transparent;}
     section.main > div, .block-container {padding-top:10px !important;}
+
     .page-title {margin:2px 0 6px 0; font-weight:700;}
-    .toolbar {display:inline-flex; gap:6px; align-items:center; flex-wrap:nowrap;}
-    .greybar {background:#f8fafc; border:1px solid #e2e8f0; padding:2px 6px; border-radius:8px; font-size:11px; white-space:nowrap;}
-    .lightbar {background:#eff6ff; border:1px solid #bfdbfe; color:#1e40af; padding:6px 10px; border-radius:10px; font-size:12px; white-space:nowrap;}
-    .mt4 {margin-top:6px;}
+
+    /* Toolbar chips (same height) */
+    .toolbar {display:flex; gap:8px; align-items:center; flex-wrap:nowrap;}
+    .chip {display:inline-flex; align-items:center; height:28px; padding:0 10px; border-radius:10px; font-size:12px; border:1px solid;}
+    .chip.grey {background:#f8fafc; border-color:#e2e8f0; color:#0f172a;}
+    .chip.blue {background:#eff6ff; border-color:#bfdbfe; color:#1e40af;}
+
+    /* Popover trigger wider */
+    div[data-testid="stPopover"] > button { width: 100% !important; }
+
+    /* Make the only button (검색 초기화) light blue */
+    .stButton > button {
+        background:#e0f2fe !important;
+        border:1px solid #bfdbfe !important;
+        color:#1e40af !important;
+    }
+
+    /* Dataframe spacing */
     [data-testid="stDataFrame"] {margin-top:6px;}
     </style>
     """,
@@ -160,14 +176,13 @@ for k, v in defaults.items():
 # ==================== Layout ====================
 st.markdown("<h4 class='page-title'>💊 내과 처방 조회(타병원)</h4>", unsafe_allow_html=True)
 
-left, right = st.columns([1.1, 2.4])
+left, right = st.columns([1.2, 2.4])
 
 with left:
-    # 안내문 — 일반 글꼴(볼드 X)
     st.write("드롭다운을 추가로 선택하면 조건이 누적됩니다.")
 
-    # 상단 툴바: 좌측(Hismedi Dx 팝오버), 우측(검색 초기화)
-    lc, rc = st.columns([1.6, 0.5])
+    # 상단 툴바: 좌측(Hismedi Dx 팝오버 길게), 우측(검색 초기화 파랑 버튼)
+    lc, rc = st.columns([1.9, 0.6])
     with lc:
         diag_df = pd.DataFrame(FREQUENT_DIAG_ITEMS, columns=["진단코드", "진단명"])
         try:
@@ -216,7 +231,6 @@ with left:
     st.text_input("통합(단어)검색", key="free_q", placeholder="코드·명·처방구분·환자번호·진료일 중 일부 입력")
 
 with right:
-    # 우측 상단 카운트 (작은 글씨, greybar)
     any_filter = any([
         st.session_state.sel_code != "전체",
         st.session_state.sel_rx != "전체",
@@ -234,7 +248,9 @@ with right:
     if not any_filter:
         total = run_count_only(filters)
         shown = 0
-        st.markdown(f"<div class='toolbar'><span class='greybar'>총 {total:,}건 / 표시 {shown:,}건</span></div>", unsafe_allow_html=True)
+        # 같은 줄, 같은 높이의 칩 1개만 노출
+        bar = f"<div class='toolbar'><span class='chip grey'>총 {total:,}건 / 표시 {shown:,}건</span></div>"
+        st.markdown(bar, unsafe_allow_html=True)
         st.dataframe(pd.DataFrame(columns=["진료과","진료일","환자번호","처방구분","처방명"]),
                      use_container_width=True, hide_index=True, height=640)
     else:
@@ -256,19 +272,18 @@ with right:
 
         shown = 0 if df.empty else len(df)
 
-        st.markdown(f"<div class='toolbar'><span class='greybar'>총 {total:,}건 / 표시 {shown:,}건</span></div>", unsafe_allow_html=True)
-
-        # 선택된 진단코드·명 — 옅은 파랑 바 + 간격
+        # 같은 줄, 같은 높이 칩 2개(카운트 + 진단바)
+        chips = [f"<span class='chip grey'>총 {total:,}건 / 표시 {shown:,}건</span>"]
         if st.session_state.sel_code and st.session_state.sel_code != "전체":
             sel_name = DIAG_CODE2NAME.get(st.session_state.sel_code, "")
-            st.markdown(f"<div class='toolbar mt4'><span class='lightbar'>{st.session_state.sel_code} · {sel_name}</span></div>", unsafe_allow_html=True)
+            chips.append(f"<span class='chip blue'>{st.session_state.sel_code} · {sel_name}</span>")
+        st.markdown(f"<div class='toolbar'>{''.join(chips)}</div>", unsafe_allow_html=True)
 
         if df.empty:
             st.info("검색(필터) 결과가 없습니다.")
         else:
             if "진단명" not in df.columns and "진단코드" in df.columns:
                 df["진단명"] = df["진단코드"].map(DIAG_CODE2NAME).fillna(df.get("진단명"))
-            # 보기에서 원시코드/생성열은 숨김
             drop_cols = [c for c in ["id", "created_at", "진단코드", "진단명"] if c in df.columns]
             df_show = df.drop(columns=drop_cols)
 
