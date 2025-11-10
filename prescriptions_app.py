@@ -99,7 +99,8 @@ st.markdown(
     div.block-container { padding-top: 10px !important; }        /* 일부 버전 호환 */
 
     /* 제목 컴팩트 */
-    .page-title { margin: 0 0 6px 0; line-height: 1.2; }
+    .page-title { margin-top: 2px; }         /* 제목만 아주 살짝 내림 (+2px) */
+    [data-testid="stHeader"]{ height: 36px;} /* 헤더 높이 34→36로 2px 여유 */
 
     /* 툴바 컴팩트화 */
     .toolbar { display: inline-flex; gap: 6px; align-items: center; flex-wrap: nowrap; margin: 0; }
