@@ -58,6 +58,8 @@ with st.sidebar:
 # ============= Page config must be first Streamlit command =============
 st.set_page_config(page_title="내과 처방 조회(타병원)", page_icon="💊", layout="wide")
 
+
+
 try:
     from supabase import create_client, Client
 except Exception:
