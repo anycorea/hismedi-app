@@ -7,6 +7,27 @@ st.set_page_config(page_title="내과 처방 조회(타병원)", page_icon="💊
 
 try:
     from supabase import create_client, Client
+st.markdown(
+    """
+    <style>
+      /* --- Compact header only on the page-header wrapper --- */
+      .page-header { padding-top: 10px; } /* adjust 8~12px if needed */
+      .page-title  { margin: 0; line-height: 1.25; }
+
+      /* Optional: compact buttons and popover triggers */
+      .stButton>button { padding: 0.4rem 0.75rem; }
+      [data-testid="stPopoverAnchor"] button { padding: 0.4rem 0.75rem; }
+      .stCaption { margin-top: 0 !important; }
+
+      /* DataFrame readability */
+      [data-testid="stDataFrame"] { margin-top: 4px; }
+      [data-testid="stDataFrame"] div[role="gridcell"] { white-space: normal !important; }
+      [data-testid="stDataFrame"] div[role="gridcell"] p { margin: 0; }
+    </style>
+    """
+    ,
+    unsafe_allow_html=True,
+)
 except Exception:
     create_client = None
     Client = None
@@ -87,7 +108,46 @@ DIAG_CODE2NAME = {c: n for c, n in FREQUENT_DIAG_ITEMS}
 # 제목 & 공통 스타일
 # =========================
 
-st.markdown("<h3 class='page-title'>💊 내과 처방 조회(타병원)</h3>", unsafe_allow_html=True)
+st.markdown("<h3 class='page-title'>💊 내과 처방 조회(타병원)
+
+# === Topbar: 안내문 + 도움말/초기화 (제목 바로 아래 한 줄) ===
+g_col, h_col, r_col = st.columns([1.0, 0.22, 0.16])
+with g_col:
+    
+# --- moved to title topbar ---
+# st.caption("드롭다운을 추가로 선택하면 조건이 누적됩니다.")
+# 
+with h_col:
+    try:
+        pop = st.popover("Hismedi Dx(다빈도순)", use_container_width=True)
+        with pop:
+            try:
+                diag_df = pd.DataFrame(FREQUENT_DIAG_ITEMS, columns=["진단코드", "진단명"])
+            except Exception:
+                diag_df = pd.DataFrame([], columns=["진단코드", "진단명"])
+            st.dataframe(diag_df, use_container_width=True, hide_index=True, height=480)
+    except Exception:
+        with st.expander("Hismedi Dx(다빈도순)"):
+            try:
+                diag_df = pd.DataFrame(FREQUENT_DIAG_ITEMS, columns=["진단코드", "진단명"])
+            except Exception:
+                diag_df = pd.DataFrame([], columns=["진단코드", "진단명"])
+            st.dataframe(diag_df, use_container_width=True, hide_index=True, height=480)
+
+with r_col:
+    if 
+# --- moved to title topbar ---
+# st.button("검색 초기화", use_container_width=True):
+#         st.session_state.update({
+#             "sel_code": "전체",
+#             "sel_rx":   "전체",
+#             "sel_pt":   "전체",
+#             "sel_visit":"전체",
+#             "free_q":   "",
+#         })
+#         st.rerun()
+# 
+</h3>", unsafe_allow_html=True)
 
 # 공통 스타일: 상단 여백 최소 + 컴팩트 컴포넌트
 st.markdown(
@@ -212,10 +272,16 @@ left, right = st.columns([1.1, 2.4])
 
 with left:
     # Caption + Help button + Reset button (3 columns)
-    c1, c2, c3 = st.columns([1, 1, 0.8])
-    with c1:
-        st.caption("드롭다운을 추가로 선택하면 조건이 누적됩니다.")
-    with c2:
+    
+# --- moved to title topbar ---
+# c1, c2, c3 = st.columns([1, 1, 0.8])
+#     with c1:
+#         
+
+# --- moved to title topbar ---
+# st.caption("드롭다운을 추가로 선택하면 조건이 누적됩니다.")
+#     
+with c2:
         diag_df = pd.DataFrame(FREQUENT_DIAG_ITEMS, columns=["진단코드", "진단명"])
         try:
             pop = st.popover("Hismedi Dx(다빈도순)")
@@ -225,15 +291,18 @@ with left:
             with st.expander("Hismedi Dx(다빈도순)"):
                 st.dataframe(diag_df, use_container_width=True, hide_index=True, height=480)
     with c3:
-        if st.button("검색 초기화", use_container_width=True):
-            st.session_state.sel_code = "전체"
-            st.session_state.sel_rx = "전체"
-            st.session_state.sel_pt = "전체"
-            st.session_state.sel_visit = "전체"
-            st.session_state.free_q = ""
-            try:
-                st.rerun()
-            except Exception:
+        if 
+# --- moved to title topbar ---
+# st.button("검색 초기화", use_container_width=True):
+#             st.session_state.sel_code = "전체"
+#             st.session_state.sel_rx = "전체"
+#             st.session_state.sel_pt = "전체"
+#             st.session_state.sel_visit = "전체"
+#             st.session_state.free_q = ""
+#             try:
+#                 st.rerun()
+#             
+except Exception:
                 st.experimental_rerun()
 
     # (1) 진단코드
