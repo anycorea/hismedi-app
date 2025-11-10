@@ -86,8 +86,8 @@ DIAG_CODE2NAME = {c: n for c, n in FREQUENT_DIAG_ITEMS}
 # =========================
 # 기본 UI
 # =========================
-st.set_page_config(page_title="내과 처방 조회", page_icon="💊", layout="wide")
-st.title("내과 처방 조회")
+st.set_page_config(page_title="내과 처방 조회(타병원)", page_icon="💊", layout="wide")
+st.title("내과 처방 조회(타병원)")
 
 # =========================
 # Supabase 연결
