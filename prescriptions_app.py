@@ -22,7 +22,7 @@ df = load_data()
 # 필터 UI
 col1, col2, col3, col4 = st.columns(4)
 with col1:
-    sel_diagnosis = st.selectbox("진단", ["전체"] + sorted(df["진단"].dropna().unique().tolist()))
+    sel_diagnosis = st.selectbox("진단명", ["전체"] + sorted(df["진단명"].dropna().unique().tolist()))
 with col2:
     sel_date = st.date_input("진료일", value=None)
 with col3:
@@ -33,7 +33,7 @@ with col4:
 # 필터 적용
 filtered = df.copy()
 if sel_diagnosis != "전체":
-    filtered = filtered[filtered["진단"] == sel_diagnosis]
+    filtered = filtered[filtered["진단명"] == sel_diagnosis]
 if sel_category != "전체":
     filtered = filtered[filtered["처방구분"] == sel_category]
 if sel_date:
