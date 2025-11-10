@@ -86,17 +86,48 @@ DIAG_CODE2NAME = {c: n for c, n in FREQUENT_DIAG_ITEMS}
 # =========================
 # 기본 UI
 # =========================
+st.markdown("<h4 class='page-title'>💊 내과 처방 조회(타병원)</h4>", unsafe_allow_html=True)
 st.markdown(
     """
     <style>
-      [data-testid="stHeader"] { height: 34px; padding: 0; background: transparent; }
-      section.main > div, div.block-container { padding-top: 10px !important; }
-      .page-title { margin: 2px 0 6px 0; font-weight: 700; }
+    /* 헤더/여백 최소화 */
+    [data-testid="stHeader"] { height: 34px; padding: 0; background: transparent; }
+    section.main > div, div.block-container { padding-top: 10px !important; }
+
+    /* 심플 타이틀 */
+    .page-title { margin: 2px 0 6px 0; font-weight: 700; }
+
+    /* 좌측 툴바/칩 */
+    .toolbar { display: inline-flex; gap: 6px; align-items: center; flex-wrap: nowrap; margin: 0; }
+    .greybar {
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        padding: 2px 6px;                 /* 더 컴팩트 */
+        border-radius: 8px;
+        font-size: 11px;                  /* 더 작게 */
+        display: inline-block; vertical-align: middle; white-space: nowrap;
+    }
+    /* 오른쪽: 선택된 진단 표시용 옅은 파랑 "바" */
+    .lightbar {
+        background: #eff6ff;              /* 옅은 파랑 */
+        border: 1px solid #bfdbfe;        /* 파랑 계열 테두리 */
+        color: #1e40af;                   /* 글자 파랑 */
+        padding: 6px 10px;
+        border-radius: 10px;              /* 바 형태 (칩보다 덜 둥글게) */
+        font-size: 12px;
+        display: inline-block; white-space: nowrap;
+    }
+    .mt4 { margin-top: 6px; }             /* 카운트와 바 사이 간격 */
+    .stCaption { margin-top: 2px !important; }
+
+    /* DataFrame 래핑 */
+    [data-testid="stDataFrame"] { margin-top: 4px; }
+    [data-testid="stDataFrame"] div[role="gridcell"] { white-space: normal !important; }
+    [data-testid="stDataFrame"] div[role="gridcell"] p { margin: 0; }
     </style>
     """,
     unsafe_allow_html=True,
 )
-st.markdown("<h4 class='page-title'>💊 내과 처방 조회(타병원)</h4>", unsafe_allow_html=True)
 
 # =========================
 # Supabase 연결
@@ -172,7 +203,7 @@ left, right = st.columns([1.1, 2.4])
 
 with left:
     # 안내문 + Hismedi Dx + 검색 초기화
-    st.markdown("**드롭다운을 추가로 선택하면 조건이 누적됩니다.**")
+    st.markdown("드롭다운을 추가로 선택하면 조건이 누적됩니다.")
     c1, c2 = st.columns([1.6, 0.5])
     with c1:
         diag_df = pd.DataFrame(FREQUENT_DIAG_ITEMS, columns=["진단코드", "진단명"])
@@ -248,7 +279,10 @@ with right:
     if not any_filter:
         total = run_count_only(filters)
         shown = 0
-        st.markdown(f'<div class="toolbar"><span class="greybar">총 {total:,}건 / 표시 {shown:,}건</span></div>', unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="toolbar"><span class="greybar">총 {total:,}건 / 표시 {shown:,}건</span></div>',
+            unsafe_allow_html=True
+        )
         st.dataframe(pd.DataFrame(columns=["진료과","진료일","환자번호","처방구분","처방명"]), use_container_width=True, hide_index=True, height=720)
     else:
         df, total = run_query(filters)
@@ -268,11 +302,19 @@ with right:
             df = df[df.apply(match_row, axis=1)]
 
         shown = 0 if df.empty else len(df)
-        pieces = [f'<span class="greybar">총 {total:,}건 / 표시 {shown:,}건</span>']
+        
+        # ① 카운트(작은 글씨)
+        st.markdown(
+            f'<div class="toolbar"><span class="greybar">총 {total:,}건 / 표시 {shown:,}건</span></div>',
+            unsafe_allow_html=True
+        )
+        # ② 선택 진단 바(옅은 파랑) — 카운트와 살짝 간격
         if st.session_state.sel_code and st.session_state.sel_code != "전체":
             sel_name = DIAG_CODE2NAME.get(st.session_state.sel_code, "")
-            pieces.append(f'<span class="chip">{st.session_state.sel_code} · {sel_name}</span>')
-        st.markdown(f'<div class="toolbar">{"".join(pieces)}</div>', unsafe_allow_html=True)
+            st.markdown(
+                f'<div class="toolbar mt4"><span class="lightbar">{st.session_state.sel_code} · {sel_name}</span></div>',
+                unsafe_allow_html=True
+            )
 
         if df.empty:
             st.info("검색(필터) 결과가 없습니다.")
