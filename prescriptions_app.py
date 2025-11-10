@@ -95,8 +95,8 @@ st.markdown(
     <style>
     /* 상단 여백 최소화 (헤더/본문 둘 다) */
     [data-testid="stHeader"] { height: 34px; padding: 0; background: transparent; }
-    section.main > div { padding-top: 6px !important; }        /* Streamlit 기본 top padding 줄이기 */
-    div.block-container { padding-top: 6px !important; }        /* 일부 버전 호환 */
+    section.main > div { padding-top: 10px !important; }        /* Streamlit 기본 top padding 줄이기 */
+    div.block-container { padding-top: 10px !important; }        /* 일부 버전 호환 */
 
     /* 제목 컴팩트 */
     .page-title { margin: 0 0 6px 0; line-height: 1.2; }
