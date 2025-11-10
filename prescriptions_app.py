@@ -2,29 +2,11 @@ import os
 import streamlit as st
 import pandas as pd
 
-st.markdown(
-    """
-    <style>
-      .page-header { padding-top: 10px; }
-      .page-title  { margin: 0; line-height: 1.25; }
-      /* Sidebar: make controls full width and caption one-line */
-      [data-testid="stSidebar"] .stButton>button { width: 100%; padding: 0.45rem 0.75rem; }
-      [data-testid="stSidebar"] [data-testid="stPopoverAnchor"] button { width: 100%; padding: 0.45rem 0.75rem; }
-      [data-testid="stSidebar"] .side-caption {
-        margin: 0 0 8px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #64748b;
-      }
-      /* DataFrame readability */
-      [data-testid="stDataFrame"] { margin-top: 4px; }
-      [data-testid="stDataFrame"] div[role="gridcell"] { white-space: normal !important; }
-      [data-testid="stDataFrame"] div[role="gridcell"] p { margin: 0; }
-    </style>
-    """
-    ,
-    unsafe_allow_html=True,
-)
+
+st.set_page_config(page_title="내과 처방 조회(타병원)", page_icon="\U0001F48A", layout="wide")
 
 
-# ===== Sidebar layout: 1) caption (one line)  2) two columns (left: His..., right: reset) =====
+
 with st.sidebar:
     st.markdown('<p class="side-caption">드롭다운을 추가로 선택하면 조건이 누적됩니다.</p>', unsafe_allow_html=True)
     sb_l, sb_r = st.columns([1, 1], gap="small")
@@ -55,8 +37,32 @@ with st.sidebar:
             })
             st.rerun()
 
+st.markdown(
+    """
+    <style>
+      .page-header { padding-top: 10px; }
+      .page-title  { margin: 0; line-height: 1.25; }
+      /* Sidebar: make controls full width and caption one-line */
+      [data-testid="stSidebar"] .stButton>button { width: 100%; padding: 0.45rem 0.75rem; }
+      [data-testid="stSidebar"] [data-testid="stPopoverAnchor"] button { width: 100%; padding: 0.45rem 0.75rem; }
+      [data-testid="stSidebar"] .side-caption {
+        margin: 0 0 8px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #64748b;
+      }
+      /* DataFrame readability */
+      [data-testid="stDataFrame"] { margin-top: 4px; }
+      [data-testid="stDataFrame"] div[role="gridcell"] { white-space: normal !important; }
+      [data-testid="stDataFrame"] div[role="gridcell"] p { margin: 0; }
+    </style>
+    """
+    ,
+    unsafe_allow_html=True,
+)
+
+
+# ===== Sidebar layout: 1) caption (one line)  2) two columns (left: His..., right: reset) =====
+
+
 # ============= Page config must be first Streamlit command =============
-st.set_page_config(page_title="내과 처방 조회(타병원)", page_icon="💊", layout="wide")
 
 
 
