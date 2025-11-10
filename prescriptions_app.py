@@ -2,6 +2,59 @@ import os
 import streamlit as st
 import pandas as pd
 
+st.markdown(
+    """
+    <style>
+      .page-header { padding-top: 10px; }
+      .page-title  { margin: 0; line-height: 1.25; }
+      /* Sidebar: make controls full width and caption one-line */
+      [data-testid="stSidebar"] .stButton>button { width: 100%; padding: 0.45rem 0.75rem; }
+      [data-testid="stSidebar"] [data-testid="stPopoverAnchor"] button { width: 100%; padding: 0.45rem 0.75rem; }
+      [data-testid="stSidebar"] .side-caption {
+        margin: 0 0 8px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #64748b;
+      }
+      /* DataFrame readability */
+      [data-testid="stDataFrame"] { margin-top: 4px; }
+      [data-testid="stDataFrame"] div[role="gridcell"] { white-space: normal !important; }
+      [data-testid="stDataFrame"] div[role="gridcell"] p { margin: 0; }
+    </style>
+    """
+    ,
+    unsafe_allow_html=True,
+)
+
+
+# ===== Sidebar layout: 1) caption (one line)  2) two columns (left: His..., right: reset) =====
+with st.sidebar:
+    st.markdown('<p class="side-caption">드롭다운을 추가로 선택하면 조건이 누적됩니다.</p>', unsafe_allow_html=True)
+    sb_l, sb_r = st.columns([1, 1], gap="small")
+    with sb_l:
+        try:
+            pop = st.popover("Hismedi Dx(다빈도순)", use_container_width=True)
+            with pop:
+                try:
+                    diag_df = pd.DataFrame(FREQUENT_DIAG_ITEMS, columns=["진단코드", "진단명"])
+                except Exception:
+                    diag_df = pd.DataFrame([], columns=["진단코드", "진단명"])
+                st.dataframe(diag_df, use_container_width=True, hide_index=True, height=480)
+        except Exception:
+            with st.expander("Hismedi Dx(다빈도순)"):
+                try:
+                    diag_df = pd.DataFrame(FREQUENT_DIAG_ITEMS, columns=["진단코드", "진단명"])
+                except Exception:
+                    diag_df = pd.DataFrame([], columns=["진단코드", "진단명"])
+                st.dataframe(diag_df, use_container_width=True, hide_index=True, height=480)
+    with sb_r:
+        if st.button("검색 초기화", use_container_width=True):
+            st.session_state.update({
+                "sel_code": "전체",
+                "sel_rx":   "전체",
+                "sel_pt":   "전체",
+                "sel_visit":"전체",
+                "free_q":   "",
+            })
+            st.rerun()
+
 # ============= Page config must be first Streamlit command =============
 st.set_page_config(page_title="내과 처방 조회(타병원)", page_icon="💊", layout="wide")
 
