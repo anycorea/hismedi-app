@@ -85,12 +85,12 @@ DIAG_CODE2NAME = {c: n for c, n in FREQUENT_DIAG_ITEMS}
 # =========================
 st.set_page_config(page_title="내과 처방 조회", page_icon="💊", layout="wide")
 
-# Top padding almost removed + moderate title size
+# Top padding almost removed + safe title spacing
 st.markdown(
     """
     <style>
-        .block-container {padding-top: 6px !important; padding-bottom: 1rem;}
-        h1, h2, h3 {margin-top: 0.2rem;}
+        .block-container {padding-top: 12px !important; padding-bottom: 1rem;}
+        h3.app-title {margin: 0 0 0.5rem 0; line-height: 1.25;}
         .greybar {
             background: #f1f5f9;
             border: 1px solid #e2e8f0;
@@ -100,16 +100,12 @@ st.markdown(
             display: inline-block;
             margin: 4px 0 12px 0;
         }
-        .chip {
-            display:inline-block; padding:4px 10px; border-radius:999px;
-            background:#f1f5f9; border:1px solid #e2e8f0; font-size:12px;
-        }
         .stDataFrame {margin-top: 0.25rem;}
     </style>
     """,
     unsafe_allow_html=True,
 )
-st.markdown("### 내과 처방 조회")
+st.markdown('<h3 class="app-title">내과 처방 조회</h3>', unsafe_allow_html=True)
 
 # =========================
 # Supabase 연결
@@ -174,7 +170,8 @@ for k, v in defaults.items():
 # =========================
 # 레이아웃: 왼쪽 메뉴 / 오른쪽 결과
 # =========================
-left, right = st.columns([1.1, 2.4], vertical_alignment="start")
+# Remove vertical_alignment for broad compatibility
+left, right = st.columns([1.1, 2.4])
 
 with left:
     st.caption("드롭다운을 추가로 선택하면 조건이 누적됩니다.")
@@ -238,7 +235,7 @@ with right:
     df, total = run_query(filters)
 
     # 통합검색(클라이언트 필터)
-    if free_q and free_q.strip() and not df.empty:
+    if 'free_q' in locals() and free_q and free_q.strip() and not df.empty:
         q = free_q.strip().lower()
         def match_row(row):
             values = [
@@ -256,7 +253,7 @@ with right:
         st.info("검색(필터) 결과가 없습니다.")
     else:
         # 진단명 보정
-        if "진단명" not in df.columns:
+        if "진단명" not in df.columns and "진단코드" in df.columns:
             df["진단명"] = df["진단코드"].map(DIAG_CODE2NAME).fillna(df.get("진단명"))
 
         # 숨길 컬럼(id, created_at) 제거
