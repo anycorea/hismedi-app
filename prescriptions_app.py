@@ -84,7 +84,29 @@ DIAG_CODE2NAME = {c: n for c, n in FREQUENT_DIAG_ITEMS}
 # 기본 UI
 # =========================
 st.set_page_config(page_title="내과 처방 조회", page_icon="💊", layout="wide")
-st.title("내과 처방 조회")
+
+# 제목: 아이콘을 텍스트에 직접 포함
+st.markdown("### 💊 내과 처방 조회")
+
+# 테이블 줄바꿈(랩) 가능하도록 CSS
+st.markdown(
+    """
+    <style>
+    [data-testid="stDataFrame"] div[role="gridcell"] {white-space: normal !important;}
+    [data-testid="stDataFrame"] div[role="gridcell"] p {margin: 0;}
+    .greybar {
+        background: #f1f5f9;
+        border: 1px solid #e2e8f0;
+        padding: 6px 10px;
+        border-radius: 8px;
+        font-size: 13px;
+        display: inline-block;
+        margin: 4px 0 12px 0;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 # =========================
 # Supabase 연결
@@ -107,10 +129,6 @@ TABLE = "prescriptions"  # 실제 테이블명에 맞추세요.
 # 유틸
 # =========================
 def get_distinct(column: str, eq_filters: dict, limit: int = 10000):
-    """
-    현재 선택(진단코드 등)에 맞게 column의 고유값 목록을 가져옵니다.
-    캐시 없이 즉시 갱신.
-    """
     if sb is None:
         return ["전체"]
     q = sb.table(TABLE).select(column)
@@ -149,7 +167,6 @@ for k, v in defaults.items():
 # =========================
 # 레이아웃: 왼쪽 메뉴 / 오른쪽 결과
 # =========================
-# Remove vertical_alignment for broad compatibility
 left, right = st.columns([1.1, 2.4])
 
 with left:
@@ -165,18 +182,14 @@ with left:
         key="sel_code",
     )
 
-    # ▶ 즉시 조회 (버튼 없음) — 선택 누적
+    # 즉시 조회 — 선택 누적
     filters = {
         "진단코드": st.session_state.sel_code,
         "처방구분": st.session_state.sel_rx,
         "환자번호": st.session_state.sel_pt,
         "진료일":   st.session_state.sel_visit,
     }
-    df, total = run_query(filters)
-
-    # 회색바: 총/표시 — 진단코드 드롭박스 다음 줄, 1줄
-    shown = 0 if df.empty else len(df)
-    st.markdown(f'<div class="greybar">총 {total:,}건 / 표시 {shown:,}건</div>', unsafe_allow_html=True)
+    # 왼쪽은 요약만, 실제 표/카운트는 오른쪽에서 처리
 
     # (2) 처방구분 — 코드 기준으로 전체 후보 노출
     rx_options = get_distinct("처방구분", {"진단코드": sel_code})
@@ -227,6 +240,10 @@ with right:
             return any(q in str(v).lower() for v in values)
         df = df[df.apply(match_row, axis=1)]
 
+    # 오른쪽 상단(좌측 정렬)에 카운트 배치: 총/표시
+    shown = 0 if df.empty else len(df)
+    st.markdown(f'<div class="greybar">총 {total:,}건 / 표시 {shown:,}건</div>', unsafe_allow_html=True)
+
     # 결과 표 (오른쪽 메뉴)
     if df.empty:
         st.info("검색(필터) 결과가 없습니다.")
@@ -243,4 +260,26 @@ with right:
         preferred = ["진단코드","진단명","진료과","진료일","환자번호","처방구분","처방명"]
         ordered = [c for c in preferred if c in df_show.columns] + [c for c in df_show.columns if c not in preferred]
 
-        st.dataframe(df_show[ordered], use_container_width=True, hide_index=True)
+        # 컬럼 너비 구성
+        col_config = {}
+        if "진단코드" in ordered:
+            col_config["진단코드"] = st.column_config.TextColumn("진단코드", width="small")
+        if "진단명" in ordered:
+            col_config["진단명"] = st.column_config.TextColumn("진단명", width="large")
+        if "진료과" in ordered:
+            col_config["진료과"] = st.column_config.TextColumn("진료과", width="small")
+        if "진료일" in ordered:
+            col_config["진료일"] = st.column_config.TextColumn("진료일", width="small")
+        if "환자번호" in ordered:
+            col_config["환자번호"] = st.column_config.TextColumn("환자번호", width="small")
+        if "처방구분" in ordered:
+            col_config["처방구분"] = st.column_config.TextColumn("처방구분", width="small")
+        if "처방명" in ordered:
+            col_config["처방명"] = st.column_config.TextColumn("처방명", width="medium")
+
+        st.dataframe(
+            df_show[ordered],
+            use_container_width=True,
+            hide_index=True,
+            column_config=col_config
+        )
