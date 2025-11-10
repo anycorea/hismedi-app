@@ -91,9 +91,14 @@ st.markdown("### 💊 내과 처방 조회(타병원)")
 st.markdown(
     """
     <style>
+    .block-container { padding-top: 8px !important; }
+    h1,h2,h3 { margin-top: 0 !important; margin-bottom: 6px !important; line-height: 1.25; }
+    /* pull up first vertical blocks in columns */
+    .stColumn > div:first-child { margin-top: 0 !important; }
     /* wrap cells so long text shows across lines */
     [data-testid="stDataFrame"] div[role="gridcell"] {white-space: normal !important;}
     [data-testid="stDataFrame"] div[role="gridcell"] p {margin: 0;}
+    .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 2px 0 6px 0; }
     .greybar {
         background: #f1f5f9;
         border: 1px solid #e2e8f0;
@@ -101,7 +106,6 @@ st.markdown(
         border-radius: 8px;
         font-size: 13px;
         display: inline-block;
-        margin: 4px 8px 12px 0; /* right margin to separate from the chip */
         vertical-align: middle;
     }
     .chip {
@@ -113,8 +117,11 @@ st.markdown(
         font-size: 12px;
         color: #3730a3;
         vertical-align: middle;
-        margin: 4px 0 12px 0;
     }
+    /* Trim spacing before/after dataframe */
+    [data-testid="stDataFrame"] { margin-top: 6px; }
+    /* Reduce caption top space */
+    .stCaption { margin-top: 0 !important; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -182,13 +189,13 @@ for k, v in defaults.items():
 left, right = st.columns([1.1, 2.4])
 
 with left:
-    # Caption + Help button (popover/expander) on the same row
+    # Caption + Help button on the same row, tight to top
     c1, c2 = st.columns([1, 1])
     with c1:
         st.caption("드롭다운을 추가로 선택하면 조건이 누적됩니다.")
     with c2:
-        # Try popover; fallback to expander if not available
         diag_df = pd.DataFrame(FREQUENT_DIAG_ITEMS, columns=["진단코드", "진단명"])
+        # popover if supported, else expander
         try:
             pop = st.popover("우리병원의 진단명(다빈도순)")
             with pop:
@@ -199,7 +206,7 @@ with left:
 
     # (1) 진단코드: 코드+명 동시 표시 (값은 코드)
     code_options = ["전체"] + [c for c, _ in FREQUENT_DIAG_ITEMS]
-    sel_code = st.selectbox(
+    st.selectbox(
         "진단코드",
         code_options,
         index=code_options.index(st.session_state.sel_code) if st.session_state.sel_code in code_options else 0,
@@ -208,20 +215,20 @@ with left:
     )
 
     # (2) 처방구분 — 코드 기준으로 전체 후보 노출
-    rx_options = get_distinct("처방구분", {"진단코드": sel_code})
+    rx_options = get_distinct("처방구분", {"진단코드": st.session_state.sel_code})
     st.selectbox("처방구분", rx_options,
                  index=rx_options.index(st.session_state.sel_rx) if st.session_state.sel_rx in rx_options else 0,
                  key="sel_rx")
 
     # (3) 환자번호 — 위 선택 누적
-    pt_options = get_distinct("환자번호", {"진단코드": sel_code, "처방구분": st.session_state.sel_rx})
+    pt_options = get_distinct("환자번호", {"진단코드": st.session_state.sel_code, "처방구분": st.session_state.sel_rx})
     st.selectbox("환자번호", pt_options,
                  index=pt_options.index(st.session_state.sel_pt) if st.session_state.sel_pt in pt_options else 0,
                  key="sel_pt")
 
     # (4) 진료일 — 위 선택 누적
     visit_options = get_distinct("진료일", {
-        "진단코드": sel_code,
+        "진단코드": st.session_state.sel_code,
         "처방구분": st.session_state.sel_rx,
         "환자번호": st.session_state.sel_pt
     })
@@ -243,9 +250,7 @@ with right:
     )
 
     if not show_results:
-        # 상단 안내+칩은 숨기고, 빈 표(헤더만) 렌더링해 레이아웃 고정
-        empty_cols = ["진료과","진료일","환자번호","처방구분","처방명"]
-        st.dataframe(pd.DataFrame(columns=empty_cols), use_container_width=True, hide_index=True, height=720)
+        st.dataframe(pd.DataFrame(columns=["진료과","진료일","환자번호","처방구분","처방명"]), use_container_width=True, hide_index=True, height=720)
     else:
         # 즉시 반영된 필터로 데이터 조회
         filters = {
@@ -270,30 +275,26 @@ with right:
                 return any(q in str(v).lower() for v in values)
             df = df[df.apply(match_row, axis=1)]
 
-        # 상단 정보(좌측 정렬): 총/표시 + 선택한 진단코드/진단명 칩
+        # === INLINE TOOLBAR (counts + selected chip in one row) ===
         shown = 0 if df.empty else len(df)
-        st.markdown(f'<span class="greybar">총 {total:,}건 / 표시 {shown:,}건</span>', unsafe_allow_html=True)
+        chip_html = ""
         if st.session_state.sel_code and st.session_state.sel_code != "전체":
             sel_name = DIAG_CODE2NAME.get(st.session_state.sel_code, "")
-            st.markdown(f'<span class="chip">{st.session_state.sel_code} · {sel_name}</span>', unsafe_allow_html=True)
+            chip_html = f'<span class="chip">{st.session_state.sel_code} · {sel_name}</span>'
+        toolbar = f'<div class="toolbar"><span class="greybar">총 {total:,}건 / 표시 {shown:,}건</span>{chip_html}</div>'
+        st.markdown(toolbar, unsafe_allow_html=True)
 
-        # 결과 표 (오른쪽 메뉴)
+        # 결과 표
         if df.empty:
             st.info("검색(필터) 결과가 없습니다.")
         else:
-            # 진단명 보정(표시 컬럼에서는 제거하지만 검색/가공을 위해 유지)
             if "진단명" not in df.columns and "진단코드" in df.columns:
                 df["진단명"] = df["진단코드"].map(DIAG_CODE2NAME).fillna(df.get("진단명"))
-
-            # 숨길 컬럼(id, created_at) + 요구: 진단코드/진단명 제거
             drop_cols = [c for c in ["id", "created_at", "진단코드", "진단명"] if c in df.columns]
             df_show = df.drop(columns=drop_cols)
-
-            # 선호 정렬(진단코드/진단명 제외)
             preferred = ["진료과","진료일","환자번호","처방구분","처방명"]
             ordered = [c for c in preferred if c in df_show.columns] + [c for c in df_show.columns if c not in preferred]
 
-            # 컬럼 너비 구성
             col_config = {}
             if "진료과" in ordered:
                 col_config["진료과"] = st.column_config.TextColumn("진료과", width="small")
