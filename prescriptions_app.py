@@ -86,8 +86,17 @@ DIAG_CODE2NAME = {c: n for c, n in FREQUENT_DIAG_ITEMS}
 # =========================
 # 기본 UI
 # =========================
-st.set_page_config(page_title="내과 처방 조회(타병원)", page_icon="💊", layout="wide")
-st.title("내과 처방 조회(타병원)")
+st.markdown(
+    """
+    <style>
+      [data-testid="stHeader"] { height: 34px; padding: 0; background: transparent; }
+      section.main > div, div.block-container { padding-top: 10px !important; }
+      .page-title { margin: 2px 0 6px 0; font-weight: 700; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+st.markdown("<h4 class='page-title'>💊 내과 처방 조회(타병원)</h4>", unsafe_allow_html=True)
 
 # =========================
 # Supabase 연결
