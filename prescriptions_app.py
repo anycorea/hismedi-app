@@ -1,5 +1,10 @@
 import os
 import streamlit as st
+
+# ===== 공통 유틸: 옵션 갯수( "전체" 제외 )가 라벨에 표시되도록 =====
+def label_with_count(base_label: str, options: list) -> str:
+    n = sum(1 for x in options if str(x) != "전체")
+    return f"{base_label} ({n}개)"
 import pandas as pd
 
 # ==================== MUST be first Streamlit command ====================
@@ -168,7 +173,9 @@ def run_count_only(filters: dict):
     return res.count or 0
 
 # ==================== Session defaults ====================
-defaults = {"sel_code": "전체", "sel_rx": "전체", "sel_rxname": "전체", "sel_pt": "전체", "sel_visit": "전체", "free_q": ""}
+defaults = {"sel_code": "전체", "sel_rx": "전체", "sel_pt": "전체", "sel_visit": "전체", "free_q": "",
+    "sel_rxname": "전체"
+}
 for k, v in defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
@@ -179,7 +186,7 @@ st.markdown("<h4 class='page-title'>💊 내과 처방 조회(타병원)</h4>", 
 left, right = st.columns([1.2, 2.4])
 
 with left:
-    st.write("개별 검색 또는 조건 누적으로 원하는 결과를 찾아보세요.")
+    st.write("드롭다운을 추가로 선택하면 조건이 누적됩니다.")
 
     # 상단 툴바: 좌측(Hismedi Dx 팝오버 길게), 우측(검색 초기화 파랑 버튼)
     lc, rc = st.columns([1.9, 0.6])
@@ -195,41 +202,58 @@ with left:
 
     with rc:
         if st.button("검색 초기화", use_container_width=True):
-            for k in ["sel_code", "sel_rx", "sel_rxname", "sel_pt", "sel_visit", "free_q"]:
+            for k in ["sel_code", "sel_rx, "sel_rxname"", "sel_pt", "sel_visit", "free_q"]:
                 st.session_state[k] = "전체" if k != "free_q" else ""
             st.rerun()
 
     # 필터 드롭다운
     code_options = ["전체"] + [c for c, _ in FREQUENT_DIAG_ITEMS]
     st.selectbox(
-        "진단코드",
-        code_options,
+    label_with_count("진단코드", code_options),
+    code_options,
         index=code_options.index(st.session_state.sel_code) if st.session_state.sel_code in code_options else 0,
         format_func=lambda c: "전체" if c == "전체" else f"{c} · {DIAG_CODE2NAME.get(c, '')}",
         key="sel_code",
     )
 
     rx_options = get_distinct("처방구분", {"진단코드": st.session_state.sel_code})
-    st.selectbox("처방구분", rx_options,
-                 index=rx_options.index(st.session_state.sel_rx) if st.session_state.sel_rx in rx_options else 0,
-                 key="sel_rx")
-    rxname_options = get_distinct("처방명", {"진단코드": st.session_state.sel_code, "처방구분": st.session_state.sel_rx})
-    st.selectbox("처방명", rxname_options,
-                 index=rxname_options.index(st.session_state.sel_rxname) if st.session_state.sel_rxname in rxname_options else 0,
-                 key="sel_rxname")
+    st.selectbox(
+    label_with_count("처방구분", rx_options),
+    rx_options,
+                 index=rx_options.index(st.session_state.sel_rx) 
 
-    pt_options = get_distinct("환자번호", {"진단코드": st.session_state.sel_code, "처방구분": st.session_state.sel_rx, "처방명": st.session_state.sel_rxname})
-    st.selectbox("환자번호", pt_options,
+# (추가) 처방명
+rxname_options = get_distinct("처방명", {
+    "진단코드": st.session_state.sel_code,
+    "처방구분": st.session_state.sel_rx
+})
+st.selectbox(
+    label_with_count("처방명", rxname_options),
+    rxname_options,
+    index=rxname_options.index(st.session_state.sel_rxname) if st.session_state.sel_rxname in rxname_options else 0,
+    key="sel_rxname"
+)
+if st.session_state.sel_rx in rx_options else 0,
+                 key="sel_rx")
+
+    pt_options = get_distinct("환자번호", {"진단코드": st.session_state.sel_code, "처방구분": st.session_state.sel_rx,
+    "처방명":   st.session_state.sel_rxname
+})
+    st.selectbox(
+    label_with_count("환자번호", pt_options),
+    pt_options,
                  index=pt_options.index(st.session_state.sel_pt) if st.session_state.sel_pt in pt_options else 0,
                  key="sel_pt")
 
     visit_options = get_distinct("진료일", {
         "진단코드": st.session_state.sel_code,
         "처방구분": st.session_state.sel_rx,
-        "처방명": st.session_state.sel_rxname, 
-        "환자번호": st.session_state.sel_pt
-    })
-    st.selectbox("진료일", visit_options,
+        "환자번호": st.session_state.sel_pt,
+    "처방명":   st.session_state.sel_rxname
+})
+    st.selectbox(
+    label_with_count("진료일", visit_options),
+    visit_options,
                  index=visit_options.index(st.session_state.sel_visit) if st.session_state.sel_visit in visit_options else 0,
                  key="sel_visit")
 
@@ -239,18 +263,18 @@ with right:
     any_filter = any([
         st.session_state.sel_code != "전체",
         st.session_state.sel_rx != "전체",
-        st.session_state.sel_rxname!= "전체",
         st.session_state.sel_pt != "전체",
         st.session_state.sel_visit != "전체",
         st.session_state.free_q.strip() != ""
-    ])
+    ,
+    st.session_state.sel_rxname != "전체"])
     filters = {
         "진단코드": st.session_state.sel_code,
         "처방구분": st.session_state.sel_rx,
-        "처방명": st.session_state.sel_rxname,
         "환자번호": st.session_state.sel_pt,
         "진료일":   st.session_state.sel_visit,
-    }
+    
+    "처방명":   st.session_state.sel_rxname}
 
     if not any_filter:
         total = run_count_only(filters)
@@ -271,10 +295,10 @@ with right:
                     row.get("진단코드", ""),
                     DIAG_CODE2NAME.get(row.get("진단코드",""), ""),
                     row.get("처방구분",""),
-                    row.get("처방명",""),
                     row.get("환자번호",""),
                     row.get("진료일",""),
-                ]
+                
+            row.get("처방명","")]
                 return any(q in str(v).lower() for v in values)
             df = df[df.apply(match_row, axis=1)]
 
