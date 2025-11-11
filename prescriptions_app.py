@@ -168,7 +168,7 @@ def run_count_only(filters: dict):
     return res.count or 0
 
 # ==================== Session defaults ====================
-defaults = {"sel_code": "전체", "sel_rx": "전체", "sel_pt": "전체", "sel_visit": "전체", "free_q": ""}
+defaults = {"sel_code": "전체", "sel_rx": "전체", "sel_rxname": "전체", "sel_pt": "전체", "sel_visit": "전체", "free_q": ""}
 for k, v in defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
@@ -195,7 +195,7 @@ with left:
 
     with rc:
         if st.button("검색 초기화", use_container_width=True):
-            for k in ["sel_code", "sel_rx", "sel_pt", "sel_visit", "free_q"]:
+            for k in ["sel_code", "sel_rx", "sel_rxname", "sel_pt", "sel_visit", "free_q"]:
                 st.session_state[k] = "전체" if k != "free_q" else ""
             st.rerun()
 
@@ -213,8 +213,12 @@ with left:
     st.selectbox("처방구분", rx_options,
                  index=rx_options.index(st.session_state.sel_rx) if st.session_state.sel_rx in rx_options else 0,
                  key="sel_rx")
+    rxname_options = get_distinct("처방명", {"진단코드": st.session_state.sel_code, "처방구분": st.session_state.sel_rx})
+    st.selectbox("처방명", rxname_options,
+                 index=rxname_options.index(st.session_state.sel_rxname) if st.session_state.sel_rxname in rxname_options else 0,
+                 key="sel_rxname")
 
-    pt_options = get_distinct("환자번호", {"진단코드": st.session_state.sel_code, "처방구분": st.session_state.sel_rx})
+    pt_options = get_distinct("환자번호", {"진단코드": st.session_state.sel_code, "처방구분": st.session_state.sel_rx, "처방명": st.session_state.sel_rxname})
     st.selectbox("환자번호", pt_options,
                  index=pt_options.index(st.session_state.sel_pt) if st.session_state.sel_pt in pt_options else 0,
                  key="sel_pt")
@@ -222,6 +226,7 @@ with left:
     visit_options = get_distinct("진료일", {
         "진단코드": st.session_state.sel_code,
         "처방구분": st.session_state.sel_rx,
+        "처방명": st.session_state.sel_rxname, 
         "환자번호": st.session_state.sel_pt
     })
     st.selectbox("진료일", visit_options,
@@ -234,6 +239,7 @@ with right:
     any_filter = any([
         st.session_state.sel_code != "전체",
         st.session_state.sel_rx != "전체",
+        st.session_state.sel_rxname!= "전체",
         st.session_state.sel_pt != "전체",
         st.session_state.sel_visit != "전체",
         st.session_state.free_q.strip() != ""
@@ -241,6 +247,7 @@ with right:
     filters = {
         "진단코드": st.session_state.sel_code,
         "처방구분": st.session_state.sel_rx,
+        "처방명": st.session_state.sel_rxname,
         "환자번호": st.session_state.sel_pt,
         "진료일":   st.session_state.sel_visit,
     }
