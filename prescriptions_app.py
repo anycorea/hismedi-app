@@ -228,7 +228,7 @@ with left:
                  index=visit_options.index(st.session_state.sel_visit) if st.session_state.sel_visit in visit_options else 0,
                  key="sel_visit")
 
-    st.text_input("통합(단어)검색", key="free_q", placeholder="진단코드·진단명·처방구분·처방명·환자번호·진료일 중 일부 입력")
+    st.text_input("통합검색(일부 단어 입력) ", key="free_q", placeholder="진단코드·진단명·처방구분·처방명·환자번호·진료일 중 일부 입력")
 
 with right:
     any_filter = any([
