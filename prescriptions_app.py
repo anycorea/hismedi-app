@@ -202,7 +202,7 @@ with left:
 
     with rc:
         if st.button("검색 초기화", use_container_width=True):
-            for k in ["sel_code", "sel_rx, "sel_rxname"", "sel_pt", "sel_visit", "free_q"]:
+            for k in ["sel_code", "sel_rx", "sel_rxname", "sel_pt", "sel_visit", "free_q"]:
                 st.session_state[k] = "전체" if k != "free_q" else ""
             st.rerun()
 
