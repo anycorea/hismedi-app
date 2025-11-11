@@ -1,11 +1,11 @@
 import os
 import streamlit as st
+import pandas as pd
 
 # ===== 공통 유틸: 옵션 갯수( "전체" 제외 )가 라벨에 표시되도록 =====
 def label_with_count(base_label: str, options: list) -> str:
     n = sum(1 for x in options if str(x) != "전체")
     return f"{base_label} ({n}개)"
-import pandas as pd
 
 # ==================== MUST be first Streamlit command ====================
 st.set_page_config(page_title="내과 처방 조회(타병원)", page_icon="💊", layout="wide")
@@ -206,58 +206,74 @@ with left:
                 st.session_state[k] = "전체" if k != "free_q" else ""
             st.rerun()
 
+    # ---------------------
     # 필터 드롭다운
+    # ---------------------
+
+    # 진단코드
     code_options = ["전체"] + [c for c, _ in FREQUENT_DIAG_ITEMS]
     st.selectbox(
-    label_with_count("진단코드", code_options),
-    code_options,
+        label_with_count("진단코드", code_options),
+        code_options,
         index=code_options.index(st.session_state.sel_code) if st.session_state.sel_code in code_options else 0,
         format_func=lambda c: "전체" if c == "전체" else f"{c} · {DIAG_CODE2NAME.get(c, '')}",
         key="sel_code",
     )
 
+    # 처방구분
     rx_options = get_distinct("처방구분", {"진단코드": st.session_state.sel_code})
     st.selectbox(
-    label_with_count("처방구분", rx_options),
-    rx_options,
-                 index=rx_options.index(st.session_state.sel_rx) 
+        label_with_count("처방구분", rx_options),
+        rx_options,
+        index=rx_options.index(st.session_state.sel_rx) if st.session_state.sel_rx in rx_options else 0,
+        key="sel_rx",
+    )
 
-# (추가) 처방명
-rxname_options = get_distinct("처방명", {
-    "진단코드": st.session_state.sel_code,
-    "처방구분": st.session_state.sel_rx
-})
-st.selectbox(
-    label_with_count("처방명", rxname_options),
-    rxname_options,
-    index=rxname_options.index(st.session_state.sel_rxname) if st.session_state.sel_rxname in rxname_options else 0,
-    key="sel_rxname"
-)
-if st.session_state.sel_rx in rx_options else 0,
-                 key="sel_rx")
-
-    pt_options = get_distinct("환자번호", {"진단코드": st.session_state.sel_code, "처방구분": st.session_state.sel_rx,
-    "처방명":   st.session_state.sel_rxname
-})
+    # 처방명
+    rxname_options = get_distinct("처방명", {
+        "진단코드": st.session_state.sel_code,
+        "처방구분": st.session_state.sel_rx,
+    })
     st.selectbox(
-    label_with_count("환자번호", pt_options),
-    pt_options,
-                 index=pt_options.index(st.session_state.sel_pt) if st.session_state.sel_pt in pt_options else 0,
-                 key="sel_pt")
+        label_with_count("처방명", rxname_options),
+        rxname_options,
+        index=rxname_options.index(st.session_state.sel_rxname) if st.session_state.sel_rxname in rxname_options else 0,
+        key="sel_rxname",
+    )
 
+    # 환자번호
+    pt_options = get_distinct("환자번호", {
+        "진단코드": st.session_state.sel_code,
+        "처방구분": st.session_state.sel_rx,
+        "처방명":   st.session_state.sel_rxname,
+    })
+    st.selectbox(
+        label_with_count("환자번호", pt_options),
+        pt_options,
+        index=pt_options.index(st.session_state.sel_pt) if st.session_state.sel_pt in pt_options else 0,
+        key="sel_pt",
+    )
+
+    # 진료일
     visit_options = get_distinct("진료일", {
         "진단코드": st.session_state.sel_code,
         "처방구분": st.session_state.sel_rx,
+        "처방명":   st.session_state.sel_rxname,
         "환자번호": st.session_state.sel_pt,
-    "처방명":   st.session_state.sel_rxname
-})
+    })
     st.selectbox(
-    label_with_count("진료일", visit_options),
-    visit_options,
-                 index=visit_options.index(st.session_state.sel_visit) if st.session_state.sel_visit in visit_options else 0,
-                 key="sel_visit")
+        label_with_count("진료일", visit_options),
+        visit_options,
+        index=visit_options.index(st.session_state.sel_visit) if st.session_state.sel_visit in visit_options else 0,
+        key="sel_visit",
+    )
 
-    st.text_input("통합검색(일부 단어 입력) ", key="free_q", placeholder="진단코드·진단명·처방구분·처방명·환자번호·진료일 중 일부 입력")
+    # 통합검색
+    st.text_input(
+        "통합검색(일부 단어 입력) ",
+        key="free_q",
+        placeholder="진단코드·진단명·처방구분·처방명·환자번호·진료일 중 일부 입력",
+    )
 
 with right:
     any_filter = any([
