@@ -186,7 +186,7 @@ st.markdown("<h4 class='page-title'>💊 내과 처방 조회(타병원)</h4>", 
 left, right = st.columns([1.2, 2.4])
 
 with left:
-    st.write("드롭다운을 추가로 선택하면 조건이 누적됩니다.")
+    st.write("개별 검색 또는 조건 누적으로 원하는 결과를 찾아보세요.")
 
     # 상단 툴바: 좌측(Hismedi Dx 팝오버 길게), 우측(검색 초기화 파랑 버튼)
     lc, rc = st.columns([1.9, 0.6])
