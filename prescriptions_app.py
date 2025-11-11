@@ -264,6 +264,7 @@ with right:
                     row.get("진단코드", ""),
                     DIAG_CODE2NAME.get(row.get("진단코드",""), ""),
                     row.get("처방구분",""),
+                    row.get("처방명",""),
                     row.get("환자번호",""),
                     row.get("진료일",""),
                 ]
