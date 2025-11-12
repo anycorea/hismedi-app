@@ -172,6 +172,51 @@ def run_count_only(filters: dict):
     res = q.limit(1).execute()
     return res.count or 0
 
+def run_free_search(qstr: str, limit: int = 1000):
+    """통합검색 전용: 드롭다운 필터는 전부 무시하고 OR 검색."""
+    if sb is None:
+        return pd.DataFrame(), 0
+    s = qstr.strip()
+    # 테이블에 존재하는 컬럼 대상으로 OR ilike
+    q = (
+        sb.table(TABLE)
+        .select("*", count="exact")
+        .or_(
+            ",".join([
+                f"진단코드.ilike.%{s}%",
+                f"처방구분.ilike.%{s}%",
+                f"처방명.ilike.%{s}%",
+                f"진료과.ilike.%{s}%",
+                f"환자번호.ilike.%{s}%",
+                f"진료일.ilike.%{s}%",
+            ])
+        )
+        .order("created_at", desc=True)
+        .limit(limit)
+    )
+    res1 = q.execute()
+    df1 = pd.DataFrame(res1.data or [])
+
+    # '진단명'(한글명)으로도 검색되게: 코드 역매핑해 추가 union
+    name_hit_codes = [c for c, n in FREQUENT_DIAG_ITEMS if s.lower() in str(n).lower()]
+    df2 = pd.DataFrame()
+    if name_hit_codes:
+        res2 = (
+            sb.table(TABLE)
+            .select("*")
+            .in_("진단코드", name_hit_codes)
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        df2 = pd.DataFrame(res2.data or [])
+
+    df_all = pd.concat([df1, df2], ignore_index=True)
+    if "id" in df_all.columns:
+        df_all = df_all.drop_duplicates(subset="id", keep="first")
+    total = (res1.count or 0) if df2.empty else len(df_all)
+    return df_all, total
+
 # ==================== Session defaults ====================
 defaults = {
     "sel_code": "전체",
@@ -324,31 +369,24 @@ with right:
         st.dataframe(pd.DataFrame(columns=["진료과","진료일","환자번호","처방구분","처방명"]),
                      use_container_width=True, hide_index=True, height=640)
     else:
-        df, total = run_query(filters, limit=1000)
+        if st.session_state.free_q.strip():
+            df, total = run_free_search(st.session_state.free_q, limit=1000)
+        else:
+            df, total = run_query(filters, limit=1000)
 
-        # free text filter
-        if st.session_state.free_q.strip() and not df.empty:
-            q = st.session_state.free_q.strip().lower()
-            def match_row(row):
-                values = [
-                    row.get("진단코드", ""),
-                    DIAG_CODE2NAME.get(row.get("진단코드",""), ""),
-                    row.get("처방구분",""),
-                    row.get("처방명",""),
-                    row.get("진료과",""),
-                    row.get("환자번호",""),
-                    row.get("진료일",""),
-                ]
-                return any(q in str(v).lower() for v in values)
-            df = df[df.apply(match_row, axis=1)]
+        shown = 0 if df is None or df.empty else len(df)
 
-        shown = 0 if df.empty else len(df)
-
-        # 같은 줄, 같은 높이 칩 2개(카운트 + 진단바)
+        # 같은 줄, 같은 높이 칩 2개(카운트 + 선택 진단)
         chips = [f"<span class='chip grey'>총 {total:,}건 / 표시 {shown:,}건</span>"]
+
+        # ✅ 통합검색 중이면 배지 추가(선택)
+        if st.session_state.free_q.strip():
+            chips.append("<span class='chip blue'>통합검색</span>")
+
         if st.session_state.sel_code and st.session_state.sel_code != "전체":
             sel_name = DIAG_CODE2NAME.get(st.session_state.sel_code, "")
             chips.append(f"<span class='chip blue'>{st.session_state.sel_code} · {sel_name}</span>")
+
         st.markdown(f"<div class='toolbar'>{''.join(chips)}</div>", unsafe_allow_html=True)
 
         if df.empty:
