@@ -165,7 +165,7 @@ def run_query(filters: dict, limit: int = 1000):
 def run_count_only(filters: dict):
     if sb is None:
         return 0
-    q = sb.table(TABLE).select("id", count="exact")
+    q = sb.table(TABLE).select("*", count="exact")
     for k, v in filters.items():
         if v and v != "전체":
             q = q.eq(k, v)
