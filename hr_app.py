@@ -2801,6 +2801,7 @@ def tab_staff_admin(emp_df: pd.DataFrame):
         height=560,
         hide_index=True,
         num_rows="fixed",
+        num_rows="dynamic", 
         column_config=colcfg,
     )
 
@@ -2816,8 +2817,59 @@ def tab_staff_admin(emp_df: pd.DataFrame):
 
             change_cnt = 0
             for sabun in after.index:
+                # 신규 추가 행 처리
                 if sabun not in before.index:
-                    continue  # num_rows="fixed" 환경에서는 거의 없음
+                    # 빈 키/공백 방지
+                    if not str(sabun).strip():
+                        continue
+
+                    # 시트에 이미 존재하면(경합 방지) 업데이트로 전환
+                    maybe_row = _find_row_by_sabun(ws, hmap, str(sabun))
+                    if maybe_row > 0:
+                        # 기존 로직으로 업데이트만 진행
+                        payload = {}
+                        for c in after.columns:
+                            if c not in before.columns:
+                                continue
+                            v0 = before.loc[before.index[0], c] if len(before.index)>0 else ""  # 안전가드
+                            v1 = after.loc[sabun, c]
+                            if str(v0) != str(v1):
+                                if c in ("재직여부", "적용여부"):
+                                    payload[c] = bool(v1)
+                                else:
+                                    payload[c] = v1
+                        if payload:
+                            _ws_batch_row(ws, maybe_row, hmap, payload)
+                            change_cnt += 1
+                        continue
+
+                    # 신규 행 구성: 현재 에디터(after) 값 기준으로 REQ_EMP_COLS 채우기
+                    rec = {}
+                    for key in REQ_EMP_COLS:
+                        if key in after.columns:
+                            rec[key] = after.loc[sabun, key]
+                        else:
+                            # 에디터에서 숨긴 컬럼은 기본값
+                            if key in ("PIN_hash", "PIN_No"):
+                                rec[key] = ""
+                            else:
+                                rec[key] = ""
+
+                    # 안전 캐스팅(체크박스 → bool)
+                    for b in ("재직여부", "적용여부"):
+                        if b in rec:
+                            rec[b] = bool(rec[b])
+
+                    # 실존 헤더 맵(hmap) 기반으로 1행 버퍼 구성 후 append
+                    rowbuf = [""] * len(header)
+                    for k, v in rec.items():
+                        c = hmap.get(k)
+                        if c:
+                            rowbuf[int(c) - 1] = v
+
+                    _retry(ws.append_row, rowbuf, value_input_option="USER_ENTERED")
+                    change_cnt += 1
+                    continue
 
                 payload = {}
                 for c in after.columns:
