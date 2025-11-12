@@ -173,8 +173,14 @@ def run_count_only(filters: dict):
     return res.count or 0
 
 # ==================== Session defaults ====================
-defaults = {"sel_code": "전체", "sel_rx": "전체", "sel_pt": "전체", "sel_visit": "전체", "free_q": "",
-    "sel_rxname": "전체"
+defaults = {
+    "sel_code": "전체",
+    "sel_rx": "전체",
+    "sel_rxname": "전체",
+    "sel_dept": "전체",
+    "sel_pt": "전체",
+    "sel_visit": "전체",
+    "free_q": "",
 }
 for k, v in defaults.items():
     if k not in st.session_state:
@@ -241,11 +247,25 @@ with left:
         key="sel_rxname",
     )
 
+    # 진료과
+    dept_options = get_distinct("진료과", {
+        "진단코드": st.session_state.sel_code,
+        "처방구분": st.session_state.sel_rx,
+        "처방명": st.session_state.sel_rxname,
+    })
+    st.selectbox(
+        label_with_count("진료과", dept_options),
+        dept_options,
+        index=dept_options.index(st.session_state.sel_dept) if st.session_state.sel_dept in dept_options else 0,
+        key="sel_dept",
+    )
+    
     # 환자번호
     pt_options = get_distinct("환자번호", {
         "진단코드": st.session_state.sel_code,
         "처방구분": st.session_state.sel_rx,
-        "처방명":   st.session_state.sel_rxname,
+        "처방명": st.session_state.sel_rxname,
+        "진료과": st.session_state.sel_dept,
     })
     st.selectbox(
         label_with_count("환자번호", pt_options),
@@ -258,7 +278,8 @@ with left:
     visit_options = get_distinct("진료일", {
         "진단코드": st.session_state.sel_code,
         "처방구분": st.session_state.sel_rx,
-        "처방명":   st.session_state.sel_rxname,
+        "처방명": st.session_state.sel_rxname,
+        "진료과": st.session_state.sel_dept,
         "환자번호": st.session_state.sel_pt,
     })
     st.selectbox(
@@ -272,25 +293,27 @@ with left:
     st.text_input(
         "통합검색(일부 단어 입력) ",
         key="free_q",
-        placeholder="진단코드·진단명·처방구분·처방명·환자번호·진료일 중 일부 입력",
+        placeholder="진단코드·진단명·처방구분·처방명·진료과·환자번호·진료일 중 일부 입력",
     )
 
 with right:
     any_filter = any([
         st.session_state.sel_code != "전체",
         st.session_state.sel_rx != "전체",
+        st.session_state.sel_rxname != "전체",
+        st.session_state.sel_dept != "전체",
         st.session_state.sel_pt != "전체",
         st.session_state.sel_visit != "전체",
-        st.session_state.free_q.strip() != ""
-    ,
-    st.session_state.sel_rxname != "전체"])
+        st.session_state.free_q.strip() != "",
+    ])
     filters = {
         "진단코드": st.session_state.sel_code,
         "처방구분": st.session_state.sel_rx,
+        "처방명": st.session_state.sel_rxname,
+        "진료과": st.session_state.sel_dept,
         "환자번호": st.session_state.sel_pt,
-        "진료일":   st.session_state.sel_visit,
-    
-    "처방명":   st.session_state.sel_rxname}
+        "진료일": st.session_state.sel_visit,
+    }
 
     if not any_filter:
         total = run_count_only(filters)
@@ -311,10 +334,11 @@ with right:
                     row.get("진단코드", ""),
                     DIAG_CODE2NAME.get(row.get("진단코드",""), ""),
                     row.get("처방구분",""),
+                    row.get("처방명",""),
+                    row.get("진료과",""),
                     row.get("환자번호",""),
                     row.get("진료일",""),
-                
-            row.get("처방명","")]
+                ]
                 return any(q in str(v).lower() for v in values)
             df = df[df.apply(match_row, axis=1)]
 
