@@ -2800,7 +2800,6 @@ def tab_staff_admin(emp_df: pd.DataFrame):
         use_container_width=True,
         height=560,
         hide_index=True,
-        num_rows="fixed",
         num_rows="dynamic", 
         column_config=colcfg,
     )
