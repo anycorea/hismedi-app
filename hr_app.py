@@ -2780,7 +2780,7 @@ def tab_staff_admin(emp_df: pd.DataFrame):
 
     # 4) 에디터
     colcfg = {
-        "사번": st.column_config.TextColumn("사번", disabled=True),
+        "사번": st.column_config.TextColumn("사번", disabled=False),  # 신규 추가 가능하도록 입력 허용
         "이름": st.column_config.TextColumn("이름"),
         "부서1": st.column_config.SelectboxColumn("부서1", options=dept1_options),
         "부서2": st.column_config.SelectboxColumn("부서2", options=dept2_options),
@@ -2800,66 +2800,68 @@ def tab_staff_admin(emp_df: pd.DataFrame):
         use_container_width=True,
         height=560,
         hide_index=True,
-        num_rows="dynamic", 
+        num_rows="dynamic",
         column_config=colcfg,
     )
+
+    # data_editor 결과를 기준으로 비교·저장하도록 after/before 구성
+    edited = edited.fillna("")
+
+    after = edited.copy()
+    if "사번" in after.columns:
+        after["사번"] = after["사번"].astype(str).str.strip()
+        after = after.set_index("사번", drop=False)
+
+    before = view.copy()
+    if "사번" in before.columns:
+        before["사번"] = before["사번"].astype(str).str.strip()
+        before = before.set_index("사번", drop=False)
 
     # 5) 저장(변경된 칼럼만 부분 갱신)
     if st.button("변경사항 저장", type="primary", use_container_width=True):
         try:
-            before = view.set_index("사번")
-            after  = edited.set_index("사번")
-
             # 안전장치: 빈 키 제거
             before = before[before.index.astype(str) != ""]
             after  = after[after.index.astype(str) != ""]
 
             change_cnt = 0
             for sabun in after.index:
-                # 신규 추가 행 처리
+                # ---------- 신규 추가 ----------
                 if sabun not in before.index:
-                    # 빈 키/공백 방지
                     if not str(sabun).strip():
-                        continue
+                        continue  # 빈 키 방지
 
-                    # 시트에 이미 존재하면(경합 방지) 업데이트로 전환
+                    # 혹시 동시편집 등으로 이미 존재하면 업데이트로 전환
                     maybe_row = _find_row_by_sabun(ws, hmap, str(sabun))
                     if maybe_row > 0:
-                        # 기존 로직으로 업데이트만 진행
                         payload = {}
                         for c in after.columns:
                             if c not in before.columns:
                                 continue
-                            v0 = before.loc[before.index[0], c] if len(before.index)>0 else ""  # 안전가드
                             v1 = after.loc[sabun, c]
-                            if str(v0) != str(v1):
-                                if c in ("재직여부", "적용여부"):
-                                    payload[c] = bool(v1)
-                                else:
-                                    payload[c] = v1
+                            if c in ("재직여부", "적용여부"):
+                                payload[c] = bool(v1)
+                            else:
+                                payload[c] = v1
                         if payload:
                             _ws_batch_row(ws, maybe_row, hmap, payload)
                             change_cnt += 1
                         continue
 
-                    # 신규 행 구성: 현재 에디터(after) 값 기준으로 REQ_EMP_COLS 채우기
+                    # 신규 행 구성: after 값으로 REQ_EMP_COLS 채움
                     rec = {}
                     for key in REQ_EMP_COLS:
                         if key in after.columns:
                             rec[key] = after.loc[sabun, key]
                         else:
-                            # 에디터에서 숨긴 컬럼은 기본값
-                            if key in ("PIN_hash", "PIN_No"):
-                                rec[key] = ""
-                            else:
-                                rec[key] = ""
+                            rec[key] = ""  # 숨김 컬럼 기본값
 
-                    # 안전 캐스팅(체크박스 → bool)
+                    # 체크박스 캐스팅
                     for b in ("재직여부", "적용여부"):
                         if b in rec:
                             rec[b] = bool(rec[b])
 
-                    # 실존 헤더 맵(hmap) 기반으로 1행 버퍼 구성 후 append
+                    # 헤더 순서에 맞춰 append
                     rowbuf = [""] * len(header)
                     for k, v in rec.items():
                         c = hmap.get(k)
@@ -2870,6 +2872,7 @@ def tab_staff_admin(emp_df: pd.DataFrame):
                     change_cnt += 1
                     continue
 
+                # ---------- 기존 행 업데이트 ----------
                 payload = {}
                 for c in after.columns:
                     if c not in before.columns:
