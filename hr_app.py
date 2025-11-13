@@ -2359,8 +2359,8 @@ def tab_job_desc(emp_df: pd.DataFrame):
         )
 
     # 본문
-    job_summary = st.text_area("직무개요", value=jd_current.get("직무개요",""), height=80,  key="jd2_summary", disabled=not edit_mode)
-    job_main    = st.text_area("주업무",   value=jd_current.get("주업무",""),   height=120, key="jd2_main",    disabled=not edit_mode)
+    job_summary = st.text_area("직무개요", value=jd_current.get("직무개요",""), height=100,  key="jd2_summary", disabled=not edit_mode)
+    job_main    = st.text_area("주업무",   value=jd_current.get("주업무",""),   height=200, key="jd2_main",    disabled=not edit_mode)
     job_other   = st.text_area("기타업무", value=jd_current.get("기타업무",""), height=80,  key="jd2_other",   disabled=not edit_mode)
 
     # =================== Education/Qualification (4 rows) ===================
