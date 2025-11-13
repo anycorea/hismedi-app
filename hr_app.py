@@ -2166,7 +2166,10 @@ def tab_job_desc(emp_df: pd.DataFrame):
     u = st.session_state["user"]
     me_sabun = str(u["사번"]); me_name = str(u["이름"])
 
-    am_admin_or_mgr = (is_admin(me_sabun) or len(get_allowed_sabuns(emp_df, me_sabun, include_self=False)) > 0)
+    # 현재 로그인 사용자가 관리자(admin 권한)인지 여부
+    is_admin_user = is_admin(me_sabun)
+
+    am_admin_or_mgr = (is_admin_user or len(get_allowed_sabuns(emp_df, me_sabun, include_self=False)) > 0)
     allowed = get_allowed_sabuns(emp_df, me_sabun, include_self=True)
 
     glob_sab, glob_name = get_global_target()
@@ -2278,30 +2281,82 @@ def tab_job_desc(emp_df: pd.DataFrame):
     # =================== Header Row 1 (가로) ===================
     r1 = st.columns([1, 1, 1, 1, 1.6])
     with r1[0]:
-        version = st.number_input("버전(없으면 자동)", min_value=0, max_value=999,
-                                  value=int(str(jd_current.get("버전", 0)) or 0),
-                                  step=1, key="jd2_ver", disabled=not edit_mode)
+        version = st.number_input(
+            "버전(없으면 자동)",
+            min_value=0,
+            max_value=999,
+            value=int(str(jd_current.get("버전", 0)) or 0),
+            step=1,
+            key="jd2_ver",
+            # ★ 관리자이면서 수정모드일 때만 입력 가능
+            disabled=not (edit_mode and is_admin_user),
+        )
     with r1[1]:
-        d_create = st.text_input("제정일", value=jd_current.get("제정일",""), key="jd2_d_create", disabled=not edit_mode)
+        d_create = st.text_input(
+            "제정일",
+            value=jd_current.get("제정일", ""),
+            key="jd2_d_create",
+            disabled=not (edit_mode and is_admin_user),
+        )
     with r1[2]:
-        d_update = st.text_input("개정일", value=jd_current.get("개정일",""), key="jd2_d_update", disabled=not edit_mode)
+        d_update = st.text_input(
+            "개정일",
+            value=jd_current.get("개정일", ""),
+            key="jd2_d_update",
+            disabled=not (edit_mode and is_admin_user),
+        )
     with r1[3]:
-        review = st.text_input("검토주기", value=jd_current.get("검토주기",""), key="jd2_review", disabled=not edit_mode)
+        review = st.text_input(
+            "검토주기",
+            value=jd_current.get("검토주기", ""),
+            key="jd2_review",
+            disabled=not (edit_mode and is_admin_user),
+        )
     with r1[4]:
-        memo = st.text_input("비고", value=jd_current.get("비고",""), key="jd2_memo", disabled=not edit_mode)
+        memo = st.text_input(
+            "비고",
+            value=jd_current.get("비고", ""),
+            key="jd2_memo",
+            disabled=not (edit_mode and is_admin_user),
+        )
 
     # =================== Header Row 2 (가로) ===================
     r2 = st.columns([1, 1, 1, 1, 1.6])
     with r2[0]:
-        dept1  = st.text_input("부서1", value=jd_current.get("부서1",""), key="jd2_dept1", disabled=not edit_mode)
+        dept1 = st.text_input(
+            "부서1",
+            value=jd_current.get("부서1", ""),
+            key="jd2_dept1",
+            disabled=not (edit_mode and is_admin_user),
+        )
     with r2[1]:
-        dept2  = st.text_input("부서2", value=jd_current.get("부서2",""), key="jd2_dept2", disabled=not edit_mode)
+        dept2 = st.text_input(
+            "부서2",
+            value=jd_current.get("부서2", ""),
+            key="jd2_dept2",
+            disabled=not (edit_mode and is_admin_user),
+        )
     with r2[2]:
-        group  = st.text_input("직군", value=jd_current.get("직군",""), key="jd2_group", disabled=not edit_mode)
+        group = st.text_input(
+            "직군",
+            value=jd_current.get("직군", ""),
+            key="jd2_group",
+            disabled=not (edit_mode and is_admin_user),
+        )
     with r2[3]:
-        series = st.text_input("직종", value=jd_current.get("직종",""), key="jd2_series", disabled=not edit_mode)
+        series = st.text_input(
+            "직종",
+            value=jd_current.get("직종", ""),
+            key="jd2_series",
+            disabled=not (edit_mode and is_admin_user),
+        )
     with r2[4]:
-        jobname= st.text_input("직무명", value=jd_current.get("직무명",""), key="jd2_jobname", disabled=not edit_mode)
+        jobname = st.text_input(
+            "직무명",
+            value=jd_current.get("직무명", ""),
+            key="jd2_jobname",
+            disabled=not (edit_mode and is_admin_user),
+        )
 
     # 본문
     job_summary = st.text_area("직무개요", value=jd_current.get("직무개요",""), height=80,  key="jd2_summary", disabled=not edit_mode)
