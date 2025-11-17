@@ -2266,6 +2266,45 @@ def tab_job_desc(emp_df: pd.DataFrame):
         "면허": "", "경력(자격요건)": "", "비고": ""
     }
 
+    # ======================= 교육 항목 기본값 자동 설정 =======================
+    # 1) 직원공통필수교육 : 전 직원 공통 기본값
+    default_common_edu = (
+        "질향상·환자안전, 감염관리, 개인정보 보호 및 보안, 환자의 권리와 의무, "
+        "폭력예방, 산업안전보건, 성희롱 예방, 직장 내 장애인 인식 개선, "
+        "아동·노인·장애인 학대 예방 및 신고, 의료 윤리 및 법률 준수, "
+        "직장 내 괴롭힘 예방, 퇴직연금, 결핵 예방"
+    )
+
+    # 2) 부서별 특성화교육 기본값 매핑
+    special_by_dept = {
+        "의약품관리3종": [
+            "외래간호1팀","외래간호2팀","6병동","7병동","8병동","9병동","12병동","내시경실","인공신장실"
+        ],
+        "주사실": ["주사실"],
+        "지표관리": ["수술실","감염관리실","영상의학팀","진단검사의학팀","총무팀"]
+    }
+
+    dept1_val = jd_current.get("부서1", "").strip()
+
+    # 직원공통필수교육 : 값이 비어 있을 때만 기본값 채우기
+    if not jd_current.get("직원공통필수교육"):
+        jd_current["직원공통필수교육"] = default_common_edu
+
+    # 특성화교육 : 값이 비어 있을 때 부서에 따라 기본값 채우기
+    if not jd_current.get("특성화교육"):
+        applied = ""
+        for key, dept_list in special_by_dept.items():
+            if dept1_val in dept_list:
+                if key == "의약품관리3종":
+                    applied = "의약품 관리, 진정치료, 신체 보호대"
+                elif key == "주사실":
+                    applied = "진정치료"
+                elif key == "지표관리":
+                    applied = "지표관리"
+                break
+        if applied:
+            jd_current["특성화교육"] = applied
+
     with st.expander("현재 저장된 직무기술서 요약", expanded=False):
         st.write(f"**직무명:** {(jd_saved or {}).get('직무명', '')}")
         cc = st.columns(2)
