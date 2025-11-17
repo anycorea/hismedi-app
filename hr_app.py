@@ -2276,8 +2276,8 @@ def tab_job_desc(emp_df: pd.DataFrame):
 
     # ======================= 교육 항목 기본값 자동 설정 =======================
 
-    # 값이 None, NaN, 공백이면 True
     def _is_blank(val):
+        # None, NaN, 공백 문자열은 전부 "비어있음"으로 처리
         if val is None:
             return True
         try:
@@ -2307,18 +2307,20 @@ def tab_job_desc(emp_df: pd.DataFrame):
         "지표관리": ["수술실","감염관리실","영상의학팀","진단검사의학팀","총무팀"]
     }
 
-    # 부서1 값 정리
+    # 부서2를 우선 사용, 없으면 부서1 사용
     dept1_val = str(jd_current.get("부서1", "") or "").strip()
+    dept2_val = str(jd_current.get("부서2", "") or "").strip()
+    dept_for_special = dept2_val or dept1_val
 
     # 직원공통필수교육 : 값이 비어 있을 때만 기본값 채우기
     if _is_blank(jd_current.get("직원공통필수교육")):
         jd_current["직원공통필수교육"] = default_common_edu
 
     # 특성화교육 : 값이 비어 있을 때 부서에 따라 기본값 채우기
-    if _is_blank(jd_current.get("특성화교육")):
+    if _is_blank(jd_current.get("특성화교육")) and dept_for_special:
         applied = ""
         for key, dept_list in special_by_dept.items():
-            if dept1_val in dept_list:
+            if dept_for_special in dept_list:
                 if key == "의약품관리3종":
                     applied = "의약품 관리, 진정치료, 신체 보호대"
                 elif key == "주사실":
