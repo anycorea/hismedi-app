@@ -2255,6 +2255,7 @@ def tab_job_desc(emp_df: pd.DataFrame):
         except Exception:
             return default
 
+    # 기본 jd_current 구성
     jd_current = jd_saved if jd_saved else {
         "사번": str(target_sabun), "연도": int(year), "버전": 0,
         "부서1": _safe_get("부서1",""), "부서2": _safe_get("부서2",""),
@@ -2266,7 +2267,29 @@ def tab_job_desc(emp_df: pd.DataFrame):
         "면허": "", "경력(자격요건)": "", "비고": ""
     }
 
+    # 기존 JD라도 부서1/부서2가 비어 있으면 인사정보에서 보정
+    if jd_saved:
+        if not jd_current.get("부서1"):
+            jd_current["부서1"] = _safe_get("부서1","")
+        if not jd_current.get("부서2"):
+            jd_current["부서2"] = _safe_get("부서2","")
+
     # ======================= 교육 항목 기본값 자동 설정 =======================
+
+    # 값이 None, NaN, 공백이면 True
+    def _is_blank(val):
+        if val is None:
+            return True
+        try:
+            import pandas as pd
+            if pd.isna(val):
+                return True
+        except Exception:
+            pass
+        if isinstance(val, str) and not val.strip():
+            return True
+        return False
+
     # 1) 직원공통필수교육 : 전 직원 공통 기본값
     default_common_edu = (
         "질향상·환자안전, 감염관리, 개인정보 보호 및 보안, 환자의 권리와 의무, "
@@ -2284,14 +2307,15 @@ def tab_job_desc(emp_df: pd.DataFrame):
         "지표관리": ["수술실","감염관리실","영상의학팀","진단검사의학팀","총무팀"]
     }
 
-    dept1_val = jd_current.get("부서1", "").strip()
+    # 부서1 값 정리
+    dept1_val = str(jd_current.get("부서1", "") or "").strip()
 
     # 직원공통필수교육 : 값이 비어 있을 때만 기본값 채우기
-    if not jd_current.get("직원공통필수교육"):
+    if _is_blank(jd_current.get("직원공통필수교육")):
         jd_current["직원공통필수교육"] = default_common_edu
 
     # 특성화교육 : 값이 비어 있을 때 부서에 따라 기본값 채우기
-    if not jd_current.get("특성화교육"):
+    if _is_blank(jd_current.get("특성화교육")):
         applied = ""
         for key, dept_list in special_by_dept.items():
             if dept1_val in dept_list:
