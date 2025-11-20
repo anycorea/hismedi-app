@@ -130,6 +130,10 @@ def main():
 
     st.set_page_config(page_title=app_title, layout="wide")
 
+    # 인쇄 미리보기용 버전 카운터
+    if "print_version" not in st.session_state:
+        st.session_state["print_version"] = 0
+
     # Global layout & spacing styles
     st.markdown(
         """
@@ -229,6 +233,8 @@ def main():
         btn_cols = st.columns(2)
         with btn_cols[0]:
             if st.button("🖨 인쇄 미리보기", use_container_width=True):
+                # 매번 버전 올려서 컴포넌트 key를 바꿔줌
+                st.session_state["print_version"] += 1
                 st.session_state["print_requested"] = True
         with btn_cols[1]:
             if st.button("🔄 데이터 동기화", use_container_width=True):
@@ -608,7 +614,12 @@ def main():
           </body>
         </html>
         """
-        components.html(html, height=0, width=0)
+        components.html(
+            html,
+            height=0,
+            width=0,
+            key=f"print_{st.session_state.get('print_version', 0)}"
+        )
         st.session_state["print_requested"] = False
 
 if __name__ == "__main__":
