@@ -130,13 +130,13 @@ def main():
 
     st.set_page_config(page_title=app_title, layout="wide")
 
-    # Global layout & spacing styles - 최대한 상단으로, 간격 압축
+    # Global layout & spacing styles - 최대한 상단으로, 간격 압축 + 사이드바 좀 더 넓게
     st.markdown(
         """
         <style>
         [data-testid="stSidebar"] {
-            min-width: 360px;
-            max-width: 380px;
+            min-width: 390px;
+            max-width: 410px;
             padding-top: 0;
         }
         [data-testid="stSidebar"] * {
@@ -161,8 +161,8 @@ def main():
         }
         [data-testid="block-container"] {
             padding-top: 0;
-            padding-left: 1.1rem;
-            padding-right: 1.1rem;
+            padding-left: 1.3rem;
+            padding-right: 1.3rem;
         }
         h4 {
             margin-top: 0.15rem;
