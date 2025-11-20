@@ -130,7 +130,7 @@ def main():
 
     st.set_page_config(page_title=app_title, layout="wide")
 
-    # Global layout & spacing styles - 최대한 상단으로, 간격 압축 + 사이드바 좀 더 넓게
+    # Global layout & spacing styles
     st.markdown(
         """
         <style>
@@ -150,14 +150,14 @@ def main():
             padding-top: 0.18rem;
             padding-bottom: 0.18rem;
         }
-        /* 부서 선택 영역(컬럼 안 버튼)은 글자 더 작게, 박스는 약간 높게 */
+        /* 부서 선택 영역(컬럼 안 버튼)은 글자 더 작게, 박스는 약간 높게, 버튼 간 간격 더 좁게 */
         [data-testid="stSidebar"] [data-testid="column"] button {
             font-size: 0.7rem;
             padding-top: 0.30rem;
             padding-bottom: 0.30rem;
         }
         [data-testid="stSidebar"] [data-testid="column"] .stButton {
-            margin-bottom: 0.15rem;
+            margin-bottom: 0.07rem;
         }
         [data-testid="block-container"] {
             padding-top: 0;
@@ -171,7 +171,11 @@ def main():
         textarea {
             line-height: 1.3;
         }
-        /* 기간 선택 드롭다운 텍스트를 더 굵고 크게 */
+        /* 기간 선택 드롭다운 텍스트를 더 굵게, 배경색 강조 */
+        [data-testid="stSidebar"] div[data-baseweb="select"] > div {
+            background-color: #eef2ff;
+            border-radius: 4px;
+        }
         [data-testid="stSidebar"] div[data-baseweb="select"] span {
             font-size: 0.9rem;
             font-weight: 700;
@@ -199,9 +203,20 @@ def main():
 
     # ---------------------- Sidebar ----------------------
     with st.sidebar:
-        # Title at very top - 글자 크게, 여백 최소
+        # Title (조금 더 예쁘게)
         st.markdown(
-            f"<div style='margin-top:0; margin-bottom:0.2rem; font-size:1.5rem; font-weight:700;'>{app_title}</div>",
+            f"""
+            <div style="
+                margin-top:0;
+                margin-bottom:0.3rem;
+                font-size:1.55rem;
+                font-weight:800;
+                letter-spacing:0.04em;
+                color:#1f2937;
+            ">
+                {app_title}
+            </div>
+            """,
             unsafe_allow_html=True,
         )
         st.markdown(
@@ -209,20 +224,22 @@ def main():
             unsafe_allow_html=True,
         )
 
-        # 인쇄 / 동기화 (섹션 제목 없이 버튼만)
-        if st.button("🖨 인쇄 미리보기", use_container_width=True):
-            st.session_state["print_requested"] = True
-
-        if st.button("🔄 데이터 동기화", use_container_width=True):
-            load_data.clear()
-            st.rerun()
+        # 인쇄 / 동기화 - 한 줄에 두 버튼
+        btn_cols = st.columns(2)
+        with btn_cols[0]:
+            if st.button("🖨 인쇄 미리보기", use_container_width=True):
+                st.session_state["print_requested"] = True
+        with btn_cols[1]:
+            if st.button("🔄 데이터 동기화", use_container_width=True):
+                load_data.clear()
+                st.rerun()
 
         st.markdown(
             "<hr style='margin:0.35rem 0; border:0; border-top:1px solid #e0e0e0;' />",
             unsafe_allow_html=True,
         )
 
-        # 기간 관리 - 섹션 제목 없이 바로 위젯
+        # 기간 관리
         week_options = df[WEEK_COL].astype(str).tolist()
         selected_week = st.selectbox(
             "기간 선택",
@@ -290,7 +307,7 @@ def main():
             unsafe_allow_html=True,
         )
 
-        # 부서 선택 - 섹션 제목 제거, 버튼만
+        # 부서 선택
         all_depts = ["전체 부서"] + dept_cols
         current_dept = st.session_state.get("selected_dept", "전체 부서")
 
@@ -381,22 +398,27 @@ def main():
             st.rerun()
 
     # ---------------------- Main content ----------------------
+    # 선택한 기간 row
     row_df = df[df[WEEK_COL] == selected_week]
     if row_df.empty:
         st.error("선택한 기간의 데이터를 찾을 수 없습니다.")
         return
 
     row = row_df.iloc[0]
-    sheet_row = int(row["_sheet_row"])
 
-    st.markdown(f"#### {selected_week} 업무 내용")
+    # 선택한 주의 인덱스 및 직전 기간 row
+    selected_indices = df.index[df[WEEK_COL] == selected_week].tolist()
+    selected_idx = selected_indices[0] if selected_indices else 0
+    prev_row = df.iloc[selected_idx + 1] if selected_idx + 1 < len(df) else None
 
-    edited_values = {}
+    edited_values = {}      # 전체 부서 모드에서 사용
+    edited_single = {}      # 단일 부서 모드에서 사용: {week_str: text}
 
     if dept_filter == "전체 부서":
-        # 항상 2열, 화면이 좁으면 자동으로 1열로 떨어짐
-        cols_main = st.columns(2)
+        # 상단 제목 - "업무 내용" 문구 제거
+        st.markdown(f"#### {selected_week}")
 
+        cols_main = st.columns(2)
         for i, dept in enumerate(dept_cols):
             current_text = ""
             if dept in row.index and pd.notna(row[dept]):
@@ -415,29 +437,67 @@ def main():
                     )
                     edited_values[dept] = edited
     else:
+        # 단독 부서 모드: 최신(선택) 기간 + 직전 기간 나란히
         dept = dept_filter
-        current_text = ""
-        if dept in row.index and pd.notna(row[dept]):
-            current_text = str(row[dept])
 
-        with st.container(border=True):
-            st.markdown(f"**{dept}**")
-            edited = st.text_area(
-                label="",
-                value=current_text,
-                height=450,
-                key=f"ta_{dept}",
-                label_visibility="collapsed",
-            )
-            edited_values[dept] = edited
+        cols = st.columns(2) if prev_row is not None else [st]
+
+        # 현재(선택) 기간
+        cur_text = ""
+        if dept in row.index and pd.notna(row[dept]):
+            cur_text = str(row[dept])
+
+        with cols[0]:
+            with st.container(border=True):
+                st.markdown(f"**{selected_week} · {dept}**")
+                edited_cur = st.text_area(
+                    label="",
+                    value(cur_text,
+                    ),
+                    height=450,
+                    key=f"ta_{dept}_{selected_week}",
+                    label_visibility="collapsed",
+                )
+                edited_single[selected_week] = edited_cur
+
+        # 직전 기간이 존재하면 오른쪽에 배치
+        if prev_row is not None:
+            prev_week = str(prev_row[WEEK_COL])
+            prev_text = ""
+            if dept in prev_row.index and pd.notna(prev_row[dept]):
+                prev_text = str(prev_row[dept])
+
+            with cols[1]:
+                with st.container(border=True):
+                    st.markdown(f"**{prev_week} · {dept}**")
+                    edited_prev = st.text_area(
+                        label="",
+                        value=prev_text,
+                        height=450,
+                        key=f"ta_{dept}_{prev_week}",
+                        label_visibility="collapsed",
+                    )
+                    edited_single[prev_week] = edited_prev
 
     # 저장 버튼
     if st.button("변경 내용 저장", type="primary"):
         cells = []
-        for dept, val in edited_values.items():
+
+        if dept_filter == "전체 부서":
+            sheet_row = int(row["_sheet_row"])
+            for dept, val in edited_values.items():
+                col_idx = get_col_index(ws, dept)
+                if col_idx is not None:
+                    cells.append(Cell(row=sheet_row, col=col_idx, value=val))
+        else:
+            dept = dept_filter
             col_idx = get_col_index(ws, dept)
             if col_idx is not None:
-                cells.append(Cell(row=sheet_row, col=col_idx, value=val))
+                for week_str, text in edited_single.items():
+                    row_match = df[df[WEEK_COL] == week_str]
+                    if not row_match.empty:
+                        sheet_row = int(row_match.iloc[0]["_sheet_row"])
+                        cells.append(Cell(row=sheet_row, col=col_idx, value=text))
 
         if not cells:
             st.error("저장할 대상 부서를 찾지 못했습니다. 헤더 이름을 확인해 주세요.")
@@ -449,7 +509,6 @@ def main():
 
     # ---------------------- Print preview (separate HTML) ----------------------
     if st.session_state.get("print_requested"):
-        # Build printable HTML with selected period & departments
         title_html = escape_html(app_title)
         week_html = escape_html(selected_week)
 
@@ -518,7 +577,6 @@ def main():
           </body>
         </html>
         """
-        # Render hidden printable HTML (separate document) and trigger print
         components.html(html, height=0, width=0)
         st.session_state["print_requested"] = False
 
