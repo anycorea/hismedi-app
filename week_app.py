@@ -452,13 +452,13 @@ def main():
                 st.markdown(f"**{selected_week} · {dept}**")
                 edited_cur = st.text_area(
                     label="",
-                    value(cur_text,
-                    ),
+                    value=cur_text,
                     height=450,
                     key=f"ta_{dept}_{selected_week}",
                     label_visibility="collapsed",
                 )
                 edited_single[selected_week] = edited_cur
+
 
         # 직전 기간이 존재하면 오른쪽에 배치
         if prev_row is not None:
