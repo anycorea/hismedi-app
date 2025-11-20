@@ -130,30 +130,34 @@ def main():
 
     st.set_page_config(page_title=app_title, layout="wide")
 
-    # Global layout & spacing styles - 전체를 위로, 간격 촘촘하게
+    # Global layout & spacing styles - 전체를 더 위로, 간격 더 촘촘하게
     st.markdown(
         """
         <style>
         [data-testid="stSidebar"] {
             min-width: 360px;
             max-width: 380px;
-            padding-top: 0.2rem;
+            padding-top: 0.05rem;
         }
         [data-testid="stSidebar"] * {
-            line-height: 1.1;
+            line-height: 1.05;
         }
         [data-testid="stSidebar"] .stButton {
-            margin-bottom: 0.35rem;
+            margin-bottom: 0.25rem;
         }
         [data-testid="stSidebar"] button {
             font-size: 0.8rem;
-            padding-top: 0.25rem;
-            padding-bottom: 0.25rem;
+            padding-top: 0.2rem;
+            padding-bottom: 0.2rem;
         }
         [data-testid="block-container"] {
-            padding-top: 0.2rem;
-            padding-left: 1.3rem;
-            padding-right: 1.3rem;
+            padding-top: 0.05rem;
+            padding-left: 1.2rem;
+            padding-right: 1.2rem;
+        }
+        h4 {
+            margin-top: 0.2rem;
+            margin-bottom: 0.4rem;
         }
         textarea {
             line-height: 1.3;
@@ -183,13 +187,19 @@ def main():
     with st.sidebar:
         # Title at very top - 글자 크게
         st.markdown(
-            f"<h2 style='margin-top: 0; margin-bottom: 0.75rem; font-size: 1.4rem; font-weight: 700;'>{app_title}</h2>",
+            f"<div style='margin-top: 0; margin-bottom: 0.3rem; font-size: 1.5rem; font-weight: 700;'>{app_title}</div>",
             unsafe_allow_html=True,
         )
-        st.markdown("---")
+        st.markdown(
+            "<hr style='margin:0.3rem 0; border:0; border-top:1px solid #e0e0e0;' />",
+            unsafe_allow_html=True,
+        )
 
         # 인쇄 / 동기화 (1열 배치)
-        st.markdown("#### 인쇄 · 동기화")
+        st.markdown(
+            "<div style='font-weight:600; margin:0.2rem 0 0.3rem;'>인쇄 · 동기화</div>",
+            unsafe_allow_html=True,
+        )
 
         if st.button("🖨 인쇄 미리보기", use_container_width=True):
             st.session_state["print_requested"] = True
@@ -199,15 +209,28 @@ def main():
             load_data.clear()
             st.rerun()
 
-        st.markdown("---")
-        st.markdown("#### 기간 관리")
+        st.markdown(
+            "<hr style='margin:0.4rem 0; border:0; border-top:1px solid #e0e0e0;' />",
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            "<div style='font-weight:600; margin:0.1rem 0 0.3rem;'>기간 관리</div>",
+            unsafe_allow_html=True,
+        )
 
         week_options = df[WEEK_COL].astype(str).tolist()
         selected_week = st.selectbox(
             "기간 선택",
             options=week_options,
             index=0,
+            label_visibility="collapsed",
             key="week_select",
+        )
+
+        # 선택된 기간을 더 크게, 눈에 띄게 표시
+        st.markdown(
+            f"<div style='margin-top:0.1rem; margin-bottom:0.25rem; font-weight:700; font-size:0.95rem; color:#111;'>{selected_week}</div>",
+            unsafe_allow_html=True,
         )
 
         last_week_str = df[WEEK_COL].astype(str).iloc[0]
@@ -218,11 +241,16 @@ def main():
         else:
             default_weeks = 2
 
+        st.markdown(
+            "<div style='font-size:0.8rem; margin-top:0.1rem; margin-bottom:0.1rem;'>새 기간 길이</div>",
+            unsafe_allow_html=True,
+        )
         unit_choice = st.radio(
-            "새 기간 길이",
+            "",
             ["직전 기간과 동일", "1주", "2주"],
             index=0,
             horizontal=True,
+            label_visibility="collapsed",
         )
 
         if unit_choice == "1주":
@@ -259,8 +287,14 @@ def main():
             st.success(f"새 기간 {new_week_str} 이(가) 추가되었습니다.")
             st.rerun()
 
-        st.markdown("---")
-        st.markdown("#### 부서 선택")
+        st.markdown(
+            "<hr style='margin:0.4rem 0; border:0; border-top:1px solid #e0e0e0;' />",
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            "<div style='font-weight:600; margin:0.1rem 0 0.25rem;'>부서 선택</div>",
+            unsafe_allow_html=True,
+        )
 
         all_depts = ["전체 부서"] + dept_cols
         current_dept = st.session_state.get("selected_dept", "전체 부서")
@@ -283,8 +317,14 @@ def main():
 
         dept_filter = current_dept
 
-        st.markdown("---")
-        st.markdown("#### 부서 관리")
+        st.markdown(
+            "<hr style='margin:0.4rem 0; border:0; border-top:1px solid #e0e0e0;' />",
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            "<div style='font-weight:600; margin:0.1rem 0 0.25rem;'>부서 관리</div>",
+            unsafe_allow_html=True,
+        )
         st.caption("표에서 부서명을 직접 수정·추가·삭제 후, 아래 저장 버튼을 눌러주세요.")
 
         dept_df = pd.DataFrame({"부서": dept_cols})
