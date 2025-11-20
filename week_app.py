@@ -11,6 +11,11 @@ import streamlit.components.v1 as components
 WEEK_COL = "WEEK"
 
 
+def mark_dirty():
+    """업무내용 편집 시 저장 안내를 띄우기 위한 플래그 설정"""
+    st.session_state["has_unsaved_changes"] = True
+
+
 @st.cache_resource(show_spinner=False)
 def get_worksheet():
     scopes = [
@@ -129,6 +134,9 @@ def main():
         pass
 
     st.set_page_config(page_title=app_title, layout="wide")
+
+    if "has_unsaved_changes" not in st.session_state:
+        st.session_state["has_unsaved_changes"] = False
 
     # Global layout & spacing styles
     st.markdown(
@@ -434,6 +442,7 @@ def main():
                         value=current_text,
                         height=320,
                         key=f"ta_{dept}",
+                        on_change=mark_dirty,
                         label_visibility="collapsed",
                     )
                     edited_values[dept] = edited
@@ -456,10 +465,10 @@ def main():
                     value=cur_text,
                     height=450,
                     key=f"ta_{dept}_{selected_week}",
+                    on_change=mark_dirty,
                     label_visibility="collapsed",
                 )
                 edited_single[selected_week] = edited_cur
-
 
         # 직전 기간이 존재하면 오른쪽에 배치
         if prev_row is not None:
@@ -476,9 +485,37 @@ def main():
                         value=prev_text,
                         height=450,
                         key=f"ta_{dept}_{prev_week}",
+                        on_change=mark_dirty,
                         label_visibility="collapsed",
                     )
                     edited_single[prev_week] = edited_prev
+
+    # 저장 안내 배너 (업무내용 편집 후 컬럼을 벗어나면 노출)
+    if st.session_state.get("has_unsaved_changes"):
+        st.markdown(
+            """
+            <div style="
+                margin-top:0.6rem;
+                margin-bottom:0.15rem;
+                padding:0.55rem 0.9rem;
+                border-radius:999px;
+                background:linear-gradient(90deg,#f97316,#fb7185);
+                color:#ffffff;
+                display:flex;
+                align-items:center;
+                gap:0.6rem;
+                font-size:0.85rem;
+                box-shadow:0 8px 18px rgba(0,0,0,0.08);
+            ">
+                <div style="font-size:1.1rem;">⚠️</div>
+                <div>
+                    <div style="font-weight:700; margin-bottom:0.1rem;">업무 내용이 아직 저장되지 않았습니다.</div>
+                    <div>아래 <b>변경 내용 저장</b> 버튼을 눌러 구글 시트에 기록해 주세요.</div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
     # 저장 버튼
     if st.button("변경 내용 저장", type="primary"):
@@ -505,6 +542,7 @@ def main():
         else:
             ws.update_cells(cells)
             load_data.clear()
+            st.session_state["has_unsaved_changes"] = False
             st.success("구글 시트에 저장되었습니다.")
             st.rerun()
 
@@ -610,6 +648,7 @@ def main():
         """
         components.html(html, height=0, width=0)
         st.session_state["print_requested"] = False
+
 
 if __name__ == "__main__":
     main()
