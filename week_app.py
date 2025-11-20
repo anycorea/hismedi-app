@@ -171,14 +171,15 @@ def main():
         textarea {
             line-height: 1.3;
         }
-        /* 기간 선택 드롭다운 텍스트를 더 굵게, 배경색 강조 */
+        /* 기간 선택 드롭다운 텍스트를 더 굵게, 배경색 강하게 */
         [data-testid="stSidebar"] div[data-baseweb="select"] > div {
-            background-color: #eef2ff;
+            background-color: #bfdbfe;  /* 더 진한 파란톤 */
             border-radius: 4px;
+            border: 1px solid #1d4ed8;
         }
         [data-testid="stSidebar"] div[data-baseweb="select"] span {
             font-size: 0.9rem;
-            font-weight: 700;
+            font-weight: 800;
         }
         </style>
         """,
@@ -515,28 +516,30 @@ def main():
         sections_html = ""
 
         if dept_filter == "전체 부서":
+            # 전체 부서: 화면처럼 박스형 카드 레이아웃
             for dept in dept_cols:
                 content = ""
                 if dept in row.index and pd.notna(row[dept]):
                     content = str(row[dept])
                 content_html = escape_html(content)
                 sections_html += f"""
-                <section style='margin-bottom: 0.8rem;'>
-                    <h3 style='margin:0 0 0.15rem 0;'>{escape_html(dept)}</h3>
-                    <div style='white-space:normal;font-size:0.85rem;'>{content_html}</div>
-                </section>
+                <div class="dept-card">
+                    <div class="dept-title">{escape_html(dept)}</div>
+                    <div class="dept-body">{content_html}</div>
+                </div>
                 """
         else:
+            # 단일 부서: 선택한 부서 내용만 카드로 표시
             dept = dept_filter
             content = ""
             if dept in row.index and pd.notna(row[dept]):
                 content = str(row[dept])
             content_html = escape_html(content)
             sections_html += f"""
-            <section style='margin-bottom: 1rem;'>
-                <h3 style='margin:0 0 0.2rem 0;'>{escape_html(dept)}</h3>
-                <div style='white-space:normal;font-size:0.9rem;'>{content_html}</div>
-            </section>
+            <div class="dept-card">
+                <div class="dept-title">{escape_html(dept)}</div>
+                <div class="dept-body">{content_html}</div>
+            </div>
             """
 
         html = f"""
@@ -562,15 +565,43 @@ def main():
                 font-size: 13px;
                 margin: 0 0 0.6rem 0;
               }}
-              h3 {{
-                font-size: 12px;
+
+              .dept-grid {{
+                display: flex;
+                flex-wrap: wrap;
+                gap: 8px;
+              }}
+              .dept-card {{
+                box-sizing: border-box;
+                flex: 1 1 calc(50% - 8px); /* 두 칼럼 카드 레이아웃 */
+                border: 1px solid #d1d5db;
+                border-radius: 6px;
+                padding: 6px 8px;
+                page-break-inside: avoid;
+              }}
+              .dept-title {{
+                font-size: 11px;
+                font-weight: 700;
+                margin-bottom: 3px;
+              }}
+              .dept-body {{
+                font-size: 10px;
+                white-space: normal;
+              }}
+
+              @media print {{
+                .dept-card {{
+                  break-inside: avoid;
+                }}
               }}
             </style>
           </head>
           <body>
             <h1>{title_html}</h1>
             <h2>{week_html}</h2>
-            {sections_html}
+            <div class="dept-grid">
+              {sections_html}
+            </div>
             <script>
               window.print();
             </script>
@@ -579,7 +610,6 @@ def main():
         """
         components.html(html, height=0, width=0)
         st.session_state["print_requested"] = False
-
 
 if __name__ == "__main__":
     main()
