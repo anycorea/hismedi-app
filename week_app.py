@@ -6,6 +6,7 @@ from gspread.cell import Cell
 import pandas as pd
 import streamlit as st
 from google.oauth2.service_account import Credentials
+import streamlit.components.v1 as components
 
 # ===== 기본 설정 =====
 WEEK_COL = "WEEK"  # 시트에서 기간이 들어있는 열 이름
@@ -286,17 +287,19 @@ def main():
     # -----------------------
     # 메인 영역: 인쇄 + 내용 편집
     # -----------------------
-    # 인쇄 버튼 (브라우저 프린트)
+    # 인쇄 버튼 (브라우저 인쇄 미리보기)
     col_print, _ = st.columns([1, 5])
     with col_print:
-        if st.button("🖨 인쇄"):
-            st.markdown(
+        if st.button("🖨 인쇄 미리보기"):
+            # iframe 안에서도 확실하게 실행되도록 components.html 사용
+            components.html(
                 """
                 <script>
-                window.print();
+                    window.print();
                 </script>
                 """,
-                unsafe_allow_html=True,
+                height=0,
+                width=0,
             )
 
     # 선택한 기간 한 행 가져오기
