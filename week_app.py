@@ -168,6 +168,10 @@ def main():
             options=["전체 부서"] + dept_cols,
             index=0,
         )
+        if st.button("🔄 동기화"):
+            # 캐시 비우고 다시 읽기
+            load_data.clear()
+            st.rerun()
 
         st.markdown("---")
         st.markdown("### 새 기간 추가")
@@ -204,7 +208,6 @@ def main():
         st.caption(f"새 기간 미리보기: **{new_week_str}**")
 
         if st.button("새 기간 행 추가"):
-            # 헤더 개수만큼 빈 문자열 생성 후 WEEK 위치에만 값 세팅
             headers = ws.row_values(1)
             new_row = ["" for _ in headers]
             if WEEK_COL in headers:
@@ -217,8 +220,9 @@ def main():
                 new_row = ["" for _ in headers]
                 new_row[0] = new_week_str
 
-            # 항상 append_row로 마지막에 추가 → 기존 데이터 덮어쓰지 않음
-            ws.append_row(new_row, value_input_option="USER_ENTERED")
+            # ✅ 항상 2행에 새 행 삽입 (제목 바로 아래)
+            ws.insert_row(new_row, index=2, value_input_option="USER_ENTERED")
+
             load_data.clear()
             st.success(f"새 기간 {new_week_str} 이(가) 추가되었습니다.")
             st.rerun()
