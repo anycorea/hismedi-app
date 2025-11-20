@@ -69,7 +69,10 @@ def load_data():
     for c in [c for c in df.columns if c.startswith("Unnamed_")]:
         if df[c].replace("", pd.NA).isna().all():
             df.drop(columns=[c], inplace=True)
-
+    
+    # 👉 시트 실제 행 번호 기억 (헤더 1행 + 데이터는 2행부터)
+    df["_sheet_row"] = df.index + 2
+    
     # 4) 기간 컬럼 자동 탐지 (YYYY.MM.DD~YYYY.MM.DD)
     pattern = re.compile(r"\d{4}\.\d{2}\.\d{2}\s*~\s*\d{4}\.\d{2}\.\d{2}")
     week_col_name = None
@@ -299,7 +302,7 @@ def main():
         return
 
     row = row_df.iloc[0]
-    sheet_row = row.name + 2  # 헤더 1행 보정
+    sheet_row = int(row["_sheet_row"])
 
     st.markdown(f"### {selected_week} 업무 내용")
 
