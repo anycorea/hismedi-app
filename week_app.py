@@ -150,11 +150,11 @@ def main():
             padding-top: 0.18rem;
             padding-bottom: 0.18rem;
         }
-        /* 부서 선택 영역(컬럼 안 버튼)은 글자 조금 더 작게, 박스는 약간 높게 */
+        /* 부서 선택 영역(컬럼 안 버튼)은 글자 더 작게, 박스는 약간 높게 */
         [data-testid="stSidebar"] [data-testid="column"] button {
-            font-size: 0.75rem;
-            padding-top: 0.26rem;
-            padding-bottom: 0.26rem;
+            font-size: 0.7rem;
+            padding-top: 0.30rem;
+            padding-bottom: 0.30rem;
         }
         [data-testid="stSidebar"] [data-testid="column"] .stButton {
             margin-bottom: 0.15rem;
