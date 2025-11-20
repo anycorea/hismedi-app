@@ -112,6 +112,15 @@ def get_col_index(ws, col_name: str):
         return None
 
 
+def escape_html(text: str) -> str:
+    if text is None:
+        return ""
+    text = str(text)
+    text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    text = text.replace("\n", "<br>")
+    return text
+
+
 def main():
     app_title = "HISMEDI † Weekly report"
     try:
@@ -121,16 +130,25 @@ def main():
 
     st.set_page_config(page_title=app_title, layout="wide")
 
-    st.markdown(
-        f"<h3 style='margin-top: 0; margin-bottom: 0.5rem;'>{app_title}</h3>",
-        unsafe_allow_html=True,
-    )
+    # Global layout & spacing styles
     st.markdown(
         """
         <style>
         [data-testid="stSidebar"] {
-            min-width: 320px;
-            max-width: 340px;
+            min-width: 360px;
+            max-width: 380px;
+            padding-top: 0.5rem;
+        }
+        [data-testid="stSidebar"] * {
+            line-height: 1.2;
+        }
+        [data-testid="block-container"] {
+            padding-top: 0.5rem;
+            padding-left: 1.5rem;
+            padding-right: 1.5rem;
+        }
+        textarea {
+            line-height: 1.3;
         }
         </style>
         """,
@@ -153,27 +171,20 @@ def main():
     if "selected_dept" not in st.session_state:
         st.session_state["selected_dept"] = "전체 부서"
 
+    # ---------------------- Sidebar ----------------------
     with st.sidebar:
+        # Title at very top
+        st.markdown(
+            f"<h3 style='margin-top: 0; margin-bottom: 0.5rem;'>{app_title}</h3>",
+            unsafe_allow_html=True,
+        )
+        st.markdown("---")
+
+        # 인쇄 / 동기화 (1열 배치)
         st.markdown("#### 인쇄 · 동기화")
 
         if st.button("🖨 인쇄 미리보기", use_container_width=True):
-            components.html(
-                """
-                <html>
-                  <body>
-                    <script>
-                      if (window.parent) {
-                        window.parent.print();
-                      } else {
-                        window.print();
-                      }
-                    </script>
-                  </body>
-                </html>
-                """,
-                height=0,
-                width=0,
-            )
+            st.session_state["print_requested"] = True
 
         if st.button("🔄 데이터 동기화", use_container_width=True, type="primary"):
             load_data.clear()
@@ -324,6 +335,7 @@ def main():
             st.success("부서 설정이 저장되었습니다.")
             st.rerun()
 
+    # ---------------------- Main content ----------------------
     row_df = df[df[WEEK_COL] == selected_week]
     if row_df.empty:
         st.error("선택한 기간의 데이터를 찾을 수 없습니다.")
@@ -337,22 +349,22 @@ def main():
     edited_values = {}
 
     if dept_filter == "전체 부서":
-        n_cols_main = 2 if len(dept_cols) <= 4 else 3
-        cols_main = st.columns(n_cols_main)
+        # 항상 2열, 화면이 좁으면 자동으로 1열로 떨어짐
+        cols_main = st.columns(2)
 
         for i, dept in enumerate(dept_cols):
             current_text = ""
             if dept in row.index and pd.notna(row[dept]):
                 current_text = str(row[dept])
 
-            col = cols_main[i % n_cols_main]
+            col = cols_main[i % 2]
             with col:
                 with st.container(border=True):
                     st.markdown(f"**{dept}**")
                     edited = st.text_area(
                         label="",
                         value=current_text,
-                        height=150,
+                        height=320,
                         key=f"ta_{dept}",
                         label_visibility="collapsed",
                     )
@@ -368,12 +380,13 @@ def main():
             edited = st.text_area(
                 label="",
                 value=current_text,
-                height=400,
+                height=450,
                 key=f"ta_{dept}",
                 label_visibility="collapsed",
             )
             edited_values[dept] = edited
 
+    # 저장 버튼
     if st.button("변경 내용 저장", type="primary"):
         cells = []
         for dept, val in edited_values.items():
@@ -388,6 +401,81 @@ def main():
             load_data.clear()
             st.success("구글 시트에 저장되었습니다.")
             st.rerun()
+
+    # ---------------------- Print preview (separate HTML) ----------------------
+    if st.session_state.get("print_requested"):
+        # Build printable HTML with selected period & departments
+        title_html = escape_html(app_title)
+        week_html = escape_html(selected_week)
+
+        sections_html = ""
+
+        if dept_filter == "전체 부서":
+            for dept in dept_cols:
+                content = ""
+                if dept in row.index and pd.notna(row[dept]):
+                    content = str(row[dept])
+                content_html = escape_html(content)
+                sections_html += f"""
+                <section style='margin-bottom: 1.5rem;'>
+                    <h3 style='margin:0 0 0.25rem 0;'>{escape_html(dept)}</h3>
+                    <div style='white-space:normal;font-size:0.9rem;'>{content_html}</div>
+                </section>
+                """
+        else:
+            dept = dept_filter
+            content = ""
+            if dept in row.index and pd.notna(row[dept]):
+                content = str(row[dept])
+            content_html = escape_html(content)
+            sections_html += f"""
+            <section style='margin-bottom: 1.5rem;'>
+                <h3 style='margin:0 0 0.25rem 0;'>{escape_html(dept)}</h3>
+                <div style='white-space:normal;font-size:0.9rem;'>{content_html}</div>
+            </section>
+            """
+
+        html = f"""
+        <html>
+          <head>
+            <meta charset="utf-8" />
+            <title>{title_html}</title>
+            <style>
+              @page {{
+                size: A4;
+                margin: 20mm;
+              }}
+              body {{
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+                font-size: 12px;
+                color: #111;
+              }}
+              h1 {{
+                font-size: 18px;
+                margin-bottom: 0.5rem;
+              }}
+              h2 {{
+                font-size: 14px;
+                margin: 0 0 1rem 0;
+              }}
+              h3 {{
+                font-size: 13px;
+              }}
+            </style>
+          </head>
+          <body>
+            <h1>{title_html}</h1>
+            <h2>{week_html}</h2>
+            {sections_html}
+            <script>
+              window.print();
+            </script>
+          </body>
+        </html>
+        """
+        # Render hidden printable HTML (separate document) and trigger print
+        components.html(html, height=0, width=0)
+        st.session_state["print_requested"] = False
 
 
 if __name__ == "__main__":
