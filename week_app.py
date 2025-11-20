@@ -291,12 +291,20 @@ def main():
     col_print, _ = st.columns([1, 5])
     with col_print:
         if st.button("🖨 인쇄 미리보기"):
-            # iframe 안에서도 확실하게 실행되도록 components.html 사용
             components.html(
                 """
-                <script>
-                    window.print();
-                </script>
+                <html>
+                  <body>
+                    <script>
+                      // 이 iframe이 아니라, 부모(스트림릿 앱 전체)를 인쇄
+                      if (window.parent) {
+                        window.parent.print();
+                      } else {
+                        window.print();
+                      }
+                    </script>
+                  </body>
+                </html>
                 """,
                 height=0,
                 width=0,
