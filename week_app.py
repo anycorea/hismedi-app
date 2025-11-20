@@ -130,22 +130,30 @@ def main():
 
     st.set_page_config(page_title=app_title, layout="wide")
 
-    # Global layout & spacing styles
+    # Global layout & spacing styles - 전체를 위로, 간격 촘촘하게
     st.markdown(
         """
         <style>
         [data-testid="stSidebar"] {
             min-width: 360px;
             max-width: 380px;
-            padding-top: 0.5rem;
+            padding-top: 0.2rem;
         }
         [data-testid="stSidebar"] * {
-            line-height: 1.2;
+            line-height: 1.1;
+        }
+        [data-testid="stSidebar"] .stButton {
+            margin-bottom: 0.35rem;
+        }
+        [data-testid="stSidebar"] button {
+            font-size: 0.8rem;
+            padding-top: 0.25rem;
+            padding-bottom: 0.25rem;
         }
         [data-testid="block-container"] {
-            padding-top: 0.5rem;
-            padding-left: 1.5rem;
-            padding-right: 1.5rem;
+            padding-top: 0.2rem;
+            padding-left: 1.3rem;
+            padding-right: 1.3rem;
         }
         textarea {
             line-height: 1.3;
@@ -173,9 +181,9 @@ def main():
 
     # ---------------------- Sidebar ----------------------
     with st.sidebar:
-        # Title at very top
+        # Title at very top - 글자 크게
         st.markdown(
-            f"<h3 style='margin-top: 0; margin-bottom: 0.5rem;'>{app_title}</h3>",
+            f"<h2 style='margin-top: 0; margin-bottom: 0.75rem; font-size: 1.4rem; font-weight: 700;'>{app_title}</h2>",
             unsafe_allow_html=True,
         )
         st.markdown("---")
@@ -186,7 +194,8 @@ def main():
         if st.button("🖨 인쇄 미리보기", use_container_width=True):
             st.session_state["print_requested"] = True
 
-        if st.button("🔄 데이터 동기화", use_container_width=True, type="primary"):
+        # 데이터 동기화 버튼: 기본 스타일(회색 계열)
+        if st.button("🔄 데이터 동기화", use_container_width=True):
             load_data.clear()
             st.rerun()
 
@@ -417,9 +426,9 @@ def main():
                     content = str(row[dept])
                 content_html = escape_html(content)
                 sections_html += f"""
-                <section style='margin-bottom: 1.5rem;'>
-                    <h3 style='margin:0 0 0.25rem 0;'>{escape_html(dept)}</h3>
-                    <div style='white-space:normal;font-size:0.9rem;'>{content_html}</div>
+                <section style='margin-bottom: 0.8rem;'>
+                    <h3 style='margin:0 0 0.15rem 0;'>{escape_html(dept)}</h3>
+                    <div style='white-space:normal;font-size:0.85rem;'>{content_html}</div>
                 </section>
                 """
         else:
@@ -429,8 +438,8 @@ def main():
                 content = str(row[dept])
             content_html = escape_html(content)
             sections_html += f"""
-            <section style='margin-bottom: 1.5rem;'>
-                <h3 style='margin:0 0 0.25rem 0;'>{escape_html(dept)}</h3>
+            <section style='margin-bottom: 1rem;'>
+                <h3 style='margin:0 0 0.2rem 0;'>{escape_html(dept)}</h3>
                 <div style='white-space:normal;font-size:0.9rem;'>{content_html}</div>
             </section>
             """
@@ -443,23 +452,23 @@ def main():
             <style>
               @page {{
                 size: A4;
-                margin: 20mm;
+                margin: 10mm;
               }}
               body {{
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-                font-size: 12px;
+                font-size: 11px;
                 color: #111;
               }}
               h1 {{
-                font-size: 18px;
-                margin-bottom: 0.5rem;
+                font-size: 16px;
+                margin-bottom: 0.3rem;
               }}
               h2 {{
-                font-size: 14px;
-                margin: 0 0 1rem 0;
+                font-size: 13px;
+                margin: 0 0 0.6rem 0;
               }}
               h3 {{
-                font-size: 13px;
+                font-size: 12px;
               }}
             </style>
           </head>
