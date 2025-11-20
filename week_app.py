@@ -34,12 +34,49 @@ def get_worksheet():
 
 @st.cache_data(show_spinner=False)
 def load_data():
-    """구글시트 전체를 DataFrame으로 가져오기"""
+    """
+    구글시트 전체를 DataFrame으로 가져오기.
+    - get_all_values()로 값만 가져온 뒤
+    - 헤더의 빈 칸을 'Unnamed_n' 으로 치환
+    - 행마다 칼럼 개수 맞춰서 DataFrame 생성
+    """
     ws = get_worksheet()
-    records = ws.get_all_records()
-    df = pd.DataFrame(records)
+    values = ws.get_all_values()   # [[헤더...], [row1...], [row2...], ...]
 
-    # WEEK를 최신순으로 정렬 (기간 문자열의 '시작 날짜' 기준)
+    if not values or len(values) < 2:
+        return pd.DataFrame()
+
+    raw_header = values[0]
+    rows = values[1:]
+
+    # 1) 헤더 정리: 빈 헤더("")는 Unnamed_1, Unnamed_2 ... 로 바꿔서 중복 제거
+    header = []
+    for i, h in enumerate(raw_header):
+        h = str(h).strip()
+        if not h:
+            h = f"Unnamed_{i+1}"
+        header.append(h)
+
+    n_cols = len(header)
+
+    # 2) 각 행 길이를 헤더 길이에 맞게 패딩/자르기
+    normalized_rows = []
+    for r in rows:
+        if len(r) < n_cols:
+            r = r + [""] * (n_cols - len(r))
+        elif len(r) > n_cols:
+            r = r[:n_cols]
+        normalized_rows.append(r)
+
+    df = pd.DataFrame(normalized_rows, columns=header)
+
+    # 3) 완전히 빈 'Unnamed_*' 컬럼은 정리해서 없애기 (헤더만 있고 내용이 전부 공백이면 삭제)
+    unnamed_cols = [c for c in df.columns if c.startswith("Unnamed_")]
+    for c in unnamed_cols:
+        if df[c].replace("", pd.NA).isna().all():
+            df.drop(columns=[c], inplace=True)
+
+    # 4) WEEK 기준 최신순 정렬
     def parse_start_date(week_str):
         try:
             start = str(week_str).split("~")[0].strip()
@@ -50,6 +87,7 @@ def load_data():
     if WEEK_COL in df.columns:
         df["_start_date"] = df[WEEK_COL].astype(str).apply(parse_start_date)
         df = df.sort_values("_start_date", ascending=False).reset_index(drop=True)
+
     return df
 
 
