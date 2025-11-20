@@ -14,7 +14,7 @@ WEEK_COL = "WEEK"
 @st.cache_resource(show_spinner=False)
 def get_worksheet():
     scopes = [
-        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/spreadssheets",
         "https://www.googleapis.com/auth/drive",
     ]
     creds = Credentials.from_service_account_info(
