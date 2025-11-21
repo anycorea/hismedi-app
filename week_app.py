@@ -144,8 +144,8 @@ def main():
         """
         <style>
         [data-testid="stSidebar"] {
-            min-width: 390px;
-            max-width: 410px;
+            min-width: 440px;
+            max-width: 460px;
             padding-top: 0;
         }
         [data-testid="stSidebar"] * {
@@ -213,20 +213,19 @@ def main():
 
     # ---------------------- Sidebar ----------------------
     with st.sidebar:
-        # 제목: 크게 + 굵게 + 가운데 정렬
         st.markdown(
             f"""
             <div style="
                 width:100%;
-                display:flex;
-                justify-content:center;
-                align-items:flex-start;
-                margin-top:0rem;
-                margin-bottom:0.6rem;
-                font-size:1.8rem;
-                font-weight:900;
+                margin-top:-0.4rem;      /* 위로 조금 더 당기기 */
+                margin-bottom:0.3rem;
+                font-size:1.55rem;
+                font-weight:800;
                 letter-spacing:0.04em;
                 color:#1f2937;
+                text-align:center;       /* 가운데 정렬 */
+                display:flex;
+                justify-content:center;
             ">
                 {app_title}
             </div>
@@ -298,7 +297,7 @@ def main():
         new_week_str = f"{new_start:%Y.%m.%d}~{new_end:%Y.%m.%d}"
         st.caption(f"새 기간 미리보기: **{new_week_str}**")
 
-        if st.button("새 기간 행 추가", use_container_width=True):
+        if st.button("새 기간 추가('기간선택'에서 없는 경우)", use_container_width=True):
             headers = ws.row_values(1)
             new_row = ["" for _ in headers]
             if WEEK_COL in headers:
