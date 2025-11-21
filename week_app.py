@@ -122,6 +122,8 @@ def save_cell(sheet_row: int, col_name: str, key: str):
         return
     value = st.session_state.get(key, "")
     ws.update_cell(sheet_row, col_idx, value)
+    # ✅ 여기 추가: 캐시를 지워서 다음 실행 때 항상 최신 데이터 사용
+    load_data.clear()
     # 과도한 알림을 막기 위해 토스트가 지원되면 가볍게만 표시
     try:
         st.toast("자동 저장 완료", icon="💾")
@@ -219,22 +221,23 @@ def main():
 
     # ---------------------- Sidebar ----------------------
     with st.sidebar:
-        # Title (조금 더 예쁘게)
         st.markdown(
             f"""
             <div style="
-                margin-top:0;
+                margin-top:-0.4rem;      /* 위로 조금 더 당기기 */
                 margin-bottom:0.3rem;
                 font-size:1.55rem;
                 font-weight:800;
                 letter-spacing:0.04em;
                 color:#1f2937;
+                text-align:center;       /* 가운데 정렬 */
             ">
                 {app_title}
             </div>
             """,
             unsafe_allow_html=True,
         )
+
         st.markdown(
             "<hr style='margin:0.25rem 0; border:0; border-top:1px solid #e0e0e0;' />",
             unsafe_allow_html=True,
@@ -340,10 +343,13 @@ def main():
                     use_container_width=True,
                     type=button_type,
                 ):
+                    # 클릭된 부서를 상태에 반영하고 즉시 rerun해서
+                    # 버튼 색과 메인 내용이 바로 일치하게 만든다.
                     st.session_state["selected_dept"] = dept
-                    current_dept = dept
+                    st.rerun()
 
-        dept_filter = current_dept
+        # 현재 선택된 부서 필터
+        dept_filter = st.session_state.get("selected_dept", "전체 부서")
 
         st.markdown(
             "<hr style='margin:0.35rem 0; border:0; border-top:1px solid #e0e0e0;' />",
