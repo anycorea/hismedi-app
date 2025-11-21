@@ -271,7 +271,7 @@ def main():
             unsafe_allow_html=True,
         )
         unit_choice = st.radio(
-            "",
+            "새 기간 길이 선택",   # ▶ 숨겨진 라벨 (경고 제거용)
             ["직전 기간과 동일", "1주", "2주"],
             index=0,
             horizontal=True,
@@ -443,7 +443,7 @@ def main():
                     st.markdown(f"**{dept}**")
                     ta_key = f"ta_{dept}"
                     edited = st.text_area(
-                        label="",
+                        label=f"{dept} 업무 내용",   # ▶ 숨겨진 라벨
                         value=current_text,
                         height=320,
                         key=ta_key,
@@ -468,7 +468,7 @@ def main():
                 st.markdown(f"**{selected_week} · {dept}**")
                 ta_key_cur = f"ta_{dept}_{selected_week}"
                 edited_cur = st.text_area(
-                    label="",
+                    label=f"{selected_week} · {dept} 업무 내용",  # ▶ 숨겨진 라벨
                     value=cur_text,
                     height=450,
                     key=ta_key_cur,
@@ -477,7 +477,6 @@ def main():
                     args=(int(row["_sheet_row"]), dept, ta_key_cur),
                 )
                 edited_single[selected_week] = edited_cur
-
 
         # 직전 기간이 존재하면 오른쪽에 배치
         if prev_row is not None:
@@ -491,7 +490,7 @@ def main():
                     st.markdown(f"**{prev_week} · {dept}**")
                     ta_key_prev = f"ta_{dept}_{prev_week}"
                     edited_prev = st.text_area(
-                        label="",
+                        label=f"{prev_week} · {dept} 업무 내용",  # ▶ 숨겨진 라벨
                         value=prev_text,
                         height=450,
                         key=ta_key_prev,
