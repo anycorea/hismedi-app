@@ -251,15 +251,34 @@ def main():
 
         # 기간 관리
         week_options = df[WEEK_COL].astype(str).tolist()
+
+        # 🔹 (1번 수정) 세션에 저장된 기간 선택 값이 현재 옵션 목록에 없으면 보정
+        prev_selected = st.session_state.get("week_select")
+        if week_options:  # 옵션이 하나 이상 있을 때만
+            if prev_selected not in week_options:
+                st.session_state["week_select"] = week_options[0]
+
         selected_week = st.selectbox(
             "기간 선택",
             options=week_options,
-            index=0,
-            key="week_select",
+            key="week_select",  # index는 안 써도 됨 (위에서 기본값 세팅)
         )
 
-        last_week_str = df[WEEK_COL].astype(str).iloc[0]
-        last_start, last_end = parse_week_range(last_week_str)
+        # 🔹 (2번 수정) 파싱 가능한 기간만 모아서 '직전 기간' 계산
+        valid_weeks = []
+        for s in week_options:
+            start, end = parse_week_range(s)
+            if start and end:
+                valid_weeks.append((start, end, s))
+
+        if valid_weeks:
+            # 시작일 기준으로 가장 최근(가장 뒤) 기간을 사용
+            valid_weeks.sort(key=lambda x: x[0], reverse=True)
+            last_start, last_end, last_week_str = valid_weeks[0]
+        else:
+            last_start = last_end = None
+            last_week_str = None
+
         if last_start and last_end:
             span_days = (last_end - last_start).days + 1
             default_weeks = 1 if span_days <= 7 else 2
