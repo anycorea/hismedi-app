@@ -217,15 +217,12 @@ def main():
             f"""
             <div style="
                 width:100%;
-                margin-top:-0.4rem;      /* 위로 조금 더 당기기 */
+                margin-top:-0.8rem;
                 margin-bottom:0.3rem;
-                font-size:1.55rem;
-                font-weight:800;
-                letter-spacing:0.04em;
-                color:#1f2937;
-                text-align:center;       /* 가운데 정렬 */
-                display:flex;
-                justify-content:center;
+                font-size:2.0rem;
+                font-weight:900;
+                letter-spacing:0.05em;
+                color:#111827;
             ">
                 {app_title}
             </div>
