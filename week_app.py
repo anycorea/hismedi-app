@@ -90,7 +90,6 @@ def load_data():
 def get_dept_columns(df: pd.DataFrame):
     return [c for c in df.columns if c not in [WEEK_COL] and not c.startswith("_")]
 
-
 def parse_week_range(week_str: str):
     try:
         s, e = week_str.split("~")
@@ -99,7 +98,6 @@ def parse_week_range(week_str: str):
         return start, end
     except Exception:
         return None, None
-
 
 def get_col_index(ws, col_name: str):
     headers = ws.row_values(1)
@@ -161,6 +159,7 @@ def main():
             padding-top: 0.18rem;
             padding-bottom: 0.18rem;
         }
+        /* 부서 선택 영역(컬럼 안 버튼)은 글자 더 작게, 박스는 약간 높게, 버튼 간 간격 더 좁게 */
         [data-testid="stSidebar"] [data-testid="column"] button {
             font-size: 0.7rem;
             padding-top: 0.30rem;
@@ -181,8 +180,9 @@ def main():
         textarea {
             line-height: 1.3;
         }
+        /* 기간 선택 드롭다운 텍스트를 더 굵게, 배경색 강하게 */
         [data-testid="stSidebar"] div[data-baseweb="select"] > div {
-            background-color: #bfdbfe;
+            background-color: #bfdbfe;  /* 더 진한 파란톤 */
             border-radius: 4px;
             border: 1px solid #1d4ed8;
         }
@@ -190,22 +190,11 @@ def main():
             font-size: 0.9rem;
             font-weight: 800;
         }
-
-        /* ✅ 사이드바 타이틀 전용 커스텀 스타일 */
-        .sidebar-title-custom {
-            text-align: center;
-            font-size: 1.4rem;
-            font-weight: 800;
-            letter-spacing: 0.04em;
-            color: #111827;
-            margin-top: -0.2rem;   /* 위쪽으로 살짝 붙이기 */
-            margin-bottom: 0.5rem;
-        }
         </style>
         """,
         unsafe_allow_html=True,
     )
-    
+
     df = load_data()
     if df.empty:
         st.warning("구글시트에 데이터가 없습니다.")
