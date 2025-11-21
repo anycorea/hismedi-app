@@ -213,16 +213,20 @@ def main():
 
     # ---------------------- Sidebar ----------------------
     with st.sidebar:
+        # 제목: 크게 + 굵게 + 가운데 정렬
         st.markdown(
             f"""
             <div style="
-                margin-top:-0.4rem;      /* 위로 조금 더 당기기 */
-                margin-bottom:0.3rem;
-                font-size:1.55rem;
-                font-weight:800;
+                width:100%;
+                display:flex;
+                justify-content:center;
+                align-items:flex-start;
+                margin-top:0rem;
+                margin-bottom:0.6rem;
+                font-size:1.8rem;
+                font-weight:900;
                 letter-spacing:0.04em;
                 color:#1f2937;
-                text-align:center;       /* 가운데 정렬 */
             ">
                 {app_title}
             </div>
@@ -234,7 +238,6 @@ def main():
             "<hr style='margin:0.25rem 0; border:0; border-top:1px solid #e0e0e0;' />",
             unsafe_allow_html=True,
         )
-
         # 인쇄 / 동기화 - 한 줄에 두 버튼
         btn_cols = st.columns(2)
         with btn_cols[0]:
