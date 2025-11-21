@@ -10,7 +10,6 @@ import streamlit.components.v1 as components
 
 WEEK_COL = "WEEK"
 
-
 @st.cache_resource(show_spinner=False)
 def get_worksheet():
     scopes = [
@@ -25,7 +24,6 @@ def get_worksheet():
     sh = client.open_by_key(st.secrets["gsheet"]["spreadsheet_id"])
     ws = sh.worksheet(st.secrets["gsheet"]["worksheet_name"])
     return ws
-
 
 @st.cache_data(show_spinner=False)
 def load_data():
@@ -89,7 +87,6 @@ def load_data():
 
     return df
 
-
 def get_dept_columns(df: pd.DataFrame):
     return [c for c in df.columns if c not in [WEEK_COL] and not c.startswith("_")]
 
@@ -110,8 +107,6 @@ def get_col_index(ws, col_name: str):
         return headers.index(col_name) + 1
     except ValueError:
         return None
-
-
 
 def save_cell(sheet_row: int, col_name: str, key: str):
     """텍스트 입력이 끝난 시점에 해당 셀을 바로 구글 시트에 반영하는 자동 저장 콜백."""
@@ -136,7 +131,6 @@ def escape_html(text: str) -> str:
     text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     text = text.replace("\n", "<br>")
     return text
-
 
 def main():
     app_title = "HISMEDI † Weekly report"
@@ -167,7 +161,6 @@ def main():
             padding-top: 0.18rem;
             padding-bottom: 0.18rem;
         }
-        /* 부서 선택 영역(컬럼 안 버튼)은 글자 더 작게, 박스는 약간 높게, 버튼 간 간격 더 좁게 */
         [data-testid="stSidebar"] [data-testid="column"] button {
             font-size: 0.7rem;
             padding-top: 0.30rem;
@@ -188,9 +181,8 @@ def main():
         textarea {
             line-height: 1.3;
         }
-        /* 기간 선택 드롭다운 텍스트를 더 굵게, 배경색 강하게 */
         [data-testid="stSidebar"] div[data-baseweb="select"] > div {
-            background-color: #bfdbfe;  /* 더 진한 파란톤 */
+            background-color: #bfdbfe;
             border-radius: 4px;
             border: 1px solid #1d4ed8;
         }
@@ -198,11 +190,22 @@ def main():
             font-size: 0.9rem;
             font-weight: 800;
         }
+
+        /* ✅ 사이드바 타이틀 전용 커스텀 스타일 */
+        .sidebar-title-custom {
+            text-align: center;
+            font-size: 1.4rem;
+            font-weight: 800;
+            letter-spacing: 0.04em;
+            color: #111827;
+            margin-top: -0.2rem;   /* 위쪽으로 살짝 붙이기 */
+            margin-bottom: 0.5rem;
+        }
         </style>
         """,
         unsafe_allow_html=True,
     )
-
+    
     df = load_data()
     if df.empty:
         st.warning("구글시트에 데이터가 없습니다.")
