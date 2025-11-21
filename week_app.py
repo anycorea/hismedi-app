@@ -11,11 +11,6 @@ import streamlit.components.v1 as components
 WEEK_COL = "WEEK"
 
 
-def mark_dirty():
-    """업무내용 편집 시 저장 안내를 띄우기 위한 플래그 설정"""
-    st.session_state["has_unsaved_changes"] = True
-
-
 @st.cache_resource(show_spinner=False)
 def get_worksheet():
     scopes = [
@@ -117,6 +112,21 @@ def get_col_index(ws, col_name: str):
         return None
 
 
+
+def save_cell(sheet_row: int, col_name: str, key: str):
+    """텍스트 입력이 끝난 시점에 해당 셀을 바로 구글 시트에 반영하는 자동 저장 콜백."""
+    ws = get_worksheet()
+    col_idx = get_col_index(ws, col_name)
+    if col_idx is None:
+        st.warning(f"'{col_name}' 열을 찾을 수 없어 자동 저장에 실패했습니다.")
+        return
+    value = st.session_state.get(key, "")
+    ws.update_cell(sheet_row, col_idx, value)
+    # 과도한 알림을 막기 위해 토스트가 지원되면 가볍게만 표시
+    try:
+        st.toast("자동 저장 완료", icon="💾")
+    except Exception:
+        st.success("자동 저장 완료")
 def escape_html(text: str) -> str:
     if text is None:
         return ""
@@ -134,9 +144,6 @@ def main():
         pass
 
     st.set_page_config(page_title=app_title, layout="wide")
-
-    if "has_unsaved_changes" not in st.session_state:
-        st.session_state["has_unsaved_changes"] = False
 
     # Global layout & spacing styles
     st.markdown(
@@ -437,13 +444,15 @@ def main():
             with col:
                 with st.container(border=True):
                     st.markdown(f"**{dept}**")
+                    ta_key = f"ta_{dept}"
                     edited = st.text_area(
                         label="",
                         value=current_text,
                         height=320,
-                        key=f"ta_{dept}",
-                        on_change=mark_dirty,
+                        key=ta_key,
                         label_visibility="collapsed",
+                        on_change=save_cell,
+                        args=(int(row["_sheet_row"]), dept, ta_key),
                     )
                     edited_values[dept] = edited
     else:
@@ -460,15 +469,18 @@ def main():
         with cols[0]:
             with st.container(border=True):
                 st.markdown(f"**{selected_week} · {dept}**")
+                ta_key_cur = f"ta_{dept}_{selected_week}"
                 edited_cur = st.text_area(
                     label="",
                     value=cur_text,
                     height=450,
-                    key=f"ta_{dept}_{selected_week}",
-                    on_change=mark_dirty,
+                    key=ta_key_cur,
                     label_visibility="collapsed",
+                    on_change=save_cell,
+                    args=(int(row["_sheet_row"]), dept, ta_key_cur),
                 )
                 edited_single[selected_week] = edited_cur
+
 
         # 직전 기간이 존재하면 오른쪽에 배치
         if prev_row is not None:
@@ -480,42 +492,17 @@ def main():
             with cols[1]:
                 with st.container(border=True):
                     st.markdown(f"**{prev_week} · {dept}**")
+                    ta_key_prev = f"ta_{dept}_{prev_week}"
                     edited_prev = st.text_area(
                         label="",
                         value=prev_text,
                         height=450,
-                        key=f"ta_{dept}_{prev_week}",
-                        on_change=mark_dirty,
+                        key=ta_key_prev,
                         label_visibility="collapsed",
+                        on_change=save_cell,
+                        args=(int(prev_row["_sheet_row"]), dept, ta_key_prev),
                     )
                     edited_single[prev_week] = edited_prev
-
-    # 저장 안내 배너 (업무내용 편집 후 컬럼을 벗어나면 노출)
-    if st.session_state.get("has_unsaved_changes"):
-        st.markdown(
-            """
-            <div style="
-                margin-top:0.6rem;
-                margin-bottom:0.15rem;
-                padding:0.55rem 0.9rem;
-                border-radius:999px;
-                background:linear-gradient(90deg,#f97316,#fb7185);
-                color:#ffffff;
-                display:flex;
-                align-items:center;
-                gap:0.6rem;
-                font-size:0.85rem;
-                box-shadow:0 8px 18px rgba(0,0,0,0.08);
-            ">
-                <div style="font-size:1.1rem;">⚠️</div>
-                <div>
-                    <div style="font-weight:700; margin-bottom:0.1rem;">업무 내용이 아직 저장되지 않았습니다.</div>
-                    <div>아래 <b>변경 내용 저장</b> 버튼을 눌러 구글 시트에 기록해 주세요.</div>
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
 
     # 저장 버튼
     if st.button("변경 내용 저장", type="primary"):
@@ -542,7 +529,6 @@ def main():
         else:
             ws.update_cells(cells)
             load_data.clear()
-            st.session_state["has_unsaved_changes"] = False
             st.success("구글 시트에 저장되었습니다.")
             st.rerun()
 
@@ -648,7 +634,6 @@ def main():
         """
         components.html(html, height=0, width=0)
         st.session_state["print_requested"] = False
-
 
 if __name__ == "__main__":
     main()
