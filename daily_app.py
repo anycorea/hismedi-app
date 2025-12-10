@@ -50,7 +50,7 @@ def load_daily_df():
     __row 컬럼은 실제 시트의 행 번호.
     """
     ws = get_worksheet()
-    records = ws.get_all_records(numericise_dates=True)
+    records = ws.get_all_records()
 
     if not records:
         df = pd.DataFrame(columns=["DATE", "내용", "비고"])
