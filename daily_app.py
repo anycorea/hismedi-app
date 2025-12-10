@@ -44,42 +44,38 @@ def get_worksheet():
 
 @st.cache_data(ttl=60)
 def load_daily_df():
-    """
-    Daily 시트 전체를 DataFrame으로 로드.
-    DATE 컬럼은 date 객체,
-    __row 컬럼은 실제 시트의 행 번호.
-    """
     ws = get_worksheet()
     records = ws.get_all_records()
 
+    # 데이터가 아예 없으면 빈 DF 반환
     if not records:
-        df = pd.DataFrame(columns=["DATE", "내용", "비고"])
-        return df
+        return pd.DataFrame(columns=["DATE", "내용", "비고", "__row"])
 
     df = pd.DataFrame(records)
 
+    # DATE 컬럼 필수 체크
     if "DATE" not in df.columns:
-        st.error("Daily 시트의 헤더에 'DATE' 컬럼이 필요합니다.")
+        st.error("Daily 시트의 헤더에 'DATE' 열이 필요합니다.")
         st.stop()
 
-    # DATE 타입 정리
-    first_val = df.loc[0, "DATE"]
-    if isinstance(first_val, datetime):
-        df["DATE"] = df["DATE"].dt.date
-    else:
-        df["DATE"] = pd.to_datetime(df["DATE"]).dt.date
-
-    # 실제 시트의 행 번호 (헤더가 1행이므로 2행부터 데이터)
+    # 시트 상의 실제 행 번호 (헤더가 1행이므로 데이터는 2행부터)
     df["__row"] = df.index + 2
 
-    # 내용/비고 기본값 보정
-    if "내용" not in df.columns:
-        df["내용"] = ""
-    if "비고" not in df.columns:
-        df["비고"] = ""
+    # 1) DATE를 안전하게 변환 (이상한 값은 NaT로 처리)
+    df["DATE"] = pd.to_datetime(df["DATE"], errors="coerce").dt.date
 
-    df["내용"] = df["내용"].fillna("").astype(str)
-    df["비고"] = df["비고"].fillna("").astype(str)
+    # 2) DATE가 없는 행(잘못된 값, 공백 등)은 버린다
+    df = df[~df["DATE"].isna()].copy()
+
+    # 3) 다 버리고 나면 비어 있을 수도 있음 → 그때도 안전하게 빈 DF 반환
+    if df.empty:
+        return pd.DataFrame(columns=["DATE", "내용", "비고", "__row"])
+
+    # 4) 내용/비고 컬럼 정리
+    for col in ["내용", "비고"]:
+        if col not in df.columns:
+            df[col] = ""
+        df[col] = df[col].fillna("").astype(str)
 
     return df
 
