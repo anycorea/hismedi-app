@@ -117,7 +117,7 @@ st.sidebar.title("Daily Report")
 
 df_daily = load_daily_df()
 
-mode = st.sidebar.radio("보기 모드", ("일일 보고", "기간 요약"))
+mode = st.sidebar.radio("보기 모드", ("1일 보고", "기간 요약"))
 
 today = date.today()
 
@@ -166,9 +166,9 @@ if st.sidebar.button("오늘로 이동"):
 
 st.title(APP_TITLE)
 
-if mode == "일일 보고":
+if mode == "1일 보고":
     # 헤더
-    st.subheader(f"{selected_date.strftime('%Y-%m-%d')} 일일 보고")
+    st.subheader(f"{selected_date.strftime('%Y-%m-%d')} 1일 보고")
 
     # 현재 선택 날짜 데이터
     if not df_daily.empty:
@@ -254,7 +254,7 @@ else:
 
             st.dataframe(show_df, use_container_width=True)
             st.caption(
-                "※ 각 날짜의 전체 내용은 '일일 보고' 모드에서 해당 날짜를 선택하여 확인하세요."
+                "※ 각 날짜의 전체 내용은 '1일 보고' 모드에서 해당 날짜를 선택하여 확인하세요."
             )
 
     st.markdown("---")
