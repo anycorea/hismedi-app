@@ -158,7 +158,7 @@ else:
 
 st.sidebar.markdown("---")
 if st.sidebar.button("오늘로 이동"):
-    st.experimental_rerun()
+    st.rerun()
 
 # -------------------------------
 # 메인 영역
@@ -210,13 +210,13 @@ if mode == "1일 보고":
         if st.button("저장", type="primary"):
             save_daily_entry(selected_date, content, note, df_daily)
             st.success("저장되었습니다.")
-            st.experimental_rerun()
+            st.rerun()
 
     with btn_cols[1]:
         if has_existing and st.button("내용 비우기"):
             save_daily_entry(selected_date, "", "", df_daily)
             st.info("이 날짜의 내용/비고를 비웠습니다.")
-            st.experimental_rerun()
+            st.rerun()
 
     st.markdown("---")
     st.caption("※ 엔터로 줄바꿈한 내용은 그대로 구글시트 셀 안에 저장됩니다.")
