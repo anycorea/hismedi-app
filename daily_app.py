@@ -1,192 +1,319 @@
 import streamlit as st
 import pandas as pd
-from datetime import date, datetime, timedelta
-from google.oauth2.service_account import Credentials
+import re
 import gspread
+from google.oauth2.service_account import Credentials
+from datetime import date, datetime, timedelta
 
-# ---------------------------
-# 구글시트 인증
-# ---------------------------
-def get_worksheet():
-    # 구글 시트 접근 범위
-    scope = [
-        "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive",
-    ]
+# ------------------------------------------------------
+# App / Secrets
+# ------------------------------------------------------
 
-    # Streamlit secrets 에 저장된 서비스 계정 JSON 로드
-    creds = Credentials.from_service_account_info(
+APP_TITLE = st.secrets["app"].get("TITLE", "HISMEDI † Daily report")
+TZ = st.secrets["app"].get("TZ", "Asia/Seoul")
+
+SPREADSHEET_ID = st.secrets["gsheet"]["spreadsheet_id"]
+WORKSHEET_NAME = st.secrets["gsheet"]["worksheet_name"]
+
+SCOPE = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive",
+]
+
+
+# ------------------------------------------------------
+# Google Sheets Connection
+# ------------------------------------------------------
+
+@st.cache_resource
+def get_gspread_client():
+    credentials = Credentials.from_service_account_info(
         st.secrets["gcp_service_account"],
-        scopes=scope
+        scopes=SCOPE,
     )
+    return gspread.authorize(credentials)
 
-    client = gspread.authorize(creds)
 
-    spreadsheet_id = st.secrets["gsheet"]["spreadsheet_id"]
-    worksheet_name = st.secrets["gsheet"]["worksheet_name"]
+def get_worksheet():
+    client = get_gspread_client()
+    sh = client.open_by_key(SPREADSHEET_ID)
+    return sh.worksheet(WORKSHEET_NAME)
 
-    sh = client.open_by_key(spreadsheet_id)
-    return sh.worksheet(worksheet_name)
 
-@st.cache_data
+# ------------------------------------------------------
+# 날짜 유틸 함수
+# ------------------------------------------------------
+
+def parse_date_cell(v):
+    """Daily 시트의 DATE 셀을 date 객체로 변환."""
+    if isinstance(v, date) and not isinstance(v, datetime):
+        return v
+    if isinstance(v, datetime):
+        return v.date()
+
+    if isinstance(v, str):
+        s = v.strip()
+        if not s:
+            return None
+
+        # 1) ISO 형식 시도: 2025-11-24
+        try:
+            return date.fromisoformat(s)
+        except Exception:
+            pass
+
+        # 2) 한글 형식: 2025년 11월 24일 (월) / 2025년11월24일 등
+        m = re.search(r"(\d{4})\s*년\s*(\d{1,2})\s*월\s*(\d{1,2})\s*일", s)
+        if m:
+            y, mth, d = map(int, m.groups())
+            try:
+                return date(y, mth, d)
+            except Exception:
+                return None
+
+    return None
+
+
+def format_date_for_display(d):
+    """화면 상단 제목용: YYYY-MM-DD(요일)"""
+    if isinstance(d, datetime):
+        d = d.date()
+    if not isinstance(d, date):
+        return str(d)
+    weekday_map = ["월", "화", "수", "목", "금", "토", "일"]
+    w = weekday_map[d.weekday()]
+    return d.strftime("%Y-%m-%d") + f"({w})"
+
+
+def format_date_simple(d):
+    """YYYY-MM-DD 문자열 (테이블 내부용)"""
+    if isinstance(d, datetime):
+        d = d.date()
+    if isinstance(d, date):
+        return d.strftime("%Y-%m-%d")
+    return str(d)
+
+
+def format_date_with_weekday(d):
+    """테이블용 DATE 컬럼: YYYY-MM-DD (요일)"""
+    if isinstance(d, datetime):
+        d = d.date()
+    if not isinstance(d, date):
+        return str(d)
+    weekday_map = ["월", "화", "수", "목", "금", "토", "일"]
+    w = weekday_map[d.weekday()]
+    return d.strftime("%Y-%m-%d") + f" ({w})"
+
+
+# ------------------------------------------------------
+# Load Daily Report DF
+# ------------------------------------------------------
+
+@st.cache_data(ttl=60)
 def load_daily_df():
     ws = get_worksheet()
     records = ws.get_all_records()
+
+    # 데이터가 아예 없으면 빈 DF 반환
+    if not records:
+        return pd.DataFrame(columns=["DATE", "내용", "비고", "__row"])
+
     df = pd.DataFrame(records)
 
-    if df.empty:
-        return df
+    # DATE 컬럼 필수
+    if "DATE" not in df.columns:
+        st.error("Daily 시트의 헤더에 'DATE' 열이 필요합니다.")
+        st.stop()
 
-    df["DATE"] = pd.to_datetime(df["DATE"], errors="coerce").dt.date
-    df["내용"] = df["내용"].fillna("")
-    df["비고"] = df["비고"].fillna("")
+    # 시트 상 실제 행 번호 (헤더=1행 → 데이터는 2행부터)
+    df["__row"] = df.index + 2
+
+    # DATE 파싱 (모두 date 객체로 통일)
+    parsed = df["DATE"].apply(parse_date_cell)
+    df = df[parsed.notna()].copy()
+    if df.empty:
+        return pd.DataFrame(columns=["DATE", "내용", "비고", "__row"])
+
+    df["DATE"] = parsed
+
+    # 내용/비고 정리
+    for col in ["내용", "비고"]:
+        if col not in df.columns:
+            df[col] = ""
+        df[col] = df[col].fillna("").astype(str)
 
     return df
 
-# ---------------------------
-# UI 기본 환경
-# ---------------------------
-st.set_page_config(layout="wide")
 
-st.title("HISMEDI † Daily report")
+# ------------------------------------------------------
+# Save / Update Entry
+# ------------------------------------------------------
+
+def save_daily_entry(selected_date: date, content: str, note: str, df: pd.DataFrame):
+    ws = get_worksheet()
+
+    if not df.empty:
+        mask = df["DATE"] == selected_date
+    else:
+        mask = pd.Series([], dtype=bool)
+
+    if not df.empty and mask.any():
+        # 기존 행 업데이트
+        row_number = int(df.loc[mask, "__row"].iloc[0])
+        ws.update_cell(row_number, 2, content)
+        ws.update_cell(row_number, 3, note)
+    else:
+        # 새 행 추가
+        ws.append_row(
+            [selected_date.isoformat(), content, note],
+            value_input_option="USER_ENTERED",
+        )
+
+    # 캐시 무효화
+    load_daily_df.clear()
+
+
+# ------------------------------------------------------
+# UI 기본 환경
+# ------------------------------------------------------
+
+st.set_page_config(page_title=APP_TITLE, layout="wide")
+st.title(APP_TITLE)
 
 df_daily = load_daily_df()
-today = date.today()
 
-# ---------------------------
-# 사이드바
-# ---------------------------
 st.sidebar.title("Daily Report")
 mode = st.sidebar.radio("보기 모드", ("1일 보고", "기간 요약"))
 
+today = date.today()
+
+# 1일 보고 기본 날짜: 오늘
 default_single = today
-weekday_idx = today.weekday()
+
+# 기간 기본값: 이번 주 월요일 ~ 일요일
+weekday_idx = today.weekday()  # 월=0
 week_start = today - timedelta(days=weekday_idx)
 week_end = week_start + timedelta(days=6)
 default_range = (week_start, week_end)
 
-# ---------------------------
-# 날짜 포맷 함수
-# ---------------------------
-def format_date_for_display(d):
-    weekdays = ["월", "화", "수", "목", "금", "토", "일"]
-    if isinstance(d, datetime):
-        d = d.date()
-    return f"{d.strftime('%Y-%m-%d')}({weekdays[d.weekday()]})"
 
-def format_date_simple(d):
-    if isinstance(d, datetime):
-        d = d.date()
-    return d.strftime("%Y-%m-%d")
+# --------------------------- 1일 보고 모드 ---------------------------
 
-def format_date_with_weekday(d):
-    weekdays = ["월", "화", "수", "목", "금", "토", "일"]
-    if isinstance(d, datetime):
-        d = d.date()
-    return f"{d.strftime('%Y-%m-%d')} ({weekdays[d.weekday()]})"
-
-# ---------------------------
-# 1일 보고
-# ---------------------------
 if mode == "1일 보고":
     selected_date = st.sidebar.date_input(
         "날짜 선택",
         value=default_single,
-        format="YYYY-MM-DD"
+        format="YYYY-MM-DD",
     )
+    if isinstance(selected_date, (list, tuple)):
+        selected_date = selected_date[0]
 
-    st.subheader(f"{format_date_for_display(selected_date)} 1일 보고")
+    # 헤더: YYYY-MM-DD(요일)
+    st.subheader(format_date_for_display(selected_date))
 
-    existing_row = None
-    if not df_daily.empty:
-        match = df_daily[df_daily["DATE"] == selected_date]
-        if not match.empty:
-            existing_row = match.iloc[0]
+    # 현재 날짜 데이터 로딩
+    if not df_daily.empty and (df_daily["DATE"] == selected_date).any():
+        row = df_daily[df_daily["DATE"] == selected_date].iloc[0]
+        default_content = row["내용"]
+        default_note = row["비고"]
+        has_existing = True
+    else:
+        default_content = ""
+        default_note = ""
+        has_existing = False
 
-    content_input = st.text_area(
-        "내용",
-        value=existing_row["내용"] if existing_row is not None else "",
-        height=300,
-        placeholder="이 날의 전체 업무를 입력하세요. (줄바꿈 가능)"
-    )
-    note_input = st.text_area(
-        "비고 (선택)",
-        value=existing_row["비고"] if existing_row is not None else "",
-        height=150,
-        placeholder="추가 메모 등이 있을 때만 입력하세요."
-    )
+    col_left, col_right = st.columns([3, 1])
 
-    if st.button("저장"):
-        ws = get_worksheet()
-        records = ws.get_all_records()
-        df = pd.DataFrame(records)
+    with col_left:
+        content = st.text_area(
+            "내용",
+            height=350,
+            value=default_content,
+            placeholder="이 날의 업무를 자유롭게 작성하세요.\n(엔터로 줄바꿈)",
+        )
 
-        if df.empty:
-            new_row = {
-                "DATE": selected_date.strftime("%Y-%m-%d"),
-                "내용": content_input,
-                "비고": note_input,
-            }
-            ws.append_row(list(new_row.values()))
-        else:
-            df_dates = pd.to_datetime(df["DATE"], errors="coerce").dt.date
-            if selected_date in set(df_dates):
-                row_idx = df_dates[df_dates == selected_date].index[0] + 2
-                ws.update_cell(row_idx, 2, content_input)
-                ws.update_cell(row_idx, 3, note_input)
-            else:
-                ws.append_row([
-                    selected_date.strftime("%Y-%m-%d"),
-                    content_input,
-                    note_input
-                ])
+    with col_right:
+        note = st.text_area(
+            "비고 (선택)",
+            height=350,
+            value=default_note,
+            placeholder="특이사항이 있을 때만 작성하세요.",
+        )
 
-        st.success("저장되었습니다!")
-        st.rerun()
+    # 버튼 영역
+    save_col, clear_col, _ = st.columns([1, 1, 5])
 
-    st.caption("※ 엔터로 줄바꿈한 내용은 그대로 구글시트에 저장됩니다.")
+    with save_col:
+        if st.button("저장", type="primary"):
+            save_daily_entry(selected_date, content, note, df_daily)
+            st.success("저장되었습니다.")
+            st.rerun()
 
-# ---------------------------
-# 기간 요약 (표 방식)
-# ---------------------------
+    with clear_col:
+        if has_existing and st.button("내용 비우기"):
+            save_daily_entry(selected_date, "", "", df_daily)
+            st.info("이 날짜의 내용/비고를 모두 비웠습니다.")
+            st.rerun()
+
+    st.caption("※ 줄바꿈은 Google Sheet 셀 안에 그대로 저장됩니다.")
+
+
+# --------------------------- 기간 요약 모드 ---------------------------
+
 else:
     selected_range = st.sidebar.date_input(
         "기간 선택",
         value=default_range,
-        format="YYYY-MM-DD"
+        format="YYYY-MM-DD",
     )
 
+    # date_input 반환값 정규화
     if isinstance(selected_range, (list, tuple)):
         if len(selected_range) == 2:
             start_date, end_date = selected_range
-        else:
+        elif len(selected_range) == 1:
             start_date = end_date = selected_range[0]
+        else:
+            start_date = end_date = today
     else:
         start_date = end_date = selected_range
 
-    st.subheader(f"{format_date_for_display(start_date)} ~ {format_date_for_display(end_date)}")
+    # 헤더: YYYY-MM-DD(요일) ~ YYYY-MM-DD(요일)
+    start_label = format_date_for_display(start_date)
+    end_label = format_date_for_display(end_date)
+    st.subheader(f"{start_label} ~ {end_label}")
 
     if df_daily.empty:
-        st.info("아직 데이터가 없습니다.")
+        st.info("아직 작성된 보고가 없습니다.")
     else:
+        # df_daily["DATE"] 는 date 타입, start/end_date 도 date 타입 → 비교 OK
         mask = (df_daily["DATE"] >= start_date) & (df_daily["DATE"] <= end_date)
         period_df = df_daily.loc[mask].copy().sort_values("DATE")
 
         if period_df.empty:
-            st.info("해당 기간에 보고가 없습니다.")
+            st.info("해당 기간의 보고가 없습니다.")
         else:
+            # DATE는 "YYYY-MM-DD (요일)" 로 표시
             period_df["DATE"] = period_df["DATE"].apply(format_date_with_weekday)
-            period_df["내용"] = period_df["내용"].str.replace("\n", "<br>")
-            period_df["비고"] = period_df["비고"].str.replace("\n", "<br>")
+
+            # 내용/비고 줄바꿈을 <br>로 치환 (HTML 줄바꿈용)
+            period_df["내용"] = (
+                period_df["내용"].fillna("").astype(str).str.replace("\n", "<br>")
+            )
+            period_df["비고"] = (
+                period_df["비고"].fillna("").astype(str).str.replace("\n", "<br>")
+            )
 
             show_df = period_df[["DATE", "내용", "비고"]]
 
+            # pandas HTML 테이블 생성
             html_table = show_df.to_html(
-                index=False,
-                escape=False,
-                border=0
+                index=False,   # 인덱스 숨김
+                escape=False,  # <br> 이스케이프하지 않음
+                border=0,
             )
 
+            # 스타일 + 테이블 렌더링
             styled_html = f"""
             <style>
             table {{
@@ -213,4 +340,4 @@ else:
 
             st.markdown(styled_html, unsafe_allow_html=True)
 
-    st.caption("※ 인쇄는 Ctrl+P 를 사용하세요.")
+    st.caption("※ 인쇄는 브라우저의 Ctrl+P 기능을 사용하세요.")
