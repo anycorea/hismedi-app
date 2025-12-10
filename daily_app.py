@@ -261,92 +261,71 @@ if mode == "1일 보고":
 
 # --------------------------- 기간 요약 모드 ---------------------------
 else:
-    selected_range = st.sidebar.date_input(
-        "기간 선택",
-        value=default_range,
-        format="YYYY-MM-DD",
+    weekday_map = ["월", "화", "수", "목", "금", "토", "일"]
+    start_w = weekday_map[start_date.weekday()]
+    end_w = weekday_map[end_date.weekday()]
+
+    # 상단 제목 : 2025-11-03(월) ~ 2025-11-30(일)
+    st.subheader(
+        f"{start_date.strftime('%Y-%m-%d')}({start_w}) ~ "
+        f"{end_date.strftime('%Y-%m-%d')}({end_w})"
     )
-
-    # date_input 반환값 정규화
-    if isinstance(selected_range, (list, tuple)):
-        if len(selected_range) == 2:
-            start_date, end_date = selected_range
-        elif len(selected_range) == 1:
-            start_date = end_date = selected_range[0]
-        else:
-            start_date = end_date = today
-    else:
-        start_date = end_date = selected_range
-
-    # 헤더: YYYY-MM-DD(요일) ~ YYYY-MM-DD(요일)
-    start_label = format_date_for_display(start_date)
-    end_label = format_date_for_display(end_date)
-    st.subheader(f"{start_label} ~ {end_label}")
 
     if df_daily.empty:
         st.info("아직 작성된 보고가 없습니다.")
     else:
-        # df_daily["DATE"]는 date 타입, start/end 도 date 타입
+        # 선택한 기간 필터링
         mask = (df_daily["DATE"] >= start_date) & (df_daily["DATE"] <= end_date)
-        period_df = df_daily.loc[mask].copy().sort_values("DATE")
+        period_df = df_daily.loc[mask, ["DATE", "내용", "비고"]].copy().sort_values("DATE")
 
         if period_df.empty:
             st.info("해당 기간의 보고가 없습니다.")
         else:
-            # 1) DATE: YYYY-MM-DD (요일) 형태로
+            # 날짜를 'YYYY-MM-DD (요일)' 형식으로 표시
+            def format_date_with_weekday(d: date) -> str:
+                w = weekday_map[d.weekday()]
+                return f"{d.strftime('%Y-%m-%d')} ({w})"
+
             period_df["DATE"] = period_df["DATE"].apply(format_date_with_weekday)
 
-            # 2) 내용/비고 줄바꿈을 <br>로 치환
-            period_df["내용"] = (
-                period_df["내용"]
-                .fillna("")
-                .astype(str)
-                .str.replace("\n", "<br>")
-            )
-            period_df["비고"] = (
-                period_df["비고"]
-                .fillna("")
-                .astype(str)
-                .str.replace("\n", "<br>")
-            )
-
-            # 3) 보여줄 컬럼만 선택
-            show_df = period_df[["DATE", "내용", "비고"]]
-
-            # 4) pandas로 HTML 테이블 생성
-            html_table = show_df.to_html(
-                index=False,
-                escape=False,   # <br> 그대로 쓰게
-                border=0,
-            )
-
-            # 5) CSS + HTML을 한 번에 렌더링 (앞 공백 제거해서 코드블럭 방지)
-            styled_html = textwrap.dedent(
-                f"""
-                <style>
-                table {{
-                    width: 100%;
-                    border-collapse: collapse;
-                    table-layout: fixed;
-                    font-size: 0.95rem;
-                }}
-                th {{
-                    text-align: center !important;
-                    padding: 8px;
-                    border-bottom: 2px solid #ccc;
-                    background-color: #fafafa;
-                }}
-                td {{
-                    vertical-align: top;
-                    padding: 6px 8px;
-                    border: 1px solid #eee;
-                    word-wrap: break-word;
-                }}
-                </style>
-                {html_table}
-                """
+            # 표 스타일 : 헤더 가운데 정렬, 셀은 줄바꿈 그대로 보이도록
+            styled = (
+                period_df.style
+                .set_properties(
+                    subset=["내용", "비고"],
+                    **{"white-space": "pre-wrap"}  # \n 을 줄바꿈으로 표시
+                )
+                .set_table_styles(
+                    [
+                        {
+                            "selector": "th",
+                            "props": [("text-align", "center")],
+                        },
+                        {
+                            "selector": "th.col_heading",
+                            "props": [("text-align", "center")],
+                        },
+                        {
+                            "selector": "table",
+                            "props": [
+                                ("width", "100%"),           # 가로 전체 사용
+                                ("border-collapse", "collapse"),
+                            ],
+                        },
+                        {
+                            "selector": "td",
+                            "props": [
+                                ("vertical-align", "top"),   # 여러 줄일 때 위쪽 정렬
+                                ("padding", "4px 8px"),
+                                ("border", "1px solid #eee"),
+                            ],
+                        },
+                    ]
+                )
             )
 
-            st.markdown(styled_html, unsafe_allow_html=True)
+            # 표 출력 (줄바꿈 포함, 화면 폭에 맞게)
+            st.table(styled)
 
-    st.caption("※ 인쇄는 브라우저의 Ctrl+P 기능을 사용하세요.")
+    st.markdown("---")
+    st.caption("브라우저 인쇄(Ctrl+P)를 사용해 이 화면을 바로 출력할 수 있습니다.")
