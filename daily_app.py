@@ -146,26 +146,41 @@ st.sidebar.title("Daily Report")
 
 df_daily = load_daily_df()
 
+# 보기 모드 선택
 mode = st.sidebar.radio("보기 모드", ("1일 보고", "기간 요약"))
 
 today = date.today()
 
-if df_daily.empty:
-    default_single = today
-    default_range = (today, today)   # 기간도 오늘~오늘
-else:
-    existing_dates = df_daily["DATE"]
-    default_single = today
-    default_range = (today, today)   # 항상 처음은 오늘 기준으로
+# --------------------------------------
+# 날짜 기본값 (항상 오늘)
+# --------------------------------------
+default_single = today
 
+# --------------------------------------
+# 기간 기본값: "이번 주 월요일 ~ 일요일" 자동 설정
+# --------------------------------------
+weekday_idx = today.weekday()  # 월=0
+week_start = today - timedelta(days=weekday_idx)
+week_end = week_start + timedelta(days=6)
+default_range = (week_start, week_end)
+
+# --------------------------------------
+# 1일 보고 모드
+# --------------------------------------
 if mode == "1일 보고":
     selected_date = st.sidebar.date_input(
         "날짜 선택",
         value=default_single,
         format="YYYY-MM-DD",
     )
+
+    # Streamlit은 list로 반환하는 경우가 있으므로 보호
     if isinstance(selected_date, (list, tuple)):
         selected_date = selected_date[0]
+
+# --------------------------------------
+# 기간 요약 모드
+# --------------------------------------
 else:
     selected_range = st.sidebar.date_input(
         "기간 선택",
@@ -173,7 +188,7 @@ else:
         format="YYYY-MM-DD",
     )
 
-    # date_input 반환값을 항상 (start_date, end_date)로 정규화
+    # (start, end) 형태로 정규화
     if isinstance(selected_range, (list, tuple)):
         if len(selected_range) == 2:
             start_date, end_date = selected_range
@@ -182,8 +197,8 @@ else:
         else:
             start_date = end_date = today
     else:
-        # 단일 날짜만 선택된 경우
         start_date = end_date = selected_range
+
 
 # -------------------------------
 # 메인 영역
@@ -193,7 +208,9 @@ st.title(APP_TITLE)
 
 if mode == "1일 보고":
     # 헤더
-    st.subheader(f"{selected_date.strftime('%Y-%m-%d')} 1일 보고")
+    weekday_map = ["월", "화", "수", "목", "금", "토", "일"]
+    weekday = weekday_map[selected_date.weekday()]
+    st.subheader(f"{selected_date.strftime('%Y-%m-%d')}({weekday})")
 
     # 현재 선택 날짜 데이터
     if not df_daily.empty:
@@ -248,8 +265,13 @@ if mode == "1일 보고":
 
 else:
     # 기간 요약 모드
+    weekday_map = ["월", "화", "수", "목", "금", "토", "일"]
+    start_w = weekday_map[start_date.weekday()]
+    end_w = weekday_map[end_date.weekday()]
+
     st.subheader(
-        f"{start_date.strftime('%Y-%m-%d')} ~ {end_date.strftime('%Y-%m-%d')} 기간 요약"
+        f"{start_date.strftime('%Y-%m-%d')}({start_w}) ~ "
+        f"{end_date.strftime('%Y-%m-%d')}({end_w})"
     )
 
     if df_daily.empty:
@@ -270,13 +292,12 @@ else:
             period_df["DATE"] = period_df["DATE"].apply(
                 lambda d: d.strftime("%Y-%m-%d")
             )
-            period_df["요약"] = period_df["내용"].apply(first_line)
-            period_df["비고여부"] = period_df["비고"].apply(
-                lambda x: "O" if isinstance(x, str) and x.strip() else ""
-            )
 
-            show_df = period_df[["DATE", "요약", "비고여부"]]
+            # 날짜(문자열) 정리
+            period_df["DATE"] = period_df["DATE"].apply(lambda d: d.strftime("%Y-%m-%d"))
 
+            # 전체 내용 그대로 보여주기
+            show_df = period_df[["DATE", "내용", "비고"]]
             st.dataframe(show_df, use_container_width=True)
             st.caption(
                 "※ 각 날짜의 전체 내용은 '1일 보고' 모드에서 해당 날짜를 선택하여 확인하세요."
