@@ -4,14 +4,14 @@ import re
 import gspread
 from google.oauth2.service_account import Credentials
 from datetime import date, datetime, timedelta
-import textwrap
+from typing import Any, Optional
 
 # ------------------------------------------------------
 # App / Secrets
 # ------------------------------------------------------
 
 APP_TITLE = st.secrets["app"].get("TITLE", "HISMEDI † Daily report")
-TZ = st.secrets["app"].get("TZ", "Asia/Seoul")
+TZ = st.secrets["app"].get("TZ", "Asia/Seoul")  # 현재는 미사용이지만 향후 대비해서 유지
 
 SPREADSHEET_ID = st.secrets["gsheet"]["spreadsheet_id"]
 WORKSHEET_NAME = st.secrets["gsheet"]["worksheet_name"]
@@ -21,13 +21,21 @@ SCOPE = [
     "https://www.googleapis.com/auth/drive",
 ]
 
+# 시트 구조 관련 상수
+HEADER_ROW = 1
+DATA_START_ROW = HEADER_ROW + 1
+
+# 요일 한글 표기
+WEEKDAY_MAP = ["월", "화", "수", "목", "금", "토", "일"]
+
 
 # ------------------------------------------------------
 # Google Sheets Connection
 # ------------------------------------------------------
 
+
 @st.cache_resource
-def get_gspread_client():
+def get_gspread_client() -> gspread.Client:
     credentials = Credentials.from_service_account_info(
         st.secrets["gcp_service_account"],
         scopes=SCOPE,
@@ -35,7 +43,7 @@ def get_gspread_client():
     return gspread.authorize(credentials)
 
 
-def get_worksheet():
+def get_worksheet() -> gspread.Worksheet:
     client = get_gspread_client()
     sh = client.open_by_key(SPREADSHEET_ID)
     return sh.worksheet(WORKSHEET_NAME)
@@ -45,7 +53,8 @@ def get_worksheet():
 # 날짜 유틸 함수
 # ------------------------------------------------------
 
-def parse_date_cell(v):
+
+def parse_date_cell(v: Any) -> Optional[date]:
     """Daily 시트의 DATE 셀을 date 객체로 변환."""
     if isinstance(v, date) and not isinstance(v, datetime):
         return v
@@ -75,18 +84,17 @@ def parse_date_cell(v):
     return None
 
 
-def format_date_for_display(d):
+def format_date_for_display(d: Any) -> str:
     """화면 상단 제목용: YYYY-MM-DD(요일)"""
     if isinstance(d, datetime):
         d = d.date()
     if not isinstance(d, date):
         return str(d)
-    weekday_map = ["월", "화", "수", "목", "금", "토", "일"]
-    w = weekday_map[d.weekday()]
+    w = WEEKDAY_MAP[d.weekday()]
     return d.strftime("%Y-%m-%d") + f"({w})"
 
 
-def format_date_simple(d):
+def format_date_simple(d: Any) -> str:
     """YYYY-MM-DD 문자열 (테이블 내부용)"""
     if isinstance(d, datetime):
         d = d.date()
@@ -95,14 +103,13 @@ def format_date_simple(d):
     return str(d)
 
 
-def format_date_with_weekday(d):
+def format_date_with_weekday(d: Any) -> str:
     """테이블용 DATE 컬럼: YYYY-MM-DD (요일)"""
     if isinstance(d, datetime):
         d = d.date()
     if not isinstance(d, date):
         return str(d)
-    weekday_map = ["월", "화", "수", "목", "금", "토", "일"]
-    w = weekday_map[d.weekday()]
+    w = WEEKDAY_MAP[d.weekday()]
     return d.strftime("%Y-%m-%d") + f" ({w})"
 
 
@@ -110,8 +117,9 @@ def format_date_with_weekday(d):
 # Load Daily Report DF
 # ------------------------------------------------------
 
+
 @st.cache_data(ttl=60)
-def load_daily_df():
+def load_daily_df() -> pd.DataFrame:
     ws = get_worksheet()
     records = ws.get_all_records()
 
@@ -126,16 +134,28 @@ def load_daily_df():
         st.error("Daily 시트의 헤더에 'DATE' 열이 필요합니다.")
         st.stop()
 
-    # 시트 상 실제 행 번호 (헤더=1행 → 데이터는 2행부터)
-    df["__row"] = df.index + 2
+    # 시트 상 실제 행 번호 (헤더=1행 → 데이터는 DATA_START_ROW부터)
+    df["__row"] = df.index + DATA_START_ROW
 
     # DATE 파싱 (모두 date 객체로 통일)
     parsed = df["DATE"].apply(parse_date_cell)
-    df = df[parsed.notna()].copy()
+
+    # 파싱 실패값 경고
+    invalid_mask = parsed.isna()
+    if invalid_mask.any():
+        invalid_values = df.loc[invalid_mask, "DATE"].astype(str).unique()
+        st.warning(
+            "파싱할 수 없는 DATE 값이 있어 제외되었습니다: "
+            + ", ".join(invalid_values),
+        )
+
+    # 유효한 행만 사용
+    valid_mask = ~invalid_mask
+    df = df[valid_mask].copy()
     if df.empty:
         return pd.DataFrame(columns=["DATE", "내용", "비고", "__row"])
 
-    df["DATE"] = parsed
+    df["DATE"] = parsed[valid_mask].values
 
     # 내용/비고 정리
     for col in ["내용", "비고"]:
@@ -150,7 +170,13 @@ def load_daily_df():
 # Save / Update Entry
 # ------------------------------------------------------
 
-def save_daily_entry(selected_date: date, content: str, note: str, df: pd.DataFrame):
+
+def save_daily_entry(
+    selected_date: date,
+    content: str,
+    note: str,
+    df: pd.DataFrame,
+) -> None:
     ws = get_worksheet()
 
     if not df.empty:
@@ -159,10 +185,12 @@ def save_daily_entry(selected_date: date, content: str, note: str, df: pd.DataFr
         mask = pd.Series([], dtype=bool)
 
     if not df.empty and mask.any():
-        # 기존 행 업데이트
+        # 기존 행 업데이트 (B, C 두 셀을 한 번에)
         row_number = int(df.loc[mask, "__row"].iloc[0])
-        ws.update_cell(row_number, 2, content)
-        ws.update_cell(row_number, 3, note)
+        ws.update(
+            f"B{row_number}:C{row_number}",
+            [[content, note]],
+        )
     else:
         # 새 행 추가
         ws.append_row(
@@ -181,6 +209,10 @@ def save_daily_entry(selected_date: date, content: str, note: str, df: pd.DataFr
 st.set_page_config(page_title=APP_TITLE, layout="wide")
 
 df_daily = load_daily_df()
+
+# 플래시 메시지 상태
+if "flash" not in st.session_state:
+    st.session_state["flash"] = None
 
 st.sidebar.markdown(f"# {APP_TITLE}")
 mode = st.sidebar.radio("보기 모드", ("1일 보고", "기간 요약"))
@@ -246,13 +278,16 @@ if mode == "1일 보고":
     with save_col:
         if st.button("저장", type="primary"):
             save_daily_entry(selected_date, content, note, df_daily)
-            st.success("저장되었습니다.")
+            st.session_state["flash"] = ("success", "저장되었습니다.")
             st.rerun()
 
     with clear_col:
         if has_existing and st.button("내용 비우기"):
             save_daily_entry(selected_date, "", "", df_daily)
-            st.info("이 날짜의 내용/비고를 모두 비웠습니다.")
+            st.session_state["flash"] = (
+                "info",
+                "이 날짜의 내용/비고를 모두 비웠습니다.",
+            )
             st.rerun()
 
     st.caption("※ 줄바꿈은 Google Sheet 셀 안에 그대로 저장됩니다.")
@@ -276,10 +311,10 @@ else:
             start_date = end_date = today
     else:
         start_date = end_date = selected_range
-    # 요일 표시 준비
-    weekday_map = ["월", "화", "수", "목", "금", "토", "일"]
-    start_w = weekday_map[start_date.weekday()]
-    end_w = weekday_map[end_date.weekday()]
+
+    # 요일 표시
+    start_w = WEEKDAY_MAP[start_date.weekday()]
+    end_w = WEEKDAY_MAP[end_date.weekday()]
 
     # 상단 제목 : 2025-11-03(월) ~ 2025-11-30(일)
     st.subheader(
@@ -292,26 +327,24 @@ else:
     else:
         # 선택한 기간 필터링
         mask = (df_daily["DATE"] >= start_date) & (df_daily["DATE"] <= end_date)
-        period_df = df_daily.loc[mask, ["DATE", "내용", "비고"]].copy().sort_values("DATE")
+        period_df = (
+            df_daily.loc[mask, ["DATE", "내용", "비고"]]
+            .copy()
+            .sort_values("DATE")
+        )
 
         if period_df.empty:
             st.info("해당 기간의 보고가 없습니다.")
         else:
             # 날짜를 'YYYY-MM-DD (요일)' 형식으로 표시
-            def format_date_with_weekday(d: date) -> str:
-                w = weekday_map[d.weekday()]
-                return f"{d.strftime('%Y-%m-%d')} ({w})"
-
             period_df["DATE"] = period_df["DATE"].apply(format_date_with_weekday)
 
-            # 표 스타일 : 헤더 가운데 정렬, 셀은 줄바꿈 그대로 보이도록
+            # 표 스타일 : 헤더 가운데 정렬, 내용 셀은 줄바꿈 그대로 보이도록
             styled = (
-                period_df.style
-                .set_properties(
+                period_df.style.set_properties(
                     subset=["내용", "비고"],
-                    **{"white-space": "pre-wrap"}  # \n 을 줄바꿈으로 표시
-                )
-                .set_table_styles(
+                    **{"white-space": "pre-wrap"},  # \n 을 줄바꿈으로 표시
+                ).set_table_styles(
                     [
                         {
                             "selector": "th",
@@ -324,14 +357,14 @@ else:
                         {
                             "selector": "table",
                             "props": [
-                                ("width", "100%"),           # 가로 전체 사용
+                                ("width", "100%"),
                                 ("border-collapse", "collapse"),
                             ],
                         },
                         {
                             "selector": "td",
                             "props": [
-                                ("vertical-align", "top"),   # 여러 줄일 때 위쪽 정렬
+                                ("vertical-align", "top"),
                                 ("padding", "4px 8px"),
                                 ("border", "1px solid #eee"),
                             ],
@@ -345,3 +378,19 @@ else:
 
     st.markdown("---")
     st.caption("브라우저 인쇄(Ctrl+P)를 사용해 이 화면을 바로 출력할 수 있습니다.")
+
+
+# ------------------------------------------------------
+# 플래시 메시지 출력
+# ------------------------------------------------------
+
+flash = st.session_state.get("flash")
+if flash:
+    level, msg = flash
+    if level == "success":
+        st.success(msg)
+    elif level == "info":
+        st.info(msg)
+    elif level == "warning":
+        st.warning(msg)
+    st.session_state["flash"] = None
