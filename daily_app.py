@@ -259,7 +259,6 @@ if mode == "1일 보고":
 
 
 # --------------------------- 기간 요약 모드 ---------------------------
-
 else:
     selected_range = st.sidebar.date_input(
         "기간 선택",
@@ -286,34 +285,41 @@ else:
     if df_daily.empty:
         st.info("아직 작성된 보고가 없습니다.")
     else:
-        # df_daily["DATE"] 는 date 타입, start/end_date 도 date 타입 → 비교 OK
+        # df_daily["DATE"]는 date 타입, start/end 도 date 타입
         mask = (df_daily["DATE"] >= start_date) & (df_daily["DATE"] <= end_date)
         period_df = df_daily.loc[mask].copy().sort_values("DATE")
 
         if period_df.empty:
             st.info("해당 기간의 보고가 없습니다.")
         else:
-            # DATE는 "YYYY-MM-DD (요일)" 로 표시
+            # 1) DATE: YYYY-MM-DD (요일) 형태로
             period_df["DATE"] = period_df["DATE"].apply(format_date_with_weekday)
 
-            # 내용/비고 줄바꿈을 <br>로 치환 (HTML 줄바꿈용)
+            # 2) 내용/비고 줄바꿈을 <br>로 치환
             period_df["내용"] = (
-                period_df["내용"].fillna("").astype(str).str.replace("\n", "<br>")
+                period_df["내용"]
+                .fillna("")
+                .astype(str)
+                .str.replace("\n", "<br>")
             )
             period_df["비고"] = (
-                period_df["비고"].fillna("").astype(str).str.replace("\n", "<br>")
+                period_df["비고"]
+                .fillna("")
+                .astype(str)
+                .str.replace("\n", "<br>")
             )
 
+            # 3) 보여줄 컬럼만 선택
             show_df = period_df[["DATE", "내용", "비고"]]
 
-            # pandas HTML 테이블 생성
+            # 4) pandas로 HTML 테이블 생성
             html_table = show_df.to_html(
-                index=False,   # 인덱스 숨김
-                escape=False,  # <br> 이스케이프하지 않음
+                index=False,
+                escape=False,   # <br> 그대로 쓰게
                 border=0,
             )
 
-            # 스타일 + 테이블 렌더링
+            # 5) CSS + HTML을 한 번에 렌더링
             styled_html = f"""
             <style>
             table {{
