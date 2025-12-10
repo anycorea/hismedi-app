@@ -5,6 +5,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 from datetime import date, datetime, timedelta
 from typing import Any, Optional
+import streamlit.components.v1 as components
 
 # ------------------------------------------------------
 # App / Secrets
@@ -113,6 +114,36 @@ def format_date_with_weekday(d: Any) -> str:
     return d.strftime("%Y-%m-%d") + f" ({w})"
 
 
+def render_sheet_preview() -> None:
+    """[gsheet_preview]에 연결된 진료시간표 구글시트를 오른쪽에 미리보기로 띄움."""
+    sheet_id = st.secrets["gsheet_preview"]["spreadsheet_id"]
+    gid = st.secrets["gsheet_preview"].get("gid", "0")
+
+    # htmlview + rm=minimal : 메뉴 최소화된 깔끔한 뷰
+    src = (
+        f"https://docs.google.com/spreadsheets/d/{sheet_id}/htmlview"
+        f"?gid={gid}&rm=minimal"
+    )
+
+    components.html(
+        f"""
+        <div style="position: sticky; top: 0;">
+          <iframe
+            src="{src}"
+            style="
+              width: 100%;
+              height: 800px;
+              border: 1px solid #ddd;
+              background: white;
+            "
+          ></iframe>
+        </div>
+        """,
+        height=820,
+        scrolling=True,
+    )
+
+
 # ------------------------------------------------------
 # Load Daily Report DF
 # ------------------------------------------------------
@@ -216,6 +247,7 @@ if "flash" not in st.session_state:
 
 st.sidebar.markdown(f"# {APP_TITLE}")
 mode = st.sidebar.radio("보기 모드", ("1일 보고", "기간 요약"))
+show_timetable = st.sidebar.checkbox("진료시간표 보기", value=True)
 
 today = date.today()
 
@@ -240,57 +272,67 @@ if mode == "1일 보고":
     if isinstance(selected_date, (list, tuple)):
         selected_date = selected_date[0]
 
-    # 헤더: YYYY-MM-DD(요일)
-    st.subheader(format_date_for_display(selected_date))
-
-    # 현재 날짜 데이터 로딩
-    if not df_daily.empty and (df_daily["DATE"] == selected_date).any():
-        row = df_daily[df_daily["DATE"] == selected_date].iloc[0]
-        default_content = row["내용"]
-        default_note = row["비고"]
-        has_existing = True
+    # 진료시간표 토글에 따라 레이아웃 분기
+    if show_timetable:
+        main_col, preview_col = st.columns([2, 1])
     else:
-        default_content = ""
-        default_note = ""
-        has_existing = False
+        # 시트 안 볼 때는 전체 폭을 전부 메인에 사용
+        main_col = st
+        preview_col = None
 
-    col_left, col_right = st.columns([3, 1])
+    # -------- 왼쪽: Daily 보고 작성 --------
+    with main_col:
+        st.subheader(format_date_for_display(selected_date))
 
-    with col_left:
-        content = st.text_area(
-            "내용",
-            height=350,
-            value=default_content,
-            placeholder="이 날의 업무를 자유롭게 작성하세요.\n(엔터로 줄바꿈)",
-        )
+        if not df_daily.empty and (df_daily["DATE"] == selected_date).any():
+            row = df_daily[df_daily["DATE"] == selected_date].iloc[0]
+            default_content = row["내용"]
+            default_note = row["비고"]
+            has_existing = True
+        else:
+            default_content = ""
+            default_note = ""
+            has_existing = False
 
-    with col_right:
-        note = st.text_area(
-            "비고 (선택)",
-            height=350,
-            value=default_note,
-            placeholder="특이사항이 있을 때만 작성하세요.",
-        )
-
-    # 버튼 영역
-    save_col, clear_col, _ = st.columns([1, 1, 5])
-
-    with save_col:
-        if st.button("저장", type="primary"):
-            save_daily_entry(selected_date, content, note, df_daily)
-            st.session_state["flash"] = ("success", "저장되었습니다.")
-            st.rerun()
-
-    with clear_col:
-        if has_existing and st.button("내용 비우기"):
-            save_daily_entry(selected_date, "", "", df_daily)
-            st.session_state["flash"] = (
-                "info",
-                "이 날짜의 내용/비고를 모두 비웠습니다.",
+        col_left, col_right = st.columns([3, 1])
+        with col_left:
+            content = st.text_area(
+                "내용",
+                height=350,
+                value=default_content,
+                placeholder="이 날의 업무를 자유롭게 작성하세요.\n(엔터로 줄바꿈)",
             )
-            st.rerun()
 
-    st.caption("※ 줄바꿈은 Google Sheet 셀 안에 그대로 저장됩니다.")
+        with col_right:
+            note = st.text_area(
+                "비고 (선택)",
+                height=350,
+                value=default_note,
+                placeholder="특이사항이 있을 때만 작성하세요.",
+            )
+
+        save_col, clear_col, _ = st.columns([1, 1, 5])
+        with save_col:
+            if st.button("저장", type="primary"):
+                save_daily_entry(selected_date, content, note, df_daily)
+                st.session_state["flash"] = ("success", "저장되었습니다.")
+                st.rerun()
+        with clear_col:
+            if has_existing and st.button("내용 비우기"):
+                save_daily_entry(selected_date, "", "", df_daily)
+                st.session_state["flash"] = (
+                    "info",
+                    "이 날짜의 내용/비고를 모두 비웠습니다.",
+                )
+                st.rerun()
+
+        st.caption("※ 줄바꿈은 Google Sheet 셀 안에 그대로 저장됩니다.")
+
+    # -------- 오른쪽: 진료시간표 미리보기 --------
+    if show_timetable and preview_col is not None:
+        with preview_col:
+            st.markdown("### 진료시간표")
+            render_sheet_preview()
 
 
 # --------------------------- 기간 요약 모드 ---------------------------
