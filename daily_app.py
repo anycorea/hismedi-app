@@ -1,20 +1,25 @@
 import streamlit as st
 import pandas as pd
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
 from datetime import date, datetime, timedelta
+from google.oauth2.service_account import Credentials
+import gspread
 
 # ---------------------------
 # 구글시트 인증
 # ---------------------------
 def get_worksheet():
+    # 구글 시트 접근 범위
     scope = [
-        "https://spreadsheets.google.com/feeds",
-        "https://www.googleapis.com/auth/drive"
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive",
     ]
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(
-        st.secrets["gcp_service_account"], scope
+
+    # Streamlit secrets 에 저장된 서비스 계정 JSON 로드
+    creds = Credentials.from_service_account_info(
+        st.secrets["gcp_service_account"],
+        scopes=scope
     )
+
     client = gspread.authorize(creds)
 
     spreadsheet_id = st.secrets["gsheet"]["spreadsheet_id"]
