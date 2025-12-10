@@ -3,7 +3,7 @@ import pandas as pd
 import re
 import gspread
 from google.oauth2.service_account import Credentials
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 # -------------------------------
 # 기본 설정
