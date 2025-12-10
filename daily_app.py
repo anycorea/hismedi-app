@@ -156,10 +156,6 @@ else:
         # 단일 날짜만 선택된 경우
         start_date = end_date = selected_range
 
-st.sidebar.markdown("---")
-if st.sidebar.button("오늘로 이동"):
-    st.rerun()
-
 # -------------------------------
 # 메인 영역
 # -------------------------------
