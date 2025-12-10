@@ -4,6 +4,7 @@ import re
 import gspread
 from google.oauth2.service_account import Credentials
 from datetime import date, datetime, timedelta
+import textwrap
 
 # ------------------------------------------------------
 # App / Secrets
@@ -319,30 +320,32 @@ else:
                 border=0,
             )
 
-            # 5) CSS + HTML을 한 번에 렌더링
-            styled_html = f"""
-            <style>
-            table {{
-                width: 100%;
-                border-collapse: collapse;
-                table-layout: fixed;
-                font-size: 0.95rem;
-            }}
-            th {{
-                text-align: center !important;
-                padding: 8px;
-                border-bottom: 2px solid #ccc;
-                background-color: #fafafa;
-            }}
-            td {{
-                vertical-align: top;
-                padding: 6px 8px;
-                border: 1px solid #eee;
-                word-wrap: break-word;
-            }}
-            </style>
-            {html_table}
-            """
+            # 5) CSS + HTML을 한 번에 렌더링 (앞 공백 제거해서 코드블럭 방지)
+            styled_html = textwrap.dedent(
+                f"""
+                <style>
+                table {{
+                    width: 100%;
+                    border-collapse: collapse;
+                    table-layout: fixed;
+                    font-size: 0.95rem;
+                }}
+                th {{
+                    text-align: center !important;
+                    padding: 8px;
+                    border-bottom: 2px solid #ccc;
+                    background-color: #fafafa;
+                }}
+                td {{
+                    vertical-align: top;
+                    padding: 6px 8px;
+                    border: 1px solid #eee;
+                    word-wrap: break-word;
+                }}
+                </style>
+                {html_table}
+                """
+            )
 
             st.markdown(styled_html, unsafe_allow_html=True)
 
