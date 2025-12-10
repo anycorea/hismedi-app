@@ -279,6 +279,8 @@ else:
 
             # 전체 내용 그대로 보여주기
             show_df = period_df[["DATE", "내용", "비고"]]
-            st.dataframe(show_df, use_container_width=True)
+
+            # 줄바꿈까지 그대로 보이게 출력
+            st.table(show_df)
 
     st.caption("※ 인쇄는 브라우저의 Ctrl+P 기능을 사용하세요.")
