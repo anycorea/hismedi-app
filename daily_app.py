@@ -249,6 +249,7 @@ else:
         format="YYYY-MM-DD",
     )
 
+    # date_input 반환값 정규화
     if isinstance(selected_range, (list, tuple)):
         if len(selected_range) == 2:
             start_date, end_date = selected_range
@@ -267,58 +268,31 @@ else:
     if df_daily.empty:
         st.info("아직 작성된 보고가 없습니다.")
     else:
+        # 기간 필터링
         mask = (df_daily["DATE"] >= start_date) & (df_daily["DATE"] <= end_date)
         period_df = df_daily.loc[mask].copy().sort_values("DATE")
 
         if period_df.empty:
             st.info("해당 기간의 보고가 없습니다.")
         else:
-            # 날짜는 문자열로만 표시
-            period_df["DATE_STR"] = period_df["DATE"].apply(format_date_simple)
+            # 1) DATE는 문자열로
+            period_df["DATE"] = period_df["DATE"].apply(format_date_simple)
 
-            # HTML 테이블로 렌더링 (줄바꿈 유지)
-            rows = []
-            for _, row in period_df.iterrows():
-                date_str = row["DATE_STR"]
-                content = row.get("내용", "") or ""
-                note = row.get("비고", "") or ""
+            # 2) 내용/비고의 줄바꿈을 <br>로 치환 (HTML에서 줄바꿈 유지)
+            period_df["내용"] = period_df["내용"].astype(str).str.replace("\n", "<br>")
+            period_df["비고"] = period_df["비고"].astype(str).str.replace("\n", "<br>")
 
-                # Alt+Enter 줄바꿈을 <br>로 치환해서 그대로 보이게
-                content_html = content.replace("\n", "<br>")
-                note_html = note.replace("\n", "<br>")
+            # 3) 우리가 보여줄 컬럼만 선택
+            show_df = period_df[["DATE", "내용", "비고"]]
 
-                rows.append(
-                    f"""
-                    <tr>
-                        <td style="vertical-align:top; padding:4px 8px; border:1px solid #eee; white-space:nowrap;">
-                            {date_str}
-                        </td>
-                        <td style="vertical-align:top; padding:4px 8px; border:1px solid #eee;">
-                            {content_html}
-                        </td>
-                        <td style="vertical-align:top; padding:4px 8px; border:1px solid #eee;">
-                            {note_html}
-                        </td>
-                    </tr>
-                    """
-                )
+            # 4) pandas HTML 테이블 생성해서 그대로 렌더링
+            html_table = show_df.to_html(
+                index=False,      # 왼쪽 인덱스 번호 숨김
+                escape=False,     # <br> 등을 이스케이프하지 않음
+                border=0
+            )
 
-            table_html = """
-            <table style="width:100%; border-collapse:collapse; font-size:0.9rem;">
-                <thead>
-                    <tr>
-                        <th style="text-align:left; padding:4px 8px; border-bottom:2px solid #ccc;">DATE</th>
-                        <th style="text-align:left; padding:4px 8px; border-bottom:2px solid #ccc;">내용</th>
-                        <th style="text-align:left; padding:4px 8px; border-bottom:2px solid #ccc;">비고</th>
-                    </tr>
-                </thead>
-                <tbody>
-            """ + "\n".join(rows) + """
-                </tbody>
-            </table>
-            """
-
-            # ⚠️ 꼭 markdown + unsafe_allow_html=True 로 렌더링해야 HTML이 표로 보입니다
-            st.markdown(table_html, unsafe_allow_html=True)
+            # 5) Streamlit에서 HTML 허용하고 출력
+            st.markdown(html_table, unsafe_allow_html=True)
 
     st.caption("※ 인쇄는 브라우저의 Ctrl+P 기능을 사용하세요.")
