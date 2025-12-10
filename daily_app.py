@@ -182,7 +182,7 @@ st.set_page_config(page_title=APP_TITLE, layout="wide")
 
 df_daily = load_daily_df()
 
-st.sidebar.markdown(f"## {APP_TITLE}")
+st.sidebar.markdown(f"# {APP_TITLE}")
 mode = st.sidebar.radio("보기 모드", ("1일 보고", "기간 요약"))
 
 today = date.today()
