@@ -273,25 +273,52 @@ else:
         if period_df.empty:
             st.info("해당 기간의 보고가 없습니다.")
         else:
-            # 날짜는 그대로 date 객체를 쓰고, 날짜별로 블록 출력
+            # 날짜는 문자열로만 표시
+            period_df["DATE_STR"] = period_df["DATE"].apply(format_date_simple)
+
+            # HTML 테이블로 렌더링 (줄바꿈 유지)
+            rows = []
             for _, row in period_df.iterrows():
-                # 날짜 헤더: 2025-11-03(월)
-                date_label = format_date_for_display(row["DATE"])
-                st.markdown(f"### {date_label}")
-
-                # 내용 전체 (줄바꿈 유지)
+                date_str = row["DATE_STR"]
                 content = row.get("내용", "") or ""
-                # 마크다운에서 줄바꿈 인식시키려면 '두 칸 + 개행' 사용
-                st.markdown(content.replace("\n", "  \n"))
-
-                # 비고가 있으면 같이 표시
                 note = row.get("비고", "") or ""
-                if note.strip():
-                    st.markdown("")
-                    st.markdown(f"**비고:**")
-                    st.markdown(note.replace("\n", "  \n"))
 
-                # 날짜 구분선
-                st.markdown("---")
+                # Alt+Enter 줄바꿈을 <br>로 치환해서 그대로 보이게
+                content_html = content.replace("\n", "<br>")
+                note_html = note.replace("\n", "<br>")
+
+                rows.append(
+                    f"""
+                    <tr>
+                        <td style="vertical-align:top; padding:4px 8px; border:1px solid #eee; white-space:nowrap;">
+                            {date_str}
+                        </td>
+                        <td style="vertical-align:top; padding:4px 8px; border:1px solid #eee;">
+                            {content_html}
+                        </td>
+                        <td style="vertical-align:top; padding:4px 8px; border:1px solid #eee;">
+                            {note_html}
+                        </td>
+                    </tr>
+                    """
+                )
+
+            table_html = """
+            <table style="width:100%; border-collapse:collapse; font-size:0.9rem;">
+                <thead>
+                    <tr>
+                        <th style="text-align:left; padding:4px 8px; border-bottom:2px solid #ccc;">DATE</th>
+                        <th style="text-align:left; padding:4px 8px; border-bottom:2px solid #ccc;">내용</th>
+                        <th style="text-align:left; padding:4px 8px; border-bottom:2px solid #ccc;">비고</th>
+                    </tr>
+                </thead>
+                <tbody>
+            """ + "\n".join(rows) + """
+                </tbody>
+            </table>
+            """
+
+            # ⚠️ 꼭 markdown + unsafe_allow_html=True 로 렌더링해야 HTML이 표로 보입니다
+            st.markdown(table_html, unsafe_allow_html=True)
 
     st.caption("※ 인쇄는 브라우저의 Ctrl+P 기능을 사용하세요.")
