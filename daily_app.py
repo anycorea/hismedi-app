@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import re
 import gspread
 from google.oauth2.service_account import Credentials
 from datetime import date, datetime
@@ -61,17 +62,45 @@ def load_daily_df():
     # 시트 상의 실제 행 번호 (헤더가 1행이므로 데이터는 2행부터)
     df["__row"] = df.index + 2
 
-    # 1) DATE를 안전하게 변환 (이상한 값은 NaT로 처리)
-    df["DATE"] = pd.to_datetime(df["DATE"], errors="coerce").dt.date
+    # ---- 여기서 직접 파싱 ----
+    def parse_date_cell(v):
+        # 이미 date/datetime 이면 그대로(또는 date로) 사용
+        if isinstance(v, date):
+            return v
+        if isinstance(v, datetime):
+            return v.date()
 
-    # 2) DATE가 없는 행(잘못된 값, 공백 등)은 버린다
-    df = df[~df["DATE"].isna()].copy()
+        if isinstance(v, str):
+            s = v.strip()
 
-    # 3) 다 버리고 나면 비어 있을 수도 있음 → 그때도 안전하게 빈 DF 반환
+            # 1) ISO 형식 시도: 2025-11-24
+            try:
+                return date.fromisoformat(s)
+            except Exception:
+                pass
+
+            # 2) 한글 형식: 2025년 11월 24일 (월)  /  2025년11월24일 등
+            m = re.search(r"(\d{4})\s*년\s*(\d{1,2})\s*월\s*(\d{1,2})\s*일", s)
+            if m:
+                y, mth, d = map(int, m.groups())
+                try:
+                    return date(y, mth, d)
+                except Exception:
+                    return None
+
+        # 그 외(빈칸, 이상값)는 사용 안 함
+        return None
+
+    parsed = df["DATE"].apply(parse_date_cell)
+
+    # 파싱 성공한 행만 남기기
+    df = df[parsed.notna()].copy()
     if df.empty:
         return pd.DataFrame(columns=["DATE", "내용", "비고", "__row"])
 
-    # 4) 내용/비고 컬럼 정리
+    df["DATE"] = parsed
+
+    # 내용/비고 컬럼 정리
     for col in ["내용", "비고"]:
         if col not in df.columns:
             df[col] = ""
