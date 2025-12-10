@@ -123,13 +123,13 @@ today = date.today()
 
 if df_daily.empty:
     default_single = today
-    default_range = (today, today)
+    default_range = (today, today)   # 기간도 오늘~오늘
 else:
     existing_dates = df_daily["DATE"]
-    default_single = today if today in set(existing_dates) else existing_dates.max()
-    default_range = (existing_dates.min(), existing_dates.max())
+    default_single = today
+    default_range = (today, today)   # 항상 처음은 오늘 기준으로
 
-if mode == "일일 보고":
+if mode == "1일 보고":
     selected_date = st.sidebar.date_input(
         "날짜 선택",
         value=default_single,
@@ -143,9 +143,17 @@ else:
         value=default_range,
         format="YYYY-MM-DD",
     )
+
+    # date_input 반환값을 항상 (start_date, end_date)로 정규화
     if isinstance(selected_range, (list, tuple)):
-        start_date, end_date = selected_range
+        if len(selected_range) == 2:
+            start_date, end_date = selected_range
+        elif len(selected_range) == 1:
+            start_date = end_date = selected_range[0]
+        else:
+            start_date = end_date = today
     else:
+        # 단일 날짜만 선택된 경우
         start_date = end_date = selected_range
 
 st.sidebar.markdown("---")
