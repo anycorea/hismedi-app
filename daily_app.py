@@ -179,11 +179,10 @@ def save_daily_entry(selected_date: date, content: str, note: str, df: pd.DataFr
 # ------------------------------------------------------
 
 st.set_page_config(page_title=APP_TITLE, layout="wide")
-st.title(APP_TITLE)
 
 df_daily = load_daily_df()
 
-st.sidebar.title("Daily Report")
+st.sidebar.markdown(f"### {APP_TITLE}")
 mode = st.sidebar.radio("보기 모드", ("1일 보고", "기간 요약"))
 
 today = date.today()
