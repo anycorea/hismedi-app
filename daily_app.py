@@ -275,12 +275,50 @@ else:
             st.info("해당 기간의 보고가 없습니다.")
         else:
             # 날짜는 YYYY-MM-DD 문자열로만 표시
-            period_df["DATE"] = period_df["DATE"].apply(format_date_simple)
+            period_df["DATE_STR"] = period_df["DATE"].apply(format_date_simple)
 
-            # 전체 내용 그대로 보여주기
-            show_df = period_df[["DATE", "내용", "비고"]]
+            # HTML 테이블로 직접 렌더링 (줄바꿈 유지)
+            rows = []
+            for _, row in period_df.iterrows():
+                date_str = row["DATE_STR"]
+                content = row["내용"] or ""
+                note = row["비고"] or ""
 
-            # 줄바꿈까지 그대로 보이게 출력
-            st.table(show_df)
+                # 줄바꿈을 <br>로 치환해서 그대로 보여주기
+                content_html = content.replace("\n", "<br>")
+                note_html = note.replace("\n", "<br>")
+
+                rows.append(
+                    f"""
+                    <tr>
+                        <td style="vertical-align:top; padding:4px 8px; border:1px solid #eee; white-space:nowrap;">
+                            {date_str}
+                        </td>
+                        <td style="vertical-align:top; padding:4px 8px; border:1px solid #eee;">
+                            {content_html}
+                        </td>
+                        <td style="vertical-align:top; padding:4px 8px; border:1px solid #eee;">
+                            {note_html}
+                        </td>
+                    </tr>
+                    """
+                )
+
+            table_html = """
+            <table style="width:100%; border-collapse:collapse; font-size:0.9rem;">
+                <thead>
+                    <tr>
+                        <th style="text-align:left; padding:4px 8px; border-bottom:2px solid #ccc;">DATE</th>
+                        <th style="text-align:left; padding:4px 8px; border-bottom:2px solid #ccc;">내용</th>
+                        <th style="text-align:left; padding:4px 8px; border-bottom:2px solid #ccc;">비고</th>
+                    </tr>
+                </thead>
+                <tbody>
+            """ + "\n".join(rows) + """
+                </tbody>
+            </table>
+            """
+
+            st.markdown(table_html, unsafe_allow_html=True)
 
     st.caption("※ 인쇄는 브라우저의 Ctrl+P 기능을 사용하세요.")
