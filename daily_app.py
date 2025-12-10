@@ -261,6 +261,23 @@ if mode == "1일 보고":
 
 # --------------------------- 기간 요약 모드 ---------------------------
 else:
+    # 기간 날짜 선택 UI
+    selected_range = st.sidebar.date_input(
+        "기간 선택",
+        value=default_range,
+        format="YYYY-MM-DD",
+    )
+
+    if isinstance(selected_range, (list, tuple)):
+        if len(selected_range) == 2:
+            start_date, end_date = selected_range
+        elif len(selected_range) == 1:
+            start_date = end_date = selected_range[0]
+        else:
+            start_date = end_date = today
+    else:
+        start_date = end_date = selected_range
+    # 요일 표시 준비
     weekday_map = ["월", "화", "수", "목", "금", "토", "일"]
     start_w = weekday_map[start_date.weekday()]
     end_w = weekday_map[end_date.weekday()]
