@@ -242,7 +242,6 @@ if mode == "1일 보고":
 
 
 # --------------------------- 기간 요약 모드 ---------------------------
-
 else:
     selected_range = st.sidebar.date_input(
         "기간 선택",
@@ -284,7 +283,7 @@ else:
                 content = row["내용"] or ""
                 note = row["비고"] or ""
 
-                # 줄바꿈을 <br>로 치환해서 그대로 보여주기
+                # 줄바꿈을 <br>로 치환해서 여러 줄 그대로 보이게
                 content_html = content.replace("\n", "<br>")
                 note_html = note.replace("\n", "<br>")
 
@@ -319,6 +318,7 @@ else:
             </table>
             """
 
+            # ❗ 꼭 markdown + unsafe_allow_html=True 로 렌더링해야 합니다
             st.markdown(table_html, unsafe_allow_html=True)
 
     st.caption("※ 인쇄는 브라우저의 Ctrl+P 기능을 사용하세요.")
