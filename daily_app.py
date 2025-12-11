@@ -272,39 +272,71 @@ def render_sheet_preview() -> None:
     # 상단 카드 (제목 + 새창에서 열기)
     st.markdown(
         f"""
-        <div style="
-            margin-top: 1.2rem;
-            margin-bottom: 0.4rem;
-            padding: 0.8rem 1.0rem;
-            border-radius: 0.75rem;
-            border: 1px solid #d4d4ff;
-            background: linear-gradient(135deg, #f4f5ff, #ffffff);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        ">
-          <div>
-            <div style="font-size: 1.05rem; font-weight: 700; color: #1f2933;">
-              🗓 진료시간표
-            </div>
-            <div style="font-size: 0.85rem; color: #6b7280; margin-top: 2px;">
-              외래 진료 스케줄 확인용 안내표입니다.
-            </div>
-          </div>
-          <a href="{src_open}" target="_blank" style="
-                font-size: 0.82rem;
-                text-decoration: none;
-                padding: 0.35rem 0.9rem;
-                border-radius: 999px;
-                border: 1px solid #4f46e5;
-                color: #4f46e5;
-                background: #eef2ff;
-                font-weight: 500;
-          ">
-            새 창에서 열기 ↗
-          </a>
-        </div>
-        """,
+<style>
+.timetable-card {{
+    margin-top: 1.2rem;
+    margin-bottom: 0.4rem;
+    padding: 0.8rem 1.0rem;
+    border-radius: 0.75rem;
+    border: 1px solid #d4d4ff;
+    background: linear-gradient(135deg, #f4f5ff, #ffffff);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}}
+.timetable-card-title {{
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: #1f2933;
+}}
+.timetable-card-desc {{
+    font-size: 0.85rem;
+    color: #6b7280;
+    margin-top: 2px;
+}}
+.timetable-card-link {{
+    font-size: 0.82rem;
+    text-decoration: none;
+    padding: 0.35rem 0.9rem;
+    border-radius: 999px;
+    border: 1px solid #4f46e5;
+    color: #4f46e5;
+    background: #eef2ff;
+    font-weight: 500;
+}}
+.timetable-wrapper {{
+    border: 1px solid #ddd;
+    border-radius: 0.5rem;
+    overflow: hidden;
+    background: white;
+    margin-top: 0.4rem;
+}}
+.timetable-table {{
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 0.85rem;
+}}
+.timetable-table td {{
+    border: 1px solid #eee;
+    padding: 6px 8px;
+    text-align: center;
+    white-space: pre-wrap;
+}}
+.timetable-table tr:nth-child(even) td {{
+    background: #fafafa;
+}}
+</style>
+
+<div class="timetable-card">
+    <div>
+        <div class="timetable-card-title">🗓 진료시간표</div>
+        <div class="timetable-card-desc">외래 진료 스케줄 확인용 안내표입니다.</div>
+    </div>
+    <a href="{src_open}" target="_blank" class="timetable-card-link">
+        새 창에서 열기 ↗
+    </a>
+</div>
+""",
         unsafe_allow_html=True,
     )
 
@@ -321,41 +353,18 @@ def render_sheet_preview() -> None:
         header=False,
         border=0,
         justify="center",
-        escape=False  # ← HTML escape 방지
+        escape=False,
     )
 
-    # Pandas가 기본으로 넣는 class="dataframe" 제거 → Streamlit에서 HTML이 텍스트로 보이는 현상 해결
+    # Pandas 기본 클래스 제거 → 우리 CSS 클래스로 교체
     table_html = table_html.replace('class="dataframe"', 'class="timetable-table"')
 
     st.markdown(
         f"""
-        <style>
-            .timetable-wrapper {{
-                border: 1px solid #ddd;
-                border-radius: 0.5rem;
-                overflow: hidden;
-                background: white;
-            }}
-            .timetable-table {{
-                border-collapse: collapse;
-                width: 100%;
-                font-size: 0.85rem;
-            }}
-            .timetable-table td {{
-                border: 1px solid #eee;
-                padding: 6px 8px;
-                text-align: center;
-                white-space: pre-wrap;
-            }}
-            .timetable-table tr:nth-child(even) td {{
-                background: #fafafa;
-            }}
-        </style>
-
-        <div class="timetable-wrapper">
-            {table_html}
-        </div>
-        """,
+<div class="timetable-wrapper">
+{table_html}
+</div>
+""",
         unsafe_allow_html=True,
     )
 
