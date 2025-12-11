@@ -683,7 +683,8 @@ else:
 
 if show_timetable:
     st.markdown("### 진료시간표")
-    render_sheet_preview()
+    with st.spinner("진료시간표를 불러오는 중..."):
+        render_sheet_preview()
 
 
 # ------------------------------------------------------
