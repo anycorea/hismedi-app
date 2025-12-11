@@ -314,12 +314,6 @@ def render_weekly_cards(df_weekly: pd.DataFrame, week_str: str) -> None:
         if c not in [WEEK_COL, "_start"] and not c.startswith("Unnamed")
     ]
 
-    # 상단 기간 제목
-    st.markdown(
-        f"#### {escape_html(week_str)}",
-        unsafe_allow_html=True,
-    )
-
     col_a, col_b = st.columns(2)
 
     card_idx = 0
@@ -337,26 +331,26 @@ def render_weekly_cards(df_weekly: pd.DataFrame, week_str: str) -> None:
         with target_col:
             with st.container(border=True):
 
-                # 부서명 (라인박스와 간격 최소화)
+                # 부서명: 라인박스와의 간격 더 줄이기
                 st.markdown(
-                    f"<div style='font-size:0.82rem; font-weight:700; margin:0 0 0.05rem 0;'>{dept}</div>",
+                    f"<div style='font-size:0.82rem; font-weight:700; margin:-0.10rem 0 0.03rem 0;'>{dept}</div>",
                     unsafe_allow_html=True,
                 )
 
-                # 회색 박스 (위/아래 여백 최소, 첫 글자 들여쓰기 없이)
+                # 회색 박스: 내부 폰트 살짝 키우고, 아래 여백 늘리기
                 st.markdown(
                     f"""<div style="
                         background:#f3f4f6;
                         border-radius:0.5rem;
-                        padding:0.25rem 0.65rem;
-                        font-size:0.70rem;
-                        line-height:1.28;
+                        padding:0.22rem 0.65rem;
+                        margin-bottom:0.18rem;
+                        font-size:0.74rem;
+                        line-height:1.30;
                         color:#111827;
                         white-space:pre-wrap;
                     ">{escape_html(text)}</div>""",
                     unsafe_allow_html=True,
                 )
-
 
     if card_idx == 0:
         st.info("선택한 기간에 작성된 부서별 업무 내용이 없습니다.")
