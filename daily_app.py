@@ -441,6 +441,10 @@ df_daily = load_daily_df()
 if "flash" not in st.session_state:
     st.session_state["flash"] = None
 
+# 진료시간표 모달 상태
+if "timetable_open" not in st.session_state:
+    st.session_state["timetable_open"] = False
+
 today = date.today()
 
 # 1일 보고 기본 날짜
@@ -522,8 +526,48 @@ with st.sidebar:
 
     # 3) 진료시간표
     st.markdown("### 진료시간표")
-    show_timetable = st.checkbox("바로보기", value=True)
+    if st.button("진료시간표 열기", use_container_width=True):
+        st.session_state["timetable_open"] = True
 
+# --------------------------- 진료시간표 모달 ---------------------------
+
+if st.session_state.get("timetable_open", False):
+    st.markdown(
+        """
+        <div style="
+            padding:0.75rem 1.0rem;
+            border-radius:0.9rem;
+            border:1px solid #d4d4ff;
+            background:linear-gradient(135deg, #f4f5ff, #ffffff);
+            margin:0.3rem 0 0.8rem 0;
+            box-shadow:0 10px 25px rgba(15, 23, 42, 0.08);
+        ">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <div>
+              <div style="font-size:0.95rem; font-weight:700; color:#111827;">
+                진료시간표
+              </div>
+              <div style="font-size:0.8rem; color:#6b7280; margin-top:2px;">
+                외래 진료 스케줄을 한 눈에 확인합니다.
+              </div>
+            </div>
+            <div style="font-size:0.8rem; color:#6b7280;">
+              ↓ 아래에서 바로 확인하세요.
+            </div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    with st.spinner("진료시간표를 불러오는 중..."):
+        render_sheet_preview()
+
+    close_col = st.columns([4, 1])[1]
+    with close_col:
+        if st.button("닫기", use_container_width=True):
+            st.session_state["timetable_open"] = False
+            st.rerun()
 
 # --------------------------- 월별 보기 ---------------------------
 
@@ -647,14 +691,6 @@ else:
             render_weekly_cards(weekly_df, selected_week)
         else:
             st.info("주간업무 데이터가 없습니다.")
-
-
-# --------------------------- 진료시간표 ---------------------------
-
-if show_timetable:
-    st.markdown("### 진료시간표")
-    with st.spinner("진료시간표를 불러오는 중..."):
-        render_sheet_preview()
 
 
 # ------------------------------------------------------
