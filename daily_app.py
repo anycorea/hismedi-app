@@ -1,11 +1,11 @@
 import streamlit as st
 import pandas as pd
-import re
 import gspread
 from google.oauth2.service_account import Credentials
 from datetime import date, datetime, timedelta
 from typing import Any, Optional
 import calendar
+import re
 import streamlit.components.v1 as components
 
 # ------------------------------------------------------
@@ -30,10 +30,28 @@ DATA_START_ROW = HEADER_ROW + 1
 # 요일 한글 표기
 WEEKDAY_MAP = ["월", "화", "수", "목", "금", "토", "일"]
 
+# ------------------------------------------------------
+# Layout (상단 여백 줄이기)
+# ------------------------------------------------------
+
+st.set_page_config(page_title=APP_TITLE, layout="wide")
+
+st.markdown(
+    """
+    <style>
+        .block-container {
+            padding-top: 0.8rem;
+            padding-bottom: 1rem;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 # ------------------------------------------------------
 # Google Sheets Connection
 # ------------------------------------------------------
+
 
 @st.cache_resource
 def get_gspread_client() -> gspread.Client:
@@ -53,6 +71,7 @@ def get_worksheet() -> gspread.Worksheet:
 # ------------------------------------------------------
 # 날짜 유틸 함수
 # ------------------------------------------------------
+
 
 def parse_date_cell(v: Any) -> Optional[date]:
     """Daily 시트의 DATE 셀을 date 객체로 변환."""
@@ -113,39 +132,10 @@ def format_date_with_weekday(d: Any) -> str:
     return d.strftime("%Y-%m-%d") + f" ({w})"
 
 
-def render_sheet_preview() -> None:
-    """[gsheet_preview]에 연결된 진료시간표 구글시트를 오른쪽에 미리보기로 띄움."""
-    sheet_id = st.secrets["gsheet_preview"]["spreadsheet_id"]
-    gid = st.secrets["gsheet_preview"].get("gid", "0")
-
-    # htmlview + rm=minimal : 메뉴 최소화된 깔끔한 뷰
-    src = (
-        f"https://docs.google.com/spreadsheets/d/{sheet_id}/htmlview"
-        f"?gid={gid}&rm=minimal"
-    )
-
-    components.html(
-        f"""
-        <div style="position: sticky; top: 0;">
-          <iframe
-            src="{src}"
-            style="
-              width: 100%;
-              height: 800px;
-              border: 1px solid #ddd;
-              background: white;
-            "
-          ></iframe>
-        </div>
-        """,
-        height=820,
-        scrolling=True,
-    )
-
-
 # ------------------------------------------------------
 # Load Daily Report DF
 # ------------------------------------------------------
+
 
 @st.cache_data(ttl=60)
 def load_daily_df() -> pd.DataFrame:
@@ -199,6 +189,7 @@ def load_daily_df() -> pd.DataFrame:
 # Save / Update Entry
 # ------------------------------------------------------
 
+
 def save_daily_entry(
     selected_date: date,
     content: str,
@@ -231,10 +222,42 @@ def save_daily_entry(
 
 
 # ------------------------------------------------------
-# UI 기본 환경
+# 외부 진료시간표 시트 미리보기
 # ------------------------------------------------------
 
-st.set_page_config(page_title=APP_TITLE, layout="wide")
+
+def render_sheet_preview() -> None:
+    """[gsheet_preview]에 연결된 진료시간표 구글시트를 미리보기로 띄움."""
+    sheet_id = st.secrets["gsheet_preview"]["spreadsheet_id"]
+    gid = st.secrets["gsheet_preview"].get("gid", "0")
+
+    src = (
+        f"https://docs.google.com/spreadsheets/d/{sheet_id}/htmlview"
+        f"?gid={gid}&rm=minimal"
+    )
+
+    components.html(
+        f"""
+        <div style="position: sticky; top: 0;">
+          <iframe
+            src="{src}"
+            style="
+              width: 100%;
+              height: 800px;
+              border: 1px solid #ddd;
+              background: white;
+            "
+          ></iframe>
+        </div>
+        """,
+        height=820,
+        scrolling=True,
+    )
+
+
+# ------------------------------------------------------
+# UI 기본 환경
+# ------------------------------------------------------
 
 df_daily = load_daily_df()
 
@@ -242,23 +265,19 @@ df_daily = load_daily_df()
 if "flash" not in st.session_state:
     st.session_state["flash"] = None
 
-st.sidebar.markdown(f"# {APP_TITLE}")
-mode = st.sidebar.radio("보기 모드", ("1일 보고", "기간 요약"))
-
-# 진료시간표 보기 토글
-show_timetable = st.sidebar.checkbox("진료시간표 보기", value=True)
-
 today = date.today()
 
-# 1일 보고 기본 날짜: 오늘
+# 1일 보고 기본 날짜
 default_single = today
 
-# 기간 기본값: 이번 주 월요일 ~ 일요일
-weekday_idx = today.weekday()  # 월=0
-week_start = today - timedelta(days=weekday_idx)
-week_end = week_start + timedelta(days=6)
-default_range = (week_start, week_end)
+# ------------------------------------------------------
+# 사이드바
+# ------------------------------------------------------
 
+with st.sidebar:
+    st.markdown(f"### {APP_TITLE}")
+    mode = st.radio("", ("1일 보고", "월별 보기"))
+    show_timetable = st.checkbox("진료시간표 보기", value=True)
 
 # --------------------------- 1일 보고 모드 ---------------------------
 
@@ -291,7 +310,7 @@ if mode == "1일 보고":
     with col_left:
         content = st.text_area(
             "내용",
-            height=260,  # 기존 350 → 260 으로 줄임
+            height=260,
             value=default_content,
             placeholder="이 날의 업무를 자유롭게 작성하세요.\n(엔터로 줄바꿈)",
         )
@@ -299,7 +318,7 @@ if mode == "1일 보고":
     with col_right:
         note = st.text_area(
             "비고 (선택)",
-            height=260,  # 함께 줄여서 전체 높이 감소
+            height=260,
             value=default_note,
             placeholder="특이사항이 있을 때만 작성하세요.",
         )
@@ -329,39 +348,30 @@ if mode == "1일 보고":
         st.markdown("### 진료시간표")
         render_sheet_preview()
 
-
-# --------------------------- 기간 요약 모드 ---------------------------
+# --------------------------- 월별 보기 모드 ---------------------------
 else:
     if df_daily.empty:
         st.info("아직 작성된 보고가 없습니다.")
     else:
-        # ---------------- 사이드바: 연 / 월 선택 ----------------
-        # 데이터에 실제로 존재하는 연도들
-        years = sorted({d.year for d in df_daily["DATE"]}, reverse=True)
-        default_year = today.year if today.year in years else years[0]
+        # 실제 데이터가 있는 (연, 월)만 모아서 한 박스에서 선택
+        ym_set = {(d.year, d.month) for d in df_daily["DATE"]}
+        ym_options = sorted(ym_set, reverse=True)  # 최근 연/월이 위로 오도록
 
-        year = st.sidebar.selectbox(
-            "연도 선택",
-            years,
-            index=years.index(default_year),
-        )
+        default_ym = (today.year, today.month)
+        if default_ym in ym_options:
+            default_index = ym_options.index(default_ym)
+        else:
+            default_index = 0
 
-        # 선택한 연도에 실제로 데이터가 있는 월만 보여주기
-        months_available = sorted({d.month for d in df_daily["DATE"] if d.year == year})
-        default_month = (
-            today.month
-            if (today.year == year and today.month in months_available)
-            else months_available[0]
-        )
-
-        month = st.sidebar.selectbox(
+        selected_ym = st.sidebar.selectbox(
             "월 선택",
-            months_available,
-            index=months_available.index(default_month),
-            format_func=lambda m: f"{m:02d}월",
+            ym_options,
+            index=default_index,
+            format_func=lambda ym: f"{ym[0]}년 {ym[1]:02d}월",
         )
+        year, month = selected_ym
 
-        # ---------------- 선택한 월의 시작/끝 날짜 계산 ----------------
+        # 선택한 월의 시작/끝 날짜 계산
         start_date = date(year, month, 1)
         last_day = calendar.monthrange(year, month)[1]
         end_date = date(year, month, last_day)
@@ -369,14 +379,14 @@ else:
         start_w = WEEKDAY_MAP[start_date.weekday()]
         end_w = WEEKDAY_MAP[end_date.weekday()]
 
-        # 상단 제목: "2025년 12월 (2025-12-01(월) ~ 2025-12-31(수))"
+        # 상단 제목
         st.subheader(
             f"{year}년 {month:02d}월  "
             f"({start_date.strftime('%Y-%m-%d')}({start_w})"
             f" ~ {end_date.strftime('%Y-%m-%d')}({end_w}))"
         )
 
-        # ---------------- 해당 월 데이터 필터링 ----------------
+        # 해당 월 데이터 필터링
         mask = (df_daily["DATE"] >= start_date) & (df_daily["DATE"] <= end_date)
         period_df = (
             df_daily.loc[mask, ["DATE", "내용", "비고"]]
@@ -427,7 +437,6 @@ else:
 
     st.markdown("---")
     st.caption("브라우저 인쇄(Ctrl+P)를 사용해 이 화면을 바로 출력할 수 있습니다.")
-
 
 # ------------------------------------------------------
 # 플래시 메시지 출력
