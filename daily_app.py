@@ -230,17 +230,16 @@ def render_sheet_preview() -> None:
     sheet_id = st.secrets["gsheet_preview"]["spreadsheet_id"]
     gid = st.secrets["gsheet_preview"].get("gid", "0")
 
-    # 1) '웹에 게시'를 켜둔 시트라면 이 주소가 조금 더 가볍습니다.
+    # 예전 방식으로 롤백: htmlview + rm=minimal
     src_view = (
-        f"https://docs.google.com/spreadsheets/d/{sheet_id}/pubhtml"
-        f"?gid={gid}&single=true&widget=true&headers=false"
+        f"https://docs.google.com/spreadsheets/d/{sheet_id}/htmlview"
+        f"?gid={gid}&rm=minimal"
     )
 
     src_open = (
         f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit#gid={gid}"
     )
 
-    # 헤더 카드 부분은 그대로 두고, 아래 iframe 부분만 이 주소로
     st.markdown(
         f"""
         <div style="
@@ -295,7 +294,6 @@ def render_sheet_preview() -> None:
         height=720,
         scrolling=True,
     )
-
 
 # ------------------------------------------------------
 # UI 기본 환경
