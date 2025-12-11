@@ -335,33 +335,37 @@ def render_weekly_cards(df_weekly: pd.DataFrame, week_str: str) -> None:
         card_idx += 1
 
         with target_col:
-            with st.container(border=True):
-
-                # 부서명
-                st.markdown(
-                    f"<div style='font-size:0.82rem; font-weight:700; margin-bottom:0.10rem;'>{dept}</div>",
-                    unsafe_allow_html=True,
-                )
-
-                # 회색 박스 + 아래 간격 확보
-                st.markdown(
-                    f"""
+            st.markdown(
+                f"""
 <div style="
-    background:#f3f4f6;
-    border-radius:0.5rem;
-    padding:0.55rem 0.75rem;
-    font-size:0.75rem;
-    line-height:1.32;
-    color:#111827;
-    white-space:pre-wrap;
+    border:1px solid #e5e7eb;
+    border-radius:0.75rem;
+    padding:0.45rem 0.75rem;
+    margin-bottom:0.6rem;
+    background:linear-gradient(135deg,#ffffff,#f9fafb);
 ">
-{escape_html(text)}
+  <div style="
+      font-size:0.82rem;
+      font-weight:700;
+      margin-bottom:0.08rem;  /* 라인박스와 부서명 간격 최소화 */
+  ">
+    {dept}
+  </div>
+  <div style="
+      background:#f3f4f6;
+      border-radius:0.5rem;
+      padding:0.30rem 0.60rem; /* 회색박스 위/아래 여백 최소화 */
+      font-size:0.75rem;       /* 내용 전체 폰트 살짝 감소 */
+      line-height:1.30;
+      color:#111827;
+      white-space:pre-wrap;
+  ">
+    {escape_html(text)}
+  </div>
 </div>
-<div style="height:0.25rem;"></div>
 """,
-                    unsafe_allow_html=True,
-                )
-
+                unsafe_allow_html=True,
+            )
 
     if card_idx == 0:
         st.info("선택한 기간에 작성된 부서별 업무 내용이 없습니다.")
