@@ -526,48 +526,26 @@ with st.sidebar:
 
     # 3) 진료시간표
     st.markdown("### 진료시간표")
-    if st.button("진료시간표 열기", use_container_width=True):
-        st.session_state["timetable_open"] = True
 
-# --------------------------- 진료시간표 모달 ---------------------------
+    is_open = st.session_state.get("timetable_open", False)
 
-if st.session_state.get("timetable_open", False):
-    st.markdown(
-        """
-        <div style="
-            padding:0.75rem 1.0rem;
-            border-radius:0.9rem;
-            border:1px solid #d4d4ff;
-            background:linear-gradient(135deg, #f4f5ff, #ffffff);
-            margin:0.3rem 0 0.8rem 0;
-            box-shadow:0 10px 25px rgba(15, 23, 42, 0.08);
-        ">
-          <div style="display:flex; justify-content:space-between; align-items:center;">
-            <div>
-              <div style="font-size:0.95rem; font-weight:700; color:#111827;">
-                진료시간표
-              </div>
-              <div style="font-size:0.8rem; color:#6b7280; margin-top:2px;">
-                외래 진료 스케줄을 한 눈에 확인합니다.
-              </div>
-            </div>
-            <div style="font-size:0.8rem; color:#6b7280;">
-              ↓ 아래에서 바로 확인하세요.
-            </div>
-          </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    with st.spinner("진료시간표를 불러오는 중..."):
-        render_sheet_preview()
-
-    close_col = st.columns([4, 1])[1]
-    with close_col:
-        if st.button("닫기", use_container_width=True):
+    if is_open:
+        # 이미 열려 있을 때는 '닫기' 버튼만 보여줌
+        if st.button("진료시간표 닫기", use_container_width=True):
             st.session_state["timetable_open"] = False
             st.rerun()
+    else:
+        # 닫혀 있을 때는 '열기' 버튼만 보여줌
+        if st.button("진료시간표 열기", use_container_width=True):
+            st.session_state["timetable_open"] = True
+            st.rerun()
+
+# --------------------------- 진료시간표 ---------------------------
+
+if st.session_state.get("timetable_open", False):
+    st.markdown("### 진료시간표")
+    with st.spinner("진료시간표를 불러오는 중..."):
+        render_sheet_preview()
 
 # --------------------------- 월별 보기 ---------------------------
 
