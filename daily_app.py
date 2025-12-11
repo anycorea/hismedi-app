@@ -361,57 +361,13 @@ def render_weekly_cards(df_weekly: pd.DataFrame, week_str: str) -> None:
 # 외부 진료시간표 시트 미리보기
 # ------------------------------------------------------
 
-
 def render_sheet_preview() -> None:
     sheet_id = st.secrets["gsheet_preview"]["spreadsheet_id"]
     gid = st.secrets["gsheet_preview"].get("gid", "0")
 
-    # htmlview + rm=minimal
     src_view = (
         f"https://docs.google.com/spreadsheets/d/{sheet_id}/htmlview"
         f"?gid={gid}&rm=minimal"
-    )
-
-    src_open = (
-        f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit#gid={gid}"
-    )
-
-    st.markdown(
-        f"""
-        <div style="
-            margin-top: 1.2rem;
-            margin-bottom: 0.4rem;
-            padding: 0.8rem 1.0rem;
-            border-radius: 0.75rem;
-            border: 1px solid #d4d4ff;
-            background: linear-gradient(135deg, #f4f5ff, #ffffff);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        ">
-          <div>
-            <div style="font-size: 1.05rem; font-weight: 700; color: #1f2933;">
-              🗓 진료시간표
-            </div>
-            <div style="font-size: 0.85rem; color: #6b7280; margin-top: 2px;">
-              ↓↓↓ 아래의 진료시간표(바로보기)는 불러오는데 시간이 걸릴 수 있습니다.
-            </div>
-          </div>
-          <a href="{src_open}" target="_blank" style="
-                font-size: 0.82rem;
-                text-decoration: none;
-                padding: 0.35rem 0.9rem;
-                border-radius: 999px;
-                border: 1px solid #4f46e5;
-                color: #4f46e5;
-                background: #eef2ff;
-                font-weight: 500;
-          ">
-            새 창에서 열기 ↗
-          </a>
-        </div>
-        """,
-        unsafe_allow_html=True,
     )
 
     st.components.v1.html(
@@ -420,16 +376,17 @@ def render_sheet_preview() -> None:
             src="{src_view}"
             style="
               width: 100%;
-              height: 900px;
+              height: 700px;
               border: 1px solid #ddd;
               border-radius: 0.5rem;
               background: white;
             "
         ></iframe>
         """,
-        height=920,
-        scrolling=False,
+        height=720,
+        scrolling=True,
     )
+
 
 # ------------------------------------------------------
 # UI 기본 환경
@@ -529,21 +486,33 @@ with st.sidebar:
 
     is_open = st.session_state.get("timetable_open", False)
 
+    # 열기 / 닫기 버튼
     if is_open:
-        # 이미 열려 있을 때는 '닫기' 버튼만 보여줌
         if st.button("진료시간표 닫기", use_container_width=True):
             st.session_state["timetable_open"] = False
             st.rerun()
     else:
-        # 닫혀 있을 때는 '열기' 버튼만 보여줌
         if st.button("진료시간표 열기", use_container_width=True):
             st.session_state["timetable_open"] = True
             st.rerun()
 
+    # '새 창에서 열기' 링크 (항상 표시)
+    sheet_id = st.secrets["gsheet_preview"]["spreadsheet_id"]
+    gid = st.secrets["gsheet_preview"].get("gid", "0")
+    src_open = (
+        f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit#gid={gid}"
+    )
+
+    st.markdown(
+        f'<a href="{src_open}" target="_blank" '
+        f'style="font-size:0.8rem; color:#4f46e5; text-decoration:none;">'
+        f'새 창에서 열기 ↗</a>',
+        unsafe_allow_html=True,
+    )
+
 # --------------------------- 진료시간표 ---------------------------
 
 if st.session_state.get("timetable_open", False):
-    st.markdown("### 진료시간표")
     with st.spinner("진료시간표를 불러오는 중..."):
         render_sheet_preview()
 
