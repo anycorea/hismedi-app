@@ -227,23 +227,34 @@ def save_daily_entry(
 
 
 def render_sheet_preview() -> None:
+    """진료시간표를 '인쇄 미리보기'에 가까운 PDF 뷰로 띄우기."""
     sheet_id = st.secrets["gsheet_preview"]["spreadsheet_id"]
     gid = st.secrets["gsheet_preview"].get("gid", "0")
 
-    # 예전 방식으로 롤백: htmlview + rm=minimal
-    src_view = (
-        f"https://docs.google.com/spreadsheets/d/{sheet_id}/htmlview"
-        f"?gid={gid}&rm=minimal"
+    # 구글시트 PDF export URL (인쇄 결과물)
+    pdf_url = (
+        f"https://docs.google.com/spreadsheets/d/{sheet_id}/export"
+        f"?format=pdf"
+        f"&gid={gid}"
+        f"&portrait=true"     # 세로 방향 (원하시면 false로 바꿔도 됨)
+        f"&size=A4"           # 용지 크기 (A4 기준)
+        f"&fitw=true"         # 가로폭 맞추기
+        f"&gridlines=false"   # 격자선 숨기기 (원하면 true)
+        f"&printtitle=false"  # 머리글/바닥글 숨기기
+        f"&sheetnames=false"  # 시트 이름 숨기기
+        f"&pagenum=none"      # 페이지 번호 안 보이게
     )
 
+    # 원본 시트를 새 창에서 열기 위한 링크
     src_open = (
         f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit#gid={gid}"
     )
 
+    # 상단 헤더 카드
     st.markdown(
         f"""
         <div style="
-            margin-top: 1.2rem;
+            margin-top: 1.0rem;
             margin-bottom: 0.4rem;
             padding: 0.8rem 1.0rem;
             border-radius: 0.75rem;
@@ -255,10 +266,10 @@ def render_sheet_preview() -> None:
         ">
           <div>
             <div style="font-size: 1.05rem; font-weight: 700; color: #1f2933;">
-              🗓 진료시간표
+              🗓 진료시간표 (인쇄 미리보기)
             </div>
             <div style="font-size: 0.85rem; color: #6b7280; margin-top: 2px;">
-              외래 진료 스케줄 확인용 안내표입니다.
+              구글시트 인쇄용 PDF 화면을 그대로 불러옵니다.
             </div>
           </div>
           <a href="{src_open}" target="_blank" style="
@@ -271,29 +282,31 @@ def render_sheet_preview() -> None:
                 background: #eef2ff;
                 font-weight: 500;
           ">
-            새 창에서 열기 ↗
+            시트 열기 ↗
           </a>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
+    # PDF 미리보기 iframe
     st.components.v1.html(
         f"""
         <iframe
-            src="{src_view}"
+            src="{pdf_url}"
             style="
               width: 100%;
-              height: 700px;
+              height: 800px;
               border: 1px solid #ddd;
               border-radius: 0.5rem;
               background: white;
             "
         ></iframe>
         """,
-        height=720,
+        height=820,
         scrolling=True,
     )
+
 
 # ------------------------------------------------------
 # UI 기본 환경
