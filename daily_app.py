@@ -347,7 +347,7 @@ def render_weekly_cards(df_weekly: pd.DataFrame, week_str: str) -> None:
                     <div style="font-size:0.9rem; font-weight:700; color:#111827; margin-bottom:0.35rem;">
                         {dept}
                     </div>
-                    <div style="font-size:0.85rem; color:#111827; white-space:pre-wrap; line-height:1.35;">
+                    <div style="font-size:0.80rem; color:#111827; white-space:pre-wrap; line-height:1.35;">
                         {text}
                     </div>
                 </div>
@@ -560,7 +560,7 @@ else:
         st.markdown(f"## {year}년 {month:02d}월")
 
         # 월별 보기 레이아웃: 왼쪽 Daily 표, 오른쪽 Weekly 카드
-        col_left, col_right = st.columns([2, 1])
+        col_left, col_right = st.columns([1, 2])
 
         # ---------------- 왼쪽: Daily 월별 표 ----------------
         with col_left:
@@ -569,6 +569,7 @@ else:
                 df_daily.loc[mask, ["DATE", "내용"]]
                 .copy()
                 .sort_values("DATE")
+                .reset_index(drop=True)  # 인덱스 초기화
             )
 
             if period_df.empty:
@@ -578,14 +579,34 @@ else:
                 period_df["DATE"] = period_df["DATE"].apply(format_date_with_weekday)
 
                 styled = (
-                    period_df.style.set_properties(
+                    period_df.style
+                    # 🔹 인덱스(왼쪽 번호 열) 숨기기
+                    .hide(axis="index")
+                    # 🔹 DATE 열: 글자 작게, 폭 좁게, 줄바꿈 없이
+                    .set_properties(
+                        subset=["DATE"],
+                        **{
+                            "white-space": "nowrap",
+                            "font-size": "0.80rem",
+                            "width": "8.5rem",
+                        },
+                    )
+                    # 🔹 내용 열: 글자 작게, 줄바꿈 허용
+                    .set_properties(
                         subset=["내용"],
-                        **{"white-space": "pre-wrap"},
-                    ).set_table_styles(
+                        **{
+                            "white-space": "pre-wrap",
+                            "font-size": "0.80rem",
+                        },
+                    )
+                    .set_table_styles(
                         [
                             {
                                 "selector": "th",
-                                "props": [("text-align", "center")],
+                                "props": [
+                                    ("text-align", "center"),
+                                    ("font-size", "0.80rem"),
+                                ],
                             },
                             {
                                 "selector": "th.col_heading",
@@ -602,7 +623,7 @@ else:
                                 "selector": "td",
                                 "props": [
                                     ("vertical-align", "top"),
-                                    ("padding", "4px 8px"),
+                                    ("padding", "3px 6px"),
                                     ("border", "1px solid #eee"),
                                 ],
                             },
