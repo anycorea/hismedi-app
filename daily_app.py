@@ -321,14 +321,14 @@ def render_sheet_preview() -> None:
             src="{src_view}"
             style="
                 width: 100%;
-                height: 1050px;
+                height: 1250px;
                 border: 1px solid #ddd;
                 border-radius: 0.5rem;
                 background: white;
             "
         ></iframe>
         """,
-        height=1070,
+        height=1270,
         scrolling=True,
     )
 
