@@ -5,6 +5,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 from datetime import date, datetime, timedelta
 from typing import Any, Optional
+import calendar
 import streamlit.components.v1 as components
 
 # ------------------------------------------------------
@@ -34,7 +35,6 @@ WEEKDAY_MAP = ["월", "화", "수", "목", "금", "토", "일"]
 # Google Sheets Connection
 # ------------------------------------------------------
 
-
 @st.cache_resource
 def get_gspread_client() -> gspread.Client:
     credentials = Credentials.from_service_account_info(
@@ -53,7 +53,6 @@ def get_worksheet() -> gspread.Worksheet:
 # ------------------------------------------------------
 # 날짜 유틸 함수
 # ------------------------------------------------------
-
 
 def parse_date_cell(v: Any) -> Optional[date]:
     """Daily 시트의 DATE 셀을 date 객체로 변환."""
@@ -148,7 +147,6 @@ def render_sheet_preview() -> None:
 # Load Daily Report DF
 # ------------------------------------------------------
 
-
 @st.cache_data(ttl=60)
 def load_daily_df() -> pd.DataFrame:
     ws = get_worksheet()
@@ -200,7 +198,6 @@ def load_daily_df() -> pd.DataFrame:
 # ------------------------------------------------------
 # Save / Update Entry
 # ------------------------------------------------------
-
 
 def save_daily_entry(
     selected_date: date,
@@ -335,37 +332,51 @@ if mode == "1일 보고":
 
 # --------------------------- 기간 요약 모드 ---------------------------
 else:
-    # 기간 날짜 선택 UI
-    selected_range = st.sidebar.date_input(
-        "기간 선택",
-        value=default_range,
-        format="YYYY-MM-DD",
-    )
-
-    if isinstance(selected_range, (list, tuple)):
-        if len(selected_range) == 2:
-            start_date, end_date = selected_range
-        elif len(selected_range) == 1:
-            start_date = end_date = selected_range[0]
-        else:
-            start_date = end_date = today
-    else:
-        start_date = end_date = selected_range
-
-    # 요일 표시
-    start_w = WEEKDAY_MAP[start_date.weekday()]
-    end_w = WEEKDAY_MAP[end_date.weekday()]
-
-    # 상단 제목 : 2025-11-03(월) ~ 2025-11-30(일)
-    st.subheader(
-        f"{start_date.strftime('%Y-%m-%d')}({start_w}) ~ "
-        f"{end_date.strftime('%Y-%m-%d')}({end_w})"
-    )
-
     if df_daily.empty:
         st.info("아직 작성된 보고가 없습니다.")
     else:
-        # 선택한 기간 필터링
+        # ---------------- 사이드바: 연 / 월 선택 ----------------
+        # 데이터에 실제로 존재하는 연도들
+        years = sorted({d.year for d in df_daily["DATE"]}, reverse=True)
+        default_year = today.year if today.year in years else years[0]
+
+        year = st.sidebar.selectbox(
+            "연도 선택",
+            years,
+            index=years.index(default_year),
+        )
+
+        # 선택한 연도에 실제로 데이터가 있는 월만 보여주기
+        months_available = sorted({d.month for d in df_daily["DATE"] if d.year == year})
+        default_month = (
+            today.month
+            if (today.year == year and today.month in months_available)
+            else months_available[0]
+        )
+
+        month = st.sidebar.selectbox(
+            "월 선택",
+            months_available,
+            index=months_available.index(default_month),
+            format_func=lambda m: f"{m:02d}월",
+        )
+
+        # ---------------- 선택한 월의 시작/끝 날짜 계산 ----------------
+        start_date = date(year, month, 1)
+        last_day = calendar.monthrange(year, month)[1]
+        end_date = date(year, month, last_day)
+
+        start_w = WEEKDAY_MAP[start_date.weekday()]
+        end_w = WEEKDAY_MAP[end_date.weekday()]
+
+        # 상단 제목: "2025년 12월 (2025-12-01(월) ~ 2025-12-31(수))"
+        st.subheader(
+            f"{year}년 {month:02d}월  "
+            f"({start_date.strftime('%Y-%m-%d')}({start_w})"
+            f" ~ {end_date.strftime('%Y-%m-%d')}({end_w}))"
+        )
+
+        # ---------------- 해당 월 데이터 필터링 ----------------
         mask = (df_daily["DATE"] >= start_date) & (df_daily["DATE"] <= end_date)
         period_df = (
             df_daily.loc[mask, ["DATE", "내용", "비고"]]
@@ -374,16 +385,15 @@ else:
         )
 
         if period_df.empty:
-            st.info("해당 기간의 보고가 없습니다.")
+            st.info("해당 월에 작성된 보고가 없습니다.")
         else:
-            # 날짜를 'YYYY-MM-DD (요일)' 형식으로 표시
+            # 날짜 표시: YYYY-MM-DD (요일)
             period_df["DATE"] = period_df["DATE"].apply(format_date_with_weekday)
 
-            # 표 스타일 : 헤더 가운데 정렬, 내용 셀은 줄바꿈 그대로 보이도록
             styled = (
                 period_df.style.set_properties(
                     subset=["내용", "비고"],
-                    **{"white-space": "pre-wrap"},  # \n 을 줄바꿈으로 표시
+                    **{"white-space": "pre-wrap"},
                 ).set_table_styles(
                     [
                         {
@@ -413,7 +423,6 @@ else:
                 )
             )
 
-            # 표 출력 (줄바꿈 포함, 화면 폭에 맞게)
             st.table(styled)
 
     st.markdown("---")
