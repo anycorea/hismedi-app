@@ -15,13 +15,24 @@ import streamlit.components.v1 as components
 APP_TITLE = st.secrets["app"].get("TITLE", "HISMEDI † Daily report")
 TZ = st.secrets["app"].get("TZ", "Asia/Seoul")  # 현재는 미사용이지만 향후 대비해서 유지
 
+# Daily 보고용 시트
 SPREADSHEET_ID = st.secrets["gsheet"]["spreadsheet_id"]
 WORKSHEET_NAME = st.secrets["gsheet"]["worksheet_name"]
+
+# Weekly(주간업무) 시트
+# secrets.toml 예시:
+# [weekly_board]
+# spreadsheet_id = "..."
+# worksheet_name = "주간업무"
+WEEKLY_SPREADSHEET_ID = st.secrets["weekly_board"]["spreadsheet_id"]
+WEEKLY_WORKSHEET_NAME = st.secrets["weekly_board"]["worksheet_name"]
 
 SCOPE = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
 ]
+
+WEEK_COL = "WEEK"
 
 # 시트 구조 관련 상수
 HEADER_ROW = 1
@@ -48,10 +59,10 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# ------------------------------------------------------
+# Google Sheets Connection (Daily)
+# ------------------------------------------------------
 
-# ------------------------------------------------------
-# Google Sheets Connection
-# ------------------------------------------------------
 
 @st.cache_resource
 def get_gspread_client() -> gspread.Client:
@@ -69,8 +80,21 @@ def get_worksheet() -> gspread.Worksheet:
 
 
 # ------------------------------------------------------
+# Google Sheets Connection (Weekly)
+# ------------------------------------------------------
+
+
+@st.cache_resource
+def get_weekly_worksheet() -> gspread.Worksheet:
+    client = get_gspread_client()
+    sh = client.open_by_key(WEEKLY_SPREADSHEET_ID)
+    return sh.worksheet(WEEKLY_WORKSHEET_NAME)
+
+
+# ------------------------------------------------------
 # 날짜 유틸 함수
 # ------------------------------------------------------
+
 
 def parse_date_cell(v: Any) -> Optional[date]:
     """Daily 시트의 DATE 셀을 date 객체로 변환."""
@@ -135,6 +159,7 @@ def format_date_with_weekday(d: Any) -> str:
 # Load Daily Report DF
 # ------------------------------------------------------
 
+
 @st.cache_data(ttl=60)
 def load_daily_df() -> pd.DataFrame:
     ws = get_worksheet()
@@ -187,6 +212,7 @@ def load_daily_df() -> pd.DataFrame:
 # Save / Update Entry
 # ------------------------------------------------------
 
+
 def save_daily_entry(
     selected_date: date,
     content: str,
@@ -219,63 +245,139 @@ def save_daily_entry(
 
 
 # ------------------------------------------------------
-# 외부 진료시간표 시트 로딩 / 미리보기
+# Weekly (주간업무) DF 로드 & 카드 렌더링
 # ------------------------------------------------------
 
+
 @st.cache_data(ttl=300)
-def load_timetable_df() -> pd.DataFrame:
+def load_weekly_df() -> pd.DataFrame:
     """
-    진료시간표 시트를 DataFrame으로 불러온 뒤,
-    1행, 2행은 숨기고(제거) 나머지만 반환.
-    인덱스/열 이름 없이 '인쇄 미리보기'처럼 쓸 예정.
+    '주간업무' 시트를 읽어서 WEEK 기준으로 최신 순 정렬된 DF 반환.
+    WEEK 형식 예: 2025.12.08~2025.12.21
     """
-    sheet_id = st.secrets["gsheet_preview"]["spreadsheet_id"]
-    gid_raw = st.secrets["gsheet_preview"].get("gid", "0")
+    ws = get_weekly_worksheet()
+    values = ws.get_all_values()
 
-    try:
-        gid = int(gid_raw)
-    except ValueError:
-        gid = 0
-
-    client = get_gspread_client()
-    sh = client.open_by_key(sheet_id)
-    ws = sh.get_worksheet_by_id(gid)
-
-    values = ws.get_all_values()  # 2차원 리스트
-
-    # 1, 2행 숨기기 → 0,1 인덱스 제거
-    if len(values) <= 2:
+    if not values or len(values) < 2:
         return pd.DataFrame()
 
-    data_rows = values[2:]  # 3행부터 끝까지
+    header = values[0]
+    rows = values[1:]
 
-    # DataFrame으로 변환
-    df = pd.DataFrame(data_rows)
+    df = pd.DataFrame(rows, columns=header)
 
-    # 완전히 빈 열은 제거 (전부 "" 인 경우)
+    # 완전히 빈 행 제거
     df = df.replace("", pd.NA)
-    df = df.dropna(axis=1, how="all")
+    df = df.dropna(how="all")
     df = df.fillna("")
 
+    if WEEK_COL not in df.columns:
+        st.warning("주간업무 시트에 'WEEK' 열이 없습니다.")
+        return pd.DataFrame()
+
+    def parse_start(week_str: str) -> Optional[date]:
+        try:
+            s = str(week_str).split("~")[0].strip()
+            return datetime.strptime(s, "%Y.%m.%d").date()
+        except Exception:
+            return None
+
+    df["_start"] = df[WEEK_COL].astype(str).apply(parse_start)
+    df = df.dropna(subset=["_start"])
+    df = df.sort_values("_start", ascending=False).reset_index(drop=True)
+
     return df
+
+
+def render_weekly_cards(df_weekly: pd.DataFrame, week_str: str) -> None:
+    """선택한 WEEK 한 줄을 예쁜 카드형(2열)으로 렌더링."""
+    row_df = df_weekly[df_weekly[WEEK_COL] == week_str]
+    if row_df.empty:
+        st.info("선택한 기간의 주간업무 데이터가 없습니다.")
+        return
+
+    row = row_df.iloc[0]
+    dept_cols = [
+        c for c in df_weekly.columns
+        if c not in [WEEK_COL, "_start"] and not c.startswith("Unnamed")
+    ]
+
+    st.markdown(
+        f"""
+        <div style="display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:0.4rem;">
+            <div>
+                <div style="font-size:1.0rem; font-weight:700; color:#111827;">
+                    주간업무
+                </div>
+                <div style="font-size:0.8rem; color:#6b7280; margin-top:2px;">
+                    선택한 기간의 부서별 주요 업무를 한 눈에 확인합니다.
+                </div>
+            </div>
+            <div style="font-size:0.8rem; color:#4b5563;">
+                <span style="font-weight:600;">기간:</span> {week_str}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # 카드 2열
+    col_a, col_b = st.columns(2)
+
+    card_index = 0
+    for dept in dept_cols:
+        text = str(row.get(dept, "")).strip()
+        if not text:
+            continue
+
+        target_col = col_a if card_index % 2 == 0 else col_b
+        card_index += 1
+
+        with target_col:
+            st.markdown(
+                f"""
+                <div style="
+                    border-radius:0.75rem;
+                    border:1px solid #e5e7eb;
+                    padding:0.7rem 0.9rem;
+                    margin-bottom:0.6rem;
+                    background:linear-gradient(135deg, #ffffff, #f9fafb);
+                    box-shadow:0 1px 2px rgba(15,23,42,0.04);
+                ">
+                    <div style="font-size:0.9rem; font-weight:700; color:#111827; margin-bottom:0.35rem;">
+                        {dept}
+                    </div>
+                    <div style="font-size:0.85rem; color:#111827; white-space:pre-wrap; line-height:1.35;">
+                        {text}
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+    if card_index == 0:
+        st.info("선택한 기간에 작성된 부서별 업무 내용이 없습니다.")
+
+
+# ------------------------------------------------------
+# 외부 진료시간표 시트 미리보기
+# ------------------------------------------------------
 
 
 def render_sheet_preview() -> None:
     sheet_id = st.secrets["gsheet_preview"]["spreadsheet_id"]
     gid = st.secrets["gsheet_preview"].get("gid", "0")
 
-    # 구글 시트 미니멀 뷰
+    # htmlview + rm=minimal
     src_view = (
         f"https://docs.google.com/spreadsheets/d/{sheet_id}/htmlview"
         f"?gid={gid}&rm=minimal"
     )
 
-    # 새 창에서 열기 URL
     src_open = (
         f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit#gid={gid}"
     )
 
-    # ---------------------- 카드 영역 ----------------------
     st.markdown(
         f"""
         <div style="
@@ -289,15 +391,15 @@ def render_sheet_preview() -> None:
             justify-content: space-between;
             align-items: center;
         ">
-            <div>
-                <div style="font-size: 1.05rem; font-weight: 700; color: #1f2933;">
-                    🗓 진료시간표
-                </div>
-                <div style="font-size: 0.85rem; color: #6b7280; margin-top: 2px;">
-                    ↓↓↓ 아래의 진료시간표(바로보기)는 불러오는데 시간이 걸릴 수 있습니다.
-                </div>
+          <div>
+            <div style="font-size: 1.05rem; font-weight: 700; color: #1f2933;">
+              🗓 진료시간표
             </div>
-            <a href="{src_open}" target="_blank" style="
+            <div style="font-size: 0.85rem; color: #6b7280; margin-top: 2px;">
+              ↓↓↓ 아래의 진료시간표(바로보기)는 불러오는데 시간이 걸릴 수 있습니다.
+            </div>
+          </div>
+          <a href="{src_open}" target="_blank" style="
                 font-size: 0.82rem;
                 text-decoration: none;
                 padding: 0.35rem 0.9rem;
@@ -306,32 +408,30 @@ def render_sheet_preview() -> None:
                 color: #4f46e5;
                 background: #eef2ff;
                 font-weight: 500;
-            ">
-                새 창에서 열기 ↗
-            </a>
+          ">
+            새 창에서 열기 ↗
+          </a>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    # ---------------------- iframe 미리보기 ----------------------
     st.components.v1.html(
         f"""
         <iframe
             src="{src_view}"
             style="
-                width: 100%;
-                height: 1150px;
-                border: 1px solid #ddd;
-                border-radius: 0.5rem;
-                background: white;
+              width: 100%;
+              height: 900px;
+              border: 1px solid #ddd;
+              border-radius: 0.5rem;
+              background: white;
             "
         ></iframe>
         """,
-        height=1170,
-        scrolling=True,
+        height=920,
+        scrolling=False,
     )
-
 
 # ------------------------------------------------------
 # UI 기본 환경
@@ -353,7 +453,10 @@ default_single = today
 # ------------------------------------------------------
 
 with st.sidebar:
-    st.markdown(f"<h2 style='font-size:1.6rem; font-weight:700;'>{APP_TITLE}</h2>", unsafe_allow_html=True)
+    st.markdown(
+        f"<h2 style='font-size:1.6rem; font-weight:700;'>{APP_TITLE}</h2>",
+        unsafe_allow_html=True,
+    )
     mode = st.radio("", ("1일 보고", "월별 보기"))
     show_timetable = st.checkbox("진료시간표 보기", value=True)
 
@@ -369,7 +472,9 @@ if mode == "1일 보고":
         selected_date = selected_date[0]
 
     # 상단 제목
-    st.markdown(f"## {selected_date.year}년 {selected_date.month}월 {selected_date.day}일")
+    st.markdown(
+        f"## {selected_date.year}년 {selected_date.month}월 {selected_date.day}일"
+    )
 
     # 현재 날짜 데이터 로딩
     if not df_daily.empty and (df_daily["DATE"] == selected_date).any():
@@ -382,7 +487,7 @@ if mode == "1일 보고":
         default_note = ""
         has_existing = False
 
-    # 보고작성 영역 (조금 낮은 높이)
+    # 보고작성 영역: 내용 크게, 비고는 오른쪽 좁게 유지 (원하면 나중에 제거 가능)
     col_left, col_right = st.columns([3, 1])
 
     with col_left:
@@ -419,6 +524,7 @@ if mode == "1일 보고":
             )
             st.rerun()
 
+    # ---------------- 진료시간표 (보고작성 아래쪽) ----------------
     if show_timetable:
         render_sheet_preview()
 
@@ -450,61 +556,90 @@ else:
         last_day = calendar.monthrange(year, month)[1]
         end_date = date(year, month, last_day)
 
-        start_w = WEEKDAY_MAP[start_date.weekday()]
-        end_w = WEEKDAY_MAP[end_date.weekday()]
-
         # 상단 제목
         st.markdown(f"## {year}년 {month:02d}월")
 
-        # 해당 월 데이터 필터링
-        mask = (df_daily["DATE"] >= start_date) & (df_daily["DATE"] <= end_date)
-        period_df = (
-            df_daily.loc[mask, ["DATE", "내용", "비고"]]
-            .copy()
-            .sort_values("DATE")
-        )
+        # 월별 보기 레이아웃: 왼쪽 Daily 표, 오른쪽 Weekly 카드
+        col_left, col_right = st.columns([2, 1])
 
-        if period_df.empty:
-            st.info("해당 월에 작성된 보고가 없습니다.")
-        else:
-            # 날짜 표시: YYYY-MM-DD (요일)
-            period_df["DATE"] = period_df["DATE"].apply(format_date_with_weekday)
-
-            styled = (
-                period_df.style.set_properties(
-                    subset=["내용", "비고"],
-                    **{"white-space": "pre-wrap"},
-                ).set_table_styles(
-                    [
-                        {
-                            "selector": "th",
-                            "props": [("text-align", "center")],
-                        },
-                        {
-                            "selector": "th.col_heading",
-                            "props": [("text-align", "center")],
-                        },
-                        {
-                            "selector": "table",
-                            "props": [
-                                ("width", "100%"),
-                                ("border-collapse", "collapse"),
-                            ],
-                        },
-                        {
-                            "selector": "td",
-                            "props": [
-                                ("vertical-align", "top"),
-                                ("padding", "4px 8px"),
-                                ("border", "1px solid #eee"),
-                            ],
-                        },
-                    ]
-                )
+        # ---------------- 왼쪽: Daily 월별 표 ----------------
+        with col_left:
+            mask = (df_daily["DATE"] >= start_date) & (df_daily["DATE"] <= end_date)
+            period_df = (
+                df_daily.loc[mask, ["DATE", "내용"]]
+                .copy()
+                .sort_values("DATE")
             )
 
-            st.table(styled)
+            if period_df.empty:
+                st.info("해당 월에 작성된 보고가 없습니다.")
+            else:
+                # 날짜 표시: YYYY-MM-DD (요일)
+                period_df["DATE"] = period_df["DATE"].apply(format_date_with_weekday)
 
+                styled = (
+                    period_df.style.set_properties(
+                        subset=["내용"],
+                        **{"white-space": "pre-wrap"},
+                    ).set_table_styles(
+                        [
+                            {
+                                "selector": "th",
+                                "props": [("text-align", "center")],
+                            },
+                            {
+                                "selector": "th.col_heading",
+                                "props": [("text-align", "center")],
+                            },
+                            {
+                                "selector": "table",
+                                "props": [
+                                    ("width", "100%"),
+                                    ("border-collapse", "collapse"),
+                                ],
+                            },
+                            {
+                                "selector": "td",
+                                "props": [
+                                    ("vertical-align", "top"),
+                                    ("padding", "4px 8px"),
+                                    ("border", "1px solid #eee"),
+                                ],
+                            },
+                        ]
+                    )
+                )
+
+                st.table(styled)
+
+        # ---------------- 오른쪽: Weekly 주간업무 카드 ----------------
+        with col_right:
+            try:
+                weekly_df = load_weekly_df()
+            except Exception as e:
+                st.info("주간업무 시트 연결 설정이 아직 완료되지 않았습니다.")
+                weekly_df = pd.DataFrame()
+
+            if not weekly_df.empty:
+                week_options = weekly_df[WEEK_COL].astype(str).tolist()
+
+                # 기본 선택: 가장 최근 주간 (0번째)
+                default_week_idx = 0
+                # 세션에 이전 선택이 있으면 유지
+                prev_week = st.session_state.get("weekly_week_select")
+                if prev_week in week_options:
+                    default_week_idx = week_options.index(prev_week)
+
+                selected_week = st.selectbox(
+                    "기간선택 (주간업무)",
+                    options=week_options,
+                    index=default_week_idx,
+                    key="weekly_week_select",
+                )
+
+                render_weekly_cards(weekly_df, selected_week)
+            else:
+                st.info("주간업무 데이터가 없습니다.")
 
 # ------------------------------------------------------
 # 플래시 메시지 출력
