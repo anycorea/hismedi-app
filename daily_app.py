@@ -455,86 +455,13 @@ with st.sidebar:
         f"<h2 style='font-size:1.6rem; font-weight:700;'>{APP_TITLE}</h2>",
         unsafe_allow_html=True,
     )
-    # label_visibility 옵션 제거
-    mode = st.radio(
-        "보기 모드",
-        ("1일 보고", "월별 보기"),
-    )
-    show_timetable = st.checkbox("진료시간표 보기", value=True)
 
-# --------------------------- 1일 보고 모드 ---------------------------
-
-if mode == "1일 보고":
-    selected_date = st.sidebar.date_input(
-        "날짜 선택",
-        value=default_single,
-    )
-    if isinstance(selected_date, (list, tuple)):
-        selected_date = selected_date[0]
-
-    # 상단 제목
-    st.markdown(
-        f"## {selected_date.year}년 {selected_date.month}월 {selected_date.day}일"
-    )
-
-    # 현재 날짜 데이터 로딩
-    if not df_daily.empty and (df_daily["DATE"] == selected_date).any():
-        row = df_daily[df_daily["DATE"] == selected_date].iloc[0]
-        default_content = row["내용"]
-        default_note = row["비고"]
-        has_existing = True
-    else:
-        default_content = ""
-        default_note = ""
-        has_existing = False
-
-    # 보고작성 영역: 내용 크게, 비고는 오른쪽 좁게 유지 (원하면 나중에 제거 가능)
-    col_left, col_right = st.columns([3, 1])
-
-    with col_left:
-        content = st.text_area(
-            "내용",
-            height=260,
-            value=default_content,
-            placeholder="이 날의 업무를 자유롭게 작성하세요.\n(엔터로 줄바꿈)",
-        )
-
-    with col_right:
-        note = st.text_area(
-            "비고 (선택)",
-            height=260,
-            value=default_note,
-            placeholder="특이사항이 있을 때만 작성하세요.",
-        )
-
-    # 버튼을 오른쪽 아래에 모아서 배치
-    btn_spacer, btn_save, btn_clear = st.columns([6, 1, 1])
-
-    with btn_save:
-        if st.button("저장", type="primary", use_container_width=True):
-            save_daily_entry(selected_date, content, note, df_daily)
-            st.session_state["flash"] = ("success", "저장되었습니다.")
-            st.rerun()
-
-    with btn_clear:
-        if has_existing and st.button("내용 비우기", use_container_width=True):
-            save_daily_entry(selected_date, "", "", df_daily)
-            st.session_state["flash"] = (
-                "info",
-                "이 날짜의 내용/비고를 모두 비웠습니다.",
-            )
-            st.rerun()
-
-    # ---------------- 진료시간표 (보고작성 아래쪽) ----------------
-    if show_timetable:
-        render_sheet_preview()
-
-# --------------------------- 월별 보기 모드 ---------------------------
-else:
+    # 1) 업무현황 (월)
+    st.markdown("### 업무현황 (월)")
     if df_daily.empty:
-        st.info("아직 작성된 보고가 없습니다.")
+        st.caption("아직 작성된 보고가 없어 월 선택 옵션이 없습니다.")
+        selected_ym = None
     else:
-        # 실제 데이터가 있는 (연, 월)만 모아서 한 박스에서 선택
         ym_set = {(d.year, d.month) for d in df_daily["DATE"]}
         ym_options = sorted(ym_set, reverse=True)  # 최근 연/월이 위로 오도록
 
@@ -544,55 +471,140 @@ else:
         else:
             default_index = 0
 
-        selected_ym = st.sidebar.selectbox(
+        selected_ym = st.selectbox(
             "월 선택",
             ym_options,
             index=default_index,
             format_func=lambda ym: f"{ym[0]}년 {ym[1]:02d}월",
         )
-        year, month = selected_ym
 
-        # 선택한 월의 시작/끝 날짜 계산
-        start_date = date(year, month, 1)
-        last_day = calendar.monthrange(year, month)[1]
-        end_date = date(year, month, last_day)
+    # 2) 1일 업무 메모
+    st.markdown("### 1일 업무 메모")
+    selected_date = st.date_input(
+        "날짜",
+        value=default_single,
+    )
+    if isinstance(selected_date, (list, tuple)):
+        selected_date = selected_date[0]
 
-        # 상단 제목
-        st.markdown(f"## {year}년 {month:02d}월")
+    # 3) 진료시간표
+    st.markdown("### 진료시간표")
+    show_timetable = st.checkbox("바로보기", value=True)
 
-        # 월별 보기 레이아웃: 왼쪽 Daily 표(1/3), 오른쪽 Weekly 카드(2/3)
-        col_left, col_right = st.columns([1, 2])
 
-        # ---------------- 왼쪽: Daily 월별 표 ----------------
-        with col_left:
-            mask = (df_daily["DATE"] >= start_date) & (df_daily["DATE"] <= end_date)
-            period_df = (
-                df_daily.loc[mask, ["DATE", "내용"]]
-                .copy()
-                .sort_values("DATE")
-                .reset_index(drop=True)
+# --------------------------- 1일 업무 메모 ---------------------------
+
+st.markdown(
+    f"## {selected_date.year}년 {selected_date.month}월 {selected_date.day}일"
+)
+
+# 현재 날짜 데이터 로딩
+if not df_daily.empty and (df_daily["DATE"] == selected_date).any():
+    row = df_daily[df_daily["DATE"] == selected_date].iloc[0]
+    default_content = row["내용"]
+    has_existing = True
+else:
+    default_content = ""
+    has_existing = False
+
+# 카드형 메모 영역
+with st.container():
+    st.markdown(
+        """
+        <div style="
+            padding:0.75rem 1.0rem;
+            border-radius:0.75rem;
+            border:1px solid #e5e7eb;
+            background:#ffffff;
+            margin-bottom:0.5rem;
+        ">
+            <div style="font-size:0.9rem; font-weight:600; margin-bottom:0.2rem;">
+                오늘 업무 메모
+            </div>
+            <div style="font-size:0.8rem; color:#6b7280;">
+                날짜별로 짤막하게 메모를 남겨두면 나중에 월별 정리할 때 편합니다.
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    content = st.text_area(
+        "내용",
+        height=220,
+        value=default_content,
+        placeholder="이 날의 업무를 짤막하게 기록하세요.\n(엔터로 줄바꿈)",
+    )
+
+    col_save, col_clear = st.columns([1, 1])
+
+    with col_save:
+        if st.button("저장", type="primary", use_container_width=True):
+            # 비고는 더 이상 사용하지 않으므로 항상 빈 문자열로 저장
+            save_daily_entry(selected_date, content, "", df_daily)
+            st.session_state["flash"] = ("success", "저장되었습니다.")
+            st.rerun()
+
+    with col_clear:
+        if has_existing and st.button("비우기", use_container_width=True):
+            save_daily_entry(selected_date, "", "", df_daily)
+            st.session_state["flash"] = (
+                "info",
+                "이 날짜의 내용을 모두 비웠습니다.",
             )
+            st.rerun()
 
-            if period_df.empty:
-                st.info("해당 월에 작성된 보고가 없습니다.")
-            else:
-                # 날짜 문자열 변환
-                period_df["DATE_STR"] = period_df["DATE"].apply(format_date_with_weekday)
-                period_df["CONTENT_STR"] = period_df["내용"].astype(str)
 
-                # HTML 테이블 직접 렌더링 (index 완전히 제거)
-                rows_html = ""
-                for _, r in period_df.iterrows():
-                    d_str = escape_html(r["DATE_STR"])
-                    c_str = escape_html(r["CONTENT_STR"])
-                    rows_html += f"""
+# --------------------------- 월별 보기 ---------------------------
+
+if df_daily.empty or selected_ym is None:
+    st.info("아직 작성된 보고가 없습니다.")
+else:
+    year, month = selected_ym
+
+    # 선택한 월의 시작/끝 날짜 계산
+    start_date = date(year, month, 1)
+    last_day = calendar.monthrange(year, month)[1]
+    end_date = date(year, month, last_day)
+
+    # 상단 제목
+    st.markdown(f"## {year}년 {month:02d}월")
+
+    # 월별 보기 레이아웃: 왼쪽 Daily 표(1/3), 오른쪽 Weekly 카드(2/3)
+    col_left, col_right = st.columns([1, 2])
+
+    # ---------------- 왼쪽: Daily 월별 표 ----------------
+    with col_left:
+        mask = (df_daily["DATE"] >= start_date) & (df_daily["DATE"] <= end_date)
+        period_df = (
+            df_daily.loc[mask, ["DATE", "내용"]]
+            .copy()
+            .sort_values("DATE")
+            .reset_index(drop=True)
+        )
+
+        if period_df.empty:
+            st.info("해당 월에 작성된 보고가 없습니다.")
+        else:
+            # 날짜 문자열 변환
+            period_df["DATE_STR"] = period_df["DATE"].apply(
+                format_date_with_weekday
+            )
+            period_df["CONTENT_STR"] = period_df["내용"].astype(str)
+
+            # HTML 테이블 직접 렌더링 (index 완전히 제거)
+            rows_html = ""
+            for _, r in period_df.iterrows():
+                d_str = escape_html(r["DATE_STR"])
+                c_str = escape_html(r["CONTENT_STR"])
+                rows_html += f"""
 <tr>
   <td class="m-date">{d_str}</td>
   <td class="m-content">{c_str}</td>
 </tr>
 """
 
-                table_html = f"""
+            table_html = f"""
 <style>
 .m-table {{
   border-collapse: collapse;
@@ -635,37 +647,44 @@ else:
 </table>
 """
 
-                st.markdown(table_html, unsafe_allow_html=True)
+            st.markdown(table_html, unsafe_allow_html=True)
+
+    # ---------------- 오른쪽: Weekly 주간업무 카드 ----------------
+    with col_right:
+        try:
+            weekly_df = load_weekly_df()
+        except Exception:
+            st.info("주간업무 시트 연결 설정이 아직 완료되지 않았습니다.")
+            weekly_df = pd.DataFrame()
+
+        if not weekly_df.empty:
+            week_options = weekly_df[WEEK_COL].astype(str).tolist()
+
+            # 기본 선택: 가장 최근 주간 (0번째)
+            default_week_idx = 0
+            # 세션에 이전 선택이 있으면 유지
+            prev_week = st.session_state.get("weekly_week_select")
+            if prev_week in week_options:
+                default_week_idx = week_options.index(prev_week)
+
+            selected_week = st.selectbox(
+                "기간선택 (주간업무)",
+                options=week_options,
+                index=default_week_idx,
+                key="weekly_week_select",
+            )
+
+            render_weekly_cards(weekly_df, selected_week)
+        else:
+            st.info("주간업무 데이터가 없습니다.")
 
 
-        # ---------------- 오른쪽: Weekly 주간업무 카드 ----------------
-        with col_right:
-            try:
-                weekly_df = load_weekly_df()
-            except Exception as e:
-                st.info("주간업무 시트 연결 설정이 아직 완료되지 않았습니다.")
-                weekly_df = pd.DataFrame()
+# --------------------------- 진료시간표 ---------------------------
 
-            if not weekly_df.empty:
-                week_options = weekly_df[WEEK_COL].astype(str).tolist()
+if show_timetable:
+    st.markdown("### 진료시간표")
+    render_sheet_preview()
 
-                # 기본 선택: 가장 최근 주간 (0번째)
-                default_week_idx = 0
-                # 세션에 이전 선택이 있으면 유지
-                prev_week = st.session_state.get("weekly_week_select")
-                if prev_week in week_options:
-                    default_week_idx = week_options.index(prev_week)
-
-                selected_week = st.selectbox(
-                    "기간선택 (주간업무)",
-                    options=week_options,
-                    index=default_week_idx,
-                    key="weekly_week_select",
-                )
-
-                render_weekly_cards(weekly_df, selected_week)
-            else:
-                st.info("주간업무 데이터가 없습니다.")
 
 # ------------------------------------------------------
 # 플래시 메시지 출력
