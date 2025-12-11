@@ -4,6 +4,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 from datetime import date, datetime, timedelta
 from typing import Any, Optional
+import html
 import calendar
 import re
 import streamlit.components.v1 as components
@@ -155,6 +156,13 @@ def format_date_with_weekday(d: Any) -> str:
     return d.strftime("%Y-%m-%d") + f" ({w})"
 
 
+def escape_html(text: Any) -> str:
+    if text is None:
+        return ""
+    s = html.escape(str(text))
+    return s.replace("\n", "<br>")
+
+
 # ------------------------------------------------------
 # Load Daily Report DF
 # ------------------------------------------------------
@@ -290,7 +298,11 @@ def load_weekly_df() -> pd.DataFrame:
 
 
 def render_weekly_cards(df_weekly: pd.DataFrame, week_str: str) -> None:
-    """선택한 WEEK 한 줄을 예쁜 카드형(2열)으로 렌더링."""
+    """
+    선택한 WEEK 한 줄을 기존 주간업무 앱과 비슷한 느낌으로 렌더링.
+    - 상단에 기간 제목
+    - 부서별로 테두리 있는 컨테이너 + 내부 연한 회색 박스
+    """
     row_df = df_weekly[df_weekly[WEEK_COL] == week_str]
     if row_df.empty:
         st.info("선택한 기간의 주간업무 데이터가 없습니다.")
@@ -302,60 +314,48 @@ def render_weekly_cards(df_weekly: pd.DataFrame, week_str: str) -> None:
         if c not in [WEEK_COL, "_start"] and not c.startswith("Unnamed")
     ]
 
+    # 상단 기간 제목
     st.markdown(
-        f"""
-        <div style="display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:0.4rem;">
-            <div>
-                <div style="font-size:1.0rem; font-weight:700; color:#111827;">
-                    주간업무
-                </div>
-                <div style="font-size:0.8rem; color:#6b7280; margin-top:2px;">
-                    선택한 기간의 부서별 주요 업무를 한 눈에 확인합니다.
-                </div>
-            </div>
-            <div style="font-size:0.8rem; color:#4b5563;">
-                <span style="font-weight:600;">기간:</span> {week_str}
-            </div>
-        </div>
-        """,
+        f"#### {escape_html(week_str)}",
         unsafe_allow_html=True,
     )
 
-    # 카드 2열
     col_a, col_b = st.columns(2)
 
-    card_index = 0
+    card_idx = 0
     for dept in dept_cols:
-        text = str(row.get(dept, "")).strip()
+        raw_text = row.get(dept, "")
+        if raw_text is None:
+            continue
+        text = str(raw_text).strip()
         if not text:
             continue
 
-        target_col = col_a if card_index % 2 == 0 else col_b
-        card_index += 1
+        target_col = col_a if card_idx % 2 == 0 else col_b
+        card_idx += 1
 
         with target_col:
-            st.markdown(
-                f"""
-                <div style="
-                    border-radius:0.75rem;
-                    border:1px solid #e5e7eb;
-                    padding:0.7rem 0.9rem;
-                    margin-bottom:0.6rem;
-                    background:linear-gradient(135deg, #ffffff, #f9fafb);
-                    box-shadow:0 1px 2px rgba(15,23,42,0.04);
-                ">
-                    <div style="font-size:0.9rem; font-weight:700; color:#111827; margin-bottom:0.35rem;">
-                        {dept}
-                    </div>
-                    <div style="font-size:0.80rem; color:#111827; white-space:pre-wrap; line-height:1.35;">
-                        {text}
-                    </div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+            with st.container(border=True):
+                st.markdown(f"**{dept}**")
+                st.markdown(
+                    f"""
+<div style="
+    margin-top:0.25rem;
+    background:#f3f4f6;
+    border-radius:0.5rem;
+    padding:0.55rem 0.75rem;
+    font-size:0.78rem;
+    color:#111827;
+    white-space:pre-wrap;
+    line-height:1.35;
+">
+{escape_html(text)}
+</div>
+""",
+                    unsafe_allow_html=True,
+                )
 
-    if card_index == 0:
+    if card_idx == 0:
         st.info("선택한 기간에 작성된 부서별 업무 내용이 없습니다.")
 
 
@@ -559,7 +559,7 @@ else:
         # 상단 제목
         st.markdown(f"## {year}년 {month:02d}월")
 
-        # 월별 보기 레이아웃: 왼쪽 Daily 표, 오른쪽 Weekly 카드
+        # 월별 보기 레이아웃: 왼쪽 Daily 표(1/3), 오른쪽 Weekly 카드(2/3)
         col_left, col_right = st.columns([1, 2])
 
         # ---------------- 왼쪽: Daily 월별 표 ----------------
@@ -569,69 +569,73 @@ else:
                 df_daily.loc[mask, ["DATE", "내용"]]
                 .copy()
                 .sort_values("DATE")
-                .reset_index(drop=True)  # 인덱스 초기화
+                .reset_index(drop=True)
             )
 
             if period_df.empty:
                 st.info("해당 월에 작성된 보고가 없습니다.")
             else:
-                # 날짜 표시: YYYY-MM-DD (요일)
-                period_df["DATE"] = period_df["DATE"].apply(format_date_with_weekday)
+                # 날짜 문자열 변환
+                period_df["DATE_STR"] = period_df["DATE"].apply(format_date_with_weekday)
+                period_df["CONTENT_STR"] = period_df["내용"].astype(str)
 
-                styled = (
-                    period_df.style
-                    # 🔹 인덱스(왼쪽 번호 열) 숨기기
-                    .hide(axis="index")
-                    # 🔹 DATE 열: 글자 작게, 폭 좁게, 줄바꿈 없이
-                    .set_properties(
-                        subset=["DATE"],
-                        **{
-                            "white-space": "nowrap",
-                            "font-size": "0.80rem",
-                            "width": "8.5rem",
-                        },
-                    )
-                    # 🔹 내용 열: 글자 작게, 줄바꿈 허용
-                    .set_properties(
-                        subset=["내용"],
-                        **{
-                            "white-space": "pre-wrap",
-                            "font-size": "0.80rem",
-                        },
-                    )
-                    .set_table_styles(
-                        [
-                            {
-                                "selector": "th",
-                                "props": [
-                                    ("text-align", "center"),
-                                    ("font-size", "0.80rem"),
-                                ],
-                            },
-                            {
-                                "selector": "th.col_heading",
-                                "props": [("text-align", "center")],
-                            },
-                            {
-                                "selector": "table",
-                                "props": [
-                                    ("width", "100%"),
-                                    ("border-collapse", "collapse"),
-                                ],
-                            },
-                            {
-                                "selector": "td",
-                                "props": [
-                                    ("vertical-align", "top"),
-                                    ("padding", "3px 6px"),
-                                    ("border", "1px solid #eee"),
-                                ],
-                            },
-                        ]
-                    )
-                )
+                # HTML 테이블 직접 렌더링 (index 완전히 제거)
+                rows_html = ""
+                for _, r in period_df.iterrows():
+                    d_str = escape_html(r["DATE_STR"])
+                    c_str = escape_html(r["CONTENT_STR"])
+                    rows_html += f"""
+<tr>
+  <td class="m-date">{d_str}</td>
+  <td class="m-content">{c_str}</td>
+</tr>
+"""
 
-                st.table(styled)
+                table_html = f"""
+<style>
+.m-table {{
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.80rem;
+}}
+.m-table thead th {{
+  text-align: center;
+  padding: 4px 6px;
+  border-bottom: 1px solid #e5e7eb;
+  color: #4b5563;
+}}
+.m-table tbody td {{
+  vertical-align: top;
+  padding: 3px 6px;
+  border-bottom: 1px solid #f3f4f6;
+}}
+.m-date {{
+  white-space: nowrap;
+  width: 8.5rem;
+  color: #111827;
+  font-weight: 600;
+}}
+.m-content {{
+  white-space: pre-wrap;
+  color: #111827;
+}}
+</style>
+
+<table class="m-table">
+  <thead>
+    <tr>
+      <th>DATE</th>
+      <th>내용</th>
+    </tr>
+  </thead>
+  <tbody>
+    {rows_html}
+  </tbody>
+</table>
+"""
+
+                st.markdown(table_html, unsafe_allow_html=True)
+
 
         # ---------------- 오른쪽: Weekly 주간업무 카드 ----------------
         with col_right:
