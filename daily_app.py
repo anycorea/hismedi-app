@@ -275,7 +275,7 @@ default_single = today
 # ------------------------------------------------------
 
 with st.sidebar:
-    st.markdown(f"### {APP_TITLE}")
+    st.markdown(f"<h2 style='font-size:1.6rem; font-weight:700;'>{APP_TITLE}</h2>", unsafe_allow_html=True)
     mode = st.radio("", ("1일 보고", "월별 보기"))
     show_timetable = st.checkbox("진료시간표 보기", value=True)
 
@@ -291,7 +291,7 @@ if mode == "1일 보고":
         selected_date = selected_date[0]
 
     # 상단 제목
-    st.subheader(format_date_for_display(selected_date))
+    st.markdown(f"## {selected_date.year}년 {selected_date.month}월 {selected_date.day}일")
 
     # 현재 날짜 데이터 로딩
     if not df_daily.empty and (df_daily["DATE"] == selected_date).any():
@@ -341,7 +341,6 @@ if mode == "1일 보고":
             )
             st.rerun()
 
-    st.caption("※ 줄바꿈은 Google Sheet 셀 안에 그대로 저장됩니다.")
 
     # ---------------- 진료시간표 (보고작성 아래쪽) ----------------
     if show_timetable:
@@ -380,11 +379,7 @@ else:
         end_w = WEEKDAY_MAP[end_date.weekday()]
 
         # 상단 제목
-        st.subheader(
-            f"{year}년 {month:02d}월  "
-            f"({start_date.strftime('%Y-%m-%d')}({start_w})"
-            f" ~ {end_date.strftime('%Y-%m-%d')}({end_w}))"
-        )
+        st.markdown(f"## {year}년 {month:02d}월")
 
         # 해당 월 데이터 필터링
         mask = (df_daily["DATE"] >= start_date) & (df_daily["DATE"] <= end_date)
@@ -435,8 +430,6 @@ else:
 
             st.table(styled)
 
-    st.markdown("---")
-    st.caption("브라우저 인쇄(Ctrl+P)를 사용해 이 화면을 바로 출력할 수 있습니다.")
 
 # ------------------------------------------------------
 # 플래시 메시지 출력
