@@ -347,25 +347,28 @@ def render_weekly_cards(df_weekly: pd.DataFrame, week_str: str) -> None:
   <div style="
       font-size:0.82rem;
       font-weight:700;
-      margin-bottom:0.08rem;  /* 라인박스와 부서명 간격 최소화 */
+      margin-bottom:0.08rem;
   ">
     {dept}
   </div>
   <div style="
       background:#f3f4f6;
       border-radius:0.5rem;
-      padding:0.30rem 0.60rem; /* 회색박스 위/아래 여백 최소화 */
-      font-size:0.65rem;       /* 내용 전체 폰트 살짝 감소 */
-      line-height:1.30;
+      padding:0.30rem 0.60rem;
+      font-size:0.65rem;
+      line-height:1.25;
       color:#111827;
       white-space:pre-wrap;
   ">
-    {escape_html(text)}
+    <span style="font-size:0.65rem; line-height:1.25;">
+      {escape_html(text)}
+    </span>
   </div>
 </div>
 """,
                 unsafe_allow_html=True,
             )
+
 
     if card_idx == 0:
         st.info("선택한 기간에 작성된 부서별 업무 내용이 없습니다.")
