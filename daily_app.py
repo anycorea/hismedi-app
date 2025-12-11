@@ -321,36 +321,39 @@ def render_sheet_preview() -> None:
         header=False,
         border=0,
         justify="center",
-        classes="timetable-table",
-        escape=True,
+        escape=False  # ← HTML escape 방지
     )
+
+    # Pandas가 기본으로 넣는 class="dataframe" 제거 → Streamlit에서 HTML이 텍스트로 보이는 현상 해결
+    table_html = table_html.replace('class="dataframe"', 'class="timetable-table"')
 
     st.markdown(
         f"""
         <style>
-          .timetable-wrapper {{
-            border: 1px solid #ddd;
-            border-radius: 0.5rem;
-            overflow: hidden;
-            background: white;
-          }}
-          .timetable-table {{
-            border-collapse: collapse;
-            width: 100%;
-          }}
-          .timetable-table td {{
-            border: 1px solid #eee;
-            padding: 6px 8px;
-            text-align: center;
-            font-size: 0.85rem;
-            white-space: pre-wrap;
-          }}
-          .timetable-table tr:nth-child(even) td {{
-            background: #fafafa;
-          }}
+            .timetable-wrapper {{
+                border: 1px solid #ddd;
+                border-radius: 0.5rem;
+                overflow: hidden;
+                background: white;
+            }}
+            .timetable-table {{
+                border-collapse: collapse;
+                width: 100%;
+                font-size: 0.85rem;
+            }}
+            .timetable-table td {{
+                border: 1px solid #eee;
+                padding: 6px 8px;
+                text-align: center;
+                white-space: pre-wrap;
+            }}
+            .timetable-table tr:nth-child(even) td {{
+                background: #fafafa;
+            }}
         </style>
+
         <div class="timetable-wrapper">
-          {table_html}
+            {table_html}
         </div>
         """,
         unsafe_allow_html=True,
