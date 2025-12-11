@@ -355,7 +355,7 @@ def render_weekly_cards(df_weekly: pd.DataFrame, week_str: str) -> None:
       background:#f3f4f6;
       border-radius:0.5rem;
       padding:0.30rem 0.60rem; /* 회색박스 위/아래 여백 최소화 */
-      font-size:0.75rem;       /* 내용 전체 폰트 살짝 감소 */
+      font-size:0.65rem;       /* 내용 전체 폰트 살짝 감소 */
       line-height:1.30;
       color:#111827;
       white-space:pre-wrap;
