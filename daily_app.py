@@ -336,22 +336,28 @@ def render_weekly_cards(df_weekly: pd.DataFrame, week_str: str) -> None:
 
         with target_col:
             with st.container(border=True):
-                st.markdown(f"**{dept}**")
+
+                # 부서명
+                st.markdown(
+                    f"<div style='font-size:0.82rem; font-weight:700; margin-bottom:0.10rem;'>{dept}</div>",
+                    unsafe_allow_html=True,
+                )
+
+                # 회색 박스 + 아래 간격 확보
                 st.markdown(
                     f"""
 <div style="
-    margin-top:0.10rem;        /* 부서명과 회색 박스를 더 바짝 붙이기 */
-    margin-bottom:0.30rem;     /* 아래 테두리와는 여유 있게 띄우기 */
     background:#f3f4f6;
     border-radius:0.5rem;
     padding:0.55rem 0.75rem;
-    font-size:0.78rem;
+    font-size:0.75rem;
+    line-height:1.32;
     color:#111827;
     white-space:pre-wrap;
-    line-height:1.35;
 ">
 {escape_html(text)}
 </div>
+<div style="height:0.25rem;"></div>
 """,
                     unsafe_allow_html=True,
                 )
