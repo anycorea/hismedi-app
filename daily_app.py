@@ -457,7 +457,7 @@ with st.sidebar:
         f"<h2 style='font-size:1.6rem; font-weight:700;'>{APP_TITLE}</h2>",
         unsafe_allow_html=True,
     )
-    mode = st.radio("", ("1일 보고", "월별 보기"))
+    mode = st.radio(" ", ("1일 보고", "월별 보기"), label_visibility="collapsed")
     show_timetable = st.checkbox("진료시간표 보기", value=True)
 
 # --------------------------- 1일 보고 모드 ---------------------------
