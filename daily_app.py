@@ -219,23 +219,57 @@ def save_daily_entry(
 
 
 # ------------------------------------------------------
-# 외부 진료시간표 시트 미리보기
+# 외부 진료시간표 시트 로딩 / 미리보기
 # ------------------------------------------------------
 
+@st.cache_data(ttl=300)
+def load_timetable_df() -> pd.DataFrame:
+    """
+    진료시간표 시트를 DataFrame으로 불러온 뒤,
+    1행, 2행은 숨기고(제거) 나머지만 반환.
+    인덱스/열 이름 없이 '인쇄 미리보기'처럼 쓸 예정.
+    """
+    sheet_id = st.secrets["gsheet_preview"]["spreadsheet_id"]
+    gid_raw = st.secrets["gsheet_preview"].get("gid", "0")
+
+    try:
+        gid = int(gid_raw)
+    except ValueError:
+        gid = 0
+
+    client = get_gspread_client()
+    sh = client.open_by_key(sheet_id)
+    ws = sh.get_worksheet_by_id(gid)
+
+    values = ws.get_all_values()  # 2차원 리스트
+
+    # 1, 2행 숨기기 → 0,1 인덱스 제거
+    if len(values) <= 2:
+        return pd.DataFrame()
+
+    data_rows = values[2:]  # 3행부터 끝까지
+
+    # DataFrame으로 변환
+    df = pd.DataFrame(data_rows)
+
+    # 완전히 빈 열은 제거 (전부 "" 인 경우)
+    df = df.replace("", pd.NA)
+    df = df.dropna(axis=1, how="all")
+    df = df.fillna("")
+
+    return df
+
+
 def render_sheet_preview() -> None:
+    # 시트 열기용 URL (편집 화면)
     sheet_id = st.secrets["gsheet_preview"]["spreadsheet_id"]
     gid = st.secrets["gsheet_preview"].get("gid", "0")
-
-    # 예전 방식으로 롤백: htmlview + rm=minimal
-    src_view = (
-        f"https://docs.google.com/spreadsheets/d/{sheet_id}/htmlview"
-        f"?gid={gid}&rm=minimal"
-    )
 
     src_open = (
         f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit#gid={gid}"
     )
 
+    # 상단 카드 (제목 + 새창에서 열기)
     st.markdown(
         f"""
         <div style="
@@ -274,22 +308,54 @@ def render_sheet_preview() -> None:
         unsafe_allow_html=True,
     )
 
-    st.components.v1.html(
-        f"""
-        <iframe
-            src="{src_view}"
-            style="
-              width: 100%;
-              height: 700px;
-              border: 1px solid #ddd;
-              border-radius: 0.5rem;
-              background: white;
-            "
-        ></iframe>
-        """,
-        height=720,
-        scrolling=True,
+    # 시트 내용을 DataFrame으로 로딩
+    df_tt = load_timetable_df()
+
+    if df_tt.empty:
+        st.info("진료시간표 시트에 표시할 데이터가 없습니다.")
+        return
+
+    # 인덱스/헤더 없이 HTML 테이블로 렌더링
+    table_html = df_tt.to_html(
+        index=False,
+        header=False,
+        border=0,
+        justify="center",
+        classes="timetable-table",
+        escape=True,
     )
+
+    st.markdown(
+        f"""
+        <style>
+          .timetable-wrapper {{
+            border: 1px solid #ddd;
+            border-radius: 0.5rem;
+            overflow: hidden;
+            background: white;
+          }}
+          .timetable-table {{
+            border-collapse: collapse;
+            width: 100%;
+          }}
+          .timetable-table td {{
+            border: 1px solid #eee;
+            padding: 6px 8px;
+            text-align: center;
+            font-size: 0.85rem;
+            white-space: pre-wrap;
+          }}
+          .timetable-table tr:nth-child(even) td {{
+            background: #fafafa;
+          }}
+        </style>
+        <div class="timetable-wrapper">
+          {table_html}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
 
 # ------------------------------------------------------
 # UI 기본 환경
@@ -376,7 +442,6 @@ if mode == "1일 보고":
                 "이 날짜의 내용/비고를 모두 비웠습니다.",
             )
             st.rerun()
-
 
     # ---------------- 진료시간표 (보고작성 아래쪽) ----------------
     if show_timetable:
