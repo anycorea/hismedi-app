@@ -470,7 +470,6 @@ if mode == "1일 보고":
     selected_date = st.sidebar.date_input(
         "날짜 선택",
         value=default_single,
-        format="YYYY-MM-DD",
     )
     if isinstance(selected_date, (list, tuple)):
         selected_date = selected_date[0]
