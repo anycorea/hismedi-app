@@ -331,27 +331,25 @@ def render_weekly_cards(df_weekly: pd.DataFrame, week_str: str) -> None:
         with target_col:
             with st.container(border=True):
 
-                # 부서명
+                # 부서명: 카드 테두리와 거의 붙게, 아래 여백은 살짝만
                 st.markdown(
-                    f"<div style='font-size:0.82rem; font-weight:700; margin:-0.14rem 0 0.10rem 0;'>{dept}</div>",
+                    f"<div style='font-size:0.82rem; font-weight:700; margin:-0.18rem 0 0.04rem 0;'>{dept}</div>",
                     unsafe_allow_html=True,
                 )
 
-                # 회색박스 내용
+                # 회색 박스: 왼쪽 정렬 + 폰트 조금 키우고, 위/아래 여백 정리
                 st.markdown(
                     f"""<div style="
                         background:#f3f4f6;
                         border-radius:0.5rem;
-                        padding:0.18rem 0.55rem;
-                        margin-bottom:0.25rem;
-                        font-size:0.76rem;
-                        line-height:1.32;
+                        padding:0.16rem 0.60rem;
+                        margin-bottom:0.18rem;
+                        font-size:0.80rem;
+                        line-height:1.30;
                         color:#111827;
                         white-space:pre-wrap;
                         text-align:left;
-                    ">
-                        {escape_html(text)}
-                    </div>""",
+                    ">{escape_html(text)}</div>""",
                     unsafe_allow_html=True,
                 )
 
