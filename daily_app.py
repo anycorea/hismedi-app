@@ -333,7 +333,7 @@ def render_weekly_cards(df_weekly: pd.DataFrame, week_str: str) -> None:
 
                 # 부서명: 라인박스와의 간격 더 줄이기
                 st.markdown(
-                    f"<div style='font-size:0.82rem; font-weight:700; margin:-0.12rem 0 0.03rem 0;'>{dept}</div>",
+                    f"<div style='font-size:0.82rem; font-weight:700; margin:-0.20rem 0 0.03rem 0;'>{dept}</div>",
                     unsafe_allow_html=True,
                 )
 
@@ -344,7 +344,7 @@ def render_weekly_cards(df_weekly: pd.DataFrame, week_str: str) -> None:
                         border-radius:0.5rem;
                         padding:0.22rem 0.65rem;
                         margin-bottom:0.18rem;
-                        font-size:0.745rem;
+                        font-size:0.75rem;
                         line-height:1.30;
                         color:#111827;
                         white-space:pre-wrap;
