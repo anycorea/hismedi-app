@@ -340,7 +340,8 @@ def render_weekly_cards(df_weekly: pd.DataFrame, week_str: str) -> None:
                 st.markdown(
                     f"""
 <div style="
-    margin-top:0.25rem;
+    margin-top:0.10rem;        /* 부서명과 회색 박스를 더 바짝 붙이기 */
+    margin-bottom:0.30rem;     /* 아래 테두리와는 여유 있게 띄우기 */
     background:#f3f4f6;
     border-radius:0.5rem;
     padding:0.55rem 0.75rem;
@@ -354,6 +355,7 @@ def render_weekly_cards(df_weekly: pd.DataFrame, week_str: str) -> None:
 """,
                     unsafe_allow_html=True,
                 )
+
 
     if card_idx == 0:
         st.info("선택한 기간에 작성된 부서별 업무 내용이 없습니다.")
