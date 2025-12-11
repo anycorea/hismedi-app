@@ -261,111 +261,73 @@ def load_timetable_df() -> pd.DataFrame:
 
 
 def render_sheet_preview() -> None:
-    # 시트 열기용 URL (편집 화면)
     sheet_id = st.secrets["gsheet_preview"]["spreadsheet_id"]
     gid = st.secrets["gsheet_preview"].get("gid", "0")
 
+    # 구글 시트 미니멀 뷰 (셀합치기 포함, UI 최소화)
+    src_view = (
+        f"https://docs.google.com/spreadsheets/d/{sheet_id}/htmlview"
+        f"?gid={gid}&rm=minimal"
+    )
+
+    # 새 창에서 열기용 편집 URL
     src_open = (
         f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit#gid={gid}"
     )
 
-    # 상단 카드 (제목 + 새창에서 열기)
     st.markdown(
         f"""
-<style>
-.timetable-card {{
-    margin-top: 1.2rem;
-    margin-bottom: 0.4rem;
-    padding: 0.8rem 1.0rem;
-    border-radius: 0.75rem;
-    border: 1px solid #d4d4ff;
-    background: linear-gradient(135deg, #f4f5ff, #ffffff);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}}
-.timetable-card-title {{
-    font-size: 1.05rem;
-    font-weight: 700;
-    color: #1f2933;
-}}
-.timetable-card-desc {{
-    font-size: 0.85rem;
-    color: #6b7280;
-    margin-top: 2px;
-}}
-.timetable-card-link {{
-    font-size: 0.82rem;
-    text-decoration: none;
-    padding: 0.35rem 0.9rem;
-    border-radius: 999px;
-    border: 1px solid #4f46e5;
-    color: #4f46e5;
-    background: #eef2ff;
-    font-weight: 500;
-}}
-.timetable-wrapper {{
-    border: 1px solid #ddd;
-    border-radius: 0.5rem;
-    overflow: hidden;
-    background: white;
-    margin-top: 0.4rem;
-}}
-.timetable-table {{
-    border-collapse: collapse;
-    width: 100%;
-    font-size: 0.85rem;
-}}
-.timetable-table td {{
-    border: 1px solid #eee;
-    padding: 6px 8px;
-    text-align: center;
-    white-space: pre-wrap;
-}}
-.timetable-table tr:nth-child(even) td {{
-    background: #fafafa;
-}}
-</style>
-
-<div class="timetable-card">
-    <div>
-        <div class="timetable-card-title">🗓 진료시간표</div>
-        <div class="timetable-card-desc">외래 진료 스케줄 확인용 안내표입니다.</div>
-    </div>
-    <a href="{src_open}" target="_blank" class="timetable-card-link">
-        새 창에서 열기 ↗
-    </a>
-</div>
-""",
+        <div style="
+            margin-top: 1.2rem;
+            margin-bottom: 0.4rem;
+            padding: 0.8rem 1.0rem;
+            border-radius: 0.75rem;
+            border: 1px solid #d4d4ff;
+            background: linear-gradient(135deg, #f4f5ff, #ffffff);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        ">
+            <div>
+                <div style="font-size: 1.05rem; font-weight: 700; color: #1f2933;">
+                    🗓 진료시간표
+                </div>
+                <div style="font-size: 0.85rem; color: #6b7280; margin-top: 2px;">
+                    외래 진료 스케줄 확인용 안내표입니다.
+                </div>
+            </div>
+            <a href="{src_open}" target="_blank" style="
+                font-size: 0.82rem;
+                text-decoration: none;
+                padding: 0.35rem 0.9rem;
+                border-radius: 999px;
+                border: 1px solid #4f46e5;
+                color: #4f46e5;
+                background: #eef2ff;
+                font-weight: 500;
+            ">
+                새 창에서 열기 ↗
+            </a>
+        </div>
+        """,
         unsafe_allow_html=True,
     )
 
-    # 시트 내용을 DataFrame으로 로딩
-    df_tt = load_timetable_df()
-
-    if df_tt.empty:
-        st.info("진료시간표 시트에 표시할 데이터가 없습니다.")
-        return
-
-    # 인덱스/헤더 없이 HTML 테이블로 렌더링
-    table_html = df_tt.to_html(
-        index=False,
-        header=False,
-        border=0,
-        justify="center",
-        escape=False,
-    )
-
-    # Pandas 기본 클래스 제거 → 우리 CSS 클래스로 교체
-    table_html = table_html.replace('class="dataframe"', 'class="timetable-table"')
-
-    st.markdown(
+    st.components.v1.html(
         f"""
-<div class="timetable-wrapper">
-{table_html}
-</div>
-""",
-        unsafe_allow_html=True,
+        <iframe
+            src="{src_view}"
+            style="
+                width: 100%;
+                height: 700px;
+                border: 1px solid #ddd;
+                border-radius: 0.5rem;
+                background: white;
+            "
+        ></iframe>
+        """,
+        height=720,
+        scrolling=True,
     )
 
 
