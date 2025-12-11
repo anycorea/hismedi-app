@@ -227,30 +227,72 @@ def save_daily_entry(
 
 
 def render_sheet_preview() -> None:
-    """[gsheet_preview]에 연결된 진료시간표 구글시트를 미리보기로 띄움."""
     sheet_id = st.secrets["gsheet_preview"]["spreadsheet_id"]
     gid = st.secrets["gsheet_preview"].get("gid", "0")
 
-    src = (
-        f"https://docs.google.com/spreadsheets/d/{sheet_id}/htmlview"
-        f"?gid={gid}&rm=minimal"
+    # 1) '웹에 게시'를 켜둔 시트라면 이 주소가 조금 더 가볍습니다.
+    src_view = (
+        f"https://docs.google.com/spreadsheets/d/{sheet_id}/pubhtml"
+        f"?gid={gid}&single=true&widget=true&headers=false"
     )
 
-    components.html(
+    src_open = (
+        f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit#gid={gid}"
+    )
+
+    # 헤더 카드 부분은 그대로 두고, 아래 iframe 부분만 이 주소로
+    st.markdown(
         f"""
-        <div style="position: sticky; top: 0;">
-          <iframe
-            src="{src}"
-            style="
-              width: 100%;
-              height: 800px;
-              border: 1px solid #ddd;
-              background: white;
-            "
-          ></iframe>
+        <div style="
+            margin-top: 1.2rem;
+            margin-bottom: 0.4rem;
+            padding: 0.8rem 1.0rem;
+            border-radius: 0.75rem;
+            border: 1px solid #d4d4ff;
+            background: linear-gradient(135deg, #f4f5ff, #ffffff);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        ">
+          <div>
+            <div style="font-size: 1.05rem; font-weight: 700; color: #1f2933;">
+              🗓 진료시간표
+            </div>
+            <div style="font-size: 0.85rem; color: #6b7280; margin-top: 2px;">
+              외래 진료 스케줄 확인용 안내표입니다.
+            </div>
+          </div>
+          <a href="{src_open}" target="_blank" style="
+                font-size: 0.82rem;
+                text-decoration: none;
+                padding: 0.35rem 0.9rem;
+                border-radius: 999px;
+                border: 1px solid #4f46e5;
+                color: #4f46e5;
+                background: #eef2ff;
+                font-weight: 500;
+          ">
+            새 창에서 열기 ↗
+          </a>
         </div>
         """,
-        height=820,
+        unsafe_allow_html=True,
+    )
+
+    st.components.v1.html(
+        f"""
+        <iframe
+            src="{src_view}"
+            style="
+              width: 100%;
+              height: 700px;
+              border: 1px solid #ddd;
+              border-radius: 0.5rem;
+              background: white;
+            "
+        ></iframe>
+        """,
+        height=720,
         scrolling=True,
     )
 
@@ -344,9 +386,9 @@ if mode == "1일 보고":
 
     # ---------------- 진료시간표 (보고작성 아래쪽) ----------------
     if show_timetable:
-        st.markdown("### 진료시간표")
-        render_sheet_preview()
-
+        with st.spinner("진료시간표를 불러오는 중..."):
+            render_sheet_preview()
+        
 # --------------------------- 월별 보기 모드 ---------------------------
 else:
     if df_daily.empty:
