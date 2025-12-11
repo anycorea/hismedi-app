@@ -333,23 +333,25 @@ def render_weekly_cards(df_weekly: pd.DataFrame, week_str: str) -> None:
 
                 # 부서명
                 st.markdown(
-                    f"<div style='font-size:0.82rem; font-weight:700; margin:-0.10rem 0 0.03rem 0;'>{dept}</div>",
+                    f"<div style='font-size:0.82rem; font-weight:700; margin:-0.14rem 0 0.10rem 0;'>{dept}</div>",
                     unsafe_allow_html=True,
                 )
 
-                # 회색 박스 (왼쪽 정렬 + 폰트 키움 + 위/아래 간격 정리)
+                # 회색박스 내용
                 st.markdown(
                     f"""<div style="
                         background:#f3f4f6;
                         border-radius:0.5rem;
-                        padding:0.26rem 0.70rem;
-                        margin-bottom:0.18rem;
-                        font-size:0.78rem;
+                        padding:0.18rem 0.55rem;
+                        margin-bottom:0.25rem;
+                        font-size:0.76rem;
                         line-height:1.32;
                         color:#111827;
                         white-space:pre-wrap;
                         text-align:left;
-                    ">{escape_html(text)}</div>""",
+                    ">
+                        {escape_html(text)}
+                    </div>""",
                     unsafe_allow_html=True,
                 )
 
