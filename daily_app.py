@@ -337,21 +337,19 @@ def render_weekly_cards(df_weekly: pd.DataFrame, week_str: str) -> None:
                     unsafe_allow_html=True,
                 )
 
-                # 회색 박스 (텍스트 들여쓰기 제거 + 폰트 크기 조절)
+                # 회색 박스 (왼쪽 정렬 + 폰트 키움 + 위/아래 간격 정리)
                 st.markdown(
                     f"""<div style="
                         background:#f3f4f6;
                         border-radius:0.5rem;
-                        padding:0.22rem 0.65rem;
-                        font-size:0.745rem;
-                        line-height:1.30;
+                        padding:0.26rem 0.70rem;
+                        margin-bottom:0.18rem;
+                        font-size:0.78rem;
+                        line-height:1.32;
                         color:#111827;
                         white-space:pre-wrap;
-                    ">
-                        <span style="display:inline-block; margin:0; padding:0;">
-                            {escape_html(text)}
-                        </span>
-                    </div>""",
+                        text-align:left;
+                    ">{escape_html(text)}</div>""",
                     unsafe_allow_html=True,
                 )
 
