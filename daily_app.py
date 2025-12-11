@@ -6,7 +6,6 @@ from datetime import date, datetime, timedelta
 from typing import Any, Optional
 import calendar
 import re
-import time
 import streamlit.components.v1 as components
 
 # ------------------------------------------------------
@@ -265,17 +264,18 @@ def render_sheet_preview() -> None:
     sheet_id = st.secrets["gsheet_preview"]["spreadsheet_id"]
     gid = st.secrets["gsheet_preview"].get("gid", "0")
 
-    # 구글 시트 미니멀 뷰 (셀합치기 포함, UI 최소화)
+    # 구글 시트 미니멀 뷰
     src_view = (
         f"https://docs.google.com/spreadsheets/d/{sheet_id}/htmlview"
         f"?gid={gid}&rm=minimal"
     )
 
-    # 새 창에서 열기용 편집 URL
+    # 새 창에서 열기 URL
     src_open = (
         f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit#gid={gid}"
     )
 
+    # ---------------------- 카드 영역 ----------------------
     st.markdown(
         f"""
         <div style="
@@ -294,7 +294,7 @@ def render_sheet_preview() -> None:
                     🗓 진료시간표
                 </div>
                 <div style="font-size: 0.85rem; color: #6b7280; margin-top: 2px;">
-                    외래 진료 스케줄 확인용 안내표입니다.
+                    ↓↓↓ 아래의 진료시간표(바로보기)는 불러오는데 시간이 걸릴 수 있습니다.
                 </div>
             </div>
             <a href="{src_open}" target="_blank" style="
@@ -314,6 +314,7 @@ def render_sheet_preview() -> None:
         unsafe_allow_html=True,
     )
 
+    # ---------------------- iframe 미리보기 ----------------------
     st.components.v1.html(
         f"""
         <iframe
@@ -418,16 +419,8 @@ if mode == "1일 보고":
             )
             st.rerun()
 
-    # ---------------- 진료시간표 (보고작성 아래쪽) ----------------
     if show_timetable:
-
-        # 항상 표시되는 안내 문구
-        st.caption("※ 진료시간표는 구글시트에서 불러오는 중일 수 있습니다.")
-
-        # 스피너는 최소 0.5초 동안 보이도록 강제
-        with st.spinner("진료시간표를 불러오는 중..."):
-            time.sleep(0.5)
-            render_sheet_preview()
+        render_sheet_preview()
 
 # --------------------------- 월별 보기 모드 ---------------------------
 else:
