@@ -48,10 +48,10 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+
 # ------------------------------------------------------
 # Google Sheets Connection
 # ------------------------------------------------------
-
 
 @st.cache_resource
 def get_gspread_client() -> gspread.Client:
@@ -71,7 +71,6 @@ def get_worksheet() -> gspread.Worksheet:
 # ------------------------------------------------------
 # 날짜 유틸 함수
 # ------------------------------------------------------
-
 
 def parse_date_cell(v: Any) -> Optional[date]:
     """Daily 시트의 DATE 셀을 date 객체로 변환."""
@@ -136,7 +135,6 @@ def format_date_with_weekday(d: Any) -> str:
 # Load Daily Report DF
 # ------------------------------------------------------
 
-
 @st.cache_data(ttl=60)
 def load_daily_df() -> pd.DataFrame:
     ws = get_worksheet()
@@ -189,7 +187,6 @@ def load_daily_df() -> pd.DataFrame:
 # Save / Update Entry
 # ------------------------------------------------------
 
-
 def save_daily_entry(
     selected_date: date,
     content: str,
@@ -224,7 +221,6 @@ def save_daily_entry(
 # ------------------------------------------------------
 # 외부 진료시간표 시트 미리보기
 # ------------------------------------------------------
-
 
 def render_sheet_preview() -> None:
     sheet_id = st.secrets["gsheet_preview"]["spreadsheet_id"]
