@@ -335,39 +335,27 @@ def render_weekly_cards(df_weekly: pd.DataFrame, week_str: str) -> None:
         card_idx += 1
 
         with target_col:
-            st.markdown(
-                f"""
-<div style="
-    border:1px solid #e5e7eb;
-    border-radius:0.75rem;
-    padding:0.45rem 0.75rem;
-    margin-bottom:0.6rem;
-    background:linear-gradient(135deg,#ffffff,#f9fafb);
-">
-  <div style="
-      font-size:0.82rem;
-      font-weight:700;
-      margin-bottom:0.08rem;
-  ">
-    {dept}
-  </div>
-  <div style="
-      background:#f3f4f6;
-      border-radius:0.5rem;
-      padding:0.30rem 0.60rem;
-      font-size:0.65rem;
-      line-height:1.25;
-      color:#111827;
-      white-space:pre-wrap;
-  ">
-    <span style="font-size:0.65rem; line-height:1.25;">
-      {escape_html(text)}
-    </span>
-  </div>
-</div>
-""",
-                unsafe_allow_html=True,
-            )
+            with st.container(border=True):
+
+                # 부서명 (라인박스와 간격 최소화)
+                st.markdown(
+                    f"<div style='font-size:0.82rem; font-weight:700; margin:0 0 0.05rem 0;'>{dept}</div>",
+                    unsafe_allow_html=True,
+                )
+
+                # 회색 박스 (위/아래 여백 최소, 첫 글자 들여쓰기 없이)
+                st.markdown(
+                    f"""<div style="
+                        background:#f3f4f6;
+                        border-radius:0.5rem;
+                        padding:0.25rem 0.65rem;
+                        font-size:0.70rem;
+                        line-height:1.28;
+                        color:#111827;
+                        white-space:pre-wrap;
+                    ">{escape_html(text)}</div>""",
+                    unsafe_allow_html=True,
+                )
 
 
     if card_idx == 0:
