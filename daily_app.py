@@ -47,8 +47,11 @@ st.markdown(
       .block-container { padding-top: 2.3rem; padding-bottom: 1rem; }
 
       /* Sidebar: bring it UP to match main top */
+      section[data-testid="stSidebar"] {
+        transform: translateY(-0.6rem);
+      }
       section[data-testid="stSidebar"] .block-container {
-        padding-top: -1.0rem !important;
+        padding-top: 0rem !important;
         padding-bottom: 0.55rem !important;
       }
       /* Some themes wrap sidebar content in additional divs */
