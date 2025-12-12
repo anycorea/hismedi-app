@@ -365,44 +365,46 @@ with st.sidebar:
     st.markdown(f"<h2 style='font-size:1.45rem; font-weight:850;'>{APP_TITLE}</h2>", unsafe_allow_html=True)
     st.divider()
 
-    # 업무현황(월)
-    st.markdown("### 업무현황 (월)")
+# 업무현황(월)
+st.markdown("### 업무현황 (월)")
 
-    if df_daily.empty:
-        st.caption("아직 작성된 보고가 없어 월 선택 옵션이 없습니다.")
-        selected_ym = None
-        ym_options = []
-    else:
-        ym_set = {(d.year, d.month) for d in df_daily["DATE"]}
-        ym_options = sorted(ym_set, reverse=True)
+if df_daily.empty:
+    st.caption("아직 작성된 보고가 없어 월 선택 옵션이 없습니다.")
+    selected_ym = None
+    ym_options = []
+else:
+    ym_set = {(d.year, d.month) for d in df_daily["DATE"]}
+    ym_options = sorted(ym_set, reverse=True)
 
-        default_ym = (today.year, today.month)
-        default_index = ym_options.index(default_ym) if default_ym in ym_options else 0
+    default_ym = (today.year, today.month)
+    default_index = ym_options.index(default_ym) if default_ym in ym_options else 0
 
-        if "ym_index" not in st.session_state:
-            st.session_state["ym_index"] = default_index
+    if "ym_index" not in st.session_state:
+        st.session_state["ym_index"] = default_index
 
-        st.session_state["ym_index"] = max(0, min(st.session_state["ym_index"], len(ym_options) - 1))
+    st.session_state["ym_index"] = max(0, min(st.session_state["ym_index"], len(ym_options) - 1))
 
-        m1, m2, m3 = st.columns([1, 4, 1], vertical_alignment="center")
-        with m1:
-            if st.button("◀", use_container_width=True, key="ym_prev"):
-                st.session_state["ym_index"] = min(len(ym_options) - 1, st.session_state["ym_index"] + 1)
-                st.rerun()
-        with m2:
-            selected_ym = st.selectbox(
-                "월 선택",
-                ym_options,
-                index=st.session_state["ym_index"],
-                key="ym_selectbox",
-                format_func=lambda ym: f"{ym[0]}년 {ym[1]:02d}월",
-                label_visibility="collapsed",
-            )
-            st.session_state["ym_index"] = ym_options.index(selected_ym)
-        with m3:
-            if st.button("▶", use_container_width=True, key="ym_next"):
-                st.session_state["ym_index"] = max(0, st.session_state["ym_index"] - 1)
-                st.rerun()
+    # 1) 월 선택 박스(단독) - 중앙정렬은 박스 단독이 가장 안정적
+    selected_ym = st.selectbox(
+        "월 선택",
+        ym_options,
+        index=st.session_state["ym_index"],
+        key="ym_selectbox",
+        format_func=lambda ym: f"{ym[0]}년 {ym[1]:02d}월",
+        label_visibility="collapsed",
+    )
+    st.session_state["ym_index"] = ym_options.index(selected_ym)
+
+    # 2) 이전/다음 버튼은 아래에 따로
+    m1, m2 = st.columns(2)
+    with m1:
+        if st.button("◀ 이전", use_container_width=True, key="ym_prev"):
+            st.session_state["ym_index"] = min(len(ym_options) - 1, st.session_state["ym_index"] + 1)
+            st.rerun()
+    with m2:
+        if st.button("다음 ▶", use_container_width=True, key="ym_next"):
+            st.session_state["ym_index"] = max(0, st.session_state["ym_index"] - 1)
+            st.rerun()
 
     st.divider()
 
