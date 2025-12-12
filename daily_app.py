@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Optional
 import html
 import calendar
@@ -43,33 +43,34 @@ st.set_page_config(page_title=APP_TITLE, layout="wide")
 st.markdown(
     """
     <style>
-      .block-container { padding-top: 2.3rem; padding-bottom: 1rem; }
+      /* Main spacing */
+      .block-container { padding-top: 2.0rem; padding-bottom: 1rem; }
 
-      /* Sidebar spacing tighter */
-      section[data-testid="stSidebar"] .block-container { padding-top: 1.2rem; }
-      section[data-testid="stSidebar"] h2 { margin: 0.2rem 0 0.2rem 0 !important; }
-      section[data-testid="stSidebar"] h3 { margin: 0.35rem 0 0.25rem 0 !important; }
-      section[data-testid="stSidebar"] .stMarkdown { margin-bottom: 0.2rem; }
-      section[data-testid="stSidebar"] hr { margin: 0.45rem 0; }
+      /* Sidebar spacing (붙이기) */
+      section[data-testid="stSidebar"] .block-container { padding-top: 0.6rem; padding-bottom: 0.6rem; }
+      section[data-testid="stSidebar"] h2 { margin: 0.10rem 0 0.25rem 0 !important; }
+      section[data-testid="stSidebar"] h3 { margin: 0.25rem 0 0.15rem 0 !important; }
+      section[data-testid="stSidebar"] .stMarkdown { margin-bottom: 0.12rem; }
+      section[data-testid="stSidebar"] hr { margin: 0.35rem 0; }
 
-      /* Timetable "button-like" link */
+      /* Sidebar memo input tint (light blue) */
+      section[data-testid="stSidebar"] div[data-testid="stDateInput"] input { background: #eef2ff; }
+      section[data-testid="stSidebar"] div[data-testid="stTextArea"] textarea { background: #eef2ff; }
+
+      /* Timetable link styled like a light button */
       .sidebar-linkbtn {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 100%;
-        height: 2.45rem;
-        padding: 0 0.8rem;
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 100%; height: 2.45rem; padding: 0 0.65rem;
         border-radius: 0.5rem;
-        border: 1px solid rgba(49, 51, 63, 0.2);
-        background: rgba(255,255,255,1);
-        color: rgb(49, 51, 63) !important;
-        font-weight: 600;
+        border: 1px solid rgba(49, 51, 63, 0.18);
+        background: rgba(248, 249, 251, 1);
+        color: rgba(49, 51, 63, 0.75) !important;
+        font-weight: 500;
         text-decoration: none !important;
         white-space: nowrap;
         box-sizing: border-box;
       }
-      .sidebar-linkbtn:hover { background: rgba(248, 249, 251, 1); }
+      .sidebar-linkbtn:hover { background: rgba(243, 244, 246, 1); }
 
       /* Monthly horizontal table */
       .month-wrap { overflow-x:auto; border:1px solid #e5e7eb; border-radius:0.75rem; }
@@ -78,9 +79,12 @@ st.markdown(
       .month-date { background:#f9fafb; font-weight:700; white-space:nowrap; }
       .month-cell { min-width:14rem; white-space:pre-wrap; }
 
-      /* Main titles a bit smaller */
-      .main-title { font-size: 1.2rem; font-weight: 800; margin: 0.2rem 0 0.2rem 0; }
-      .sub-title { font-size: 1.05rem; font-weight: 800; margin: 0.2rem 0 0.2rem 0; }
+      /* Main titles */
+      .main-title { font-size: 1.15rem; font-weight: 850; margin: 0.2rem 0 0.35rem 0; }
+      .sub-title { font-size: 1.05rem; font-weight: 850; margin: 0.1rem 0 0.2rem 0; }
+
+      /* Weekly selectbox tint (main only) */
+      section.main div[data-testid="stSelectbox"] div[role="combobox"] { background: #eef2ff; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -126,6 +130,7 @@ def parse_date_cell(v: Any) -> Optional[date]:
         s = v.strip()
         if not s:
             return None
+
         try:
             return date.fromisoformat(s)
         except Exception:
@@ -250,6 +255,7 @@ def render_weekly_cards(df_weekly: pd.DataFrame, week_str: str, ncols: int = 3) 
 
     row = row_df.iloc[0]
     dept_cols = [c for c in df_weekly.columns if c not in [WEEK_COL, "_start"] and not c.startswith("Unnamed")]
+
     cols = st.columns(ncols)
     card_idx = 0
 
@@ -261,7 +267,7 @@ def render_weekly_cards(df_weekly: pd.DataFrame, week_str: str, ncols: int = 3) 
         with cols[card_idx % ncols]:
             with st.container(border=True):
                 st.markdown(
-                    f"<div style='font-size:0.85rem; font-weight:800; margin:-0.10rem 0 0.15rem 0;'>{dept}</div>",
+                    f"<div style='font-size:0.85rem; font-weight:850; margin:-0.05rem 0 0.15rem 0;'>{dept}</div>",
                     unsafe_allow_html=True,
                 )
                 st.markdown(
@@ -315,18 +321,20 @@ if "timetable_open" not in st.session_state:
 today = date.today()
 default_single = today
 
+if "memo_date" not in st.session_state:
+    st.session_state["memo_date"] = default_single
+
 
 # ======================================================
 # Sidebar
 # ======================================================
 
 with st.sidebar:
-    st.markdown(f"<h2 style='font-size:1.55rem; font-weight:800;'>{APP_TITLE}</h2>", unsafe_allow_html=True)
+    st.markdown(f"<h2 style='font-size:1.45rem; font-weight:850;'>{APP_TITLE}</h2>", unsafe_allow_html=True)
     st.divider()
 
-    # 1) 업무현황 (월) - always visible, top
+    # 1) 업무현황(월) - top
     st.markdown("### 업무현황 (월)")
-
     if df_daily.empty:
         st.caption("아직 작성된 보고가 없어 월 선택 옵션이 없습니다.")
         selected_ym = None
@@ -344,7 +352,7 @@ with st.sidebar:
 
     st.divider()
 
-    # 2) 진료시간표 - open/close + open new window (same size)
+    # 2) 진료시간표 - same style/size: open/close/link
     st.markdown("### 진료시간표")
 
     sheet_id = st.secrets["gsheet_preview"]["spreadsheet_id"]
@@ -361,31 +369,38 @@ with st.sidebar:
             st.session_state["timetable_open"] = False
             st.rerun()
     with c3:
-        st.markdown(f'<a class="sidebar-linkbtn" href="{src_open}" target="_blank">새 창에서 열기 ↗</a>', unsafe_allow_html=True)
+        st.markdown(f'<a class="sidebar-linkbtn" href="{src_open}" target="_blank">새창 열기 ↗</a>', unsafe_allow_html=True)
 
     st.divider()
 
     # 3) 1일 업무 메모
     st.markdown("### 1일 업무 메모")
 
-    selected_date = st.date_input("날짜", value=default_single)
-    if isinstance(selected_date, (list, tuple)):
-        selected_date = selected_date[0]
+    d1, d2, d3 = st.columns([0.22, 0.56, 0.22])
+    with d1:
+        if st.button("◀", use_container_width=True):
+            st.session_state["memo_date"] = st.session_state["memo_date"] - timedelta(days=1)
+            st.rerun()
+    with d2:
+        picked = st.date_input("날짜", value=st.session_state["memo_date"], key="memo_date_input")
+        if isinstance(picked, (list, tuple)):
+            picked = picked[0]
+        if picked != st.session_state["memo_date"]:
+            st.session_state["memo_date"] = picked
+    with d3:
+        if st.button("▶", use_container_width=True):
+            st.session_state["memo_date"] = st.session_state["memo_date"] + timedelta(days=1)
+            st.rerun()
 
-    default_content, has_existing = "", False
+    selected_date = st.session_state["memo_date"]
+
+    default_content = ""
     if not df_daily.empty and (df_daily["DATE"] == selected_date).any():
         row = df_daily[df_daily["DATE"] == selected_date].iloc[0]
-        default_content, has_existing = row.get("내용", ""), True
+        default_content = row.get("내용", "")
 
-    content = st.text_area(
-        "내용",
-        height=140,
-        value=default_content,
-        placeholder="짤막하게 메모를 남겨두세요.\n(예: 정대표 미팅 - 14시)",
-        key="sidebar_daily_memo",
-    )
+    content = st.text_area("내용", height=150, value=default_content, key="sidebar_daily_memo")
 
-    # 저장 + 동기화 (비우기 제거)
     b1, b2 = st.columns(2)
     with b1:
         if st.button("저장", use_container_width=True):
@@ -404,7 +419,7 @@ with st.sidebar:
 
 
 # ======================================================
-# Main - right panel
+# Main
 # ======================================================
 
 def render_month_overview_horizontal(period_df: pd.DataFrame) -> None:
@@ -415,21 +430,22 @@ def render_month_overview_horizontal(period_df: pd.DataFrame) -> None:
     dates = [format_date_with_weekday(d) for d in period_df["DATE"].tolist()]
     contents = [escape_html(str(x)) for x in period_df["내용"].tolist()]
 
-    # (요청) 헤더(DATE, 내용) 숨기기 -> 왼쪽 라벨 제거
     date_row = "".join([f"<td class='month-date'>{escape_html(d)}</td>" for d in dates])
     content_row = "".join([f"<td class='month-cell'>{c}</td>" for c in contents])
 
-    html_table = f"""
-    <div class="month-wrap">
-      <table class="month-table">
-        <tbody>
-          <tr>{date_row}</tr>
-          <tr>{content_row}</tr>
-        </tbody>
-      </table>
-    </div>
-    """
-    st.markdown(html_table, unsafe_allow_html=True)
+    st.markdown(
+        f"""
+        <div class="month-wrap">
+          <table class="month-table">
+            <tbody>
+              <tr>{date_row}</tr>
+              <tr>{content_row}</tr>
+            </tbody>
+          </table>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 if st.session_state.get("timetable_open", False):
@@ -445,31 +461,29 @@ else:
         end_date = date(year, month, calendar.monthrange(year, month)[1])
 
         st.markdown('<div class="main-title">주요 업무 현황</div>', unsafe_allow_html=True)
-        st.caption(f"{year}년 {month:02d}월")
 
         mask = (df_daily["DATE"] >= start_date) & (df_daily["DATE"] <= end_date)
         period_df = df_daily.loc[mask, ["DATE", "내용"]].copy().sort_values("DATE").reset_index(drop=True)
-
         render_month_overview_horizontal(period_df)
 
         st.markdown("<div style='height:0.9rem'></div>", unsafe_allow_html=True)
 
-        # Weekly section
         try:
             weekly_df = load_weekly_df()
         except Exception:
             weekly_df = pd.DataFrame()
 
-        title_col, sel_col = st.columns([1.2, 1])
-        with title_col:
+        head_l, head_r = st.columns([0.35, 0.65], vertical_alignment="center")
+        with head_l:
             st.markdown('<div class="sub-title">부서별 업무 현황</div>', unsafe_allow_html=True)
-        with sel_col:
+        with head_r:
             if not weekly_df.empty:
                 week_options = weekly_df[WEEK_COL].astype(str).tolist()
                 default_week_idx = 0
                 prev_week = st.session_state.get("weekly_week_select")
                 if prev_week in week_options:
                     default_week_idx = week_options.index(prev_week)
+
                 selected_week = st.selectbox(
                     "기간선택",
                     options=week_options,
