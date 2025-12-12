@@ -87,7 +87,7 @@ st.markdown(
 
       /* Sidebar: 섹션 블록 자체를 위로 당겨 밀도 증가 */
       section[data-testid="stSidebar"] .stVerticalBlock{margin-bottom:0.06rem!important;}
-      section[data-testid="stSidebar"] .stVerticalBlock > div{margin-bottom:0.12rem!important;}
+      section[data-testid="stSidebar"] .stVerticalBlock > div{margin-bottom:0.07rem!important;}
 
     </style>
     """,
