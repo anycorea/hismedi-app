@@ -46,21 +46,24 @@ st.markdown(
       /* Main spacing (safe) */
       .block-container{padding-top:2.3rem;padding-bottom:1rem;}
 
-      /* Sidebar: overall position + padding */
+      /* Sidebar: move up + padding */
       section[data-testid="stSidebar"] .block-container{padding-top:0!important;padding-bottom:0.55rem!important;}
       section[data-testid="stSidebar"] div[data-testid="stSidebarContent"]{margin-top:-1.2rem!important;}
       section[data-testid="stSidebar"] div[data-testid="stSidebarUserContent"]{margin-top:-1.2rem!important;}
-      section[data-testid="stSidebar"]>div{padding-top:0!important;}
 
-      /* Sidebar: headings / separators / element spacing */
+      /* Sidebar: headings / separators */
       section[data-testid="stSidebar"] h2{margin:-0.10rem 0 0.20rem 0!important;}
-      section[data-testid="stSidebar"] h3{margin:0.18rem 0 0.12rem 0!important;}
-      section[data-testid="stSidebar"] hr{margin:0.22rem 0!important;}
-      section[data-testid="stSidebar"] .stElementContainer{margin-bottom:0.18rem!important;}
-      section[data-testid="stSidebar"] .stSelectbox,section[data-testid="stSidebar"] .stDateInput,section[data-testid="stSidebar"] .stTextArea,section[data-testid="stSidebar"] .stButton{margin-bottom:0.22rem!important;}
-      section[data-testid="stSidebar"] .stMarkdown{margin-bottom:0.08rem!important;}
+      section[data-testid="stSidebar"] h3{margin:0.10rem 0 0.08rem 0!important;}
+      section[data-testid="stSidebar"] hr{margin:0.18rem 0!important;}
 
-      /* Highlighted inputs (sidebar + main select) */
+      /* Sidebar: REAL spacing killers (Streamlit new blocks) */
+      section[data-testid="stSidebar"] [data-testid="stBlock"]{padding-top:0!important;padding-bottom:0!important;margin-top:0!important;margin-bottom:0!important;}
+      section[data-testid="stSidebar"] .stBlock{padding-top:0!important;padding-bottom:0!important;margin-top:0!important;margin-bottom:0!important;}
+      section[data-testid="stSidebar"] .stElementContainer{margin:0.06rem 0!important;}
+      section[data-testid="stSidebar"] .stMarkdown{margin:0.05rem 0!important;}
+      section[data-testid="stSidebar"] .stButton,section[data-testid="stSidebar"] .stSelectbox,section[data-testid="stSidebar"] .stDateInput,section[data-testid="stSidebar"] .stTextArea{margin:0.06rem 0!important;}
+
+      /* Highlighted inputs */
       section[data-testid="stSidebar"] div[data-testid="stSelectbox"] div[role="combobox"],
       section[data-testid="stSidebar"] div[data-testid="stDateInput"] input,
       section[data-testid="stSidebar"] div[data-testid="stTextArea"] textarea,
@@ -71,7 +74,9 @@ st.markdown(
       section[data-testid="stSidebar"] div[data-testid="stTextArea"] textarea{font-size:0.85rem!important;line-height:1.15!important;min-height:10.5rem!important;}
 
       /* Timetable link button */
-      .sidebar-linkbtn{display:inline-flex;align-items:center;justify-content:center;width:100%;height:2.45rem;padding:0 0.65rem;border-radius:0.5rem;border:1px solid rgba(49,51,63,0.18);background:rgba(248,249,251,1);color:rgba(49,51,63,0.75)!important;font-weight:500;text-decoration:none!important;white-space:nowrap;box-sizing:border-box;}
+      .sidebar-linkbtn{display:inline-flex;align-items:center;justify-content:center;width:100%;height:2.45rem;padding:0 0.65rem;border-radius:0.5rem;border:1px solid rgba(49,51,63,0.18);}
+      .sidebar-linkbtn{background:rgba(248,249,251,1);color:rgba(49,51,63,0.75)!important;font-weight:500;text-decoration:none!important;white-space:nowrap;box-sizing:border-box;}
+
       .sidebar-linkbtn:hover{background:rgba(243,244,246,1);}
 
       /* Monthly horizontal table */
@@ -84,11 +89,6 @@ st.markdown(
       /* Main titles */
       .main-title{font-size:1.15rem;font-weight:850;margin:0.2rem 0 0.35rem 0;}
       .sub-title{font-size:1.05rem;font-weight:850;margin:0.1rem 0 0.2rem 0;}
-
-      /* Sidebar: 섹션 블록 자체를 위로 당겨 밀도 증가 */
-      section[data-testid="stSidebar"] .stVerticalBlock{margin-bottom:0.06rem!important;}
-      section[data-testid="stSidebar"] .stVerticalBlock > div{margin-bottom:0.07rem!important;}
-
     </style>
     """,
     unsafe_allow_html=True,
