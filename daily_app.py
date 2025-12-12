@@ -86,7 +86,7 @@ st.markdown(
       .sub-title{font-size:1.05rem;font-weight:850;margin:0.1rem 0 0.2rem 0;}
 
       /* Sidebar: 섹션 블록 자체를 위로 당겨 밀도 증가 */
-      section[data-testid="stSidebar"] .stVerticalBlock{margin-bottom:0.1rem!important;}
+      section[data-testid="stSidebar"] .stVerticalBlock{margin-bottom:0.06rem!important;}
       section[data-testid="stSidebar"] .stVerticalBlock > div{margin-bottom:0.12rem!important;}
 
     </style>
