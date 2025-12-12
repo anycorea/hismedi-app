@@ -48,7 +48,7 @@ st.markdown(
 
       /* Sidebar: bring it UP to match main top */
       section[data-testid="stSidebar"] {
-        transform: translateY(-0.6rem);
+        transform: translateY(-0.8rem);
       }
       section[data-testid="stSidebar"] .block-container {
         padding-top: 0rem !important;
