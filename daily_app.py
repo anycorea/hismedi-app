@@ -48,8 +48,8 @@ st.markdown(
 
       /* Sidebar: bring it UP to match main top */
       section[data-testid="stSidebar"] .block-container { padding-top: 0rem!important; padding-bottom: 0.55rem!important; }
-      section[data-testid="stSidebar"] div[data-testid="stSidebarContent"]{ margin-top:-1.0rem!important; }
-      section[data-testid="stSidebar"] div[data-testid="stSidebarUserContent"]{ margin-top:-1.0rem!important; }
+      section[data-testid="stSidebar"] div[data-testid="stSidebarContent"]{ margin-top:-1.2rem!important; }
+      section[data-testid="stSidebar"] div[data-testid="stSidebarUserContent"]{ margin-top:-1.2rem!important; }
 
       /* Some themes wrap sidebar content in additional divs */
       section[data-testid="stSidebar"] > div { padding-top: 0rem!important; }
