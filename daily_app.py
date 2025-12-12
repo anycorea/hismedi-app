@@ -487,10 +487,9 @@ def render_month_overview_horizontal(period_df: pd.DataFrame) -> None:
         unsafe_allow_html=True,
     )
 
-
 if st.session_state.get("timetable_open", False):
-    with st.spinner("진료시간표를 불러오는 중..."):
-        render_sheet_preview()
+    st.info("진료시간표를 불러오는 중... (처음엔 1~2초 걸릴 수 있어요)")
+    render_sheet_preview()
 
 else:
     if df_daily.empty or selected_ym is None:
