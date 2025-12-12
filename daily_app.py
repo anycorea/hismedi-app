@@ -43,21 +43,30 @@ st.set_page_config(page_title=APP_TITLE, layout="wide")
 st.markdown(
     """
     <style>
-      /* Main spacing */
-      .block-container { padding-top: 2.0rem; padding-bottom: 1rem; }
+      /* Keep main safe (avoid cropping) */
+      .block-container { padding-top: 2.3rem; padding-bottom: 1rem; }
 
-      /* Sidebar spacing (붙이기) */
-      section[data-testid="stSidebar"] .block-container { padding-top: 0.6rem; padding-bottom: 0.6rem; }
+      /* Sidebar only: tighter spacing */
+      section[data-testid="stSidebar"] .block-container { padding-top: 0.6rem !important; padding-bottom: 0.6rem !important; }
       section[data-testid="stSidebar"] h2 { margin: 0.10rem 0 0.25rem 0 !important; }
       section[data-testid="stSidebar"] h3 { margin: 0.25rem 0 0.15rem 0 !important; }
       section[data-testid="stSidebar"] .stMarkdown { margin-bottom: 0.12rem; }
       section[data-testid="stSidebar"] hr { margin: 0.35rem 0; }
 
-      /* Sidebar memo input tint (light blue) */
-      section[data-testid="stSidebar"] div[data-testid="stDateInput"] input { background: #eef2ff; }
-      section[data-testid="stSidebar"] div[data-testid="stTextArea"] textarea { background: #eef2ff; }
+      /* Sidebar inputs: stronger highlight (not-too-blue) */
+      section[data-testid="stSidebar"] div[data-testid="stSelectbox"] div[role="combobox"],
+      section[data-testid="stSidebar"] div[data-testid="stDateInput"] input,
+      section[data-testid="stSidebar"] div[data-testid="stTextArea"] textarea {
+        background: #eef4ff !important;
+        border: 1px solid #c7d2fe !important;
+      }
 
-      /* Timetable link styled like a light button */
+      /* Center month selectbox + date input (sidebar) */
+      section[data-testid="stSidebar"] div[data-testid="stSelectbox"] div[role="combobox"] { margin-left: auto; margin-right: auto; max-width: 260px; }
+      section[data-testid="stSidebar"] div[data-testid="stDateInput"] { max-width: 260px; margin-left: auto; margin-right: auto; }
+      section[data-testid="stSidebar"] div[data-testid="stTextArea"] textarea { border-radius: 0.55rem; }
+
+      /* Timetable link styled like a light button (same height as buttons) */
       .sidebar-linkbtn {
         display: inline-flex; align-items: center; justify-content: center;
         width: 100%; height: 2.45rem; padding: 0 0.65rem;
@@ -84,7 +93,10 @@ st.markdown(
       .sub-title { font-size: 1.05rem; font-weight: 850; margin: 0.1rem 0 0.2rem 0; }
 
       /* Weekly selectbox tint (main only) */
-      section.main div[data-testid="stSelectbox"] div[role="combobox"] { background: #eef2ff; }
+      section.main div[data-testid="stSelectbox"] div[role="combobox"] {
+        background: #eef4ff !important;
+        border: 1px solid #c7d2fe !important;
+      }
     </style>
     """,
     unsafe_allow_html=True,
@@ -270,9 +282,10 @@ def render_weekly_cards(df_weekly: pd.DataFrame, week_str: str, ncols: int = 3) 
                     f"<div style='font-size:0.85rem; font-weight:850; margin:-0.05rem 0 0.15rem 0;'>{dept}</div>",
                     unsafe_allow_html=True,
                 )
+                # (요청) 더 밝은 회색
                 st.markdown(
                     f"""<div style="
-                        background:#f3f4f6; border-radius:0.6rem;
+                        background:#f8fafc; border-radius:0.6rem;
                         padding:0.35rem 0.65rem;
                         font-size:0.80rem; line-height:1.35; color:#111827;
                         white-space:pre-wrap;
@@ -333,8 +346,9 @@ with st.sidebar:
     st.markdown(f"<h2 style='font-size:1.45rem; font-weight:850;'>{APP_TITLE}</h2>", unsafe_allow_html=True)
     st.divider()
 
-    # 1) 업무현황(월) - top
+    # 1) 업무현황(월)
     st.markdown("### 업무현황 (월)")
+
     if df_daily.empty:
         st.caption("아직 작성된 보고가 없어 월 선택 옵션이 없습니다.")
         selected_ym = None
@@ -348,11 +362,12 @@ with st.sidebar:
             ym_options,
             index=default_index,
             format_func=lambda ym: f"{ym[0]}년 {ym[1]:02d}월",
+            label_visibility="collapsed",  # (요청) '월 선택' 텍스트 제거
         )
 
     st.divider()
 
-    # 2) 진료시간표 - same style/size: open/close/link
+    # 2) 진료시간표
     st.markdown("### 진료시간표")
 
     sheet_id = st.secrets["gsheet_preview"]["spreadsheet_id"]
@@ -382,7 +397,12 @@ with st.sidebar:
             st.session_state["memo_date"] = st.session_state["memo_date"] - timedelta(days=1)
             st.rerun()
     with d2:
-        picked = st.date_input("날짜", value=st.session_state["memo_date"], key="memo_date_input")
+        picked = st.date_input(
+            "날짜",
+            value=st.session_state["memo_date"],
+            key="memo_date_input",
+            label_visibility="collapsed",  # (요청) '날짜' 텍스트 제거
+        )
         if isinstance(picked, (list, tuple)):
             picked = picked[0]
         if picked != st.session_state["memo_date"]:
@@ -399,7 +419,7 @@ with st.sidebar:
         row = df_daily[df_daily["DATE"] == selected_date].iloc[0]
         default_content = row.get("내용", "")
 
-    content = st.text_area("내용", height=150, value=default_content, key="sidebar_daily_memo")
+    content = st.text_area("내용", height=150, value=default_content, key="sidebar_daily_memo", label_visibility="collapsed")
 
     b1, b2 = st.columns(2)
     with b1:
@@ -473,10 +493,11 @@ else:
         except Exception:
             weekly_df = pd.DataFrame()
 
-        head_l, head_r = st.columns([0.35, 0.65], vertical_alignment="center")
-        with head_l:
+        # (요청) 기간 선택 박스를 제목 "바로 옆"에 두기 위해: 3컬럼(제목/선택/스페이서)
+        head1, head2, head3 = st.columns([0.20, 0.32, 0.48], vertical_alignment="center")
+        with head1:
             st.markdown('<div class="sub-title">부서별 업무 현황</div>', unsafe_allow_html=True)
-        with head_r:
+        with head2:
             if not weekly_df.empty:
                 week_options = weekly_df[WEEK_COL].astype(str).tolist()
                 default_week_idx = 0
@@ -494,6 +515,8 @@ else:
             else:
                 selected_week = None
                 st.caption("")
+        with head3:
+            st.caption("")
 
         if weekly_df.empty:
             st.info("부서별 업무 데이터가 없습니다.")
