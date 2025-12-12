@@ -48,8 +48,8 @@ st.markdown(
 
       /* Sidebar: bring it UP to match main top */
       section[data-testid="stSidebar"] .block-container { padding-top: 0rem!important; padding-bottom: 0.55rem!important; }
-      section[data-testid="stSidebar"] div[data-testid="stSidebarContent"]{ margin-top:-0.6rem!important; }
-      section[data-testid="stSidebar"] div[data-testid="stSidebarUserContent"]{ margin-top:-0.6rem!important; }
+      section[data-testid="stSidebar"] div[data-testid="stSidebarContent"]{ margin-top:-0.4rem!important; }
+      section[data-testid="stSidebar"] div[data-testid="stSidebarUserContent"]{ margin-top:-0.4rem!important; }
 
       /* Some themes wrap sidebar content in additional divs */
       section[data-testid="stSidebar"] > div { padding-top: 0rem!important; }
@@ -398,7 +398,7 @@ with st.sidebar:
             st.session_state["timetable_open"] = False
             st.rerun()
     with t3:
-        st.markdown(f'<a class="sidebar-linkbtn" href="{src_open}" target="_blank">새창 열기 ↗</a>', unsafe_allow_html=True)
+        st.markdown(f'<a class="sidebar-linkbtn" href="{src_open}" target="_blank">새창 열기↗</a>', unsafe_allow_html=True)
 
     st.divider()
 
