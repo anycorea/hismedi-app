@@ -43,15 +43,17 @@ st.set_page_config(page_title=APP_TITLE, layout="wide")
 st.markdown(
     """
     <style>
-      /* Main safe spacing */
+      /* Keep main safe spacing (do not crop) */
       .block-container { padding-top: 2.3rem; padding-bottom: 1rem; }
 
-      /* Sidebar: stick to top harder */
+      /* Sidebar: bring it UP to match main top */
       section[data-testid="stSidebar"] .block-container {
-        padding-top: 0.15rem !important;
+        padding-top: 0rem !important;
         padding-bottom: 0.55rem !important;
       }
-      section[data-testid="stSidebar"] h2 { margin: 0.00rem 0 0.20rem 0 !important; }
+      /* Some themes wrap sidebar content in additional divs */
+      section[data-testid="stSidebar"] > div { padding-top: 0rem !important; }
+      section[data-testid="stSidebar"] h2 { margin: -0.10rem 0 0.20rem 0 !important; }
       section[data-testid="stSidebar"] h3 { margin: 0.18rem 0 0.12rem 0 !important; }
       section[data-testid="stSidebar"] .stMarkdown { margin-bottom: 0.10rem; }
       section[data-testid="stSidebar"] hr { margin: 0.30rem 0; }
@@ -65,10 +67,16 @@ st.markdown(
         border: 1px solid #c7d2fe !important;
       }
 
-      /* Center text inside month/date boxes */
+      /* Center text inside date input */
       section[data-testid="stSidebar"] div[data-testid="stDateInput"] input { text-align:center !important; }
-      section[data-testid="stSidebar"] div[data-testid="stSelectbox"] div[role="combobox"] { justify-content:center !important; }
-      section[data-testid="stSidebar"] div[data-testid="stSelectbox"] div[role="combobox"] * { text-align:center !important; }
+
+      /* Center the selected value in Streamlit selectbox (BaseWeb select) */
+      section[data-testid="stSidebar"] div[data-baseweb="select"] > div {
+        justify-content: center !important;
+      }
+      section[data-testid="stSidebar"] div[data-baseweb="select"] * {
+        text-align: center !important;
+      }
 
       /* Timetable link styled like a light button */
       .sidebar-linkbtn {
