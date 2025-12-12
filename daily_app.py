@@ -43,73 +43,52 @@ st.set_page_config(page_title=APP_TITLE, layout="wide")
 st.markdown(
     """
     <style>
-      /* Keep main safe spacing (do not crop) */
-      .block-container { padding-top: 2.3rem; padding-bottom: 1rem; }
+      /* Main spacing (safe) */
+      .block-container{padding-top:2.3rem;padding-bottom:1rem;}
 
-      /* Sidebar: bring it UP to match main top */
-      section[data-testid="stSidebar"] .block-container { padding-top: 0rem!important; padding-bottom: 0.55rem!important; }
-      section[data-testid="stSidebar"] div[data-testid="stSidebarContent"]{ margin-top:-1.2rem!important; }
-      section[data-testid="stSidebar"] div[data-testid="stSidebarUserContent"]{ margin-top:-1.2rem!important; }
+      /* Sidebar: overall position + padding */
+      section[data-testid="stSidebar"] .block-container{padding-top:0!important;padding-bottom:0.55rem!important;}
+      section[data-testid="stSidebar"] div[data-testid="stSidebarContent"]{margin-top:-1.2rem!important;}
+      section[data-testid="stSidebar"] div[data-testid="stSidebarUserContent"]{margin-top:-1.2rem!important;}
+      section[data-testid="stSidebar"]>div{padding-top:0!important;}
 
-      /* Some themes wrap sidebar content in additional divs */
-      section[data-testid="stSidebar"] > div { padding-top: 0rem!important; }
-      section[data-testid="stSidebar"] h2 { margin: -0.10rem 0 0.20rem 0!important; }
-      section[data-testid="stSidebar"] h3 { margin: 0.18rem 0 0.12rem 0!important; }
-      section[data-testid="stSidebar"] .stMarkdown { margin-bottom: 0.10rem; }
-      section[data-testid="stSidebar"] hr { margin: 0.30rem 0; }
-
-      /* Sidebar: 항목 간 기본 세로 간격 축소 */
-      section[data-testid="stSidebar"] .stElementContainer { margin-bottom: 0.25rem!important; }
-      section[data-testid="stSidebar"] .stMarkdown { margin-bottom: 0.08rem!important; }
-      section[data-testid="stSidebar"] .stSelectbox,
-      section[data-testid="stSidebar"] .stDateInput,
-      section[data-testid="stSidebar"] .stTextArea,
-      section[data-testid="stSidebar"] .stButton { margin-bottom: 0.28rem!important; }
+      /* Sidebar: headings / separators / element spacing */
+      section[data-testid="stSidebar"] h2{margin:-0.10rem 0 0.20rem 0!important;}
+      section[data-testid="stSidebar"] h3{margin:0.18rem 0 0.12rem 0!important;}
+      section[data-testid="stSidebar"] hr{margin:0.22rem 0!important;}
+      section[data-testid="stSidebar"] .stElementContainer{margin-bottom:0.18rem!important;}
+      section[data-testid="stSidebar"] .stSelectbox,section[data-testid="stSidebar"] .stDateInput,section[data-testid="stSidebar"] .stTextArea,section[data-testid="stSidebar"] .stButton{margin-bottom:0.22rem!important;}
+      section[data-testid="stSidebar"] .stMarkdown{margin-bottom:0.08rem!important;}
 
       /* Highlighted inputs (sidebar + main select) */
       section[data-testid="stSidebar"] div[data-testid="stSelectbox"] div[role="combobox"],
       section[data-testid="stSidebar"] div[data-testid="stDateInput"] input,
       section[data-testid="stSidebar"] div[data-testid="stTextArea"] textarea,
-      section.main div[data-testid="stSelectbox"] div[role="combobox"]{ background: #eef4ff !important; border: 1px solid #c7d2fe !important; }
- 
-      /* Sidebar: 1일 업무 메모 내용(textarea) 글자 크기 */
-      section[data-testid="stSidebar"] div[data-testid="stTextArea"] textarea{ font-size: 0.85rem!important; line-height: 1.15!important; }
+      section.main div[data-testid="stSelectbox"] div[role="combobox"]{background:#eef4ff!important;border:1px solid #c7d2fe!important;}
 
-      /* Sidebar: 1일 업무 메모 textarea 높이 */
-      section[data-testid="stSidebar"] div[data-testid="stTextArea"] textarea{ min-height: 10.5rem!important; }
+      /* Sidebar: date center + memo textarea font/height */
+      section[data-testid="stSidebar"] div[data-testid="stDateInput"] input{text-align:center!important;}
+      section[data-testid="stSidebar"] div[data-testid="stTextArea"] textarea{font-size:0.85rem!important;line-height:1.15!important;min-height:10.5rem!important;}
 
-      /* Center text inside date input */
-      section[data-testid="stSidebar"] div[data-testid="stDateInput"] input { text-align:center !important; }
-
-      /* Timetable link styled like a light button */
-      .sidebar-linkbtn {
-        display: inline-flex; align-items: center; justify-content: center;
-        width: 100%; height: 2.45rem; padding: 0 0.65rem;
-        border-radius: 0.5rem;
-        border: 1px solid rgba(49, 51, 63, 0.18);
-        background: rgba(248, 249, 251, 1);
-        color: rgba(49, 51, 63, 0.75) !important;
-        font-weight: 500;
-        text-decoration: none !important;
-        white-space: nowrap;
-        box-sizing: border-box;
-      }
-      .sidebar-linkbtn:hover { background: rgba(243, 244, 246, 1); }
+      /* Timetable link button */
+      .sidebar-linkbtn{display:inline-flex;align-items:center;justify-content:center;width:100%;height:2.45rem;padding:0 0.65rem;border-radius:0.5rem;border:1px solid rgba(49,51,63,0.18);background:rgba(248,249,251,1);color:rgba(49,51,63,0.75)!important;font-weight:500;text-decoration:none!important;white-space:nowrap;box-sizing:border-box;}
+      .sidebar-linkbtn:hover{background:rgba(243,244,246,1);}
 
       /* Monthly horizontal table */
-      .month-wrap { overflow-x:auto; border:1px solid #e5e7eb; border-radius:0.75rem; }
-      .month-table { border-collapse:collapse; width:max-content; min-width:100%; font-size:0.82rem; }
-      .month-table td { border-bottom:1px solid #f3f4f6; padding:0.55rem 0.65rem; vertical-align:top; }
-      .month-date { background:#f9fafb; font-weight:700; white-space:nowrap; }
-      .month-cell { min-width:14rem; white-space:pre-wrap; }
+      .month-wrap{overflow-x:auto;border:1px solid #e5e7eb;border-radius:0.75rem;}
+      .month-table{border-collapse:collapse;width:max-content;min-width:100%;font-size:0.82rem;}
+      .month-table td{border-bottom:1px solid #f3f4f6;padding:0.55rem 0.65rem;vertical-align:top;}
+      .month-date{background:#f9fafb;font-weight:700;white-space:nowrap;}
+      .month-cell{min-width:14rem;white-space:pre-wrap;}
 
       /* Main titles */
-      .main-title { font-size: 1.15rem; font-weight: 850; margin: 0.2rem 0 0.35rem 0; }
-      .sub-title { font-size: 1.05rem; font-weight: 850; margin: 0.1rem 0 0.2rem 0; }
+      .main-title{font-size:1.15rem;font-weight:850;margin:0.2rem 0 0.35rem 0;}
+      .sub-title{font-size:1.05rem;font-weight:850;margin:0.1rem 0 0.2rem 0;}
     </style>
     """,
     unsafe_allow_html=True,
 )
+
 
 # ======================================================
 # Google Sheets connection
