@@ -228,7 +228,7 @@ def render_weekly_cards(df_weekly: pd.DataFrame, week_str: str) -> None:
     row = row_df.iloc[0]
     dept_cols = [c for c in df_weekly.columns if c not in [WEEK_COL, "_start"] and not c.startswith("Unnamed")]
 
-    col_a, col_b = st.columns(2)
+    cols = st.columns(3)
     card_idx = 0
 
     for dept in dept_cols:
@@ -236,7 +236,7 @@ def render_weekly_cards(df_weekly: pd.DataFrame, week_str: str) -> None:
         if not text:
             continue
 
-        target_col = col_a if card_idx % 2 == 0 else col_b
+        target_col = cols[card_idx % 3]
         card_idx += 1
 
         with target_col:
@@ -337,43 +337,55 @@ if "sidebar_date" not in st.session_state:
 today = date.today()
 default_single = today
 
-# Handle clickable month table -> set sidebar date
-pick = st.query_params.get("pick")
-if pick:
-    try:
-        # pick might be list-like depending on streamlit version
-        pick_str = pick[0] if isinstance(pick, list) else str(pick)
-        st.session_state["sidebar_date"] = date.fromisoformat(pick_str)
-    except Exception:
-        pass
-    # clear the param to keep URL clean
-    try:
-        st.query_params.pop("pick", None)
-    except Exception:
-        pass
 
 # ======================================================
 # 10. Sidebar
 # ======================================================
 
 with st.sidebar:
-    st.markdown(f"<h2 style='font-size:1.6rem; font-weight:700;'>{APP_TITLE}</h2>", unsafe_allow_html=True)
+    st.markdown(
+        f"<h2 style='font-size:1.6rem; font-weight:700;'>{APP_TITLE}</h2>",
+        unsafe_allow_html=True,
+    )
 
-    is_timetable_open = st.session_state.get("timetable_open", False)
     st.divider()
 
-    # --------------------------
-    # Daily memo
-    # --------------------------
+    # ==================================================
+    # 업무현황 (월)
+    # ==================================================
+    st.markdown("### 업무현황 (월)")
+
+    if df_daily.empty:
+        st.caption("아직 작성된 보고가 없어 월 선택 옵션이 없습니다.")
+        selected_ym = None
+    else:
+        ym_set = {(d.year, d.month) for d in df_daily["DATE"]}
+        ym_options = sorted(ym_set, reverse=True)
+
+        default_ym = (today.year, today.month)
+        default_index = ym_options.index(default_ym) if default_ym in ym_options else 0
+
+        selected_ym = st.selectbox(
+            "월 선택",
+            ym_options,
+            index=default_index,
+            format_func=lambda ym: f"{ym[0]}년 {ym[1]:02d}월",
+        )
+
+    st.divider()
+
+    # ==================================================
+    # 1일 업무 메모
+    # ==================================================
     st.markdown("### 1일 업무 메모")
 
-    st.date_input("날짜", key="sidebar_date")
+    st.date_input("날짜", key="sidebar_date", value=st.session_state.get("sidebar_date", default_single))
     selected_date = st.session_state["sidebar_date"]
 
-    default_content, has_existing = "", False
+    default_content = ""
     if not df_daily.empty and (df_daily["DATE"] == selected_date).any():
         row = df_daily[df_daily["DATE"] == selected_date].iloc[0]
-        default_content, has_existing = row.get("내용", ""), True
+        default_content = row.get("내용", "")
 
     content = st.text_area(
         "내용",
@@ -383,77 +395,52 @@ with st.sidebar:
         key="sidebar_daily_memo",
     )
 
-    c1, c2 = st.columns(2)
-    with c1:
+    col_save, col_sync = st.columns(2)
+
+    with col_save:
         if st.button("저장", use_container_width=True):
             save_daily_entry(selected_date, content, "", df_daily)
             st.session_state["flash"] = ("success", "저장되었습니다.")
             st.rerun()
-    with c2:
-        if has_existing and st.button("비우기", use_container_width=True):
-            save_daily_entry(selected_date, "", "", df_daily)
-            st.session_state["flash"] = ("info", "이 날짜의 메모를 모두 비웠습니다.")
+
+    with col_sync:
+        if st.button("동기화", use_container_width=True):
+            load_daily_df.clear()
+            try:
+                load_weekly_df.clear()
+            except Exception:
+                pass
+            st.session_state["flash"] = ("success", "동기화되었습니다.")
             st.rerun()
 
     st.divider()
 
-    # --------------------------
-    # Sync
-    # --------------------------
-    if st.button("🔄 구글시트 동기화", use_container_width=True):
-        load_daily_df.clear()
-        try:
-            load_weekly_df.clear()
-        except Exception:
-            pass
-        st.session_state["flash"] = ("success", "동기화되었습니다.")
-        st.rerun()
-
-    st.divider()
-
-    # --------------------------
-    # Timetable
-    # --------------------------
+    # ==================================================
+    # 진료시간표
+    # ==================================================
     st.markdown("### 진료시간표")
 
-    b1, b2 = st.columns([1, 1])
-    with b1:
-        label = "진료시간표 닫기" if is_timetable_open else "진료시간표 열기"
-        if st.button(label, use_container_width=True):
-            st.session_state["timetable_open"] = not is_timetable_open
+    is_open = st.session_state.get("timetable_open", False)
+
+    sheet_id = st.secrets["gsheet_preview"]["spreadsheet_id"]
+    gid = st.secrets["gsheet_preview"].get("gid", "0")
+    src_open = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit#gid={gid}"
+
+    c1, c2, c3 = st.columns(3)
+
+    with c1:
+        if st.button("열기", use_container_width=True, disabled=is_open):
+            st.session_state["timetable_open"] = True
             st.rerun()
 
-    with b2:
-        sheet_id = st.secrets["gsheet_preview"]["spreadsheet_id"]
-        gid = st.secrets["gsheet_preview"].get("gid", "0")
-        src_open = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit#gid={gid}"
-        st.markdown(f'<a class="pill-link" href="{src_open}" target="_blank">새 창에서 열기 ↗</a>', unsafe_allow_html=True)
+    with c2:
+        if st.button("닫기", use_container_width=True, disabled=not is_open):
+            st.session_state["timetable_open"] = False
+            st.rerun()
 
-    st.divider()
+    with c3:
+        st.link_button("새 창에서 열기 ↗", src_open, use_container_width=True)
 
-    # --------------------------
-    # Monthly selector (hidden while timetable open)
-    # --------------------------
-    if not is_timetable_open:
-        st.markdown("### 업무현황 (월)")
-
-        if df_daily.empty:
-            st.caption("아직 작성된 보고가 없어 월 선택 옵션이 없습니다.")
-            selected_ym = None
-        else:
-            ym_set = {(d.year, d.month) for d in df_daily["DATE"]}
-            ym_options = sorted(ym_set, reverse=True)
-            default_ym = (today.year, today.month)
-            default_index = ym_options.index(default_ym) if default_ym in ym_options else 0
-
-            selected_ym = st.selectbox(
-                "월 선택",
-                ym_options,
-                index=default_index,
-                format_func=lambda ym: f"{ym[0]}년 {ym[1]:02d}월",
-            )
-    else:
-        selected_ym = None
 
 # ======================================================
 # 11. Main
@@ -471,7 +458,7 @@ else:
         start_date = date(year, month, 1)
         end_date = date(year, month, calendar.monthrange(year, month)[1])
 
-        st.markdown(f"## {year}년 {month:02d}월")
+        st.markdown(f"<div style='font-size:1.15rem; font-weight:800; margin:0.2rem 0 0.6rem 0;'>{year}년 {month:02d}월</div>", unsafe_allow_html=True)
 
         mask = (df_daily["DATE"] >= start_date) & (df_daily["DATE"] <= end_date)
         period_df = df_daily.loc[mask, ["DATE", "내용"]].copy().sort_values("DATE").reset_index(drop=True)
