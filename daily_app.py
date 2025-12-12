@@ -303,10 +303,59 @@ def render_sheet_preview() -> None:
 
     components.html(
         f"""
-        <iframe
-          src="{src_view}"
-          style="width:100%; height:1100px; border:1px solid #ddd; border-radius:0.75rem; background:#fff;"
-        ></iframe>
+        <div id="wrap" style="position:relative; width:100%; height:1100px;">
+          <!-- Loading overlay -->
+          <div id="overlay" style="
+              position:absolute; inset:0;
+              display:flex; align-items:center; justify-content:center;
+              background: rgba(255,255,255,0.78);
+              backdrop-filter: blur(2px);
+              border: 1px solid #ddd;
+              border-radius: 0.75rem;
+              z-index: 10;
+            ">
+            <div style="display:flex; align-items:center; gap:0.55rem; color:#111827; font-size:0.92rem; font-weight:650;">
+              <div style="
+                width:14px; height:14px; border-radius:999px;
+                border: 2px solid rgba(17,24,39,0.25);
+                border-top-color: rgba(17,24,39,0.85);
+                animation: spin 0.8s linear infinite;
+              "></div>
+              진료시간표를 불러오는 중...
+            </div>
+          </div>
+
+          <iframe
+            id="sheet_iframe"
+            src="{src_view}"
+            style="
+              width:100%;
+              height:1100px;
+              border:1px solid #ddd;
+              border-radius:0.75rem;
+              background:#fff;
+            "
+          ></iframe>
+        </div>
+
+        <style>
+          @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
+        </style>
+
+        <script>
+          const iframe = document.getElementById("sheet_iframe");
+          const overlay = document.getElementById("overlay");
+
+          // iframe가 로드되면 오버레이 숨김
+          iframe.addEventListener("load", () => {{
+            overlay.style.display = "none";
+          }});
+
+          // 혹시 load 이벤트가 안 잡히는 환경 대비: 8초 후 강제 숨김(선택)
+          setTimeout(() => {{
+            if (overlay.style.display !== "none") overlay.style.display = "none";
+          }}, 8000);
+        </script>
         """,
         height=1120,
         scrolling=True,
@@ -488,7 +537,6 @@ def render_month_overview_horizontal(period_df: pd.DataFrame) -> None:
     )
 
 if st.session_state.get("timetable_open", False):
-    st.info("진료시간표를 불러오는 중... (처음엔 1~2초 걸릴 수 있어요)")
     render_sheet_preview()
 
 else:
