@@ -58,6 +58,14 @@ st.markdown(
       section[data-testid="stSidebar"] .stMarkdown { margin-bottom: 0.10rem; }
       section[data-testid="stSidebar"] hr { margin: 0.30rem 0; }
 
+      /* Sidebar: 항목 간 기본 세로 간격 축소 */
+      section[data-testid="stSidebar"] .stElementContainer { margin-bottom: 0.25rem!important; }
+      section[data-testid="stSidebar"] .stMarkdown { margin-bottom: 0.08rem!important; }
+      section[data-testid="stSidebar"] .stSelectbox,
+      section[data-testid="stSidebar"] .stDateInput,
+      section[data-testid="stSidebar"] .stTextArea,
+      section[data-testid="stSidebar"] .stButton { margin-bottom: 0.28rem!important; }
+
       /* Highlighted inputs (sidebar + main select) */
       section[data-testid="stSidebar"] div[data-testid="stSelectbox"] div[role="combobox"],
       section[data-testid="stSidebar"] div[data-testid="stDateInput"] input,
@@ -66,6 +74,9 @@ st.markdown(
  
       /* Sidebar: 1일 업무 메모 내용(textarea) 글자 크기 */
       section[data-testid="stSidebar"] div[data-testid="stTextArea"] textarea{ font-size: 0.85rem!important; line-height: 1.15!important; }
+
+      /* Sidebar: 1일 업무 메모 textarea 높이 */
+      section[data-testid="stSidebar"] div[data-testid="stTextArea"] textarea{ min-height: 10.5rem!important; }
 
       /* Center text inside date input */
       section[data-testid="stSidebar"] div[data-testid="stDateInput"] input { text-align:center !important; }
