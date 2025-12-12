@@ -71,14 +71,28 @@ st.markdown(
       section[data-testid="stSidebar"] div[data-testid="stDateInput"] input { text-align:center !important; }
 
       /* Center the selected value in Streamlit selectbox (BaseWeb select) */
-      section[data-testid="stSidebar"] div[data-baseweb="select"] > div {
+      /* Center the selected value in Streamlit selectbox (BaseWeb select) */
+      section[data-testid="stSidebar"] div[data-testid="stSelectbox"] div[data-baseweb="select"] > div {
         justify-content: center !important;
       }
-      section[data-testid="stSidebar"] div[data-baseweb="select"] * {
+      section[data-testid="stSidebar"] div[data-testid="stSelectbox"] div[data-baseweb="select"] div[role="combobox"]{
+        justify-content: center !important;
+      }
+      section[data-testid="stSidebar"] div[data-testid="stSelectbox"] div[data-baseweb="select"] div[class*="ValueContainer"]{
+        justify-content: center !important;
+      }
+      section[data-testid="stSidebar"] div[data-testid="stSelectbox"] div[data-baseweb="select"] div[class*="SingleValue"]{
+        text-align: center !important;
+        width: 100% !important;
+        margin: 0 auto !important;
+      }
+      section[data-testid="stSidebar"] div[data-testid="stSelectbox"] div[data-baseweb="select"] input{
         text-align: center !important;
       }
-
-      /* Timetable link styled like a light button */
+      section[data-testid="stSidebar"] div[data-testid="stSelectbox"] div[data-baseweb="select"] *{
+        text-align: center !important;
+      }
+/* Timetable link styled like a light button */
       .sidebar-linkbtn {
         display: inline-flex; align-items: center; justify-content: center;
         width: 100%; height: 2.45rem; padding: 0 0.65rem;
