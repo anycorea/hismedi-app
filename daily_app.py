@@ -47,12 +47,14 @@ st.markdown(
       .block-container { padding-top: 2.3rem; padding-bottom: 1rem; }
 
       /* Sidebar: bring it UP to match main top */
-      section[data-testid="stSidebar"] .block-container { padding-top: 0rem !important; padding-bottom: 0.55rem !important; }
-      section[data-testid="stSidebar"] div[data-testid="stSidebarContent"]{ margin-top: -0.6rem !important; /* -0.6 ~ -1.4 사이로 조절 */ }
+      section[data-testid="stSidebar"] .block-container { padding-top: 0rem!important; padding-bottom: 0.55rem!important; }
+      section[data-testid="stSidebar"] div[data-testid="stSidebarContent"]{ margin-top:-0.6rem!important; }
+      section[data-testid="stSidebar"] div[data-testid="stSidebarUserContent"]{ margin-top:-0.6rem!important; }
+
       /* Some themes wrap sidebar content in additional divs */
-      section[data-testid="stSidebar"] > div { padding-top: 0rem !important; }
-      section[data-testid="stSidebar"] h2 { margin: -0.10rem 0 0.20rem 0 !important; }
-      section[data-testid="stSidebar"] h3 { margin: 0.18rem 0 0.12rem 0 !important; }
+      section[data-testid="stSidebar"] > div { padding-top: 0rem!important; }
+      section[data-testid="stSidebar"] h2 { margin: -0.10rem 0 0.20rem 0!important; }
+      section[data-testid="stSidebar"] h3 { margin: 0.18rem 0 0.12rem 0!important; }
       section[data-testid="stSidebar"] .stMarkdown { margin-bottom: 0.10rem; }
       section[data-testid="stSidebar"] hr { margin: 0.30rem 0; }
 
