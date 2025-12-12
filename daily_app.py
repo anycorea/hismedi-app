@@ -48,8 +48,8 @@ st.markdown(
 
       /* Sidebar: move up + padding */
       section[data-testid="stSidebar"] .block-container{padding-top:0!important;padding-bottom:0.55rem!important;}
-      section[data-testid="stSidebar"] div[data-testid="stSidebarContent"]{margin-top:-1.2rem!important;}
-      section[data-testid="stSidebar"] div[data-testid="stSidebarUserContent"]{margin-top:-1.2rem!important;}
+      section[data-testid="stSidebar"] div[data-testid="stSidebarContent"]{margin-top:-1.6rem!important;}
+      section[data-testid="stSidebar"] div[data-testid="stSidebarUserContent"]{margin-top:-1.6rem!important;}
 
       /* Sidebar: headings / separators */
       section[data-testid="stSidebar"] h2{margin:-0.10rem 0 0.20rem 0!important;}
