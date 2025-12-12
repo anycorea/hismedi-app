@@ -63,6 +63,9 @@ st.markdown(
       section[data-testid="stSidebar"] div[data-testid="stDateInput"] input,
       section[data-testid="stSidebar"] div[data-testid="stTextArea"] textarea,
       section.main div[data-testid="stSelectbox"] div[role="combobox"]{ background: #eef4ff !important; border: 1px solid #c7d2fe !important; }
+ 
+      /* Sidebar: 1일 업무 메모 내용(textarea) 글자 크기 = 날짜 입력(input)과 동일하게 */
+      section[data-testid="stSidebar"] div[data-testid="stTextArea"] textarea{ font-size: 1rem!important; line-height: 1.35!important; }
 
       /* Center text inside date input */
       section[data-testid="stSidebar"] div[data-testid="stDateInput"] input { text-align:center !important; }
