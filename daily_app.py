@@ -65,8 +65,10 @@ st.markdown(
         border: 1px solid #c7d2fe !important;
       }
 
-      /* Make arrow buttons closer to box (reduce internal padding a bit) */
-      section[data-testid="stSidebar"] button[kind="secondary"] { padding-left: 0.55rem; padding-right: 0.55rem; }
+      /* Center text inside month/date boxes */
+      section[data-testid="stSidebar"] div[data-testid="stDateInput"] input { text-align:center !important; }
+      section[data-testid="stSidebar"] div[data-testid="stSelectbox"] div[role="combobox"] { justify-content:center !important; }
+      section[data-testid="stSidebar"] div[data-testid="stSelectbox"] div[role="combobox"] * { text-align:center !important; }
 
       /* Timetable link styled like a light button */
       .sidebar-linkbtn {
@@ -341,9 +343,7 @@ with st.sidebar:
     st.markdown(f"<h2 style='font-size:1.45rem; font-weight:850;'>{APP_TITLE}</h2>", unsafe_allow_html=True)
     st.divider()
 
-    # --------------------------------------------------
-    # 업무현황(월) + 이전/다음 (전체 블록을 가운데로)
-    # --------------------------------------------------
+    # 업무현황(월)
     st.markdown("### 업무현황 (월)")
 
     if df_daily.empty:
@@ -362,34 +362,29 @@ with st.sidebar:
 
         st.session_state["ym_index"] = max(0, min(st.session_state["ym_index"], len(ym_options) - 1))
 
-        # outer: center the whole control block
-        outer_l, outer_m, outer_r = st.columns([1, 6, 1], vertical_alignment="center")
-        with outer_m:
-            m1, m2, m3 = st.columns([1, 4, 1], vertical_alignment="center")
-            with m1:
-                if st.button("◀", use_container_width=True, key="ym_prev"):
-                    st.session_state["ym_index"] = min(len(ym_options) - 1, st.session_state["ym_index"] + 1)
-                    st.rerun()
-            with m2:
-                selected_ym = st.selectbox(
-                    "월 선택",
-                    ym_options,
-                    index=st.session_state["ym_index"],
-                    key="ym_selectbox",
-                    format_func=lambda ym: f"{ym[0]}년 {ym[1]:02d}월",
-                    label_visibility="collapsed",
-                )
-                st.session_state["ym_index"] = ym_options.index(selected_ym)
-            with m3:
-                if st.button("▶", use_container_width=True, key="ym_next"):
-                    st.session_state["ym_index"] = max(0, st.session_state["ym_index"] - 1)
-                    st.rerun()
+        m1, m2, m3 = st.columns([1, 4, 1], vertical_alignment="center")
+        with m1:
+            if st.button("◀", use_container_width=True, key="ym_prev"):
+                st.session_state["ym_index"] = min(len(ym_options) - 1, st.session_state["ym_index"] + 1)
+                st.rerun()
+        with m2:
+            selected_ym = st.selectbox(
+                "월 선택",
+                ym_options,
+                index=st.session_state["ym_index"],
+                key="ym_selectbox",
+                format_func=lambda ym: f"{ym[0]}년 {ym[1]:02d}월",
+                label_visibility="collapsed",
+            )
+            st.session_state["ym_index"] = ym_options.index(selected_ym)
+        with m3:
+            if st.button("▶", use_container_width=True, key="ym_next"):
+                st.session_state["ym_index"] = max(0, st.session_state["ym_index"] - 1)
+                st.rerun()
 
     st.divider()
 
-    # --------------------------------------------------
     # 진료시간표
-    # --------------------------------------------------
     st.markdown("### 진료시간표")
 
     sheet_id = st.secrets["gsheet_preview"]["spreadsheet_id"]
@@ -410,33 +405,29 @@ with st.sidebar:
 
     st.divider()
 
-    # --------------------------------------------------
-    # 1일 업무 메모 (날짜 컨트롤도 전체 블록 가운데)
-    # --------------------------------------------------
+    # 1일 업무 메모
     st.markdown("### 1일 업무 메모")
 
-    outer_l2, outer_m2, outer_r2 = st.columns([1, 6, 1], vertical_alignment="center")
-    with outer_m2:
-        d1, d2, d3 = st.columns([1, 4, 1], vertical_alignment="center")
-        with d1:
-            if st.button("◀", use_container_width=True, key="day_prev"):
-                st.session_state["memo_date"] = st.session_state["memo_date"] - timedelta(days=1)
-                st.rerun()
-        with d2:
-            picked = st.date_input(
-                "날짜",
-                value=st.session_state["memo_date"],
-                key="memo_date_input",
-                label_visibility="collapsed",
-            )
-            if isinstance(picked, (list, tuple)):
-                picked = picked[0]
-            if picked != st.session_state["memo_date"]:
-                st.session_state["memo_date"] = picked
-        with d3:
-            if st.button("▶", use_container_width=True, key="day_next"):
-                st.session_state["memo_date"] = st.session_state["memo_date"] + timedelta(days=1)
-                st.rerun()
+    d1, d2, d3 = st.columns([1, 4, 1], vertical_alignment="center")
+    with d1:
+        if st.button("◀", use_container_width=True, key="day_prev"):
+            st.session_state["memo_date"] = st.session_state["memo_date"] - timedelta(days=1)
+            st.rerun()
+    with d2:
+        picked = st.date_input(
+            "날짜",
+            value=st.session_state["memo_date"],
+            key="memo_date_input",
+            label_visibility="collapsed",
+        )
+        if isinstance(picked, (list, tuple)):
+            picked = picked[0]
+        if picked != st.session_state["memo_date"]:
+            st.session_state["memo_date"] = picked
+    with d3:
+        if st.button("▶", use_container_width=True, key="day_next"):
+            st.session_state["memo_date"] = st.session_state["memo_date"] + timedelta(days=1)
+            st.rerun()
 
     selected_date = st.session_state["memo_date"]
 
@@ -525,8 +516,7 @@ else:
         except Exception:
             weekly_df = pd.DataFrame()
 
-        # Bring period select closer to the title
-        head1, head2, head3 = st.columns([0.16, 0.26, 0.58], vertical_alignment="center")
+        head1, head2, head3 = st.columns([0.14, 0.24, 0.62], vertical_alignment="center")
         with head1:
             st.markdown('<div class="sub-title">부서별 업무 현황</div>', unsafe_allow_html=True)
         with head2:
