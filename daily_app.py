@@ -47,13 +47,8 @@ st.markdown(
       .block-container { padding-top: 2.3rem; padding-bottom: 1rem; }
 
       /* Sidebar: bring it UP to match main top */
-      section[data-testid="stSidebar"] {
-        transform: translateY(-0.8rem);
-      }
-      section[data-testid="stSidebar"] .block-container {
-        padding-top: 0rem !important;
-        padding-bottom: 0.55rem !important;
-      }
+      section[data-testid="stSidebar"] .block-container { padding-top: 0rem !important; padding-bottom: 0.55rem !important; }
+      section[data-testid="stSidebar"] div[data-testid="stSidebarContent"]{ margin-top: -0.6rem !important; /* -0.6 ~ -1.4 사이로 조절 */ }
       /* Some themes wrap sidebar content in additional divs */
       section[data-testid="stSidebar"] > div { padding-top: 0rem !important; }
       section[data-testid="stSidebar"] h2 { margin: -0.10rem 0 0.20rem 0 !important; }
@@ -65,37 +60,12 @@ st.markdown(
       section[data-testid="stSidebar"] div[data-testid="stSelectbox"] div[role="combobox"],
       section[data-testid="stSidebar"] div[data-testid="stDateInput"] input,
       section[data-testid="stSidebar"] div[data-testid="stTextArea"] textarea,
-      section.main div[data-testid="stSelectbox"] div[role="combobox"]{
-        background: #eef4ff !important;
-        border: 1px solid #c7d2fe !important;
-      }
+      section.main div[data-testid="stSelectbox"] div[role="combobox"]{ background: #eef4ff !important; border: 1px solid #c7d2fe !important; }
 
       /* Center text inside date input */
       section[data-testid="stSidebar"] div[data-testid="stDateInput"] input { text-align:center !important; }
 
-      /* Center the selected value in Streamlit selectbox (BaseWeb select) */
-      /* Center the selected value in Streamlit selectbox (BaseWeb select) */
-      section[data-testid="stSidebar"] div[data-testid="stSelectbox"] div[data-baseweb="select"] > div {
-        justify-content: center !important;
-      }
-      section[data-testid="stSidebar"] div[data-testid="stSelectbox"] div[data-baseweb="select"] div[role="combobox"]{
-        justify-content: center !important;
-      }
-      section[data-testid="stSidebar"] div[data-testid="stSelectbox"] div[data-baseweb="select"] div[class*="ValueContainer"]{
-        justify-content: center !important;
-      }
-      section[data-testid="stSidebar"] div[data-testid="stSelectbox"] div[data-baseweb="select"] div[class*="SingleValue"]{
-        text-align: center !important;
-        width: 100% !important;
-        margin: 0 auto !important;
-      }
-      section[data-testid="stSidebar"] div[data-testid="stSelectbox"] div[data-baseweb="select"] input{
-        text-align: center !important;
-      }
-      section[data-testid="stSidebar"] div[data-testid="stSelectbox"] div[data-baseweb="select"] *{
-        text-align: center !important;
-      }
-/* Timetable link styled like a light button */
+      /* Timetable link styled like a light button */
       .sidebar-linkbtn {
         display: inline-flex; align-items: center; justify-content: center;
         width: 100%; height: 2.45rem; padding: 0 0.65rem;
