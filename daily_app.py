@@ -173,7 +173,7 @@ def render_weekly_cards(df_weekly: pd.DataFrame, week_str: str, ncols: int = 3) 
     if row_df.empty: st.info("선택한 기간의 부서별 업무 데이터가 없습니다."); return
     row = row_df.iloc[0]
     dept_cols = [c for c in df_weekly.columns if c not in [WEEK_COL, "_start"] and not c.startswith("Unnamed")]
-    cols = st.columns(ncols); idx = 0
+    cols = st.columns(ncols, gap="medium"); idx = 0
     for dept in dept_cols:
         text = str(row.get(dept, "")).strip()
         if not text: continue
