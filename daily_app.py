@@ -58,7 +58,13 @@ st.markdown(
 
       /* Left titles */
       .left-title{font-size:1.65rem;font-weight:850;margin:0 0 0.55rem 0;}
-      .left-h3{font-size:1.02rem;font-weight:850;color:#374151;margin:0.15rem 0 0.45rem 0;}
+      .left-h3,
+      .left-h3 *{
+        font-size:1.02rem;
+        font-weight:850;
+        color:#2563eb !important;
+        margin:0.15rem 0 0.45rem 0;
+      }
       .left-hr{margin:0.75rem 0;border:none;border-top:1px solid rgba(49,51,63,0.14);}
 
       /* Left: tighten widget spacing (only in LEFT column) */
@@ -94,8 +100,8 @@ st.markdown(
       .month-cell{min-width:14rem;white-space:pre-wrap;}
 
       /* Main titles */
-      .main-title{font-size:1.15rem;font-weight:850;color:#374151;margin:0.2rem 0 0.35rem 0;}
-      .sub-title{font-size:1.05rem;font-weight:850;color:#374151;margin:0.1rem 0 0.2rem 0;}
+      .main-title{font-size:1.15rem;font-weight:850;color:#2563eb;margin:0.2rem 0 0.35rem 0;}
+      .sub-title{font-size:1.05rem;font-weight:850;color:#2563eb;margin:0.1rem 0 0.2rem 0;}
     </style>
     """,
     unsafe_allow_html=True,
