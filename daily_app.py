@@ -110,6 +110,10 @@ st.markdown(
 
       /* Weekly cards: pull grey box up a bit */
       div[style*="background:#f8fafc"]{margin-top:0!important;}
+
+      /* Border wrapper: allow children to stay inside, no spill */
+      div[data-testid="stVerticalBlockBorderWrapper"]{overflow:hidden!important; height:auto!important;}
+      div[data-testid="stVerticalBlockBorderWrapper"] > div{min-height:0!important;}
       
     </style>
     """,
