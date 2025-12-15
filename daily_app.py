@@ -64,6 +64,8 @@ div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea{
 .weekly-card{display:flow-root;}
 .weekly-dept{font-size:.85rem;font-weight:850;margin:0 0 .08rem 0;}
 .weekly-body{background:#f8fafc;border-radius:.6rem;padding:.25rem .45rem;font-size:.80rem;line-height:1.35;color:#111827;white-space:pre-wrap;margin-top:0!important;}
+.weekly-border{margin:0 0 .75rem 0;}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -175,7 +177,7 @@ def render_weekly_cards(df_weekly: pd.DataFrame, week_str: str, ncols: int = 3) 
         return
     row = row_df.iloc[0]
     dept_cols = [c for c in df_weekly.columns if c not in [WEEK_COL, "_start"] and not c.startswith("Unnamed")]
-    cols = st.columns(ncols, gap="large")
+    cols = st.columns(ncols)
     idx = 0
     for dept in dept_cols:
         text = str(row.get(dept, "")).strip()
