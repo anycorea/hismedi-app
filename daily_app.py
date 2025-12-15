@@ -105,7 +105,7 @@ st.markdown(
       .month-item-body{padding:0.65rem 0.75rem;white-space:pre-wrap;line-height:1.35;}
 
       /* Weekly cards inner box bottom overlap fix */
-      div[data-testid="stContainer"] > div > div:last-child{margin-bottom:0!important;}
+      div[data-testid="stContainer"] div[style*="background:#f8fafc"]{padding-bottom:.35rem!important;}
       
     </style>
     """,
