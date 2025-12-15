@@ -45,6 +45,7 @@ st.markdown(
       /* Remove the collapsed-sidebar top placeholder (keeps top-right menu) */
       div[data-testid="stSidebarCollapsedControl"]{display:none!important;}
       div[data-testid="stSidebarNav"]{display:none!important;}
+      div[data-testid="stSidebarHeader"]{display:none!important;}
 
       /* Left panel (sidebar-like) */
       .left-panel{position:sticky;top:0.65rem;}
