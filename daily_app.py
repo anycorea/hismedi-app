@@ -109,7 +109,7 @@ st.markdown(
       div[data-testid="stVerticalBlockBorderWrapper"] > div{padding:0!important;margin:0!important;}
 
       /* Weekly cards: pull grey box up a bit */
-      div[style*="background:#f8fafc"]{margin-top:.15rem!important;}
+      div[style*="background:#f8fafc"]{margin-top:0!important;}
       
     </style>
     """,
