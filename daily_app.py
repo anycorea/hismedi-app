@@ -223,7 +223,7 @@ def render_weekly_cards(df_weekly: pd.DataFrame, week_str: str, ncols: int = 3) 
             with st.container(border=True):
                 st.markdown(f"<div style='font-size:0.85rem;font-weight:850;margin:-0.05rem 0 0.15rem 0;'>{dept}</div>", unsafe_allow_html=True)
                 st.markdown(
-                    f"<div style='background:#f8fafc;border-radius:0.6rem;padding:0.35rem 0.65rem;font-size:0.80rem;line-height:1.35;color:#111827;white-space:pre-wrap;'>{escape_html(text)}</div>",
+                    f"<div style='background:#f8fafc;border-radius:0.6rem;padding:0.25rem 0.45rem;font-size:0.80rem;line-height:1.35;color:#111827;white-space:pre-wrap;'>{escape_html(text)}</div>",
                     unsafe_allow_html=True,
                 )
         idx += 1
