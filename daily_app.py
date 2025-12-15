@@ -104,15 +104,9 @@ st.markdown(
       .month-item-date{background:#f9fafb;font-weight:800;padding:0.55rem 0.75rem;border-bottom:1px solid #f3f4f6;white-space:nowrap;}
       .month-item-body{padding:0.65rem 0.75rem;white-space:pre-wrap;line-height:1.35;}
 
-      /* Border container padding control (works for st.container(border=True)) */
-      div[data-testid="stVerticalBlockBorderWrapper"]{padding:.35rem .45rem!important;}
-      div[data-testid="stVerticalBlockBorderWrapper"] > div{padding:0!important;margin:0!important;}
-
-      /* Weekly cards: pull grey box up a bit */
-      div[style*="background:#f8fafc"]{margin-top:0!important;}
-
-      /* Border wrapper: allow children to stay inside, no spill */
-      div[data-testid="stVerticalBlockBorderWrapper"]{overflow:visible!important;}
+      .weekly-card{display:flow-root;}
+     .weekly-dept{font-size:.85rem;font-weight:850;margin:0 0 .15rem 0;}
+     .weekly-body{background:#f8fafc;border-radius:.6rem;padding:.25rem .45rem;font-size:.80rem;line-height:1.35;color:#111827;white-space:pre-wrap;}
       
     </style>
     """,
@@ -231,11 +225,7 @@ def render_weekly_cards(df_weekly: pd.DataFrame, week_str: str, ncols: int = 3) 
         if not text: continue
         with cols[idx % ncols]:
             with st.container(border=True):
-                st.markdown(f"<div style='font-size:0.85rem;font-weight:850;margin:-0.05rem 0 0.15rem 0;'>{dept}</div>", unsafe_allow_html=True)
-                st.markdown(
-                    f"<div style='background:#f8fafc;border-radius:0.6rem;padding:0.25rem 0.45rem;font-size:0.80rem;line-height:1.35;color:#111827;white-space:pre-wrap;'>{escape_html(text)}</div>",
-                    unsafe_allow_html=True,
-                )
+                st.markdown(f"<div class='weekly-card'><div class='weekly-dept'>{escape_html(dept)}</div><div class='weekly-body'>{escape_html(text)}</div></div>", unsafe_allow_html=True)
         idx += 1
     if idx == 0: st.info("선택한 기간에 작성된 부서별 업무 내용이 없습니다.")
 
