@@ -103,7 +103,7 @@ st.markdown(
       .weekly-wrap{margin:-.55rem -.45rem -.35rem -.45rem;}
 
       div[data-testid="column"]:nth-of-type(2) div[data-testid="stContainer"] .stMarkdown{margin:0!important;padding:0!important;}
-      div[data-testid="column"]:nth-of-type(2) .weekly-wrap{position:relative;top:-10px;}
+      div[data-testid="column"]:nth-of-type(2) .weekly-wrap{position:relative;top:-14px;}
 
     </style>
     """,
