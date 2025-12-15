@@ -170,17 +170,25 @@ def load_weekly_df() -> pd.DataFrame:
 
 def render_weekly_cards(df_weekly: pd.DataFrame, week_str: str, ncols: int = 3) -> None:
     row_df = df_weekly[df_weekly[WEEK_COL] == week_str]
-    if row_df.empty: st.info("선택한 기간의 부서별 업무 데이터가 없습니다."); return
+    if row_df.empty:
+        st.info("선택한 기간의 부서별 업무 데이터가 없습니다.")
+        return
     row = row_df.iloc[0]
     dept_cols = [c for c in df_weekly.columns if c not in [WEEK_COL, "_start"] and not c.startswith("Unnamed")]
-    cols = st.columns(ncols, gap="large""ㅣ""ㅣㅁ""; 
+    cols = st.columns(ncols, gap="large")
+    idx = 0
     for dept in dept_cols:
         text = str(row.get(dept, "")).strip()
-        if not text: continue
+        if not text:
+            continue
         with cols[idx % ncols]:
-            st.markdown(f"<div class='weekly-border'><div class='weekly-card'><div class='weekly-dept'>{escape_html(dept)}</div><div class='weekly-body'>{escape_html(text)}</div></div></div>", unsafe_allow_html=True)
+            st.markdown(
+                f"<div class='weekly-border'><div class='weekly-card'><div class='weekly-dept'>{escape_html(dept)}</div><div class='weekly-body'>{escape_html(text)}</div></div></div>",
+                unsafe_allow_html=True,
+            )
         idx += 1
-    if idx == 0: st.info("선택한 기간에 작성된 부서별 업무 내용이 없습니다.")
+    if idx == 0:
+        st.info("선택한 기간에 작성된 부서별 업무 내용이 없습니다.")
 
 # ======================================================
 # 6) Timetable preview (iframe + loading overlay)
