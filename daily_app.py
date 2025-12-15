@@ -339,7 +339,7 @@ col_left, col_right = st.columns([0.26, 0.74], gap="large")
 # ---------------------------
 
 with col_left:
-        st.markdown(f"<div class='left-title'>{APP_TITLE}</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='left-title'>{APP_TITLE}</div>", unsafe_allow_html=True)
     st.markdown("<hr class='left-hr'>", unsafe_allow_html=True)
 
     # (1) 업무현황(월)
