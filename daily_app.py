@@ -104,6 +104,7 @@ st.markdown(
       .month-item-date{background:#f9fafb;font-weight:800;padding:0.55rem 0.75rem;border-bottom:1px solid #f3f4f6;white-space:nowrap;}
       .month-item-body{padding:0.65rem 0.75rem;white-space:pre-wrap;line-height:1.35;}
 
+      div[style*="background:#f8fafc"]{margin-top:0!important;}
       .weekly-card{display:flow-root;}
       .weekly-dept{font-size:.85rem;font-weight:850;margin:-.15rem 0 .10rem 0;}
       .weekly-body{background:#f8fafc;border-radius:.6rem;padding:.25rem .45rem;font-size:.80rem;line-height:1.35;color:#111827;white-space:pre-wrap;}
