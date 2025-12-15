@@ -107,7 +107,7 @@ st.markdown(
       /* RIGHT column weekly cards: kill container padding (most robust) */
       div[data-testid="column"]:nth-of-type(2) div[data-testid="stContainer"]{padding:0!important;}
       div[data-testid="column"]:nth-of-type(2) div[data-testid="stContainer"]>div{padding:0!important;margin:0!important;}
-      div[data-testid="column"]:nth-of-type(2) div[data-testid="stContainer"]>div>div{padding:0!important;margin:0!important;}
+      div[data-testid="column"]:nth-of-type(2) div[data-testid="stContainer"]>div>div{padding:.35rem .45rem!important;}
       
     </style>
     """,
