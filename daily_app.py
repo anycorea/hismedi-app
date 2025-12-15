@@ -37,9 +37,7 @@ st.markdown(
     """
     <style>
       /* Main spacing (safe) */
-      .block-container{padding-top:2.5rem;padding-bottom:1.0rem;}
-      header[data-testid="stHeader"] input, header[data-testid="stHeader"] [role="combobox"]{display:none!important;}
-      header[data-testid="stHeader"] form{display:none!important;}
+      .block-container{padding-top:2.0rem;padding-bottom:1.0rem;}
 
       /* Hide native sidebar completely (we use main 2-column panel) */
       section[data-testid="stSidebar"]{display:none!important;}
@@ -50,10 +48,6 @@ st.markdown(
       .left-title{font-size:1.35rem;font-weight:850;margin:0 0 0.55rem 0;}
       .left-h3{font-size:1.02rem;font-weight:850;margin:0.15rem 0 0.45rem 0;}
       .left-hr{margin:0.75rem 0;border:none;border-top:1px solid rgba(49,51,63,0.14);}
-
-      /* Left panel container styling (only the one that has marker) */
-      div[data-testid="stVerticalBlockBorderWrapper"]:has(#leftcard-marker){background:#f6f7f9;border:1px solid rgba(49,51,63,0.16);border-radius:0.85rem;}
-      div[data-testid="stVerticalBlockBorderWrapper"]:has(#leftcard-marker) > div{padding:0.95rem!important;}
 
       /* Left panel: tighten widget spacing */
       .left-card .stElementContainer{margin:0.10rem 0!important;}
@@ -268,94 +262,93 @@ col_left, col_right = st.columns([0.26, 0.74], gap="large")
 # ---------------------------
 
 with col_left:
-    with st.container(border=True):
-        st.markdown('<div id="leftcard-marker"></div>', unsafe_allow_html=True)
-        st.markdown(f"<div class='left-title'>{APP_TITLE}</div>", unsafe_allow_html=True)
-        st.markdown("<hr class='left-hr'>", unsafe_allow_html=True)
+    st.markdown('<div class="left-panel"><div class="left-card">', unsafe_allow_html=True)
+    st.markdown(f"<div class='left-title'>{APP_TITLE}</div>", unsafe_allow_html=True)
+    st.markdown("<hr class='left-hr'>", unsafe_allow_html=True)
 
-        # (1) 업무현황(월)
-        st.markdown("<div class='left-h3'>업무현황 (월)</div>", unsafe_allow_html=True)
+    # (1) 업무현황(월)
+    st.markdown("<div class='left-h3'>업무현황 (월)</div>", unsafe_allow_html=True)
 
-        if df_daily.empty:
-            st.caption("아직 작성된 보고가 없어 월 선택 옵션이 없습니다.")
-            selected_ym, ym_options = None, []
-        else:
-            ym_options = sorted({(d.year, d.month) for d in df_daily["DATE"]}, reverse=True)
-            default_ym = (today.year, today.month)
-            default_index = ym_options.index(default_ym) if default_ym in ym_options else 0
-            if st.session_state["ym_index"] == 0: st.session_state["ym_index"] = default_index
-            st.session_state["ym_index"] = max(0, min(st.session_state["ym_index"], len(ym_options) - 1))
+    if df_daily.empty:
+        st.caption("아직 작성된 보고가 없어 월 선택 옵션이 없습니다.")
+        selected_ym, ym_options = None, []
+    else:
+        ym_options = sorted({(d.year, d.month) for d in df_daily["DATE"]}, reverse=True)
+        default_ym = (today.year, today.month)
+        default_index = ym_options.index(default_ym) if default_ym in ym_options else 0
+        if st.session_state["ym_index"] == 0: st.session_state["ym_index"] = default_index
+        st.session_state["ym_index"] = max(0, min(st.session_state["ym_index"], len(ym_options) - 1))
 
-            m1, m2, m3 = st.columns([1, 4, 1], vertical_alignment="center")
-            with m1:
-                if st.button("◀", use_container_width=True, key="ym_prev"):
-                    st.session_state["ym_index"] = min(len(ym_options) - 1, st.session_state["ym_index"] + 1); st.rerun()
-            with m2:
-                selected_ym = st.selectbox(
-                    "월 선택", ym_options, index=st.session_state["ym_index"], key="ym_selectbox",
-                    format_func=lambda ym: f"{ym[0]}년 {ym[1]:02d}월", label_visibility="collapsed",
-                )
-                st.session_state["ym_index"] = ym_options.index(selected_ym)
-            with m3:
-                if st.button("▶", use_container_width=True, key="ym_next"):
-                    st.session_state["ym_index"] = max(0, st.session_state["ym_index"] - 1); st.rerun()
+        m1, m2, m3 = st.columns([1, 4, 1], vertical_alignment="center")
+        with m1:
+            if st.button("◀", use_container_width=True, key="ym_prev"):
+                st.session_state["ym_index"] = min(len(ym_options) - 1, st.session_state["ym_index"] + 1); st.rerun()
+        with m2:
+            selected_ym = st.selectbox(
+                "월 선택", ym_options, index=st.session_state["ym_index"], key="ym_selectbox",
+                format_func=lambda ym: f"{ym[0]}년 {ym[1]:02d}월", label_visibility="collapsed",
+            )
+            st.session_state["ym_index"] = ym_options.index(selected_ym)
+        with m3:
+            if st.button("▶", use_container_width=True, key="ym_next"):
+                st.session_state["ym_index"] = max(0, st.session_state["ym_index"] - 1); st.rerun()
 
-        st.markdown("<hr class='left-hr'>", unsafe_allow_html=True)
+    st.markdown("<hr class='left-hr'>", unsafe_allow_html=True)
 
-        # (2) 진료시간표
-        st.markdown("<div class='left-h3'>진료시간표</div>", unsafe_allow_html=True)
+    # (2) 진료시간표
+    st.markdown("<div class='left-h3'>진료시간표</div>", unsafe_allow_html=True)
 
-        sheet_id = st.secrets["gsheet_preview"]["spreadsheet_id"]
-        gid = st.secrets["gsheet_preview"].get("gid", "0")
-        src_open = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit#gid={gid}"
+    sheet_id = st.secrets["gsheet_preview"]["spreadsheet_id"]
+    gid = st.secrets["gsheet_preview"].get("gid", "0")
+    src_open = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit#gid={gid}"
 
-        t1, t2, t3 = st.columns(3)
-        with t1:
-            if st.button("열기", use_container_width=True, disabled=st.session_state["timetable_open"]):
-                st.session_state["timetable_open"] = True; st.rerun()
-        with t2:
-            if st.button("닫기", use_container_width=True, disabled=not st.session_state["timetable_open"]):
-                st.session_state["timetable_open"] = False; st.rerun()
-        with t3:
-            st.markdown(f'<a class="sidebar-linkbtn" href="{src_open}" target="_blank">새창 열기↗</a>', unsafe_allow_html=True)
+    t1, t2, t3 = st.columns(3)
+    with t1:
+        if st.button("열기", use_container_width=True, disabled=st.session_state["timetable_open"]):
+            st.session_state["timetable_open"] = True; st.rerun()
+    with t2:
+        if st.button("닫기", use_container_width=True, disabled=not st.session_state["timetable_open"]):
+            st.session_state["timetable_open"] = False; st.rerun()
+    with t3:
+        st.markdown(f'<a class="sidebar-linkbtn" href="{src_open}" target="_blank">새창 열기↗</a>', unsafe_allow_html=True)
 
-        st.markdown("<hr class='left-hr'>", unsafe_allow_html=True)
+    st.markdown("<hr class='left-hr'>", unsafe_allow_html=True)
 
-        # (3) 1일 업무 메모
-        st.markdown("<div class='left-h3'>1일 업무 메모</div>", unsafe_allow_html=True)
+    # (3) 1일 업무 메모
+    st.markdown("<div class='left-h3'>1일 업무 메모</div>", unsafe_allow_html=True)
 
-        d1, d2, d3 = st.columns([1, 4, 1], vertical_alignment="center")
-        with d1:
-            if st.button("◀", use_container_width=True, key="day_prev"):
-                st.session_state["memo_date"] = st.session_state["memo_date"] - timedelta(days=1); st.rerun()
-        with d2:
-            picked = st.date_input("날짜", value=st.session_state["memo_date"], key="memo_date_input", label_visibility="collapsed")
-            if isinstance(picked, (list, tuple)): picked = picked[0]
-            if picked != st.session_state["memo_date"]: st.session_state["memo_date"] = picked
-        with d3:
-            if st.button("▶", use_container_width=True, key="day_next"):
-                st.session_state["memo_date"] = st.session_state["memo_date"] + timedelta(days=1); st.rerun()
+    d1, d2, d3 = st.columns([1, 4, 1], vertical_alignment="center")
+    with d1:
+        if st.button("◀", use_container_width=True, key="day_prev"):
+            st.session_state["memo_date"] = st.session_state["memo_date"] - timedelta(days=1); st.rerun()
+    with d2:
+        picked = st.date_input("날짜", value=st.session_state["memo_date"], key="memo_date_input", label_visibility="collapsed")
+        if isinstance(picked, (list, tuple)): picked = picked[0]
+        if picked != st.session_state["memo_date"]: st.session_state["memo_date"] = picked
+    with d3:
+        if st.button("▶", use_container_width=True, key="day_next"):
+            st.session_state["memo_date"] = st.session_state["memo_date"] + timedelta(days=1); st.rerun()
 
-        selected_date = st.session_state["memo_date"]
-        default_content = ""
-        if not df_daily.empty and (df_daily["DATE"] == selected_date).any():
-            default_content = df_daily[df_daily["DATE"] == selected_date].iloc[0].get("내용", "")
+    selected_date = st.session_state["memo_date"]
+    default_content = ""
+    if not df_daily.empty and (df_daily["DATE"] == selected_date).any():
+        default_content = df_daily[df_daily["DATE"] == selected_date].iloc[0].get("내용", "")
 
-        content = st.text_area("내용", value=default_content, key="left_daily_memo", label_visibility="collapsed", height=150)
+    content = st.text_area("내용", value=default_content, key="left_daily_memo", label_visibility="collapsed", height=150)
 
-        b1, b2 = st.columns(2)
-        with b1:
-            if st.button("저장", use_container_width=True):
-                save_daily_entry(selected_date, content, "", df_daily)
-                st.session_state["flash"] = ("success", "저장되었습니다."); st.rerun()
-        with b2:
-            if st.button("동기화", use_container_width=True):
-                load_daily_df.clear()
-                try: load_weekly_df.clear()
-                except Exception: pass
-                st.session_state["flash"] = ("success", "동기화되었습니다."); st.rerun()
+    b1, b2 = st.columns(2)
+    with b1:
+        if st.button("저장", use_container_width=True):
+            save_daily_entry(selected_date, content, "", df_daily)
+            st.session_state["flash"] = ("success", "저장되었습니다."); st.rerun()
+    with b2:
+        if st.button("동기화", use_container_width=True):
+            load_daily_df.clear()
+            try: load_weekly_df.clear()
+            except Exception: pass
+            st.session_state["flash"] = ("success", "동기화되었습니다."); st.rerun()
 
-        st.markdown("</div></div>", unsafe_allow_html=True)
+    st.markdown("</div></div>", unsafe_allow_html=True)
 
 # ---------------------------
 # 8-2) RIGHT: main content
