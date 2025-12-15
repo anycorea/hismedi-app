@@ -218,8 +218,7 @@ def render_weekly_cards(df_weekly: pd.DataFrame, week_str: str, ncols: int = 3) 
         text = str(row.get(dept, "")).strip()
         if not text: continue
         with cols[idx % ncols]:
-            with st.container(border=True):
-                st.markdown(f"<div class='weekly-border'><div class='weekly-card'><div class='weekly-dept'>{escape_html(dept)}</div><div class='weekly-body'>{escape_html(text)}</div></div></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='weekly-border'><div class='weekly-card'><div class='weekly-dept'>{escape_html(dept)}</div><div class='weekly-body'>{escape_html(text)}</div></div></div>", unsafe_allow_html=True)
         idx += 1
     if idx == 0: st.info("선택한 기간에 작성된 부서별 업무 내용이 없습니다.")
 
