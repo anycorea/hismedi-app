@@ -35,35 +35,51 @@ st.set_page_config(page_title=APP_TITLE, layout="wide", initial_sidebar_state="c
 
 st.markdown(
     """
-    <style>
+        <style>
       /* Main spacing (safe) */
       .block-container{padding-top:2.5rem;padding-bottom:1.0rem;}
 
       /* Hide native sidebar completely (we use main 2-column panel) */
       section[data-testid="stSidebar"]{display:none!important;}
 
-      /* Left panel (sidebar-like) */
-      .left-panel{position:sticky;top:0.65rem;}
-      .left-card{background:#f6f7f9;border:1px solid rgba(49,51,63,0.16);border-radius:0.85rem;padding:0.95rem 0.95rem;}
+      /* ===========================
+         LEFT column as a "card"
+         =========================== */
+      /* Make the entire LEFT column block look like a sidebar card */
+      div[data-testid="column"]:nth-of-type(1) div[data-testid="stVerticalBlock"]{
+        position:sticky;
+        top:0.65rem;
+
+        background:#f6f7f9;
+        border:1px solid rgba(49,51,63,0.16);
+        border-radius:0.85rem;
+        padding:0.95rem 0.95rem;
+      }
+
+      /* Left titles */
       .left-title{font-size:1.35rem;font-weight:850;margin:0 0 0.55rem 0;}
       .left-h3{font-size:1.02rem;font-weight:850;margin:0.15rem 0 0.45rem 0;}
       .left-hr{margin:0.75rem 0;border:none;border-top:1px solid rgba(49,51,63,0.14);}
 
-      /* Left panel: tighten widget spacing */
-      .left-card .stElementContainer{margin:0.10rem 0!important;}
-      .left-card .stMarkdown{margin:0.05rem 0!important;}
-      .left-card [data-testid="stBlock"],.left-card .stBlock{padding:0!important;margin:0!important;}
-      .left-card .stButton,.left-card .stSelectbox,.left-card .stDateInput,.left-card .stTextArea{margin:0.10rem 0!important;}
+      /* Left: tighten widget spacing (only in LEFT column) */
+      div[data-testid="column"]:nth-of-type(1) .stElementContainer{margin:0.10rem 0!important;}
+      div[data-testid="column"]:nth-of-type(1) .stMarkdown{margin:0.05rem 0!important;}
+      div[data-testid="column"]:nth-of-type(1) [data-testid="stBlock"],
+      div[data-testid="column"]:nth-of-type(1) .stBlock{padding:0!important;margin:0!important;}
+      div[data-testid="column"]:nth-of-type(1) .stButton,
+      div[data-testid="column"]:nth-of-type(1) .stSelectbox,
+      div[data-testid="column"]:nth-of-type(1) .stDateInput,
+      div[data-testid="column"]:nth-of-type(1) .stTextArea{margin:0.10rem 0!important;}
 
       /* Highlighted inputs (left + main select) */
-      .left-card div[data-testid="stSelectbox"] div[role="combobox"],
-      .left-card div[data-testid="stDateInput"] input,
-      .left-card div[data-testid="stTextArea"] textarea,
+      div[data-testid="column"]:nth-of-type(1) div[data-testid="stSelectbox"] div[role="combobox"],
+      div[data-testid="column"]:nth-of-type(1) div[data-testid="stDateInput"] input,
+      div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea,
       section.main div[data-testid="stSelectbox"] div[role="combobox"]{background:#eef4ff!important;border:1px solid #c7d2fe!important;}
 
       /* Left memo textarea */
-      .left-card div[data-testid="stDateInput"] input{text-align:center!important;}
-      .left-card div[data-testid="stTextArea"] textarea{font-size:0.85rem!important;line-height:1.15!important;min-height:10.5rem!important;}
+      div[data-testid="column"]:nth-of-type(1) div[data-testid="stDateInput"] input{text-align:center!important;}
+      div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea{font-size:0.85rem!important;line-height:1.15!important;min-height:10.5rem!important;}
 
       /* "새창 열기" button-like link */
       .sidebar-linkbtn{display:inline-flex;align-items:center;justify-content:center;width:100%;height:2.45rem;padding:0 0.65rem;border-radius:0.5rem;border:1px solid rgba(49,51,63,0.18);}
@@ -80,37 +96,9 @@ st.markdown(
       /* Main titles */
       .main-title{font-size:1.15rem;font-weight:850;margin:0.2rem 0 0.35rem 0;}
       .sub-title{font-size:1.05rem;font-weight:850;margin:0.1rem 0 0.2rem 0;}
-
-      /* (옵션) 빈 마크다운 내부 div 정리 */
-      div[data-testid="stMarkdown"] > div:empty { display:none !important; }
-      div[data-testid="stMarkdown"] { margin:0 !important; padding:0 !important; }
     </style>
     """,
     unsafe_allow_html=True,
-)
-
-# ✅ st.markdown 밖에서 실행해야 함
-components.html(
-    """
-    <script>
-    (function(){
-      const kill = () => {
-        document.querySelectorAll('div[data-testid="stMarkdown"]').forEach(el => {
-          const child = el.firstElementChild;
-          if (!child) return;
-          const isEmpty = child.children.length === 0 && child.textContent.trim() === "";
-          if (isEmpty) el.remove();
-        });
-      };
-      kill();
-      window.addEventListener("load", kill);
-      setTimeout(kill, 50);
-      setTimeout(kill, 250);
-      setTimeout(kill, 1000);
-    })();
-    </script>
-    """,
-    height=0,
 )
 
 # ======================================================
@@ -253,7 +241,68 @@ def render_sheet_preview() -> None:
           </div>
           <iframe id="sheet_iframe" src="{src_view}" style="width:100%;height:1100px;border:1px solid #ddd;border-radius:0.75rem;background:#fff;"></iframe>
         </div>
-        <style>@keyframes spin{{to{{transform:rotate(360deg);}}}}</style>
+            <style>
+      /* Main spacing (safe) */
+      .block-container{padding-top:2.5rem;padding-bottom:1.0rem;}
+
+      /* Hide native sidebar completely (we use main 2-column panel) */
+      section[data-testid="stSidebar"]{display:none!important;}
+
+      /* ===========================
+         LEFT column as a "card"
+         =========================== */
+      /* Make the entire LEFT column block look like a sidebar card */
+      div[data-testid="column"]:nth-of-type(1) div[data-testid="stVerticalBlock"]{
+        position:sticky;
+        top:0.65rem;
+
+        background:#f6f7f9;
+        border:1px solid rgba(49,51,63,0.16);
+        border-radius:0.85rem;
+        padding:0.95rem 0.95rem;
+      }
+
+      /* Left titles */
+      .left-title{font-size:1.35rem;font-weight:850;margin:0 0 0.55rem 0;}
+      .left-h3{font-size:1.02rem;font-weight:850;margin:0.15rem 0 0.45rem 0;}
+      .left-hr{margin:0.75rem 0;border:none;border-top:1px solid rgba(49,51,63,0.14);}
+
+      /* Left: tighten widget spacing (only in LEFT column) */
+      div[data-testid="column"]:nth-of-type(1) .stElementContainer{margin:0.10rem 0!important;}
+      div[data-testid="column"]:nth-of-type(1) .stMarkdown{margin:0.05rem 0!important;}
+      div[data-testid="column"]:nth-of-type(1) [data-testid="stBlock"],
+      div[data-testid="column"]:nth-of-type(1) .stBlock{padding:0!important;margin:0!important;}
+      div[data-testid="column"]:nth-of-type(1) .stButton,
+      div[data-testid="column"]:nth-of-type(1) .stSelectbox,
+      div[data-testid="column"]:nth-of-type(1) .stDateInput,
+      div[data-testid="column"]:nth-of-type(1) .stTextArea{margin:0.10rem 0!important;}
+
+      /* Highlighted inputs (left + main select) */
+      div[data-testid="column"]:nth-of-type(1) div[data-testid="stSelectbox"] div[role="combobox"],
+      div[data-testid="column"]:nth-of-type(1) div[data-testid="stDateInput"] input,
+      div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea,
+      section.main div[data-testid="stSelectbox"] div[role="combobox"]{background:#eef4ff!important;border:1px solid #c7d2fe!important;}
+
+      /* Left memo textarea */
+      div[data-testid="column"]:nth-of-type(1) div[data-testid="stDateInput"] input{text-align:center!important;}
+      div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea{font-size:0.85rem!important;line-height:1.15!important;min-height:10.5rem!important;}
+
+      /* "새창 열기" button-like link */
+      .sidebar-linkbtn{display:inline-flex;align-items:center;justify-content:center;width:100%;height:2.45rem;padding:0 0.65rem;border-radius:0.5rem;border:1px solid rgba(49,51,63,0.18);}
+      .sidebar-linkbtn{background:rgba(248,249,251,1);color:rgba(49,51,63,0.75)!important;font-weight:500;text-decoration:none!important;white-space:nowrap;box-sizing:border-box;}
+      .sidebar-linkbtn:hover{background:rgba(243,244,246,1);}
+
+      /* Monthly horizontal table */
+      .month-wrap{overflow-x:auto;border:1px solid #e5e7eb;border-radius:0.75rem;}
+      .month-table{border-collapse:collapse;width:max-content;min-width:100%;font-size:0.82rem;}
+      .month-table td{border-bottom:1px solid #f3f4f6;padding:0.55rem 0.65rem;vertical-align:top;}
+      .month-date{background:#f9fafb;font-weight:700;white-space:nowrap;}
+      .month-cell{min-width:14rem;white-space:pre-wrap;}
+
+      /* Main titles */
+      .main-title{font-size:1.15rem;font-weight:850;margin:0.2rem 0 0.35rem 0;}
+      .sub-title{font-size:1.05rem;font-weight:850;margin:0.1rem 0 0.2rem 0;}
+    </style>
         <script>
           const iframe=document.getElementById("sheet_iframe"), overlay=document.getElementById("overlay");
           iframe.addEventListener("load",()=>{{overlay.style.display="none";}});
@@ -290,8 +339,7 @@ col_left, col_right = st.columns([0.26, 0.74], gap="large")
 # ---------------------------
 
 with col_left:
-    st.markdown('<div class="left-panel"><div class="left-card">', unsafe_allow_html=True)
-    st.markdown(f"<div class='left-title'>{APP_TITLE}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='left-title'>{APP_TITLE}</div>", unsafe_allow_html=True)
     st.markdown("<hr class='left-hr'>", unsafe_allow_html=True)
 
     # (1) 업무현황(월)
@@ -376,8 +424,7 @@ with col_left:
             except Exception: pass
             st.session_state["flash"] = ("success", "동기화되었습니다."); st.rerun()
 
-    st.markdown("</div></div>", unsafe_allow_html=True)
-
+    
 # ---------------------------
 # 8-2) RIGHT: main content
 # ---------------------------
