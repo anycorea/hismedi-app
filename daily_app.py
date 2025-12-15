@@ -51,6 +51,10 @@ st.markdown(
       .left-h3{font-size:1.02rem;font-weight:850;margin:0.15rem 0 0.45rem 0;}
       .left-hr{margin:0.75rem 0;border:none;border-top:1px solid rgba(49,51,63,0.14);}
 
+      /* Left panel container styling (only the one that has marker) */
+      div[data-testid="stVerticalBlockBorderWrapper"]:has(#leftcard-marker){background:#f6f7f9;border:1px solid rgba(49,51,63,0.16);border-radius:0.85rem;}
+      div[data-testid="stVerticalBlockBorderWrapper"]:has(#leftcard-marker) > div{padding:0.95rem!important;}
+
       /* Left panel: tighten widget spacing */
       .left-card .stElementContainer{margin:0.10rem 0!important;}
       .left-card .stMarkdown{margin:0.05rem 0!important;}
@@ -264,9 +268,11 @@ col_left, col_right = st.columns([0.26, 0.74], gap="large")
 # ---------------------------
 
 with col_left:
-    st.markdown('<div class="left-panel"><div class="left-card">', unsafe_allow_html=True)
-    st.markdown(f"<div class='left-title'>{APP_TITLE}</div>", unsafe_allow_html=True)
-    st.markdown("<hr class='left-hr'>", unsafe_allow_html=True)
+    with st.container(border=True):
+        st.markdown('<div id="leftcard-marker"></div>', unsafe_allow_html=True)
+
+        st.markdown(f"<div class='left-title'>{APP_TITLE}</div>", unsafe_allow_html=True)
+        st.markdown("<hr class='left-hr'>", unsafe_allow_html=True)
 
     # (1) 업무현황(월)
     st.markdown("<div class='left-h3'>업무현황 (월)</div>", unsafe_allow_html=True)
