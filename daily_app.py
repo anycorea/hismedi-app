@@ -87,25 +87,23 @@ st.markdown(
       .sidebar-linkbtn{background:rgba(248,249,251,1);color:rgba(49,51,63,0.75)!important;font-weight:500;text-decoration:none!important;white-space:nowrap;box-sizing:border-box;}
       .sidebar-linkbtn:hover{background:rgba(243,244,246,1);}
 
+      /* Monthly wrap grid (NO horizontal scroll) */
+      .month-grid{display:grid!important;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))!important;gap:.75rem!important;width:100%!important;}
+      .month-item{border:1px solid #e5e7eb;border-radius:.75rem;background:#fff;overflow:hidden;min-width:0;}
+      .month-item-date{background:#f9fafb;font-weight:800;padding:.55rem .75rem;border-bottom:1px solid #f3f4f6;white-space:nowrap;}
+      .month-item-body{padding:.65rem .75rem;white-space:pre-wrap;word-break:break-word;line-height:1.35;}
+
+
       /* Main titles */
       .main-title{font-size:1.15rem;font-weight:850;color:#2563eb;margin:0.2rem 0 0.35rem 0;}
       .sub-title{font-size:1.05rem;font-weight:850;color:#2563eb;margin:0.1rem 0 0.2rem 0;}
 
       /* Monthly: wrap grid (no horizontal scroll) */
-      .month-grid{display:grid!important;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))!important;gap:.75rem!important;width:100%!important;}
-      .month-item{border:1px solid #e5e7eb;border-radius:.75rem;background:#fff;overflow:hidden;min-width:0;}
-      .month-item-date{background:#f9fafb;font-weight:800;padding:.55rem .75rem;border-bottom:1px solid #f3f4f6;white-space:nowrap;}
-      .month-item-body{padding:.65rem .75rem;white-space:pre-wrap;word-break:break-word;}
-
-      /* Weekly cards: reduce container padding (RIGHT column only) */
-      div[data-testid="column"]:nth-of-type(2) div[data-testid="stContainer"]{
-        padding:0.35rem 0.55rem !important;
-      }
-
-      div[data-testid="column"]:nth-of-type(2) div[data-testid="stContainer"] .stMarkdown p{
-        margin:0.2rem 0 !important;
-      }
-
+      .month-grid{display:flex;flex-wrap:wrap;gap:0.75rem;}
+      .month-item{flex: 1 1 260px;border:1px solid #e5e7eb;border-radius:0.75rem;background:#fff;overflow:hidden;}
+      .month-item-date{background:#f9fafb;font-weight:800;padding:0.55rem 0.75rem;border-bottom:1px solid #f3f4f6;white-space:nowrap;}
+      .month-item-body{padding:0.65rem 0.75rem;white-space:pre-wrap;line-height:1.35;}
+      
     </style>
     """,
     unsafe_allow_html=True,
@@ -251,71 +249,7 @@ def render_sheet_preview() -> None:
           </div>
           <iframe id="sheet_iframe" src="{src_view}" style="width:100%;height:1100px;border:1px solid #ddd;border-radius:0.75rem;background:#fff;"></iframe>
         </div>
-            <style>
-      /* Main spacing (safe) */
-      .block-container{padding-top:2.5rem;padding-bottom:1.0rem;}
-
-      /* Hide native sidebar completely (we use main 2-column panel) */
-      section[data-testid="stSidebar"]{display:none!important;}
-
-      /* ===========================
-         LEFT column as a "card"
-         =========================== */
-      /* Make the entire LEFT column block look like a sidebar card */
-      div[data-testid="column"]:nth-of-type(1) div[data-testid="stVerticalBlock"]{
-        position:sticky;
-        top:0.65rem;
-
-        background:#f6f7f9;
-        border:1px solid rgba(49,51,63,0.16);
-        border-radius:0.85rem;
-        padding:0.95rem 0.95rem;
-      }
-
-      /* Left titles */
-      .left-title{font-size:1.35rem;font-weight:850;margin:0 0 0.55rem 0;}
-      .left-h3{font-size:1.02rem;font-weight:850;margin:0.15rem 0 0.45rem 0;}
-      .left-hr{margin:0.75rem 0;border:none;border-top:1px solid rgba(49,51,63,0.14);}
-
-      /* Left: tighten widget spacing (only in LEFT column) */
-      div[data-testid="column"]:nth-of-type(1) .stElementContainer{margin:0.10rem 0!important;}
-      div[data-testid="column"]:nth-of-type(1) .stMarkdown{margin:0.05rem 0!important;}
-      div[data-testid="column"]:nth-of-type(1) [data-testid="stBlock"],
-      div[data-testid="column"]:nth-of-type(1) .stBlock{padding:0!important;margin:0!important;}
-      div[data-testid="column"]:nth-of-type(1) .stButton,
-      div[data-testid="column"]:nth-of-type(1) .stSelectbox,
-      div[data-testid="column"]:nth-of-type(1) .stDateInput,
-      div[data-testid="column"]:nth-of-type(1) .stTextArea{margin:0.10rem 0!important;}
-
-      /* Highlighted inputs (left + main select) */
-      div[data-testid="column"]:nth-of-type(1) div[data-testid="stSelectbox"] div[role="combobox"],
-      div[data-testid="column"]:nth-of-type(1) div[data-testid="stDateInput"] input,
-      div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea,
-      section.main div[data-testid="stSelectbox"] div[role="combobox"]{background:#eef4ff!important;border:1px solid #c7d2fe!important;}
-
-      /* Left memo textarea */
-      div[data-testid="column"]:nth-of-type(1) div[data-testid="stDateInput"] input{text-align:center!important;}
-      div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea{font-size:0.85rem!important;line-height:1.15!important;min-height:10.5rem!important;}
-
-      /* "새창 열기" button-like link */
-      .sidebar-linkbtn{display:inline-flex;align-items:center;justify-content:center;width:100%;height:2.45rem;padding:0 0.65rem;border-radius:0.5rem;border:1px solid rgba(49,51,63,0.18);}
-      .sidebar-linkbtn{background:rgba(248,249,251,1);color:rgba(49,51,63,0.75)!important;font-weight:500;text-decoration:none!important;white-space:nowrap;box-sizing:border-box;}
-      .sidebar-linkbtn:hover{background:rgba(243,244,246,1);}
-
-      /* Main titles */
-      .main-title{font-size:1.15rem;font-weight:850;margin:0.2rem 0 0.35rem 0;}
-      .sub-title{font-size:1.05rem;font-weight:850;margin:0.1rem 0 0.2rem 0;}
-
-      /* Weekly cards: reduce container padding (RIGHT column only) */
-      div[data-testid="column"]:nth-of-type(2) div[data-testid="stContainer"]{
-        padding:0.35rem 0.55rem !important;
-      }
-
-      div[data-testid="column"]:nth-of-type(2) div[data-testid="stContainer"] .stMarkdown p{
-        margin:0.2rem 0 !important;
-      }
-
-    </style>
+            
         <script>
           const iframe=document.getElementById("sheet_iframe"), overlay=document.getElementById("overlay");
           iframe.addEventListener("load",()=>{{overlay.style.display="none";}});
@@ -443,22 +377,12 @@ with col_left:
 # ---------------------------
 
 def render_month_overview_horizontal(period_df: pd.DataFrame) -> None:
-    if period_df.empty:
-        st.info("해당 월에 작성된 보고가 없습니다.")
-        return
-
-    items_html = ""
+    if period_df.empty: st.info("해당 월에 작성된 보고가 없습니다."); return
+    parts=[]
     for _, r in period_df.sort_values("DATE").iterrows():
-        d = format_date_with_weekday(r["DATE"])
-        c = escape_html(str(r["내용"]))
-        items_html += f"""
-          <div class="month-item">
-            <div class="month-item-date">{escape_html(d)}</div>
-            <div class="month-item-body">{c}</div>
-          </div>
-        """
-
-    st.markdown(f"<div class='month-grid'>{items_html}</div>", unsafe_allow_html=True)
+        d=format_date_with_weekday(r["DATE"]); c=escape_html(str(r.get("내용","")))
+        parts.append(f"<div class='month-item'><div class='month-item-date'>{escape_html(d)}</div><div class='month-item-body'>{c}</div></div>")
+    st.markdown(f"<div class='month-grid'>{''.join(parts)}</div>", unsafe_allow_html=True)
 
 with col_right:
     if st.session_state.get("timetable_open", False):
