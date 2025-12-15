@@ -59,12 +59,7 @@ st.markdown(
       /* Left titles */
       .left-title{font-size:1.65rem;font-weight:850;margin:0 0 0.55rem 0;}
       .left-h3,
-      .left-h3 *{
-        font-size:1.02rem;
-        font-weight:850;
-        color:#2563eb !important;
-        margin:0.15rem 0 0.45rem 0;
-      }
+      .left-h3 *{font-size:1.02rem;font-weight:850;color:#2563eb !important;margin:0.15rem 0 0.45rem 0;}
       .left-hr{margin:0.75rem 0;border:none;border-top:1px solid rgba(49,51,63,0.14);}
 
       /* Left: tighten widget spacing (only in LEFT column) */
