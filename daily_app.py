@@ -410,7 +410,7 @@ with col_left:
     if not df_daily.empty and (df_daily["DATE"] == selected_date).any():
         default_content = df_daily[df_daily["DATE"] == selected_date].iloc[0].get("내용", "")
 
-    content = st.text_area("내용", value=default_content, key="left_daily_memo", label_visibility="collapsed", height=150)
+    content = st.text_area("내용", value=default_content, key="left_daily_memo", label_visibility="collapsed", height=200)
 
     b1, b2 = st.columns(2)
     with b1:
