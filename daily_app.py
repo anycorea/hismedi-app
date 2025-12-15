@@ -81,14 +81,36 @@ st.markdown(
       .main-title{font-size:1.15rem;font-weight:850;margin:0.2rem 0 0.35rem 0;}
       .sub-title{font-size:1.05rem;font-weight:850;margin:0.1rem 0 0.2rem 0;}
 
-      /* LEFT 컬럼 상단에 생기는 빈 stMarkdown 제거 */
-      div[data-testid="stMarkdown"]:has(> div:empty) {display: none !important;}
+      /* (옵션) 빈 마크다운 내부 div 정리 */
       div[data-testid="stMarkdown"] > div:empty { display:none !important; }
       div[data-testid="stMarkdown"] { margin:0 !important; padding:0 !important; }
-
     </style>
     """,
     unsafe_allow_html=True,
+)
+
+# ✅ st.markdown 밖에서 실행해야 함
+components.html(
+    """
+    <script>
+    (function(){
+      const kill = () => {
+        document.querySelectorAll('div[data-testid="stMarkdown"]').forEach(el => {
+          const child = el.firstElementChild;
+          if (!child) return;
+          const isEmpty = child.children.length === 0 && child.textContent.trim() === "";
+          if (isEmpty) el.remove();
+        });
+      };
+      kill();
+      window.addEventListener("load", kill);
+      setTimeout(kill, 50);
+      setTimeout(kill, 250);
+      setTimeout(kill, 1000);
+    })();
+    </script>
+    """,
+    height=0,
 )
 
 # ======================================================
