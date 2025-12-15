@@ -104,10 +104,9 @@ st.markdown(
       .month-item-date{background:#f9fafb;font-weight:800;padding:0.55rem 0.75rem;border-bottom:1px solid #f3f4f6;white-space:nowrap;}
       .month-item-body{padding:0.65rem 0.75rem;white-space:pre-wrap;line-height:1.35;}
 
-      /* RIGHT column weekly cards: kill container padding (most robust) */
-      div[data-testid="column"]:nth-of-type(2) div[data-testid="stContainer"]{padding:0!important;}
-      div[data-testid="column"]:nth-of-type(2) div[data-testid="stContainer"]>div{padding:0!important;margin:0!important;}
-      div[data-testid="column"]:nth-of-type(2) div[data-testid="stContainer"]>div>div{padding:.35rem .45rem!important;}
+      /* Border container padding control (works for st.container(border=True)) */
+      div[data-testid="stVerticalBlockBorderWrapper"]{padding:.35rem .45rem!important;}
+      div[data-testid="stVerticalBlockBorderWrapper"] > div{padding:0!important;margin:0!important;}
       
     </style>
     """,
