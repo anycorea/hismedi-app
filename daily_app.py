@@ -33,79 +33,39 @@ WEEKDAY_MAP = ["월", "화", "수", "목", "금", "토", "일"]
 
 st.set_page_config(page_title=APP_TITLE, layout="wide", initial_sidebar_state="collapsed")
 
-st.markdown(
-    """
-        <style>
-      /* Main spacing (safe) */
-      .block-container{padding-top:2.5rem;padding-bottom:1.0rem;}
+st.markdown("""
+<style>
+.block-container{padding-top:2.5rem;padding-bottom:1.0rem;}
+section[data-testid="stSidebar"]{display:none!important;}
 
-      /* Hide native sidebar completely (we use main 2-column panel) */
-      section[data-testid="stSidebar"]{display:none!important;}
+div[data-testid="column"]:nth-of-type(1) div[data-testid="stVerticalBlock"]{position:sticky;top:0.65rem;background:#f6f7f9;border:1px solid rgba(49,51,63,0.16);border-radius:0.85rem;padding:0.95rem;}
+.left-title{font-size:1.65rem;font-weight:850;margin:0 0 0.55rem 0;}
+.left-h3,.left-h3 *{font-size:1.02rem;font-weight:850;color:#2563eb!important;margin:0.15rem 0 0.45rem 0;}
+.left-hr{margin:0.75rem 0;border:none;border-top:1px solid rgba(49,51,63,0.14);}
 
-      /* ===========================
-         LEFT column as a "card"
-         =========================== */
-      /* Make the entire LEFT column block look like a sidebar card */
-      div[data-testid="column"]:nth-of-type(1) div[data-testid="stVerticalBlock"]{
-        position:sticky;
-        top:0.65rem;
+div[data-testid="column"]:nth-of-type(1) .stElementContainer{margin:0.10rem 0!important;}
+div[data-testid="column"]:nth-of-type(1) .stButton,div[data-testid="column"]:nth-of-type(1) .stSelectbox,div[data-testid="column"]:nth-of-type(1) .stDateInput,div[data-testid="column"]:nth-of-type(1) .stTextArea{margin:0.10rem 0!important;}
+div[data-testid="column"]:nth-of-type(1) div[data-testid="stSelectbox"] div[role="combobox"],div[data-testid="column"]:nth-of-type(1) div[data-testid="stDateInput"] input,div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea,section.main div[data-testid="stSelectbox"] div[role="combobox"]{background:#eef4ff!important;border:1px solid #c7d2fe!important;}
+div[data-testid="column"]:nth-of-type(1) div[data-testid="stDateInput"] input{text-align:center!important;}
+div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea{font-size:0.85rem!important;line-height:1.15!important;min-height:10.5rem!important;}
 
-        background:#f6f7f9;
-        border:1px solid rgba(49,51,63,0.16);
-        border-radius:0.85rem;
-        padding:0.95rem 0.95rem;
-      }
+.sidebar-linkbtn{display:inline-flex;align-items:center;justify-content:center;width:100%;height:2.45rem;padding:0 0.65rem;border-radius:0.5rem;border:1px solid rgba(49,51,63,0.18);background:rgba(248,249,251,1);color:rgba(49,51,63,0.75)!important;font-weight:500;text-decoration:none!important;white-space:nowrap;box-sizing:border-box;}
+.sidebar-linkbtn:hover{background:rgba(243,244,246,1);}
 
-      /* Left titles */
-      .left-title{font-size:1.65rem;font-weight:850;margin:0 0 0.55rem 0;}
-      .left-h3,
-      .left-h3 *{font-size:1.02rem;font-weight:850;color:#2563eb !important;margin:0.15rem 0 0.45rem 0;}
-      .left-hr{margin:0.75rem 0;border:none;border-top:1px solid rgba(49,51,63,0.14);}
+.month-grid{display:grid!important;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))!important;gap:.75rem!important;width:100%!important;}
+.month-item{border:1px solid #e5e7eb;border-radius:.75rem;background:#fff;overflow:hidden;min-width:0;}
+.month-item-date{background:#f9fafb;font-weight:800;padding:.55rem .75rem;border-bottom:1px solid #f3f4f6;white-space:nowrap;}
+.month-item-body{padding:.65rem .75rem;white-space:pre-wrap;word-break:break-word;line-height:1.35;}
 
-      /* Left: tighten widget spacing (only in LEFT column) */
-      div[data-testid="column"]:nth-of-type(1) .stElementContainer{margin:0.10rem 0!important;}
-      div[data-testid="column"]:nth-of-type(1) .stMarkdown{margin:0.05rem 0!important;}
-      div[data-testid="column"]:nth-of-type(1) [data-testid="stBlock"],
-      div[data-testid="column"]:nth-of-type(1) .stBlock{padding:0!important;margin:0!important;}
-      div[data-testid="column"]:nth-of-type(1) .stButton,
-      div[data-testid="column"]:nth-of-type(1) .stSelectbox,
-      div[data-testid="column"]:nth-of-type(1) .stDateInput,
-      div[data-testid="column"]:nth-of-type(1) .stTextArea{margin:0.10rem 0!important;}
+.main-title{font-size:1.15rem;font-weight:850;color:#2563eb;margin:0.2rem 0 0.35rem 0;}
+.sub-title{font-size:1.05rem;font-weight:850;color:#2563eb;margin:0.1rem 0 0.2rem 0;}
 
-      /* Highlighted inputs (left + main select) */
-      div[data-testid="column"]:nth-of-type(1) div[data-testid="stSelectbox"] div[role="combobox"],
-      div[data-testid="column"]:nth-of-type(1) div[data-testid="stDateInput"] input,
-      div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea,
-      section.main div[data-testid="stSelectbox"] div[role="combobox"]{background:#eef4ff!important;border:1px solid #c7d2fe!important;}
-
-      /* Left memo textarea */
-      div[data-testid="column"]:nth-of-type(1) div[data-testid="stDateInput"] input{text-align:center!important;}
-      div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea{font-size:0.85rem!important;line-height:1.15!important;min-height:10.5rem!important;}
-
-      /* "새창 열기" button-like link */
-      .sidebar-linkbtn{display:inline-flex;align-items:center;justify-content:center;width:100%;height:2.45rem;padding:0 0.65rem;border-radius:0.5rem;border:1px solid rgba(49,51,63,0.18);}
-      .sidebar-linkbtn{background:rgba(248,249,251,1);color:rgba(49,51,63,0.75)!important;font-weight:500;text-decoration:none!important;white-space:nowrap;box-sizing:border-box;}
-      .sidebar-linkbtn:hover{background:rgba(243,244,246,1);}
-
-      /* Monthly wrap grid (NO horizontal scroll) */
-      .month-grid{display:grid!important;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))!important;gap:.75rem!important;width:100%!important;}
-      .month-item{border:1px solid #e5e7eb;border-radius:.75rem;background:#fff;overflow:hidden;min-width:0;}
-      .month-item-date{background:#f9fafb;font-weight:800;padding:.55rem .75rem;border-bottom:1px solid #f3f4f6;white-space:nowrap;}
-      .month-item-body{padding:.65rem .75rem;white-space:pre-wrap;word-break:break-word;line-height:1.35;}
-
-      /* Main titles */
-      .main-title{font-size:1.15rem;font-weight:850;color:#2563eb;margin:0.2rem 0 0.35rem 0;}
-      .sub-title{font-size:1.05rem;font-weight:850;color:#2563eb;margin:0.1rem 0 0.2rem 0;}
-
-      .weekly-border{border:1px solid #d1d5db;border-radius:.75rem;background:#fff;padding:.20rem .25rem;} /* ← 여기서 라인박스 내부 여백을 직접 조절 */
-      .weekly-card{display:flow-root;}
-      .weekly-dept{font-size:.85rem;font-weight:850;margin:0 0 .08rem 0;} /* ← 부서명도 바짝 */
-      .weekly-body{background:#f8fafc;border-radius:.6rem;padding:.25rem .45rem;font-size:.80rem;line-height:1.35;color:#111827;white-space:pre-wrap;margin-top:0!important;}
-
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+.weekly-border{border:1px solid #d1d5db;border-radius:.75rem;background:#fff;padding:.20rem .25rem;}
+.weekly-card{display:flow-root;}
+.weekly-dept{font-size:.85rem;font-weight:850;margin:0 0 .08rem 0;}
+.weekly-body{background:#f8fafc;border-radius:.6rem;padding:.25rem .45rem;font-size:.80rem;line-height:1.35;color:#111827;white-space:pre-wrap;margin-top:0!important;}
+</style>
+""", unsafe_allow_html=True)
 
 # ======================================================
 # 2) Google Sheets connection
