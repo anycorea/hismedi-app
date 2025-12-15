@@ -87,23 +87,25 @@ st.markdown(
       .sidebar-linkbtn{background:rgba(248,249,251,1);color:rgba(49,51,63,0.75)!important;font-weight:500;text-decoration:none!important;white-space:nowrap;box-sizing:border-box;}
       .sidebar-linkbtn:hover{background:rgba(243,244,246,1);}
 
-      /* Monthly horizontal table */
-      .month-wrap{overflow-x:auto;border:1px solid #e5e7eb;border-radius:0.75rem;}
-      .month-table{border-collapse:collapse;width:max-content;min-width:100%;font-size:0.82rem;}
-      .month-table td{border-bottom:1px solid #f3f4f6;padding:0.55rem 0.65rem;vertical-align:top;}
-      .month-date{background:#f9fafb;font-weight:700;white-space:nowrap;}
-      .month-cell{min-width:14rem;white-space:pre-wrap;}
-
       /* Main titles */
       .main-title{font-size:1.15rem;font-weight:850;color:#2563eb;margin:0.2rem 0 0.35rem 0;}
       .sub-title{font-size:1.05rem;font-weight:850;color:#2563eb;margin:0.1rem 0 0.2rem 0;}
 
       /* Monthly: wrap grid (no horizontal scroll) */
-      .month-grid{display:flex;flex-wrap:wrap;gap:0.75rem;}
-      .month-item{flex: 1 1 260px;border:1px solid #e5e7eb;border-radius:0.75rem;background:#fff;overflow:hidden;}
+      .month-grid{display:flex;flex-wrap:wrap;gap:0.75rem;width:100%;align-items:stretch;}
+      .month-item{flex:1 1 260px;box-sizing:border-box;border:1px solid #e5e7eb;border-radius:0.75rem;background:#fff;overflow:hidden;}
       .month-item-date{background:#f9fafb;font-weight:800;padding:0.55rem 0.75rem;border-bottom:1px solid #f3f4f6;white-space:nowrap;}
       .month-item-body{padding:0.65rem 0.75rem;white-space:pre-wrap;line-height:1.35;}
-      
+
+      /* Weekly cards: reduce container padding (RIGHT column only) */
+      div[data-testid="column"]:nth-of-type(2) div[data-testid="stContainer"]{
+        padding:0.35rem 0.55rem !important;
+      }
+
+      div[data-testid="column"]:nth-of-type(2) div[data-testid="stContainer"] .stMarkdown p{
+        margin:0.2rem 0 !important;
+      }
+
     </style>
     """,
     unsafe_allow_html=True,
@@ -300,16 +302,19 @@ def render_sheet_preview() -> None:
       .sidebar-linkbtn{background:rgba(248,249,251,1);color:rgba(49,51,63,0.75)!important;font-weight:500;text-decoration:none!important;white-space:nowrap;box-sizing:border-box;}
       .sidebar-linkbtn:hover{background:rgba(243,244,246,1);}
 
-      /* Monthly horizontal table */
-      .month-wrap{overflow-x:auto;border:1px solid #e5e7eb;border-radius:0.75rem;}
-      .month-table{border-collapse:collapse;width:max-content;min-width:100%;font-size:0.82rem;}
-      .month-table td{border-bottom:1px solid #f3f4f6;padding:0.55rem 0.65rem;vertical-align:top;}
-      .month-date{background:#f9fafb;font-weight:700;white-space:nowrap;}
-      .month-cell{min-width:14rem;white-space:pre-wrap;}
-
       /* Main titles */
       .main-title{font-size:1.15rem;font-weight:850;margin:0.2rem 0 0.35rem 0;}
       .sub-title{font-size:1.05rem;font-weight:850;margin:0.1rem 0 0.2rem 0;}
+
+      /* Weekly cards: reduce container padding (RIGHT column only) */
+      div[data-testid="column"]:nth-of-type(2) div[data-testid="stContainer"]{
+        padding:0.35rem 0.55rem !important;
+      }
+
+      div[data-testid="column"]:nth-of-type(2) div[data-testid="stContainer"] .stMarkdown p{
+        margin:0.2rem 0 !important;
+      }
+
     </style>
         <script>
           const iframe=document.getElementById("sheet_iframe"), overlay=document.getElementById("overlay");
