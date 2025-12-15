@@ -55,7 +55,7 @@ div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea{
 .month-grid{display:grid!important;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))!important;gap:.75rem!important;width:100%!important;}
 .month-item{border:1px solid #e5e7eb;border-radius:.75rem;background:#fff;overflow:hidden;min-width:0;}
 .month-item-date{background:#f9fafb;font-weight:800;padding:.55rem .75rem;border-bottom:1px solid #f3f4f6;white-space:nowrap;}
-.month-item-body{padding:.65rem .75rem;white-space:pre-wrap;word-break:break-word;line-height:1.35;}
+.month-item-body{padding:.65rem .75rem;font-size:.82rem;line-height:1.32;white-space:pre-wrap;word-break:break-word;}
 
 .main-title{font-size:1.15rem;font-weight:850;color:#2563eb;margin:0.2rem 0 0.35rem 0;}
 .sub-title{font-size:1.05rem;font-weight:850;color:#2563eb;margin:0.1rem 0 0.2rem 0;}
