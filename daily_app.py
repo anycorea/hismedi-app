@@ -107,7 +107,7 @@ st.markdown(
       .weekly-card{display:flow-root;}
       .weekly-dept{font-size:.85rem;font-weight:850;margin:-.15rem 0 .10rem 0;}
       .weekly-body{background:#f8fafc;border-radius:.6rem;padding:.25rem .45rem;font-size:.80rem;line-height:1.35;color:#111827;white-space:pre-wrap;}
-      .weekly-wrap{margin:-.35rem -.45rem;}  /* container 기본 padding 만큼 ‘당겨서’ 제거 */
+      .weekly-wrap{margin:-.55rem -.45rem -.35rem -.45rem;}
       .weekly-wrap .weekly-card{display:flow-root;}
       
     </style>
