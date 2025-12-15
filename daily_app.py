@@ -103,7 +103,34 @@ st.markdown(
       .weekly-wrap{margin:-.55rem -.45rem -.35rem -.45rem;}
 
       div[data-testid="column"]:nth-of-type(2) div[data-testid="stContainer"] .stMarkdown{margin:0!important;padding:0!important;}
-      
+
+
+/* ============== 추가/수정할 부분 시작 ============== */
+
+        /* 1. 부서명 (weekly-dept) 상하 마진 완전 제거 */
+        .weekly-dept{
+            font-size:.85rem;
+            font-weight:850;
+            margin:0 !important; /* 상하좌우 마진을 0으로 설정 */
+        }
+        
+        /* 2. 부서명 주변의 Streamlit Markdown 요소 간격 최소화 */
+        /* weekly-card 내부의 Markdown 요소 대상 */
+        .weekly-card .stMarkdown {
+            margin: 0 !important;
+            padding: 0 !important;
+        }
+
+        /* 3. weekly-card 내부의 Streamlit 블록 간격 최소화 */
+        .weekly-card [data-testid="stBlock"],
+        .weekly-card [data-testid="stVerticalBlock"] {
+            padding: 0 !important;
+            margin: 0 !important;
+        }
+
+        /* ============== 추가/수정할 부분 끝 ============== */
+
+
     </style>
     """,
     unsafe_allow_html=True,
