@@ -97,6 +97,13 @@ st.markdown(
       /* Main titles */
       .main-title{font-size:1.15rem;font-weight:850;color:#2563eb;margin:0.2rem 0 0.35rem 0;}
       .sub-title{font-size:1.05rem;font-weight:850;color:#2563eb;margin:0.1rem 0 0.2rem 0;}
+
+      /* Monthly: wrap grid (no horizontal scroll) */
+      .month-grid{display:flex;flex-wrap:wrap;gap:0.75rem;}
+      .month-item{flex: 1 1 260px;border:1px solid #e5e7eb;border-radius:0.75rem;background:#fff;overflow:hidden;}
+      .month-item-date{background:#f9fafb;font-weight:800;padding:0.55rem 0.75rem;border-bottom:1px solid #f3f4f6;white-space:nowrap;}
+      .month-item-body{padding:0.65rem 0.75rem;white-space:pre-wrap;line-height:1.35;}
+      
     </style>
     """,
     unsafe_allow_html=True,
@@ -431,12 +438,22 @@ with col_left:
 # ---------------------------
 
 def render_month_overview_horizontal(period_df: pd.DataFrame) -> None:
-    if period_df.empty: st.info("해당 월에 작성된 보고가 없습니다."); return
-    dates = [format_date_with_weekday(d) for d in period_df["DATE"].tolist()]
-    contents = [escape_html(str(x)) for x in period_df["내용"].tolist()]
-    date_row = "".join([f"<td class='month-date'>{escape_html(d)}</td>" for d in dates])
-    content_row = "".join([f"<td class='month-cell'>{c}</td>" for c in contents])
-    st.markdown(f"<div class='month-wrap'><table class='month-table'><tbody><tr>{date_row}</tr><tr>{content_row}</tr></tbody></table></div>", unsafe_allow_html=True)
+    if period_df.empty:
+        st.info("해당 월에 작성된 보고가 없습니다.")
+        return
+
+    items_html = ""
+    for _, r in period_df.sort_values("DATE").iterrows():
+        d = format_date_with_weekday(r["DATE"])
+        c = escape_html(str(r["내용"]))
+        items_html += f"""
+          <div class="month-item">
+            <div class="month-item-date">{escape_html(d)}</div>
+            <div class="month-item-body">{c}</div>
+          </div>
+        """
+
+    st.markdown(f"<div class='month-grid'>{items_html}</div>", unsafe_allow_html=True)
 
 with col_right:
     if st.session_state.get("timetable_open", False):
