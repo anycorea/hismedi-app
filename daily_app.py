@@ -80,6 +80,10 @@ st.markdown(
       /* Main titles */
       .main-title{font-size:1.15rem;font-weight:850;margin:0.2rem 0 0.35rem 0;}
       .sub-title{font-size:1.05rem;font-weight:850;margin:0.1rem 0 0.2rem 0;}
+
+      /* LEFT 컬럼 상단에 생기는 빈 stMarkdown 제거 */
+      div[data-testid="stMarkdown"]:has(> div:empty) {display: none !important;}
+
     </style>
     """,
     unsafe_allow_html=True,
