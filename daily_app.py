@@ -332,7 +332,7 @@ if "ym_index" not in st.session_state: st.session_state["ym_index"] = 0
 # 8) Main 2-column layout (LEFT panel + RIGHT content)
 # ======================================================
 
-col_left, col_right = st.columns([0.26, 0.74], gap="large")
+col_left, col_right = st.columns([0.2, 0.8], gap="large")
 
 # ---------------------------
 # 8-1) LEFT: sidebar-like panel
