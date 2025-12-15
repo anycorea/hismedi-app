@@ -83,6 +83,8 @@ st.markdown(
 
       /* LEFT 컬럼 상단에 생기는 빈 stMarkdown 제거 */
       div[data-testid="stMarkdown"]:has(> div:empty) {display: none !important;}
+      div[data-testid="stMarkdown"] > div:empty { display:none !important; }
+      div[data-testid="stMarkdown"] { margin:0 !important; padding:0 !important; }
 
     </style>
     """,
