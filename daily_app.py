@@ -37,7 +37,7 @@ st.markdown(
     """
     <style>
       /* Main spacing (safe) */
-      .block-container{padding-top:2.0rem;padding-bottom:1.0rem;}
+      .block-container{padding-top:2.5rem;padding-bottom:1.0rem;}
 
       /* Hide native sidebar completely (we use main 2-column panel) */
       section[data-testid="stSidebar"]{display:none!important;}
