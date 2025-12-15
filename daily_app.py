@@ -39,11 +39,12 @@ st.markdown(
       /* Main spacing (safe) */
       .block-container{padding-top:2.5rem;padding-bottom:1.0rem;}
 
-      /* Remove top empty header spacer */
-      header[data-testid="stHeader"]{display:none;}
-
       /* Hide native sidebar completely (we use main 2-column panel) */
       section[data-testid="stSidebar"]{display:none!important;}
+
+      /* Remove the collapsed-sidebar top placeholder (keeps top-right menu) */
+      div[data-testid="stSidebarCollapsedControl"]{display:none!important;}
+      div[data-testid="stSidebarNav"]{display:none!important;}
 
       /* Left panel (sidebar-like) */
       .left-panel{position:sticky;top:0.65rem;}
