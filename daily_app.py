@@ -62,8 +62,8 @@ div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea{
 
 .weekly-border{border:1px solid #d1d5db;border-radius:.75rem;background:#fff;padding:.20rem .25rem;}
 .weekly-card{display:flow-root;}
-.weekly-dept{font-size:.85rem;font-weight:850;margin:0 0 .08rem 0;}
-.weekly-body{background:#f8fafc;border-radius:.6rem;padding:.25rem .45rem;font-size:.80rem;line-height:1.35;color:#111827;white-space:pre-wrap;margin-top:0!important;}
+.weekly-dept{background:#f9fafb;font-size:.85rem;font-weight:850;padding:.45rem .6rem;margin:0 0 .35rem 0;border-radius:.45rem;}
+.weekly-body{background:none;padding:.15rem .1rem;font-size:.80rem;line-height:1.35;color:#111827;white-space:pre-wrap;}
 .weekly-border{margin:0 0 .75rem 0;}
 
 </style>
