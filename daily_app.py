@@ -93,23 +93,14 @@ st.markdown(
       .month-item-date{background:#f9fafb;font-weight:800;padding:.55rem .75rem;border-bottom:1px solid #f3f4f6;white-space:nowrap;}
       .month-item-body{padding:.65rem .75rem;white-space:pre-wrap;word-break:break-word;line-height:1.35;}
 
-
       /* Main titles */
       .main-title{font-size:1.15rem;font-weight:850;color:#2563eb;margin:0.2rem 0 0.35rem 0;}
       .sub-title{font-size:1.05rem;font-weight:850;color:#2563eb;margin:0.1rem 0 0.2rem 0;}
 
-      /* Monthly: wrap grid (no horizontal scroll) */
-      .month-grid{display:flex;flex-wrap:wrap;gap:0.75rem;}
-      .month-item{flex: 1 1 260px;border:1px solid #e5e7eb;border-radius:0.75rem;background:#fff;overflow:hidden;}
-      .month-item-date{background:#f9fafb;font-weight:800;padding:0.55rem 0.75rem;border-bottom:1px solid #f3f4f6;white-space:nowrap;}
-      .month-item-body{padding:0.65rem 0.75rem;white-space:pre-wrap;line-height:1.35;}
-
-      div[style*="background:#f8fafc"]{margin-top:0!important;}
       .weekly-card{display:flow-root;}
-      .weekly-dept{font-size:.85rem;font-weight:850;margin:-.15rem 0 .10rem 0;}
-      .weekly-body{background:#f8fafc;border-radius:.6rem;padding:.25rem .45rem;font-size:.80rem;line-height:1.35;color:#111827;white-space:pre-wrap;}
-      .weekly-wrap{margin:-.55rem -.45rem -.35rem -.45rem;}
-      .weekly-wrap .weekly-card{display:flow-root;}
+      .weekly-dept{font-size:.85rem;font-weight:850;margin:0 0 .10rem 0;}
+      .weekly-body{background:#f8fafc;border-radius:.6rem;padding:.25rem .45rem;font-size:.80rem;line-height:1.35;color:#111827;white-space:pre-wrap;margin-top:0!important;}
+      .weekly-wrap{margin:-.35rem -.45rem;}
       
     </style>
     """,
