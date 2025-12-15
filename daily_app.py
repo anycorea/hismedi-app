@@ -42,13 +42,8 @@ st.markdown(
       /* Hide native sidebar completely (we use main 2-column panel) */
       section[data-testid="stSidebar"]{display:none!important;}
 
-      /* Remove the collapsed-sidebar top placeholder (keeps top-right menu) */
-      div[data-testid="stSidebarCollapsedControl"]{display:none!important;}
-      div[data-testid="stSidebarNav"]{display:none!important;}
-      div[data-testid="stSidebarHeader"]{display:none!important;}
-
-      /* ✅ THIS ONE */
-      input[data-testid="stPageNavSearchInput"]{display:none!important;}
+      /* Remove the top rounded page-search bar (container-level) */
+      div[data-testid^="stPageNav"]{display:none!important;}
 
       /* Left panel (sidebar-like) */
       .left-panel{position:sticky;top:0.65rem;}
