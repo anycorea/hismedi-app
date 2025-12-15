@@ -47,6 +47,9 @@ st.markdown(
       div[data-testid="stSidebarNav"]{display:none!important;}
       div[data-testid="stSidebarHeader"]{display:none!important;}
 
+      /* ✅ THIS ONE */
+      input[data-testid="stPageNavSearchInput"]{display:none!important;}
+
       /* Left panel (sidebar-like) */
       .left-panel{position:sticky;top:0.65rem;}
       .left-card{background:#f6f7f9;border:1px solid rgba(49,51,63,0.16);border-radius:0.85rem;padding:0.95rem 0.95rem;}
