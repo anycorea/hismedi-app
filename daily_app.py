@@ -358,6 +358,7 @@ with col_right:
             start_date, end_date = date(year, month, 1), date(year, month, calendar.monthrange(year, month)[1])
 
             st.markdown("<div class='main-title'>주요 업무 현황</div>", unsafe_allow_html=True)
+            st.markdown("<hr class='left-hr'>", unsafe_allow_html=True)
             mask = (df_daily["DATE"] >= start_date) & (df_daily["DATE"] <= end_date)
             period_df = df_daily.loc[mask, ["DATE", "내용"]].copy().sort_values("DATE").reset_index(drop=True)
             render_month_overview_horizontal(period_df)
