@@ -43,7 +43,7 @@ st.markdown(
       section[data-testid="stSidebar"]{display:none!important;}
 
       /* Remove the top rounded page-search bar (container-level) */
-      div[data-testid^="stPageNav"]{display:none!important;}
+      div[data-testid="stPageNavSearch"]{display:none!important;}
 
       /* Left panel (sidebar-like) */
       .left-panel{position:sticky;top:0.65rem;}
