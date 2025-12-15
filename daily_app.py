@@ -97,13 +97,10 @@ st.markdown(
       .main-title{font-size:1.15rem;font-weight:850;color:#2563eb;margin:0.2rem 0 0.35rem 0;}
       .sub-title{font-size:1.05rem;font-weight:850;color:#2563eb;margin:0.1rem 0 0.2rem 0;}
 
+      .weekly-border{border:1px solid #d1d5db;border-radius:.75rem;background:#fff;padding:.20rem .25rem;} /* ← 여기서 라인박스 내부 여백을 직접 조절 */
       .weekly-card{display:flow-root;}
-      .weekly-dept{font-size:.85rem;font-weight:850;margin:0 0 .10rem 0;}
+      .weekly-dept{font-size:.85rem;font-weight:850;margin:0 0 .08rem 0;} /* ← 부서명도 바짝 */
       .weekly-body{background:#f8fafc;border-radius:.6rem;padding:.25rem .45rem;font-size:.80rem;line-height:1.35;color:#111827;white-space:pre-wrap;margin-top:0!important;}
-      .weekly-wrap{margin:-.55rem -.45rem -.35rem -.45rem;}
-
-      div[data-testid="column"]:nth-of-type(2) div[data-testid="stContainer"] .stMarkdown{margin:0!important;padding:0!important;}
-      div[data-testid="column"]:nth-of-type(2) .weekly-wrap{position:relative;top:-14px;}
 
     </style>
     """,
@@ -222,9 +219,7 @@ def render_weekly_cards(df_weekly: pd.DataFrame, week_str: str, ncols: int = 3) 
         if not text: continue
         with cols[idx % ncols]:
             with st.container(border=True):
-                st.markdown("<div class='weekly-wrap'>", unsafe_allow_html=True)
-                st.markdown(f"<div class='weekly-card'><div class='weekly-dept'>{escape_html(dept)}</div><div class='weekly-body'>{escape_html(text)}</div></div>", unsafe_allow_html=True)
-                st.markdown("</div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='weekly-border'><div class='weekly-card'><div class='weekly-dept'>{escape_html(dept)}</div><div class='weekly-body'>{escape_html(text)}</div></div></div>", unsafe_allow_html=True)
         idx += 1
     if idx == 0: st.info("선택한 기간에 작성된 부서별 업무 내용이 없습니다.")
 
