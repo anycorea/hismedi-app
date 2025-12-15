@@ -38,10 +38,8 @@ st.markdown(
     <style>
       /* Main spacing (safe) */
       .block-container{padding-top:2.5rem;padding-bottom:1.0rem;}
-
-      /* Top-left rounded bar (page/nav/search UI) — hard kill (new Streamlit variants) */
-      div[data-testid^="stPageNav"], div[data-testid*="PageNav"]{display:none!important;height:0!important;margin:0!important;padding:0!important;}
-      div[data-testid*="NavSearch"], div[data-testid*="NavSearchInput"]{display:none!important;height:0!important;margin:0!important;padding:0!important;}
+      header[data-testid="stHeader"] input, header[data-testid="stHeader"] [role="combobox"]{display:none!important;}
+      header[data-testid="stHeader"] form{display:none!important;}
 
       /* Hide native sidebar completely (we use main 2-column panel) */
       section[data-testid="stSidebar"]{display:none!important;}
