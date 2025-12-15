@@ -103,6 +103,9 @@ st.markdown(
       .month-item{flex: 1 1 260px;border:1px solid #e5e7eb;border-radius:0.75rem;background:#fff;overflow:hidden;}
       .month-item-date{background:#f9fafb;font-weight:800;padding:0.55rem 0.75rem;border-bottom:1px solid #f3f4f6;white-space:nowrap;}
       .month-item-body{padding:0.65rem 0.75rem;white-space:pre-wrap;line-height:1.35;}
+
+      /* Weekly cards inner box bottom overlap fix */
+      div[data-testid="stContainer"] > div > div:last-child{margin-bottom:0!important;}
       
     </style>
     """,
