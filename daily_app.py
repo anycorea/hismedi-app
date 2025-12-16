@@ -42,21 +42,12 @@ div[data-testid="column"]:nth-of-type(1) div[data-testid="stVerticalBlock"]{posi
 .left-title{font-size:1.65rem;font-weight:850;margin:0 0 0.55rem 0;}
 .left-h3,.left-h3 *{font-size:1.02rem;font-weight:850;color:#2563eb!important;margin:0.15rem 0 0.45rem 0;}
 .left-hr{margin:0.75rem 0;border:none;border-top:1px solid rgba(49,51,63,0.14);}
+
 div[data-testid="column"]:nth-of-type(1) .stElementContainer{margin:0.10rem 0!important;}
 div[data-testid="column"]:nth-of-type(1) .stButton,div[data-testid="column"]:nth-of-type(1) .stSelectbox,div[data-testid="column"]:nth-of-type(1) .stDateInput,div[data-testid="column"]:nth-of-type(1) .stTextArea{margin:0.10rem 0!important;}
-div[data-testid="column"]:nth-of-type(1) div[data-testid="stSelectbox"] div[role="combobox"],div[data-testid="column"]:nth-of-type(1) div[data-testid="stDateInput"] input,div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea{background:#eef4ff!important;border:1px solid #c7d2fe!important;}
+div[data-testid="column"]:nth-of-type(1) div[data-testid="stSelectbox"] div[role="combobox"],div[data-testid="column"]:nth-of-type(1) div[data-testid="stDateInput"] input,div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea,section.main div[data-testid="stSelectbox"] div[role="combobox"]{background:#eef4ff!important;border:1px solid #c7d2fe!important;}
 div[data-testid="column"]:nth-of-type(1) div[data-testid="stDateInput"] input{text-align:center!important;}
 div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea{font-size:0.85rem!important;line-height:1.15!important;min-height:10.5rem!important;}
-
-/* RIGHT: divider */
-.right-compact-divider{border:none;border-top:1px solid rgba(49,51,63,0.16);margin:0.45rem 0 0.55rem 0;}
-
-/* RIGHT: 기간선택(weekly_week_select) 셀렉트박스 최소화/밑줄형 */
-div[data-testid="column"]:nth-of-type(2) div[data-testid="stSelectbox"]{max-width:100px;}
-div[data-testid="column"]:nth-of-type(2) div[data-testid="stSelectbox"] div[role="combobox"]{background:transparent!important;border:none!important;border-bottom:1px solid rgba(49,51,63,0.35)!important;border-radius:0!important;box-shadow:none!important;padding:0.05rem 0.05rem!important;min-height:1.60rem!important;}
-div[data-testid="column"]:nth-of-type(2) div[data-testid="stSelectbox"] div[role="combobox"]:hover{border-bottom:1px solid rgba(49,51,63,0.55)!important;}
-div[data-testid="column"]:nth-of-type(2) div[data-testid="stSelectbox"] div[data-baseweb="select"],div[data-testid="column"]:nth-of-type(2) div[data-testid="stSelectbox"] div[data-baseweb="select"]>div,div[data-testid="column"]:nth-of-type(2) div[data-testid="stSelectbox"] div[data-baseweb="select"]>div>div{background:transparent!important;box-shadow:none!important;}
-div[data-testid="column"]:nth-of-type(2) div[data-testid="stSelectbox"] *{font-size:0.90rem!important;}
 
 .sidebar-linkbtn{display:inline-flex;align-items:center;justify-content:center;width:100%;height:2.45rem;padding:0 0.65rem;border-radius:0.5rem;border:1px solid rgba(49,51,63,0.18);background:rgba(248,249,251,1);color:rgba(49,51,63,0.75)!important;font-weight:500;text-decoration:none!important;white-space:nowrap;box-sizing:border-box;}
 .sidebar-linkbtn:hover{background:rgba(243,244,246,1);}
@@ -69,10 +60,12 @@ div[data-testid="column"]:nth-of-type(2) div[data-testid="stSelectbox"] *{font-s
 .main-title{font-size:1.15rem;font-weight:850;color:#2563eb;margin:0.2rem 0 0.35rem 0;}
 .sub-title{font-size:1.05rem;font-weight:850;color:#2563eb;margin:0.1rem 0 0.2rem 0;}
 
-.weekly-border{border:1px solid #d1d5db;border-radius:.75rem;background:#fff;padding:.20rem .25rem;margin:0 0 .75rem 0;}
+.weekly-border{border:1px solid #d1d5db;border-radius:.75rem;background:#fff;padding:.20rem .25rem;}
 .weekly-card{display:flow-root;}
 .weekly-dept{background:#f9fafb;font-size:.85rem;font-weight:850;padding:.45rem .6rem;margin:0 0 .35rem 0;border-radius:.45rem;}
 .weekly-body{background:none;padding:.15rem .1rem;font-size:.80rem;line-height:1.35;color:#111827;white-space:pre-wrap;}
+.weekly-border{margin:0 0 .75rem 0;}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -355,34 +348,43 @@ def render_month_overview_horizontal(period_df: pd.DataFrame) -> None:
     st.markdown(f"<div class='month-grid'>{''.join(parts)}</div>", unsafe_allow_html=True)
 
 with col_right:
-    if st.session_state.get("timetable_open", False): render_sheet_preview()
-    elif df_daily.empty or (selected_ym is None): st.info("아직 작성된 보고가 없습니다.")
+    if st.session_state.get("timetable_open", False):
+        render_sheet_preview()
     else:
-        year, month = selected_ym
-        start_date, end_date = date(year, month, 1), date(year, month, calendar.monthrange(year, month)[1])
+        if df_daily.empty or (selected_ym is None):
+            st.info("아직 작성된 보고가 없습니다.")
+        else:
+            year, month = selected_ym
+            start_date, end_date = date(year, month, 1), date(year, month, calendar.monthrange(year, month)[1])
 
-        st.markdown("<div class='main-title'>주요 업무 현황</div>", unsafe_allow_html=True)
-        mask = (df_daily["DATE"] >= start_date) & (df_daily["DATE"] <= end_date)
-        period_df = df_daily.loc[mask, ["DATE", "내용"]].copy().sort_values("DATE").reset_index(drop=True)
-        render_month_overview_horizontal(period_df)
+            st.markdown("<div class='main-title'>주요 업무 현황</div>", unsafe_allow_html=True)
+            mask = (df_daily["DATE"] >= start_date) & (df_daily["DATE"] <= end_date)
+            period_df = df_daily.loc[mask, ["DATE", "내용"]].copy().sort_values("DATE").reset_index(drop=True)
+            render_month_overview_horizontal(period_df)
 
-        st.markdown("<hr class='right-compact-divider'>", unsafe_allow_html=True)
+            st.markdown("<div style='height:0.9rem'></div>", unsafe_allow_html=True)
 
-        try: weekly_df = load_weekly_df()
-        except Exception: weekly_df = pd.DataFrame()
+            try: weekly_df = load_weekly_df()
+            except Exception: weekly_df = pd.DataFrame()
 
-        h1, h2 = st.columns([0.12, 0.88], vertical_alignment="center")
-        with h1: st.markdown("<div class='sub-title'>부서별 업무 현황</div>", unsafe_allow_html=True)
-        with h2:
-            if weekly_df.empty: selected_week=None; st.caption("")
-            else:
-                week_options = weekly_df[WEEK_COL].astype(str).tolist()
-                prev_week = st.session_state.get("weekly_week_select")
-                default_week_idx = week_options.index(prev_week) if (prev_week in week_options) else 0
-                selected_week = st.selectbox("기간선택", week_options, index=default_week_idx, key="weekly_week_select", label_visibility="collapsed")
+            head1, head2, head3 = st.columns([0.14, 0.24, 0.62], vertical_alignment="center")
+            with head1:
+                st.markdown("<div class='sub-title'>부서별 업무 현황</div>", unsafe_allow_html=True)
+            with head2:
+                if not weekly_df.empty:
+                    week_options = weekly_df[WEEK_COL].astype(str).tolist()
+                    default_week_idx = 0
+                    prev_week = st.session_state.get("weekly_week_select")
+                    if prev_week in week_options: default_week_idx = week_options.index(prev_week)
+                    selected_week = st.selectbox("기간선택", options=week_options, index=default_week_idx, key="weekly_week_select", label_visibility="collapsed")
+                else:
+                    selected_week = None
+                    st.caption("")
+            with head3:
+                st.caption("")
 
-        if weekly_df.empty: st.info("부서별 업무 데이터가 없습니다.")
-        else: render_weekly_cards(weekly_df, selected_week, ncols=3)
+            if weekly_df.empty: st.info("부서별 업무 데이터가 없습니다.")
+            else: render_weekly_cards(weekly_df, selected_week, ncols=3)
 
 # ======================================================
 # 9) Flash messages
