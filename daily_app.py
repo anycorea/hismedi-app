@@ -65,13 +65,11 @@ div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea{
 .weekly-dept{background:#f9fafb;font-size:.85rem;font-weight:850;padding:.45rem .6rem;margin:0 0 .35rem 0;border-radius:.45rem;}
 .weekly-body{background:none;padding:.15rem .1rem;font-size:.80rem;line-height:1.35;color:#111827;white-space:pre-wrap;}
 
-.sheet-row{display:flex;align-items:center;gap:10px;margin:6px 0 10px 0;}
-.sheet-title{flex:1 1 auto;font-weight:700;font-size:14px;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.sheet-row{display:flex;align-items:center;gap:8px;margin:2px 0 6px 0;}
+.sheet-title{flex:1 1 auto;font-weight:800;font-size:15px;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .sheet-btns{flex:0 0 auto;display:flex;gap:6px;}
-.sheet-btns button{padding:6px 10px;height:34px;}
-.sheet-linkbtn{display:inline-flex;align-items:center;justify-content:center;height:34px;padding:0 10px;
-  border:1px solid #e5e7eb;border-radius:10px;font-size:12px;font-weight:650;color:#111827;
-  background:#fff;text-decoration:none;white-space:nowrap;}
+.sheet-btns button{padding:6px 10px;height:32px;}
+.sheet-linkbtn{display:flex;align-items:center;justify-content:center;width:100%;height:32px;padding:0 10px;border:1px solid #e5e7eb;border-radius:10px;font-size:12px;font-weight:650;color:#111827;background:#fff;text-decoration:none;white-space:nowrap;}
 .sheet-linkbtn:hover{background:#f9fafb;}
 
 </style>
@@ -304,7 +302,7 @@ with col_left:
         b1, b2, b3 = st.columns([1, 1, 1])
         with b1:
             if st.button(
-                "열기",
+                "보기",
                 use_container_width=True,
                 disabled=is_open,
                 key=f"open_{secret_key}",
