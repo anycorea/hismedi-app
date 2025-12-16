@@ -49,6 +49,24 @@ div[data-testid="column"]:nth-of-type(1) div[data-testid="stSelectbox"] div[role
 div[data-testid="column"]:nth-of-type(1) div[data-testid="stDateInput"] input{text-align:center!important;}
 div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea{font-size:0.85rem!important;line-height:1.15!important;min-height:10.5rem!important;}
 
+/* 우측(2번째 컬럼) '기간선택'을 밑줄형으로 */
+div[data-testid="column"]:nth-of-type(2) div[data-testid="stSelectbox"] div[role="combobox"]{
+  background: transparent !important;
+  border: none !important;
+  border-bottom: 1px solid rgba(49,51,63,0.28) !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+
+  padding: 0.15rem 0.1rem !important;
+  min-height: 2.0rem !important;
+}
+
+/* hover/focus 시도 깔끔하게 */
+div[data-testid="column"]:nth-of-type(2) div[data-testid="stSelectbox"] div[role="combobox"]:hover{border-bottom: 1px solid rgba(49,51,63,0.45) !important;}
+
+/* 내부 텍스트/아이콘 정돈 */
+div[data-testid="column"]:nth-of-type(2) div[data-testid="stSelectbox"] span{font-weight: 650 !important;}
+
 .sidebar-linkbtn{display:inline-flex;align-items:center;justify-content:center;width:100%;height:2.45rem;padding:0 0.65rem;border-radius:0.5rem;border:1px solid rgba(49,51,63,0.18);background:rgba(248,249,251,1);color:rgba(49,51,63,0.75)!important;font-weight:500;text-decoration:none!important;white-space:nowrap;box-sizing:border-box;}
 .sidebar-linkbtn:hover{background:rgba(243,244,246,1);}
 
@@ -367,7 +385,7 @@ with col_right:
             try: weekly_df = load_weekly_df()
             except Exception: weekly_df = pd.DataFrame()
 
-            head1, head2, head3 = st.columns([0.14, 0.24, 0.62], vertical_alignment="center")
+            head1, head2 = st.columns([0.20, 0.80], vertical_alignment="center")
             with head1:
                 st.markdown("<div class='sub-title'>부서별 업무 현황</div>", unsafe_allow_html=True)
             with head2:
@@ -380,8 +398,6 @@ with col_right:
                 else:
                     selected_week = None
                     st.caption("")
-            with head3:
-                st.caption("")
 
             if weekly_df.empty: st.info("부서별 업무 데이터가 없습니다.")
             else: render_weekly_cards(weekly_df, selected_week, ncols=3)
