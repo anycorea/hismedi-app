@@ -12,7 +12,6 @@ import streamlit.components.v1 as components
 # ======================================================
 
 APP_TITLE = st.secrets["app"].get("TITLE", "HISMEDI † Daily report")
-TZ = st.secrets["app"].get("TZ", "Asia/Seoul")  # reserved
 
 # Daily
 SPREADSHEET_ID = st.secrets["gsheet"]["spreadsheet_id"]
@@ -43,7 +42,7 @@ div[data-testid="column"]:nth-of-type(1) div[data-testid="stVerticalBlock"]{posi
 .left-h3,.left-h3 *{font-size:1.02rem;font-weight:850;color:#2563eb!important;margin:0.15rem 0 0.45rem 0;}
 .left-hr{margin:0.30rem 0;border:none;border-top:1px solid rgba(49,51,63,0.14);}
 
-/* LEFT: 간격(진짜 원인 제거) */
+/* LEFT: 간격(핵심) */
 div[data-testid="column"]:nth-of-type(1) .stElementContainer{margin:0!important;}
 div[data-testid="column"]:nth-of-type(1) div[data-testid="stHorizontalBlock"]{margin:0!important;padding:0!important;}
 div[data-testid="column"]:nth-of-type(1) div[data-testid="stHorizontalBlock"] .stElementContainer{margin:0!important;}
@@ -53,6 +52,10 @@ div[data-testid="column"]:nth-of-type(1) .stButton,div[data-testid="column"]:nth
 div[data-testid="column"]:nth-of-type(1) div[data-testid="stSelectbox"] div[role="combobox"],div[data-testid="column"]:nth-of-type(1) div[data-testid="stDateInput"] input,div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea{background:#eef4ff!important;border:1px solid #c7d2fe!important;}
 div[data-testid="column"]:nth-of-type(1) div[data-testid="stDateInput"] input{text-align:center!important;}
 div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea{font-size:0.85rem!important;line-height:1.15!important;min-height:10.5rem!important;}
+
+/* LEFT: 시트 버튼 라벨(변경안 스타일) */
+.sheet-pill{display:inline-block;padding:0.40rem 0.65rem;border:1px solid rgba(49,51,63,0.18);border-radius:0.65rem;background:#fff;font-weight:850;font-size:0.95rem;line-height:1.05;white-space:nowrap;}
+.sheet-gap{height:2px;}
 
 /* RIGHT/MAIN: 카드/리스트 */
 .month-grid{display:grid!important;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))!important;gap:.75rem!important;width:100%!important;}
@@ -67,7 +70,6 @@ div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea{
 .weekly-card{display:flow-root;}
 .weekly-dept{background:#f9fafb;font-size:.85rem;font-weight:850;padding:.45rem .6rem;margin:0 0 .35rem 0;border-radius:.45rem;}
 .weekly-body{background:none;padding:.15rem .1rem;font-size:.80rem;line-height:1.35;color:#111827;white-space:pre-wrap;}
-
 </style>
 """, unsafe_allow_html=True)
 
