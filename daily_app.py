@@ -57,7 +57,6 @@ div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea{
 .sheet-pill{display:inline-block;padding:0.40rem 0.65rem;border:1px solid transparent;border-radius:0.65rem;background:transparent;font-weight:850;font-size:0.95rem;line-height:1.05;white-space:nowrap;}
 
 /* RIGHT/MAIN: 카드/리스트 */
-.sheet-pill-muted{display:inline-flex;align-items:center;padding:0.38rem 0.65rem;border:1px solid transparent;border-radius:0.65rem;background:transparent;font-weight:700;font-size:0.90rem;line-height:1.05;color:#64748b;}
 .month-grid{display:grid!important;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))!important;gap:.75rem!important;width:100%!important;}
 .month-item{border:1px solid #e5e7eb;border-radius:.75rem;background:#fff;overflow:hidden;min-width:0;}
 .month-item-date{background:#E8F7F4;color:#0F766E;font-weight:800;padding:.38rem .75rem;border-bottom:1px solid #BFE7DE;white-space:nowrap;letter-spacing:-0.01em;line-height:1.15;}
@@ -70,7 +69,6 @@ div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea{
 .weekly-card{display:flow-root;}
 .weekly-dept{background:#f9fafb;font-size:.85rem;font-weight:850;padding:.45rem .6rem;margin:0 0 .35rem 0;border-radius:.45rem;}
 .weekly-body{background:none;padding:.15rem .1rem;font-size:.80rem;line-height:1.35;color:#111827;white-space:pre-wrap;}
-.week-head-row{display:flex;align-items:center;gap:0.45rem;}
 
 </style>
 """, unsafe_allow_html=True)
@@ -400,7 +398,10 @@ with col_right:
             try: weekly_df = load_weekly_df()
             except Exception: weekly_df = pd.DataFrame()
 
-            head1, head2 = st.columns([0.33, 0.67], vertical_alignment="center")
+            head1, head2, head3 = st.columns(
+                [0.14, 0.24, 0.62],
+                vertical_alignment="center",
+            )
 
             with head1:
                 st.markdown(
@@ -409,8 +410,6 @@ with col_right:
                 )
 
             with head2:
-                st.markdown("<div class='week-head-row'>", unsafe_allow_html=True)
-
                 if not weekly_df.empty:
                     week_options = weekly_df[WEEK_COL].astype(str).tolist()
                     default_week_idx = 0
@@ -430,7 +429,8 @@ with col_right:
                     selected_week = None
                     st.caption("")
 
-                st.markdown("</div>", unsafe_allow_html=True)
+            with head3:
+                st.caption("")
 
             if weekly_df.empty: st.info("부서별 업무 데이터가 없습니다.")
             else: render_weekly_cards(weekly_df, selected_week, ncols=3)
