@@ -63,6 +63,10 @@ div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea{
 .month-item-date{background:#E8F7F4;color:#0F766E;font-weight:800;padding:.38rem .75rem;border-bottom:1px solid #BFE7DE;white-space:nowrap;letter-spacing:-0.01em;line-height:1.15;}
 .month-item-body{padding:.65rem .75rem;font-size:.82rem;line-height:1.32;white-space:pre-wrap;word-break:break-word;}
 
+div[data-testid="column"]:nth-of-type(2) div[data-testid="stSelectbox"]{max-width:220px;}
+div[data-testid="column"]:nth-of-type(2) div[data-testid="stSelectbox"] div[role="combobox"]{background:#eaf2ff!important;}
+.sheet-pill{font-size:1.15rem;font-weight:850;color:#2563eb;}
+
 .main-title{font-size:1.15rem;font-weight:850;color:#2563eb;margin:0.2rem 0 0.35rem 0;}
 .sub-title{font-size:1.05rem;font-weight:850;color:#2563eb;margin:0.1rem 0 0.2rem 0;}
 
