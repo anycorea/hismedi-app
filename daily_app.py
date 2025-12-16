@@ -194,9 +194,9 @@ def render_weekly_cards(df_weekly: pd.DataFrame, week_str: str, ncols: int = 3) 
 # 6) Timetable preview (iframe + loading overlay)
 # ======================================================
 
-def render_sheet_preview() -> None:
-    sheet_id = st.secrets["gsheet_preview"]["spreadsheet_id"]
-    gid = st.secrets["gsheet_preview"].get("gid", "0")
+def render_sheet_preview(secret_key: str, loading_text: str = "시트를 불러오는 중...") -> None:
+    sheet_id = st.secrets[secret_key]["spreadsheet_id"]
+    gid = st.secrets[secret_key].get("gid", "0")
     src_view = f"https://docs.google.com/spreadsheets/d/{sheet_id}/htmlview?gid={gid}&rm=minimal"
 
     components.html(
@@ -205,12 +205,12 @@ def render_sheet_preview() -> None:
           <div id="overlay" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.78);backdrop-filter:blur(2px);border:1px solid #ddd;border-radius:0.75rem;z-index:10;">
             <div style="display:flex;align-items:center;gap:0.55rem;color:#111827;font-size:0.92rem;font-weight:650;">
               <div style="width:14px;height:14px;border-radius:999px;border:2px solid rgba(17,24,39,0.25);border-top-color:rgba(17,24,39,0.85);animation:spin 0.8s linear infinite;"></div>
-              진료시간표를 불러오는 중...
+              {loading_text}
             </div>
           </div>
           <iframe id="sheet_iframe" src="{src_view}" style="width:100%;height:1100px;border:1px solid #ddd;border-radius:0.75rem;background:#fff;"></iframe>
         </div>
-            
+
         <script>
           const iframe=document.getElementById("sheet_iframe"), overlay=document.getElementById("overlay");
           iframe.addEventListener("load",()=>{{overlay.style.display="none";}});
@@ -227,7 +227,8 @@ def render_sheet_preview() -> None:
 
 df_daily = load_daily_df()
 if "flash" not in st.session_state: st.session_state["flash"] = None
-if "timetable_open" not in st.session_state: st.session_state["timetable_open"] = False
+if "preview_sheet" not in st.session_state:
+    st.session_state["preview_sheet"] = None  # None | "gsheet_preview" | "gsheet_income" | "gsheet_total"
 today = date.today()
 
 # memo date
@@ -279,24 +280,35 @@ with col_left:
 
     st.markdown("<hr class='left-hr'>", unsafe_allow_html=True)
 
-    # (2) 진료시간표
-    st.markdown("<div class='left-h3'>진료시간표</div>", unsafe_allow_html=True)
+    # (2) 구글시트 프리뷰(3종)
+    def render_left_sheet_controls(title: str, secret_key: str):
+        st.markdown(f"<div class='left-h3'>{title}</div>", unsafe_allow_html=True)
 
-    sheet_id = st.secrets["gsheet_preview"]["spreadsheet_id"]
-    gid = st.secrets["gsheet_preview"].get("gid", "0")
-    src_open = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit#gid={gid}"
+        sheet_id = st.secrets[secret_key]["spreadsheet_id"]
+        gid = st.secrets[secret_key].get("gid", "0")
+        src_open = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit#gid={gid}"
 
-    t1, t2, t3 = st.columns(3)
-    with t1:
-        if st.button("열기", use_container_width=True, disabled=st.session_state["timetable_open"]):
-            st.session_state["timetable_open"] = True; st.rerun()
-    with t2:
-        if st.button("닫기", use_container_width=True, disabled=not st.session_state["timetable_open"]):
-            st.session_state["timetable_open"] = False; st.rerun()
-    with t3:
-        st.markdown(f'<a class="sidebar-linkbtn" href="{src_open}" target="_blank">새창 열기↗</a>', unsafe_allow_html=True)
+        # ✅ 어떤 시트를 열었는지: st.session_state["preview_sheet"] 로 관리
+        is_open = (st.session_state.get("preview_sheet") == secret_key)
 
-    st.markdown("<hr class='left-hr'>", unsafe_allow_html=True)
+        t1, t2, t3 = st.columns(3)
+        with t1:
+            if st.button("열기", use_container_width=True, disabled=is_open, key=f"open_{secret_key}"):
+                st.session_state["preview_sheet"] = secret_key
+                st.rerun()
+        with t2:
+            if st.button("닫기", use_container_width=True, disabled=not is_open, key=f"close_{secret_key}"):
+                st.session_state["preview_sheet"] = None
+                st.rerun()
+        with t3:
+            st.markdown(f'<a class="sidebar-linkbtn" href="{src_open}" target="_blank">새창 열기↗</a>', unsafe_allow_html=True)
+
+        st.markdown("<hr class='left-hr'>", unsafe_allow_html=True)
+
+    # 3개 시트 렌더
+    render_left_sheet_controls("진료시간표", "gsheet_preview")
+    render_left_sheet_controls("진료실적(1일)", "gsheet_income")
+    render_left_sheet_controls("진료실적(전체)", "gsheet_total")
 
     # (3) 1일 업무 메모
     st.markdown("<div class='left-h3'>1일 업무 메모</div>", unsafe_allow_html=True)
@@ -346,8 +358,15 @@ def render_month_overview_horizontal(period_df: pd.DataFrame) -> None:
     st.markdown(f"<div class='month-grid'>{''.join(parts)}</div>", unsafe_allow_html=True)
 
 with col_right:
-    if st.session_state.get("timetable_open", False): render_sheet_preview()
+    key = st.session_state.get("preview_sheet")
+    if key == "gsheet_preview":
+        render_sheet_preview("gsheet_preview", "진료시간표를 불러오는 중...")
+    elif key == "gsheet_income":
+        render_sheet_preview("gsheet_income", "진료실적(1일-전일 환자수)을 불러오는 중...")
+    elif key == "gsheet_total":
+        render_sheet_preview("gsheet_total", "진료실적(전체/과별/의사별)을 불러오는 중...")
     else:
+
         if df_daily.empty or (selected_ym is None): st.info("아직 작성된 보고가 없습니다.")
         else:
             year, month = selected_ym
