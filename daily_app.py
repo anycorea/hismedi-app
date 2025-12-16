@@ -49,26 +49,27 @@ div[data-testid="column"]:nth-of-type(1) div[data-testid="stSelectbox"] div[role
 div[data-testid="column"]:nth-of-type(1) div[data-testid="stDateInput"] input{text-align:center!important;}
 div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea{font-size:0.85rem!important;line-height:1.15!important;min-height:10.5rem!important;}
 
-/* 우측(2번째 컬럼) '기간선택'을 밑줄형으로 */
-div[data-testid="column"]:nth-of-type(2) div[data-testid="stSelectbox"] div[role="combobox"]{
+/* ✅ '부서별 업무 현황' 기간 선택(weekly_week_select)만 밑줄형으로: HTML wrapper(.weekly-select) 기반 */
+.weekly-select div[role="combobox"],
+.weekly-select div[data-baseweb="select"] > div{
   background: transparent !important;
   border: none !important;
-  border-bottom: 1px solid rgba(49,51,63,0.28) !important;
+  border-bottom: 1px solid rgba(49,51,63,0.30) !important;
   border-radius: 0 !important;
   box-shadow: none !important;
-
-  padding: 0.15rem 0.1rem !important;
-  min-height: 2.0rem !important;
+  padding: 0.15rem 0.10rem !important;
+  min-height: 2.05rem !important;
 }
 
-/* hover/focus 시도 깔끔하게 */
-div[data-testid="column"]:nth-of-type(2) div[data-testid="stSelectbox"] div[role="combobox"]:hover{border-bottom: 1px solid rgba(49,51,63,0.45) !important;}
+.weekly-select div[role="combobox"]:hover,
+.weekly-select div[data-baseweb="select"] > div:hover{
+  border-bottom: 1px solid rgba(49,51,63,0.48) !important;
+}
 
-/* 내부 텍스트/아이콘 정돈 */
-div[data-testid="column"]:nth-of-type(2) div[data-testid="stSelectbox"] span{font-weight: 650 !important;}
+.weekly-select span{font-weight:650!important;}
 
-/* right selectbox tight */
-div[data-testid="column"]:nth-of-type(2) div[data-testid="stSelectbox"]{margin-top:-0.2rem!important;}
+/* 제목과 더 밀착 */
+.weekly-select{margin-top:-0.25rem!important;}
 
 .sidebar-linkbtn{display:inline-flex;align-items:center;justify-content:center;width:100%;height:2.45rem;padding:0 0.65rem;border-radius:0.5rem;border:1px solid rgba(49,51,63,0.18);background:rgba(248,249,251,1);color:rgba(49,51,63,0.75)!important;font-weight:500;text-decoration:none!important;white-space:nowrap;box-sizing:border-box;}
 .sidebar-linkbtn:hover{background:rgba(243,244,246,1);}
@@ -383,14 +384,17 @@ with col_right:
             period_df = df_daily.loc[mask, ["DATE", "내용"]].copy().sort_values("DATE").reset_index(drop=True)
             render_month_overview_horizontal(period_df)
 
-            st.markdown("<div style='height:0.9rem'></div>", unsafe_allow_html=True)
-
-            try: weekly_df = load_weekly_df()
-            except Exception: weekly_df = pd.DataFrame()
-
+            # ✅ 구분선: '주요 업무 현황' 바로 아래에 밀착
+            st.markdown("<div style='height:0.15rem'></div>", unsafe_allow_html=True)
             st.divider()
 
-            head1, head2 = st.columns([0.20, 0.80], vertical_alignment="center")
+            try:
+                weekly_df = load_weekly_df()
+            except Exception:
+                weekly_df = pd.DataFrame()
+
+            # ✅ 제목 옆에 기간선택을 붙이기 위해 3컬럼(타이틀 / 셀렉트 / 여백)
+            head1, head2, head3 = st.columns([0.16, 0.30, 0.54], vertical_alignment="center")
             with head1:
                 st.markdown("<div class='sub-title'>부서별 업무 현황</div>", unsafe_allow_html=True)
             with head2:
@@ -399,10 +403,22 @@ with col_right:
                     default_week_idx = 0
                     prev_week = st.session_state.get("weekly_week_select")
                     if prev_week in week_options: default_week_idx = week_options.index(prev_week)
-                    selected_week = st.selectbox("기간선택", options=week_options, index=default_week_idx, key="weekly_week_select", label_visibility="collapsed")
+                    # ✅ 기간선택만 스타일링하기 위한 wrapper
+                    st.markdown("<div class='weekly-select'>", unsafe_allow_html=True)
+                    selected_week = st.selectbox(
+                        "기간선택",
+                        options=week_options,
+                        index=default_week_idx,
+                        key="weekly_week_select",
+                        label_visibility="collapsed",
+                    )
+                    st.markdown("</div>", unsafe_allow_html=True)
                 else:
                     selected_week = None
                     st.caption("")
+
+            with head3:
+                st.caption("")
 
             if weekly_df.empty: st.info("부서별 업무 데이터가 없습니다.")
             else: render_weekly_cards(weekly_df, selected_week, ncols=3)
