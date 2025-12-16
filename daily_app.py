@@ -64,15 +64,6 @@ div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea{
 .weekly-card{display:flow-root;}
 .weekly-dept{background:#f9fafb;font-size:.85rem;font-weight:850;padding:.45rem .6rem;margin:0 0 .35rem 0;border-radius:.45rem;}
 .weekly-body{background:none;padding:.15rem .1rem;font-size:.80rem;line-height:1.35;color:#111827;white-space:pre-wrap;}
-
-section.main div[data-testid="stSelectbox"] div[role="combobox"]{background:transparent!important;border:none!important;border-bottom:2px solid #BFE7DE!important;border-radius:0!important;box-shadow:none!important;height:2.15rem!important;min-height:2.15rem!important;padding:0 .2rem!important;font-weight:800!important;}
-section.main div[data-testid="stSelectbox"]{max-width:320px!important;}
-
-div[data-testid="stSelectbox"]:has(input[aria-describedby*="weekly_week_select"]) div[role="combobox"]{background:transparent!important;border:none!important;border-bottom:2px solid #BFE7DE!important;border-radius:0!important;box-shadow:none!important;height:2.15rem!important;min-height:2.15rem!important;padding:0 .2rem!important;font-weight:800!important;}
-.weekly-week-select div[role="combobox"]{background:transparent!important;border:none!important;border-bottom:2px solid #BFE7DE!important;border-radius:0!important;box-shadow:none!important;height:2.15rem!important;min-height:2.15rem!important;padding:0 .2rem!important;font-weight:800!important;}
-
-section.main div[role="combobox"][aria-label="기간선택"]{background:transparent!important;border:none!important;border-bottom:2px solid #BFE7DE!important;border-radius:0!important;box-shadow:none!important;height:2.15rem!important;min-height:2.15rem!important;padding:0 .2rem!important;font-weight:800!important;}
-
 </style>
 """, unsafe_allow_html=True)
 
