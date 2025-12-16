@@ -212,7 +212,7 @@ def render_sheet_preview(secret_key: str, loading_text: str = "시트를 불러�
 
     components.html(
         f"""
-        <div style="position:relative;width:100%;height:1100px;">
+        <div style="position:relative;width:100%;height:1100px;overflow:auto;">
           <div id="overlay" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.78);backdrop-filter:blur(2px);border:1px solid #ddd;border-radius:0.75rem;z-index:10;">
             <div style="display:flex;align-items:center;gap:0.55rem;color:#111827;font-size:0.92rem;font-weight:650;">
               <div style="width:14px;height:14px;border-radius:999px;border:2px solid rgba(17,24,39,0.25);border-top-color:rgba(17,24,39,0.85);animation:spin 0.8s linear infinite;"></div>
