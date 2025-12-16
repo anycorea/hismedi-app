@@ -64,7 +64,7 @@ div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea{
 .month-item-body{padding:.65rem .75rem;font-size:.82rem;line-height:1.32;white-space:pre-wrap;word-break:break-word;}
 
 .main-title{font-size:1.15rem;font-weight:850;color:#2563eb;margin:0.2rem 0 0.35rem 0;}
-.sub-title{font-size:1.05rem;font-weight:850;color:#2563eb;margin:0.1rem 0 0.2rem 0;}
+.sub-title{font-size:1.10rem;font-weight:850;color:#2563eb;margin:0.1rem 0 0.2rem 0;}
 
 .weekly-border{border:1px solid #d1d5db;border-radius:.75rem;background:#fff;padding:.20rem .25rem;margin:0 0 .75rem 0;}
 .weekly-card{display:flow-root;}
