@@ -400,17 +400,11 @@ with col_right:
             except Exception: weekly_df = pd.DataFrame()
 
             head1, head2, head3 = st.columns(
-                [0.14, 0.24, 0.62],
+                [0.24, 0.24, 0.52],
                 vertical_alignment="center",
             )
 
             with head1:
-                st.markdown(
-                    "<div class='sub-title'>부서별 업무 현황</div>",
-                    unsafe_allow_html=True,
-                )
-
-            with head2:
                 if not weekly_df.empty:
                     week_options = weekly_df[WEEK_COL].astype(str).tolist()
                     default_week_idx = 0
@@ -429,6 +423,12 @@ with col_right:
                 else:
                     selected_week = None
                     st.caption("")
+
+            with head2:
+                st.markdown(
+                    "<span class='sheet-pill'>부서별 업무 현황</span>",
+                    unsafe_allow_html=True,
+                )
 
             with head3:
                 st.caption("")
