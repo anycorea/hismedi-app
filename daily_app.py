@@ -63,7 +63,7 @@ div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea{
 .weekly-body{background:none;padding:.15rem .1rem;font-size:.80rem;line-height:1.35;color:#111827;white-space:pre-wrap;}
 
 .sheet-title{flex:1 1 auto;font-weight:800;font-size:15px;line-height:1.25;margin:0;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.sheet-gap{height:4px;}
+.sheet-gap{height:2px;}
 
 </style>
 """, unsafe_allow_html=True)
@@ -289,7 +289,7 @@ with col_left:
 
         is_open = (st.session_state.get("preview_sheet") == secret_key)
 
-        c0, c1, c2, c3 = st.columns([3, 1.5, 1.5, 1.5], vertical_alignment="center")
+        c0, c1, c2, c3 = st.columns([2.4, 1.2, 1.2, 1.2], vertical_alignment="center")
 
         with c0:
             st.markdown(f"<div class='sheet-title'>{title}</div>", unsafe_allow_html=True)
