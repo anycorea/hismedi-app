@@ -71,6 +71,7 @@ div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea{
 .sheet-btns button{padding:6px 10px;height:32px;}
 .sheet-linkbtn{display:flex;align-items:center;justify-content:center;width:100%;height:32px;padding:0 10px;border:1px solid #e5e7eb;border-radius:10px;font-size:12px;font-weight:650;color:#111827;background:#fff;text-decoration:none;white-space:nowrap;}
 .sheet-linkbtn:hover{background:#f9fafb;}
+.sheet-gap{height:4px;}
 
 </style>
 """, unsafe_allow_html=True)
@@ -288,7 +289,7 @@ with col_left:
 
     st.markdown("<hr class='left-hr'>", unsafe_allow_html=True)
 
-    # (2) 구글시트 프리뷰 (한 줄 UI)
+    # (2) 구글시트 프리뷰 (한 줄 UI) - Streamlit columns로 정렬 고정
     def render_left_sheet_controls(title: str, secret_key: str):
         sheet_id = st.secrets[secret_key]["spreadsheet_id"]
         gid = st.secrets[secret_key].get("gid", "0")
@@ -296,36 +297,28 @@ with col_left:
 
         is_open = (st.session_state.get("preview_sheet") == secret_key)
 
-        st.markdown("<div class='sheet-row'>", unsafe_allow_html=True)
-        st.markdown(f"<div class='sheet-title'>{title}</div>", unsafe_allow_html=True)
+        c0, c1, c2, c3 = st.columns([2.2, 1, 1, 1], vertical_alignment="center")
 
-        b1, b2, b3 = st.columns([1, 1, 1])
-        with b1:
-            if st.button(
-                "보기",
-                use_container_width=True,
-                disabled=is_open,
-                key=f"open_{secret_key}",
-            ):
+        with c0:
+            st.markdown(f"<div class='sheet-title'>{title}</div>", unsafe_allow_html=True)
+
+        with c1:
+            if st.button("보기", use_container_width=True, disabled=is_open, key=f"open_{secret_key}"):
                 st.session_state["preview_sheet"] = secret_key
                 st.rerun()
 
-        with b2:
-            if st.button(
-                "닫기",
-                use_container_width=True,
-                disabled=not is_open,
-                key=f"close_{secret_key}",
-            ):
+        with c2:
+            if st.button("닫기", use_container_width=True, disabled=not is_open, key=f"close_{secret_key}"):
                 st.session_state["preview_sheet"] = None
                 st.rerun()
 
-        with b3:
+        with c3:
             if st.button("새창", use_container_width=True, key=f"newtab_{secret_key}"):
                 st.session_state["open_newtab_url"] = src_open
                 st.rerun()
 
-        st.markdown("</div>", unsafe_allow_html=True)
+        # 항목 사이 아주 얇은 간격(원하면 값 조절)
+        st.markdown("<div class='sheet-gap'></div>", unsafe_allow_html=True)
 
     # 3개 시트 렌더
     render_left_sheet_controls("진료시간표", "gsheet_preview")
