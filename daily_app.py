@@ -44,7 +44,7 @@ div[data-testid="column"]:nth-of-type(1) div[data-testid="stVerticalBlock"]{posi
 
 /* LEFT: 간격(핵심) */
 div[data-testid="column"]:nth-of-type(1) .stElementContainer{margin:0!important;}
-div[data-testid="column"]:nth-of-type(1) div[data-testid="stHorizontalBlock"]{margin:0!important;padding:0!important;gap:0.45rem!important;}
+div[data-testid="column"]:nth-of-type(1) div[data-testid="stHorizontalBlock"]{margin:0!important;padding:0!important;gap:0.30rem!important;}
 div[data-testid="column"]:nth-of-type(1) div[data-testid="stHorizontalBlock"] .stElementContainer{margin:0!important;}
 div[data-testid="column"]:nth-of-type(1) .stButton,div[data-testid="column"]:nth-of-type(1) .stSelectbox,div[data-testid="column"]:nth-of-type(1) .stDateInput,div[data-testid="column"]:nth-of-type(1) .stTextArea{margin:0!important;}
 
@@ -54,7 +54,7 @@ div[data-testid="column"]:nth-of-type(1) div[data-testid="stDateInput"] input{te
 div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea{font-size:0.85rem!important;line-height:1.15!important;min-height:10.5rem!important;}
 
 /* LEFT: 시트 버튼 라벨(변경안 스타일) */
-.sheet-pill{display:inline-block;padding:0.40rem 0.65rem;border:1px solid rgba(49,51,63,0.18);border-radius:0.65rem;background:#fff;font-weight:850;font-size:0.95rem;line-height:1.05;white-space:nowrap;}
+.sheet-pill{display:inline-block;padding:0.40rem 0.65rem;border:1px solid transparent;border-radius:0.65rem;background:transparent;font-weight:850;font-size:0.95rem;line-height:1.05;white-space:nowrap;}
 
 /* RIGHT/MAIN: 카드/리스트 */
 .month-grid{display:grid!important;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))!important;gap:.75rem!important;width:100%!important;}
@@ -293,7 +293,7 @@ with col_left:
 
         is_open = (st.session_state.get("preview_sheet") == secret_key)
 
-        c0, c1, c2, c3 = st.columns([1.35, 1, 1, 1], vertical_alignment="center")
+        c0, c1, c2, c3 = st.columns([1.55, 1, 1, 1], vertical_alignment="center")
 
         with c0:
             st.markdown(f"<span class='sheet-pill'>{title}</span>", unsafe_allow_html=True)
