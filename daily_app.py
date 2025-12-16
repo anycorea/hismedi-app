@@ -66,6 +66,27 @@ div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea{
 .weekly-body{background:none;padding:.15rem .1rem;font-size:.80rem;line-height:1.35;color:#111827;white-space:pre-wrap;}
 .weekly-border{margin:0 0 .75rem 0;}
 
+/* RIGHT: 섹션 블록(좌측 패널 느낌) */
+.right-block{background:#ffffff;border:1px solid rgba(49,51,63,0.16);border-radius:0.85rem;padding:0.95rem;margin:0 0 0.9rem 0;}
+.right-hr{margin:0.75rem 0;border:none;border-top:1px solid rgba(49,51,63,0.14);}
+
+/* RIGHT: 타이틀/헤더 정돈 */
+.right-head{display:flex;align-items:center;justify-content:space-between;gap:0.75rem;}
+.right-head-title{font-size:1.05rem;font-weight:850;color:#2563eb;margin:0;}
+
+/* RIGHT 상단(부서별) 기간 선택 pill 느낌 */
+div[data-testid="column"]:nth-of-type(2) div[data-testid="stSelectbox"] div[role="combobox"]{
+  background:#f9fafb !important;
+  border:1px solid #d1d5db !important;
+  border-radius:999px !important;
+  padding:0.15rem 0.65rem !important;
+  min-height:2.25rem !important;
+  font-weight:750 !important;
+}
+
+/* 드롭다운 글자/아이콘 정돈 */
+div[data-testid="column"]:nth-of-type(2) div[data-testid="stSelectbox"] *{font-size:0.90rem !important;}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -357,34 +378,67 @@ with col_right:
             year, month = selected_ym
             start_date, end_date = date(year, month, 1), date(year, month, calendar.monthrange(year, month)[1])
 
+            # =======================
+            # 1) 주요 업무 현황 (블록)
+            # =======================
+            st.markdown("<div class='right-block'>", unsafe_allow_html=True)
             st.markdown("<div class='main-title'>주요 업무 현황</div>", unsafe_allow_html=True)
+            st.markdown("<hr class='right-hr'>", unsafe_allow_html=True)
+
             mask = (df_daily["DATE"] >= start_date) & (df_daily["DATE"] <= end_date)
-            period_df = df_daily.loc[mask, ["DATE", "내용"]].copy().sort_values("DATE").reset_index(drop=True)
+            period_df = (
+                df_daily.loc[mask, ["DATE", "내용"]]
+                .copy()
+                .sort_values("DATE")
+                .reset_index(drop=True)
+            )
             render_month_overview_horizontal(period_df)
+
+            st.markdown("</div>", unsafe_allow_html=True)
 
             st.markdown("<div style='height:0.9rem'></div>", unsafe_allow_html=True)
 
-            try: weekly_df = load_weekly_df()
-            except Exception: weekly_df = pd.DataFrame()
+            # =======================
+            # 2) 부서별 업무 현황 (블록)
+            # =======================
+            try:
+                weekly_df = load_weekly_df()
+            except Exception:
+                weekly_df = pd.DataFrame()
 
-            head1, head2, head3 = st.columns([0.14, 0.24, 0.62], vertical_alignment="center")
+            st.markdown("<div class='right-block'>", unsafe_allow_html=True)
+
+            head1, head2 = st.columns([0.55, 0.45], vertical_alignment="center")
             with head1:
                 st.markdown("<div class='sub-title'>부서별 업무 현황</div>", unsafe_allow_html=True)
+
             with head2:
                 if not weekly_df.empty:
                     week_options = weekly_df[WEEK_COL].astype(str).tolist()
                     default_week_idx = 0
                     prev_week = st.session_state.get("weekly_week_select")
-                    if prev_week in week_options: default_week_idx = week_options.index(prev_week)
-                    selected_week = st.selectbox("기간선택", options=week_options, index=default_week_idx, key="weekly_week_select", label_visibility="collapsed")
+                    if prev_week in week_options:
+                        default_week_idx = week_options.index(prev_week)
+
+                    selected_week = st.selectbox(
+                        "기간선택",
+                        options=week_options,
+                        index=default_week_idx,
+                        key="weekly_week_select",
+                        label_visibility="collapsed",
+                    )
                 else:
                     selected_week = None
                     st.caption("")
-            with head3:
-                st.caption("")
 
-            if weekly_df.empty: st.info("부서별 업무 데이터가 없습니다.")
-            else: render_weekly_cards(weekly_df, selected_week, ncols=3)
+            st.markdown("<hr class='right-hr'>", unsafe_allow_html=True)
+
+            if weekly_df.empty:
+                st.info("부서별 업무 데이터가 없습니다.")
+            else:
+                render_weekly_cards(weekly_df, selected_week, ncols=3)
+
+            st.markdown("</div>", unsafe_allow_html=True)
 
 # ======================================================
 # 9) Flash messages
