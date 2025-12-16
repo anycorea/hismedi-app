@@ -33,6 +33,13 @@ WEEKDAY_MAP = ["월", "화", "수", "목", "금", "토", "일"]
 
 st.set_page_config(page_title=APP_TITLE, layout="wide", initial_sidebar_state="collapsed")
 
+CSS = """
+<style>
+html{outline:6px solid #ff3b30!important;}
+</style>
+"""
+st.markdown(CSS, unsafe_allow_html=True)
+
 st.markdown("""
 <style>
 .block-container{padding-top:2.5rem;padding-bottom:1.0rem;}
