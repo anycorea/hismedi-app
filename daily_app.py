@@ -399,10 +399,7 @@ with col_right:
             try: weekly_df = load_weekly_df()
             except Exception: weekly_df = pd.DataFrame()
 
-            head1, head2, head3 = st.columns(
-                [0.24, 0.24, 0.52],
-                vertical_alignment="center",
-            )
+            head1, head2, head3 = st.columns([0.16, 0.24, 0.60], vertical_alignment="center")
 
             with head1:
                 if not weekly_df.empty:
