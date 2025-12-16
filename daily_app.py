@@ -41,16 +41,20 @@ section[data-testid="stSidebar"]{display:none!important;}
 div[data-testid="column"]:nth-of-type(1) div[data-testid="stVerticalBlock"]{position:sticky;top:0.65rem;background:#f6f7f9;border:1px solid rgba(49,51,63,0.16);border-radius:0.85rem;padding:0.95rem;}
 .left-title{font-size:1.65rem;font-weight:850;margin:0 0 0.55rem 0;}
 .left-h3,.left-h3 *{font-size:1.02rem;font-weight:850;color:#2563eb!important;margin:0.15rem 0 0.45rem 0;}
-.left-hr{margin:0.3rem 0;border:none;border-top:1px solid rgba(49,51,63,0.14);}
+.left-hr{margin:0.30rem 0;border:none;border-top:1px solid rgba(49,51,63,0.14);}
 
+/* LEFT: 간격(진짜 원인 제거) */
+div[data-testid="column"]:nth-of-type(1) .stElementContainer{margin:0!important;}
 div[data-testid="column"]:nth-of-type(1) div[data-testid="stHorizontalBlock"]{margin:0!important;padding:0!important;}
 div[data-testid="column"]:nth-of-type(1) div[data-testid="stHorizontalBlock"] .stElementContainer{margin:0!important;}
-div[data-testid="column"]:nth-of-type(1) div[data-testid="stHorizontalBlock"]{margin:0!important;padding:0!important;}
-div[data-testid="column"]:nth-of-type(1) div[data-testid="stHorizontalBlock"] .stElementContainer{margin:0!important;}
+div[data-testid="column"]:nth-of-type(1) .stButton,div[data-testid="column"]:nth-of-type(1) .stSelectbox,div[data-testid="column"]:nth-of-type(1) .stDateInput,div[data-testid="column"]:nth-of-type(1) .stTextArea{margin:0!important;}
+
+/* LEFT: 입력 UI */
 div[data-testid="column"]:nth-of-type(1) div[data-testid="stSelectbox"] div[role="combobox"],div[data-testid="column"]:nth-of-type(1) div[data-testid="stDateInput"] input,div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea{background:#eef4ff!important;border:1px solid #c7d2fe!important;}
 div[data-testid="column"]:nth-of-type(1) div[data-testid="stDateInput"] input{text-align:center!important;}
 div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea{font-size:0.85rem!important;line-height:1.15!important;min-height:10.5rem!important;}
 
+/* RIGHT/MAIN: 카드/리스트 */
 .month-grid{display:grid!important;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))!important;gap:.75rem!important;width:100%!important;}
 .month-item{border:1px solid #e5e7eb;border-radius:.75rem;background:#fff;overflow:hidden;min-width:0;}
 .month-item-date{background:#E8F7F4;color:#0F766E;font-weight:800;padding:.38rem .75rem;border-bottom:1px solid #BFE7DE;white-space:nowrap;letter-spacing:-0.01em;line-height:1.15;}
@@ -63,9 +67,6 @@ div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea{
 .weekly-card{display:flow-root;}
 .weekly-dept{background:#f9fafb;font-size:.85rem;font-weight:850;padding:.45rem .6rem;margin:0 0 .35rem 0;border-radius:.45rem;}
 .weekly-body{background:none;padding:.15rem .1rem;font-size:.80rem;line-height:1.35;color:#111827;white-space:pre-wrap;}
-
-.sheet-title{flex:1 1 auto;font-weight:800;font-size:15px;line-height:1.25;margin:0;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.sheet-gap{height:2px;}
 
 </style>
 """, unsafe_allow_html=True)
