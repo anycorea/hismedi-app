@@ -44,7 +44,7 @@ div[data-testid="column"]:nth-of-type(1) div[data-testid="stVerticalBlock"]{posi
 
 /* LEFT: 간격(핵심) */
 div[data-testid="column"]:nth-of-type(1) .stElementContainer{margin:0!important;}
-div[data-testid="column"]:nth-of-type(1) div[data-testid="stHorizontalBlock"]{margin:0!important;padding:0!important;}
+div[data-testid="column"]:nth-of-type(1) div[data-testid="stHorizontalBlock"]{margin:0!important;padding:0!important;gap:0.45rem!important;}
 div[data-testid="column"]:nth-of-type(1) div[data-testid="stHorizontalBlock"] .stElementContainer{margin:0!important;}
 div[data-testid="column"]:nth-of-type(1) .stButton,div[data-testid="column"]:nth-of-type(1) .stSelectbox,div[data-testid="column"]:nth-of-type(1) .stDateInput,div[data-testid="column"]:nth-of-type(1) .stTextArea{margin:0!important;}
 
@@ -55,7 +55,6 @@ div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea{
 
 /* LEFT: 시트 버튼 라벨(변경안 스타일) */
 .sheet-pill{display:inline-block;padding:0.40rem 0.65rem;border:1px solid rgba(49,51,63,0.18);border-radius:0.65rem;background:#fff;font-weight:850;font-size:0.95rem;line-height:1.05;white-space:nowrap;}
-.sheet-gap{height:2px;}
 
 /* RIGHT/MAIN: 카드/리스트 */
 .month-grid{display:grid!important;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))!important;gap:.75rem!important;width:100%!important;}
@@ -294,7 +293,7 @@ with col_left:
 
         is_open = (st.session_state.get("preview_sheet") == secret_key)
 
-        c0, c1, c2, c3 = st.columns([2.0, 1, 1, 1], vertical_alignment="center")
+        c0, c1, c2, c3 = st.columns([1.35, 1, 1, 1], vertical_alignment="center")
 
         with c0:
             st.markdown(f"<span class='sheet-pill'>{title}</span>", unsafe_allow_html=True)
@@ -313,9 +312,6 @@ with col_left:
             if st.button("새창", use_container_width=True, key=f"newtab_{secret_key}"):
                 st.session_state["open_newtab_url"] = src_open
                 st.rerun()
-
-        # 항목 사이 아주 얇은 간격(원하면 값 조절)
-        st.markdown("<div class='sheet-gap'></div>", unsafe_allow_html=True)
 
     # 3개 시트 렌더
     render_left_sheet_controls("진료시간표", "gsheet_preview")
