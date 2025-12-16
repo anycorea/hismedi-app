@@ -69,6 +69,7 @@ section.main div[data-testid="stSelectbox"] div[role="combobox"]{background:tran
 section.main div[data-testid="stSelectbox"]{max-width:320px!important;}
 
 div[data-testid="stSelectbox"]:has(input[aria-describedby*="weekly_week_select"]) div[role="combobox"]{background:transparent!important;border:none!important;border-bottom:2px solid #BFE7DE!important;border-radius:0!important;box-shadow:none!important;height:2.15rem!important;min-height:2.15rem!important;padding:0 .2rem!important;font-weight:800!important;}
+.weekly-week-select div[role="combobox"]{background:transparent!important;border:none!important;border-bottom:2px solid #BFE7DE!important;border-radius:0!important;box-shadow:none!important;height:2.15rem!important;min-height:2.15rem!important;padding:0 .2rem!important;font-weight:800!important;}
 
 </style>
 """, unsafe_allow_html=True)
@@ -352,11 +353,9 @@ def render_month_overview_horizontal(period_df: pd.DataFrame) -> None:
     st.markdown(f"<div class='month-grid'>{''.join(parts)}</div>", unsafe_allow_html=True)
 
 with col_right:
-    if st.session_state.get("timetable_open", False):
-        render_sheet_preview()
+    if st.session_state.get("timetable_open", False): render_sheet_preview()
     else:
-        if df_daily.empty or (selected_ym is None):
-            st.info("아직 작성된 보고가 없습니다.")
+        if df_daily.empty or (selected_ym is None): st.info("아직 작성된 보고가 없습니다.")
         else:
             year, month = selected_ym
             start_date, end_date = date(year, month, 1), date(year, month, calendar.monthrange(year, month)[1])
@@ -372,15 +371,21 @@ with col_right:
             except Exception: weekly_df = pd.DataFrame()
 
             head1, head2, head3 = st.columns([0.14, 0.24, 0.62], vertical_alignment="center")
+
             with head1:
                 st.markdown("<div class='sub-title'>부서별 업무 현황</div>", unsafe_allow_html=True)
+
             with head2:
                 if not weekly_df.empty:
                     week_options = weekly_df[WEEK_COL].astype(str).tolist()
                     default_week_idx = 0
                     prev_week = st.session_state.get("weekly_week_select")
+
                     if prev_week in week_options: default_week_idx = week_options.index(prev_week)
-                    selected_week = st.selectbox("기간선택", options=week_options, index=default_week_idx, key="weekly_week_select", label_visibility="collapsed")
+
+                    st.markdown("<div class='weekly-week-select'>",unsafe_allow_html=True)
+                    selected_week = st.selectbox("기간선택",options=week_options,index=default_week_idx,key="weekly_week_select",label_visibility="collapsed")
+                    st.markdown("</div>",unsafe_allow_html=True)
                 else:
                     selected_week = None
                     st.caption("")
