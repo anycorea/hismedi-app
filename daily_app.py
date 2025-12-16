@@ -71,6 +71,8 @@ section.main div[data-testid="stSelectbox"]{max-width:320px!important;}
 div[data-testid="stSelectbox"]:has(input[aria-describedby*="weekly_week_select"]) div[role="combobox"]{background:transparent!important;border:none!important;border-bottom:2px solid #BFE7DE!important;border-radius:0!important;box-shadow:none!important;height:2.15rem!important;min-height:2.15rem!important;padding:0 .2rem!important;font-weight:800!important;}
 .weekly-week-select div[role="combobox"]{background:transparent!important;border:none!important;border-bottom:2px solid #BFE7DE!important;border-radius:0!important;box-shadow:none!important;height:2.15rem!important;min-height:2.15rem!important;padding:0 .2rem!important;font-weight:800!important;}
 
+section.main div[role="combobox"][aria-label="기간선택"]{background:transparent!important;border:none!important;border-bottom:2px solid #BFE7DE!important;border-radius:0!important;box-shadow:none!important;height:2.15rem!important;min-height:2.15rem!important;padding:0 .2rem!important;font-weight:800!important;}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -380,12 +382,8 @@ with col_right:
                     week_options = weekly_df[WEEK_COL].astype(str).tolist()
                     default_week_idx = 0
                     prev_week = st.session_state.get("weekly_week_select")
-
                     if prev_week in week_options: default_week_idx = week_options.index(prev_week)
-
-                    st.markdown("<div class='weekly-week-select'>",unsafe_allow_html=True)
-                    selected_week = st.selectbox("기간선택",options=week_options,index=default_week_idx,key="weekly_week_select",label_visibility="collapsed")
-                    st.markdown("</div>",unsafe_allow_html=True)
+                    selected_week = st.selectbox("기간선택", options=week_options, index=default_week_idx, key="weekly_week_select", label_visibility="collapsed")
                 else:
                     selected_week = None
                     st.caption("")
