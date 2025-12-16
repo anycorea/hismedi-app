@@ -47,7 +47,7 @@ div[data-testid="column"]:nth-of-type(1) .stElementContainer{margin:0!important;
 div[data-testid="column"]:nth-of-type(1) div[data-testid="stHorizontalBlock"]{margin:0!important;padding:0!important;gap:0.30rem!important;}
 div[data-testid="column"]:nth-of-type(1) div[data-testid="stHorizontalBlock"] .stElementContainer{margin:0!important;}
 div[data-testid="column"]:nth-of-type(1) .stButton,div[data-testid="column"]:nth-of-type(1) .stSelectbox,div[data-testid="column"]:nth-of-type(1) .stDateInput,div[data-testid="column"]:nth-of-type(1) .stTextArea{margin:0!important;}
-div[data-testid="column"]:nth-of-type(1) .stButton>button{font-size:0.80rem;}
+div[data-testid="column"]:nth-of-type(1) .stButton>button{font-size:0.78rem;}
 
 /* LEFT: 입력 UI */
 div[data-testid="column"]:nth-of-type(1) div[data-testid="stSelectbox"] div[role="combobox"],div[data-testid="column"]:nth-of-type(1) div[data-testid="stDateInput"] input,div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea{background:#eef4ff!important;border:1px solid #c7d2fe!important;}
