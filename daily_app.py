@@ -49,9 +49,6 @@ div[data-testid="column"]:nth-of-type(1) div[data-testid="stSelectbox"] div[role
 div[data-testid="column"]:nth-of-type(1) div[data-testid="stDateInput"] input{text-align:center!important;}
 div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea{font-size:0.85rem!important;line-height:1.15!important;min-height:10.5rem!important;}
 
-.sidebar-linkbtn{display:inline-flex;align-items:center;justify-content:center;width:100%;height:2.45rem;padding:0 0.65rem;border-radius:0.5rem;border:1px solid rgba(49,51,63,0.18);background:rgba(248,249,251,1);color:rgba(49,51,63,0.75)!important;font-weight:500;text-decoration:none!important;white-space:nowrap;box-sizing:border-box;}
-.sidebar-linkbtn:hover{background:rgba(243,244,246,1);}
-
 .month-grid{display:grid!important;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))!important;gap:.75rem!important;width:100%!important;}
 .month-item{border:1px solid #e5e7eb;border-radius:.75rem;background:#fff;overflow:hidden;min-width:0;}
 .month-item-date{background:#E8F7F4;color:#0F766E;font-weight:800;padding:.38rem .75rem;border-bottom:1px solid #BFE7DE;white-space:nowrap;letter-spacing:-0.01em;line-height:1.15;}
@@ -65,12 +62,7 @@ div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea{
 .weekly-dept{background:#f9fafb;font-size:.85rem;font-weight:850;padding:.45rem .6rem;margin:0 0 .35rem 0;border-radius:.45rem;}
 .weekly-body{background:none;padding:.15rem .1rem;font-size:.80rem;line-height:1.35;color:#111827;white-space:pre-wrap;}
 
-.sheet-row{display:flex;align-items:center;gap:8px;margin:2px 0;}
 .sheet-title{flex:1 1 auto;font-weight:800;font-size:15px;line-height:1.25;margin:0;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.sheet-btns{flex:0 0 auto;display:flex;gap:6px;}
-.sheet-btns button{padding:6px 10px;height:32px;}
-.sheet-linkbtn{display:flex;align-items:center;justify-content:center;width:100%;height:32px;padding:0 10px;border:1px solid #e5e7eb;border-radius:10px;font-size:12px;font-weight:650;color:#111827;background:#fff;text-decoration:none;white-space:nowrap;}
-.sheet-linkbtn:hover{background:#f9fafb;}
 .sheet-gap{height:4px;}
 
 </style>
