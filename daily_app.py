@@ -289,7 +289,7 @@ with col_left:
 
         is_open = (st.session_state.get("preview_sheet") == secret_key)
 
-        c0, c1, c2, c3 = st.columns([2.2, 1, 1, 1], vertical_alignment="center")
+        c0, c1, c2, c3 = st.columns([3, 1.5, 1.5, 1.5], vertical_alignment="center")
 
         with c0:
             st.markdown(f"<div class='sheet-title'>{title}</div>", unsafe_allow_html=True)
