@@ -68,6 +68,8 @@ div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea{
 section.main div[data-testid="stSelectbox"]>div{background:transparent!important;border:none!important;box-shadow:none!important;}
 section.main div[data-testid="stSelectbox"] div[data-baseweb="select"]>div{background:transparent!important;border:none!important;border-bottom:2px solid #BFE7DE!important;border-radius:0!important;box-shadow:none!important;height:2.15rem!important;min-height:2.15rem!important;padding:0 .2rem!important;font-weight:800!important;}
 section.main div[data-testid="stSelectbox"] div[data-baseweb="select"]>div{outline:3px solid #ff3b30!important;}
+html{outline:6px solid #ff3b30!important;}
+
 
 </style>
 """, unsafe_allow_html=True)
