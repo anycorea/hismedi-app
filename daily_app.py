@@ -41,7 +41,7 @@ section[data-testid="stSidebar"]{display:none!important;}
 div[data-testid="column"]:nth-of-type(1) div[data-testid="stVerticalBlock"]{position:sticky;top:0.65rem;background:#f6f7f9;border:1px solid rgba(49,51,63,0.16);border-radius:0.85rem;padding:0.95rem;}
 .left-title{font-size:1.65rem;font-weight:850;margin:0 0 0.55rem 0;}
 .left-h3,.left-h3 *{font-size:1.02rem;font-weight:850;color:#2563eb!important;margin:0.15rem 0 0.45rem 0;}
-.left-hr{margin:0.75rem 0;border:none;border-top:1px solid rgba(49,51,63,0.14);}
+.left-hr{margin:0.35rem 0;border:none;border-top:1px solid rgba(49,51,63,0.14);}
 
 div[data-testid="column"]:nth-of-type(1) .stElementContainer{margin:0.10rem 0!important;}
 div[data-testid="column"]:nth-of-type(1) .stButton,div[data-testid="column"]:nth-of-type(1) .stSelectbox,div[data-testid="column"]:nth-of-type(1) .stDateInput,div[data-testid="column"]:nth-of-type(1) .stTextArea{margin:0.10rem 0!important;}
@@ -65,7 +65,7 @@ div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea{
 .weekly-dept{background:#f9fafb;font-size:.85rem;font-weight:850;padding:.45rem .6rem;margin:0 0 .35rem 0;border-radius:.45rem;}
 .weekly-body{background:none;padding:.15rem .1rem;font-size:.80rem;line-height:1.35;color:#111827;white-space:pre-wrap;}
 
-.sheet-row{display:flex;align-items:center;gap:8px;margin:0px 0 4px 0;}
+.sheet-row{display:flex;align-items:center;gap:8px;margin:0 0 2px 0;}
 .sheet-title{flex:1 1 auto;font-weight:800;font-size:15px;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .sheet-btns{flex:0 0 auto;display:flex;gap:6px;}
 .sheet-btns button{padding:6px 10px;height:32px;}
