@@ -64,6 +64,16 @@ div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea{
 .weekly-card{display:flow-root;}
 .weekly-dept{background:#f9fafb;font-size:.85rem;font-weight:850;padding:.45rem .6rem;margin:0 0 .35rem 0;border-radius:.45rem;}
 .weekly-body{background:none;padding:.15rem .1rem;font-size:.80rem;line-height:1.35;color:#111827;white-space:pre-wrap;}
+
+.sheet-row{display:flex;align-items:center;gap:10px;margin:6px 0 10px 0;}
+.sheet-title{flex:1 1 auto;font-weight:700;font-size:14px;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.sheet-btns{flex:0 0 auto;display:flex;gap:6px;}
+.sheet-btns button{padding:6px 10px;height:34px;}
+.sheet-linkbtn{display:inline-flex;align-items:center;justify-content:center;height:34px;padding:0 10px;
+  border:1px solid #e5e7eb;border-radius:10px;font-size:12px;font-weight:650;color:#111827;
+  background:#fff;text-decoration:none;white-space:nowrap;}
+.sheet-linkbtn:hover{background:#f9fafb;}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -280,35 +290,52 @@ with col_left:
 
     st.markdown("<hr class='left-hr'>", unsafe_allow_html=True)
 
-    # (2) 구글시트 프리뷰(3종)
+    # (2) 구글시트 프리뷰 (한 줄 UI)
     def render_left_sheet_controls(title: str, secret_key: str):
-        st.markdown(f"<div class='left-h3'>{title}</div>", unsafe_allow_html=True)
-
         sheet_id = st.secrets[secret_key]["spreadsheet_id"]
         gid = st.secrets[secret_key].get("gid", "0")
         src_open = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit#gid={gid}"
 
-        # ✅ 어떤 시트를 열었는지: st.session_state["preview_sheet"] 로 관리
         is_open = (st.session_state.get("preview_sheet") == secret_key)
 
-        t1, t2, t3 = st.columns(3)
-        with t1:
-            if st.button("열기", use_container_width=True, disabled=is_open, key=f"open_{secret_key}"):
+        st.markdown("<div class='sheet-row'>", unsafe_allow_html=True)
+        st.markdown(f"<div class='sheet-title'>{title}</div>", unsafe_allow_html=True)
+
+        b1, b2, b3 = st.columns([1, 1, 1])
+        with b1:
+            if st.button(
+                "열기",
+                use_container_width=True,
+                disabled=is_open,
+                key=f"open_{secret_key}",
+            ):
                 st.session_state["preview_sheet"] = secret_key
                 st.rerun()
-        with t2:
-            if st.button("닫기", use_container_width=True, disabled=not is_open, key=f"close_{secret_key}"):
+
+        with b2:
+            if st.button(
+                "닫기",
+                use_container_width=True,
+                disabled=not is_open,
+                key=f"close_{secret_key}",
+            ):
                 st.session_state["preview_sheet"] = None
                 st.rerun()
-        with t3:
-            st.markdown(f'<a class="sidebar-linkbtn" href="{src_open}" target="_blank">새창 열기↗</a>', unsafe_allow_html=True)
 
-        st.markdown("<hr class='left-hr'>", unsafe_allow_html=True)
+        with b3:
+            st.markdown(
+                f"<a class='sheet-linkbtn' href='{src_open}' target='_blank'>새창</a>",
+                unsafe_allow_html=True,
+            )
+
+        st.markdown("</div>", unsafe_allow_html=True)
 
     # 3개 시트 렌더
     render_left_sheet_controls("진료시간표", "gsheet_preview")
     render_left_sheet_controls("진료실적(1일)", "gsheet_income")
     render_left_sheet_controls("진료실적(전체)", "gsheet_total")
+
+    st.markdown("<hr class='left-hr'>", unsafe_allow_html=True)
 
     # (3) 1일 업무 메모
     st.markdown("<div class='left-h3'>1일 업무 메모</div>", unsafe_allow_html=True)
