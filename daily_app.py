@@ -65,7 +65,7 @@ div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea{
 .weekly-dept{background:#f9fafb;font-size:.85rem;font-weight:850;padding:.45rem .6rem;margin:0 0 .35rem 0;border-radius:.45rem;}
 .weekly-body{background:none;padding:.15rem .1rem;font-size:.80rem;line-height:1.35;color:#111827;white-space:pre-wrap;}
 
-.sheet-row{display:flex;align-items:center;gap:8px;margin:2px 0 6px 0;}
+.sheet-row{display:flex;align-items:center;gap:8px;margin:0px 0 4px 0;}
 .sheet-title{flex:1 1 auto;font-weight:800;font-size:15px;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .sheet-btns{flex:0 0 auto;display:flex;gap:6px;}
 .sheet-btns button{padding:6px 10px;height:32px;}
@@ -321,10 +321,9 @@ with col_left:
                 st.rerun()
 
         with b3:
-            st.markdown(
-                f"<a class='sheet-linkbtn' href='{src_open}' target='_blank'>새창</a>",
-                unsafe_allow_html=True,
-            )
+            if st.button("새창", use_container_width=True, key=f"newtab_{secret_key}"):
+                st.session_state["open_newtab_url"] = src_open
+                st.rerun()
 
         st.markdown("</div>", unsafe_allow_html=True)
 
@@ -332,6 +331,11 @@ with col_left:
     render_left_sheet_controls("진료시간표", "gsheet_preview")
     render_left_sheet_controls("진료실적(1일)", "gsheet_income")
     render_left_sheet_controls("진료실적(전체)", "gsheet_total")
+
+    if st.session_state.get("open_newtab_url"):
+        url = st.session_state["open_newtab_url"]
+        st.session_state["open_newtab_url"] = None
+        components.html(f"<script>window.open('{url}', '_blank');</script>", height=0)
 
     st.markdown("<hr class='left-hr'>", unsafe_allow_html=True)
 
