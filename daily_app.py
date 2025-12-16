@@ -52,7 +52,7 @@ div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea{
 .right-compact-divider{border:none;border-top:1px solid rgba(49,51,63,0.16);margin:0.45rem 0 0.55rem 0;}
 
 /* RIGHT: 기간선택(weekly_week_select) 셀렉트박스 최소화/밑줄형 */
-div[data-testid="column"]:nth-of-type(2) div[data-testid="stSelectbox"]{max-width:260px;}
+div[data-testid="column"]:nth-of-type(2) div[data-testid="stSelectbox"]{max-width:100px;}
 div[data-testid="column"]:nth-of-type(2) div[data-testid="stSelectbox"] div[role="combobox"]{background:transparent!important;border:none!important;border-bottom:1px solid rgba(49,51,63,0.35)!important;border-radius:0!important;box-shadow:none!important;padding:0.05rem 0.05rem!important;min-height:1.60rem!important;}
 div[data-testid="column"]:nth-of-type(2) div[data-testid="stSelectbox"] div[role="combobox"]:hover{border-bottom:1px solid rgba(49,51,63,0.55)!important;}
 div[data-testid="column"]:nth-of-type(2) div[data-testid="stSelectbox"] div[data-baseweb="select"],div[data-testid="column"]:nth-of-type(2) div[data-testid="stSelectbox"] div[data-baseweb="select"]>div,div[data-testid="column"]:nth-of-type(2) div[data-testid="stSelectbox"] div[data-baseweb="select"]>div>div{background:transparent!important;box-shadow:none!important;}
