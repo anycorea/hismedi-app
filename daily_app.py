@@ -43,8 +43,8 @@ div[data-testid="column"]:nth-of-type(1) div[data-testid="stVerticalBlock"]{posi
 .left-h3,.left-h3 *{font-size:1.02rem;font-weight:850;color:#2563eb!important;margin:0.15rem 0 0.45rem 0;}
 .left-hr{margin:0.3rem 0;border:none;border-top:1px solid rgba(49,51,63,0.14);}
 
-div[data-testid="column"]:nth-of-type(1) .stElementContainer{margin:0.10rem 0!important;}
-div[data-testid="column"]:nth-of-type(1) .stButton,div[data-testid="column"]:nth-of-type(1) .stSelectbox,div[data-testid="column"]:nth-of-type(1) .stDateInput,div[data-testid="column"]:nth-of-type(1) .stTextArea{margin:0.10rem 0!important;}
+div[data-testid="column"]:nth-of-type(1) div[data-testid="stHorizontalBlock"]{margin:0!important;padding:0!important;}
+div[data-testid="column"]:nth-of-type(1) div[data-testid="stHorizontalBlock"] .stElementContainer{margin:0!important;}
 div[data-testid="column"]:nth-of-type(1) div[data-testid="stSelectbox"] div[role="combobox"],div[data-testid="column"]:nth-of-type(1) div[data-testid="stDateInput"] input,div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea{background:#eef4ff!important;border:1px solid #c7d2fe!important;}
 div[data-testid="column"]:nth-of-type(1) div[data-testid="stDateInput"] input{text-align:center!important;}
 div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea{font-size:0.85rem!important;line-height:1.15!important;min-height:10.5rem!important;}
@@ -289,10 +289,10 @@ with col_left:
 
         is_open = (st.session_state.get("preview_sheet") == secret_key)
 
-        c0, c1, c2, c3 = st.columns([2.4, 1.2, 1.2, 1.2], vertical_alignment="center")
+        c0, c1, c2, c3 = st.columns([2.0, 1, 1, 1], vertical_alignment="center")
 
         with c0:
-            st.markdown(f"<div class='sheet-title'>{title}</div>", unsafe_allow_html=True)
+            st.markdown(f"<span class='sheet-pill'>{title}</span>", unsafe_allow_html=True)
 
         with c1:
             if st.button("보기", use_container_width=True, disabled=is_open, key=f"open_{secret_key}"):
