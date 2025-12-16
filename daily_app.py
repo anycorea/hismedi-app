@@ -45,7 +45,7 @@ div[data-testid="column"]:nth-of-type(1) div[data-testid="stVerticalBlock"]{posi
 
 div[data-testid="column"]:nth-of-type(1) .stElementContainer{margin:0.10rem 0!important;}
 div[data-testid="column"]:nth-of-type(1) .stButton,div[data-testid="column"]:nth-of-type(1) .stSelectbox,div[data-testid="column"]:nth-of-type(1) .stDateInput,div[data-testid="column"]:nth-of-type(1) .stTextArea{margin:0.10rem 0!important;}
-div[data-testid="column"]:nth-of-type(1) div[data-testid="stSelectbox"] div[role="combobox"],div[data-testid="column"]:nth-of-type(1) div[data-testid="stDateInput"] input,div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea,section.main div[data-testid="stSelectbox"] div[role="combobox"]{background:#eef4ff!important;border:1px solid #c7d2fe!important;}
+div[data-testid="column"]:nth-of-type(1) div[data-testid="stSelectbox"] div[role="combobox"],div[data-testid="column"]:nth-of-type(1) div[data-testid="stDateInput"] input,div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea{background:#eef4ff!important;border:1px solid #c7d2fe!important;}
 div[data-testid="column"]:nth-of-type(1) div[data-testid="stDateInput"] input{text-align:center!important;}
 div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea{font-size:0.85rem!important;line-height:1.15!important;min-height:10.5rem!important;}
 
@@ -66,6 +66,9 @@ div[data-testid="column"]:nth-of-type(2) div[data-testid="stSelectbox"] div[role
 
 /* 내부 텍스트/아이콘 정돈 */
 div[data-testid="column"]:nth-of-type(2) div[data-testid="stSelectbox"] span{font-weight: 650 !important;}
+
+/* right selectbox tight */
+div[data-testid="column"]:nth-of-type(2) div[data-testid="stSelectbox"]{margin-top:-0.2rem!important;}
 
 .sidebar-linkbtn{display:inline-flex;align-items:center;justify-content:center;width:100%;height:2.45rem;padding:0 0.65rem;border-radius:0.5rem;border:1px solid rgba(49,51,63,0.18);background:rgba(248,249,251,1);color:rgba(49,51,63,0.75)!important;font-weight:500;text-decoration:none!important;white-space:nowrap;box-sizing:border-box;}
 .sidebar-linkbtn:hover{background:rgba(243,244,246,1);}
@@ -384,6 +387,8 @@ with col_right:
 
             try: weekly_df = load_weekly_df()
             except Exception: weekly_df = pd.DataFrame()
+
+            st.divider()
 
             head1, head2 = st.columns([0.20, 0.80], vertical_alignment="center")
             with head1:
