@@ -65,7 +65,7 @@ div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea{
 .weekly-dept{background:#f9fafb;font-size:.85rem;font-weight:850;padding:.45rem .6rem;margin:0 0 .35rem 0;border-radius:.45rem;}
 .weekly-body{background:none;padding:.15rem .1rem;font-size:.80rem;line-height:1.35;color:#111827;white-space:pre-wrap;}
 
-section.main div[data-testid="stSelectbox"] div[role="combobox"]{height:2.25rem!important;min-height:2.25rem!important;padding:0 .65rem!important;border-radius:.65rem!important;background:#F7F7F8!important;border:1px solid #E5E7EB!important;box-shadow:none!important;font-weight:750!important;}
+section.main div[data-testid="stSelectbox"] div[role="combobox"]{height:2.15rem!important;min-height:2.15rem!important;padding:0 .2rem!important;border-radius:0!important;background:transparent!important;border:none!important;border-bottom:2px solid #BFE7DE!important;box-shadow:none!important;font-weight:800!important;}
 
 </style>
 """, unsafe_allow_html=True)
