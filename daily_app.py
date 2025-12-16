@@ -201,10 +201,14 @@ def render_weekly_cards(df_weekly: pd.DataFrame, week_str: str, ncols: int = 3) 
 # 6) Timetable preview (iframe + loading overlay)
 # ======================================================
 
-def render_sheet_preview(secret_key: str, loading_text: str = "시트를 불러오는 중...") -> None:
+def render_sheet_preview(secret_key: str, loading_text: str = "시트를 불러오는 중...", editable: bool = False) -> None:
     sheet_id = st.secrets[secret_key]["spreadsheet_id"]
     gid = st.secrets[secret_key].get("gid", "0")
-    src_view = f"https://docs.google.com/spreadsheets/d/{sheet_id}/htmlview?gid={gid}&rm=minimal"
+
+    if editable:
+        src_view = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit?gid={gid}&rm=minimal"
+    else:
+        src_view = f"https://docs.google.com/spreadsheets/d/{sheet_id}/htmlview?gid={gid}&rm=minimal"
 
     components.html(
         f"""
@@ -381,7 +385,7 @@ with col_right:
     elif key == "gsheet_income":
         render_sheet_preview("gsheet_income", "진료실적(1일-전일 환자수)을 불러오는 중...")
     elif key == "gsheet_total":
-        render_sheet_preview("gsheet_total", "진료실적(전체/과별/의사별)을 불러오는 중...")
+        render_sheet_preview("gsheet_total", "진료실적(전체/과별/의사별)을 불러오는 중...", editable=True)
     else:
 
         if df_daily.empty or (selected_ym is None): st.info("아직 작성된 보고가 없습니다.")
