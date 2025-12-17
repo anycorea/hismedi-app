@@ -596,18 +596,51 @@ with col_right:
     elif key == "gsheet_income":
         render_sheet_preview("gsheet_income", "진료실적(1일-전일 환자수)을 불러오는 중...")
     elif key == "gsheet_total":
-        c1, c2 = st.columns([0.25, 0.75], vertical_alignment="center")
+        st.markdown(
+            """
+            <style>
+            div[data-testid="column"]:nth-of-type(2) div[data-testid="stHorizontalBlock"]:first-of-type{
+              position:sticky;top:0.65rem;z-index:50;background:#f6f7f9;border:1px solid rgba(49,51,63,0.16);
+              border-radius:0.85rem;padding:0.45rem 0.55rem;margin:0 0 0.60rem 0;
+            }
+            div[data-testid="column"]:nth-of-type(2) div[data-testid="stHorizontalBlock"]:first-of-type .stSelectbox{margin:0!important;}
+            div[data-testid="column"]:nth-of-type(2) div[data-testid="stHorizontalBlock"]:first-of-type .stSelectbox label{display:none!important;}
+            div[data-testid="column"]:nth-of-type(2) div[data-testid="stHorizontalBlock"]:first-of-type div[data-testid="stSelectbox"] div[role="combobox"]{
+              min-height:34px!important;height:34px!important;padding:0 0.50rem!important;font-size:0.82rem!important;
+              background:#eef4ff!important;border:1px solid #c7d2fe!important;
+            }
+            div[data-testid="column"]:nth-of-type(2) div[data-testid="stHorizontalBlock"]:first-of-type div[data-testid="stSelectbox"] div[role="combobox"] *{font-size:0.82rem!important;}
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
 
-        with c1:
-            st.selectbox("연도", options=get_year_options(2019), key="gs_total_year", on_change=apply_gsheet_total_params)
-            st.selectbox("항목", options=GS_TOTAL_ITEM_OPTIONS, key="gs_total_item", on_change=apply_gsheet_total_params)
+        t0, t1, t2 = st.columns([0.10, 0.45, 0.45], vertical_alignment="center")
 
-            if not st.session_state.get("_gs_total_applied_once"):
-                apply_gsheet_total_params()
-                st.session_state["_gs_total_applied_once"] = True
+        with t0:
+            st.caption("조회")
 
-        with c2:
-            render_sheet_preview("gsheet_total", "진료실적(전체/과별/의사별)을 불러오는 중...", editable=False)
+        with t1:
+            st.selectbox(
+                "연도",
+                options=get_year_options(2019),
+                key="gs_total_year",
+                on_change=apply_gsheet_total_params,
+            )
+
+        with t2:
+            st.selectbox(
+                "항목",
+                options=GS_TOTAL_ITEM_OPTIONS,
+                key="gs_total_item",
+                on_change=apply_gsheet_total_params,
+            )
+
+        if not st.session_state.get("_gs_total_applied_once"):
+            apply_gsheet_total_params()
+            st.session_state["_gs_total_applied_once"] = True
+
+        render_sheet_preview("gsheet_total", "진료실적(전체/과별/의사별)을 불러오는 중...", editable=False)
     else:
         if df_daily.empty or selected_ym is None:
             st.info("아직 작성된 보고가 없습니다.")
