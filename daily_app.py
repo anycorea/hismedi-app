@@ -37,15 +37,18 @@ WEEKDAY_MAP = ["월", "화", "수", "목", "금", "토", "일"]
 # 1) Layout
 # ======================================================
 
-st.set_page_config(
-    page_title=APP_TITLE,
-    layout="wide",
-    initial_sidebar_state="collapsed",
-)
+st.set_page_config(page_title=APP_TITLE, layout="wide", initial_sidebar_state="collapsed")
 
 st.markdown(
     """
 <style>
+
+html{font-size:clamp(12px,0.85vw,15px);}
+@media (max-width:1100px){html{font-size:clamp(11px,1.00vw,14px);}}
+@media (max-width:800px){html{font-size:clamp(10px,1.20vw,13px);}}
+/* Streamlit 기본 폰트/여백 보정 */
+div[data-testid="stMarkdownContainer"] p,div[data-testid="stMarkdownContainer"] li{line-height:1.35;}
+
 .block-container{padding-top:2.5rem;padding-bottom:1.0rem;}
 section[data-testid="stSidebar"]{display:none!important;}
 
@@ -117,28 +120,16 @@ div[data-testid="column"]:nth-of-type(1) div[data-testid="stTextArea"] textarea{
 # ======================================================
 
 @st.cache_resource
-def get_gspread_client() -> gspread.Client:
-    credentials = Credentials.from_service_account_info(
-        st.secrets["gcp_service_account"],
-        scopes=SCOPE,
-    )
-    return gspread.authorize(credentials)
+def get_gspread_client() -> gspread.Client: credentials = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=SCOPE); return gspread.authorize(credentials)
 
-def get_worksheet() -> gspread.Worksheet:
-    sh = get_gspread_client().open_by_key(SPREADSHEET_ID)
-    return sh.worksheet(WORKSHEET_NAME)
+def get_worksheet() -> gspread.Worksheet: sh = get_gspread_client().open_by_key(SPREADSHEET_ID); return sh.worksheet(WORKSHEET_NAME)
 
 @st.cache_resource
-def get_weekly_worksheet() -> gspread.Worksheet:
-    sh = get_gspread_client().open_by_key(WEEKLY_SPREADSHEET_ID)
-    return sh.worksheet(WEEKLY_WORKSHEET_NAME)
+def get_weekly_worksheet() -> gspread.Worksheet: sh = get_gspread_client().open_by_key(WEEKLY_SPREADSHEET_ID); return sh.worksheet(WEEKLY_WORKSHEET_NAME)
 
 
 @st.cache_resource
-def get_gsheet_total_worksheet() -> gspread.Worksheet:
-    sh = get_gspread_client().open_by_key(st.secrets["gsheet_total"]["spreadsheet_id"])
-    gid = int(st.secrets["gsheet_total"]["gid"])
-    return sh.get_worksheet_by_id(gid)
+def get_gsheet_total_worksheet() -> gspread.Worksheet: sh = get_gspread_client().open_by_key(st.secrets["gsheet_total"]["spreadsheet_id"]); gid = int(st.secrets["gsheet_total"]["gid"]); return sh.get_worksheet_by_id(gid)
 
 # ======================================================
 # 3) Date utils
@@ -173,10 +164,7 @@ def format_date_with_weekday(d: Any) -> str:
         return str(d)
     return d.strftime("%Y-%m-%d") + f" ({WEEKDAY_MAP[d.weekday()]})"
 
-def escape_html(text: Any) -> str:
-    if text is None:
-        return ""
-    return html.escape(str(text)).replace("\n", "<br>")
+def escape_html(text: Any) -> str: return "" if text is None else html.escape(str(text)).replace("\\n", "<br>")
 
 # ======================================================
 # 4) Daily DF + save
@@ -370,21 +358,15 @@ GS_TOTAL_ITEM_OPTIONS = [
     "수술건수",
 ]
 
-def get_year_options(start_year: int = 2019) -> list[str]:
-    this_year = date.today().year
-    return [f"{y}년" for y in range(this_year, start_year - 1, -1)]
+def get_year_options(start_year: int = 2019) -> list[str]: return [f"{y}년" for y in range(date.today().year, start_year - 1, -1)]
 
 def apply_gsheet_total_params() -> None:
-    year = st.session_state.get("gs_total_year")
-    item = st.session_state.get("gs_total_item")
-    if not year or not item:
-        return
+    year = st.session_state.get("gs_total_year"); item = st.session_state.get("gs_total_item")
+    if not year or not item: return
     try:
-        ws = get_gsheet_total_worksheet()
-        ws.update("A1:B1", [[year, item]], value_input_option="USER_ENTERED")
+        ws = get_gsheet_total_worksheet(); ws.update("A1:B1", [[year, item]], value_input_option="USER_ENTERED")
         st.session_state["gsheet_total_cb"] = int(datetime.now().timestamp() * 1000)
     except Exception:
-        # 실패해도 화면이 죽지 않게 (로그는 Streamlit Cloud에서 확인)
         st.warning("진료실적(전체) 조회 파라미터(A1/B1) 적용에 실패했습니다. (권한/보호범위/시트 지정 확인)")
 
 
