@@ -599,26 +599,26 @@ with col_right:
         st.markdown(
             """
             <style>
-            div[data-testid="column"]:nth-of-type(2) div[data-testid="stHorizontalBlock"]:first-of-type{
-              position:sticky;top:0.65rem;z-index:50;background:#f6f7f9;border:1px solid rgba(49,51,63,0.16);
-              border-radius:0.85rem;padding:0.45rem 0.55rem;margin:0 0 0.60rem 0;
+            .total-toolbar{
+              position:sticky;top:0.65rem;z-index:50;background:#f6f7f9;
+              border:1px solid rgba(49,51,63,0.16);border-radius:0.85rem;
+              padding:0.35rem 0.45rem;margin:0 0 0.60rem 0;
             }
-            div[data-testid="column"]:nth-of-type(2) div[data-testid="stHorizontalBlock"]:first-of-type .stSelectbox{margin:0!important;}
-            div[data-testid="column"]:nth-of-type(2) div[data-testid="stHorizontalBlock"]:first-of-type .stSelectbox label{display:none!important;}
-            div[data-testid="column"]:nth-of-type(2) div[data-testid="stHorizontalBlock"]:first-of-type div[data-testid="stSelectbox"] div[role="combobox"]{
-              min-height:34px!important;height:34px!important;padding:0 0.50rem!important;font-size:0.82rem!important;
+            .total-toolbar div[data-testid="stSelectbox"]{margin:0!important;}
+            .total-toolbar div[data-testid="stSelectbox"] div[role="combobox"]{
+              min-height:30px!important;height:30px!important;line-height:30px!important;
+              padding:0 0.45rem!important;font-size:0.80rem!important;
               background:#eef4ff!important;border:1px solid #c7d2fe!important;
             }
-            div[data-testid="column"]:nth-of-type(2) div[data-testid="stHorizontalBlock"]:first-of-type div[data-testid="stSelectbox"] div[role="combobox"] *{font-size:0.82rem!important;}
+            .total-toolbar div[data-testid="stSelectbox"] div[role="combobox"] *{font-size:0.80rem!important;}
+            .total-toolbar .stSelectbox label{display:none!important;}
             </style>
             """,
             unsafe_allow_html=True,
         )
 
-        t0, t1, t2 = st.columns([0.10, 0.45, 0.45], vertical_alignment="center")
-
-        with t0:
-            st.caption("조회")
+        st.markdown("<div class='total-toolbar'>", unsafe_allow_html=True)
+        t1, t2, t3 = st.columns([0.16, 0.22, 0.62], vertical_alignment="center")
 
         with t1:
             st.selectbox(
@@ -626,6 +626,7 @@ with col_right:
                 options=get_year_options(2019),
                 key="gs_total_year",
                 on_change=apply_gsheet_total_params,
+                label_visibility="collapsed",
             )
 
         with t2:
@@ -634,7 +635,13 @@ with col_right:
                 options=GS_TOTAL_ITEM_OPTIONS,
                 key="gs_total_item",
                 on_change=apply_gsheet_total_params,
+                label_visibility="collapsed",
             )
+
+        with t3:
+            st.empty()
+
+        st.markdown("</div>", unsafe_allow_html=True)
 
         if not st.session_state.get("_gs_total_applied_once"):
             apply_gsheet_total_params()
