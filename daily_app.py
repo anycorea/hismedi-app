@@ -434,9 +434,8 @@ def render_left_sheet_controls(title: str, secret_key: str) -> None:
     with c1:
         if st.button("보기", use_container_width=True, disabled=is_open, key=f"open_{secret_key}"):
             st.session_state["preview_sheet"] = secret_key
-                if secret_key == "gsheet_total":
-                    st.session_state.pop("_gs_total_applied_once", None)
-
+            if secret_key == "gsheet_total":
+                st.session_state.pop("_gs_total_applied_once", None)
             st.rerun()
 
     with c2:
