@@ -133,6 +133,54 @@ def get_weekly_worksheet() -> gspread.Worksheet:
     sh = get_gspread_client().open_by_key(WEEKLY_SPREADSHEET_ID)
     return sh.worksheet(WEEKLY_WORKSHEET_NAME)
 
+
+@st.cache_resource
+def get_worksheet_by_secret(secret_key: str) -> gspread.Worksheet:
+    """Open worksheet using secrets[{secret_key}]['spreadsheet_id'] and optional ['gid'].
+
+    - Uses gid when provided (recommended).
+    - Falls back to the first worksheet if gid is missing/invalid.
+    """
+    sheet_id = st.secrets[secret_key]["spreadsheet_id"]
+    gid_raw = st.secrets[secret_key].get("gid")
+
+    sh = get_gspread_client().open_by_key(sheet_id)
+
+    try:
+        if gid_raw is not None:
+            return sh.get_worksheet_by_id(int(gid_raw))
+    except Exception:
+        pass
+
+    return sh.get_worksheet(0)
+
+
+GS_TOTAL_ITEM_OPTIONS = [
+    "진료수입(전체)",
+    "진료수입(외래)",
+    "진료수입(입원)",
+    "환자수(외래)",
+    "환자수(입원)",
+    "수술건수",
+]
+
+def get_year_options(start_year: int = 2019) -> list[str]:
+    this_year = date.today().year
+    return [f"{y}년" for y in range(this_year, start_year - 1, -1)]
+
+def apply_gsheet_total_params() -> None:
+    """Set A1/B1 on gsheet_total (service account editor 권한 필요)."""
+    year = st.session_state.get("gs_total_year")
+    item = st.session_state.get("gs_total_item")
+    if not year or not item:
+        return
+
+    ws = get_worksheet_by_secret("gsheet_total")
+    ws.update("A1", year)
+    ws.update("B1", item)
+
+    st.session_state["gs_total_reload"] = st.session_state.get("gs_total_reload", 0) + 1
+
 # ======================================================
 # 3) Date utils
 # ======================================================
@@ -310,7 +358,7 @@ def render_weekly_cards(df_weekly: pd.DataFrame, week_str: str, ncols: int = 3) 
 # 6) Timetable preview (iframe + loading overlay)
 # ======================================================
 
-def render_sheet_preview(secret_key: str, loading_text: str = "시트를 불러오는 중...", editable: bool = False) -> None:
+def render_sheet_preview(secret_key: str, loading_text: str = "시트를 불러오는 중...", editable: bool = False, cache_bust: Optional[int] = None) -> None:
     sheet_id = st.secrets[secret_key]["spreadsheet_id"]
     gid = st.secrets[secret_key].get("gid", "0")
 
@@ -318,6 +366,9 @@ def render_sheet_preview(secret_key: str, loading_text: str = "시트를 불러�
         src_view = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit?gid={gid}&rm=minimal"
     else:
         src_view = f"https://docs.google.com/spreadsheets/d/{sheet_id}/htmlview?gid={gid}&rm=minimal"
+
+    if cache_bust is not None:
+        src_view += f"&t={cache_bust}"
 
     html_block = f"""
 <div style="position:relative;width:100%;height:1100px;">
@@ -357,6 +408,10 @@ st.session_state.setdefault("preview_sheet", None)  # None | "gsheet_preview" | 
 today = date.today()
 st.session_state.setdefault("memo_date", today)
 st.session_state.setdefault("ym_index", 0)
+
+st.session_state.setdefault("gs_total_year", f"{date.today().year}년")
+st.session_state.setdefault("gs_total_item", "진료수입(전체)")
+st.session_state.setdefault("gs_total_reload", 0)
 
 # ======================================================
 # 8) Main 2-column layout (LEFT panel + RIGHT content)
@@ -543,7 +598,37 @@ with col_right:
     elif key == "gsheet_income":
         render_sheet_preview("gsheet_income", "진료실적(1일-전일 환자수)을 불러오는 중...")
     elif key == "gsheet_total":
-        render_sheet_preview("gsheet_total", "진료실적(전체/과별/의사별)을 불러오는 중...", editable=True)
+        controls = st.container()
+        with controls:
+            c1, c2, c3 = st.columns([0.20, 0.35, 0.45], vertical_alignment="center")
+            with c1:
+                st.markdown("<span class='sheet-pill'>진료실적 조회</span>", unsafe_allow_html=True)
+            with c2:
+                st.selectbox(
+                    "연도",
+                    options=get_year_options(2019),
+                    key="gs_total_year",
+                    label_visibility="collapsed",
+                    on_change=apply_gsheet_total_params,
+                )
+            with c3:
+                st.selectbox(
+                    "항목",
+                    options=GS_TOTAL_ITEM_OPTIONS,
+                    key="gs_total_item",
+                    label_visibility="collapsed",
+                    on_change=apply_gsheet_total_params,
+                )
+
+        # 프리뷰 최초 진입 시에도 A1/B1 반영 (이미 동일 값이면 시트 변화 없음)
+        apply_gsheet_total_params()
+
+        render_sheet_preview(
+            "gsheet_total",
+            "진료실적(전체/과별/의사별)을 불러오는 중...",
+            editable=False,
+            cache_bust=st.session_state.get("gs_total_reload"),
+        )
     else:
         if df_daily.empty or selected_ym is None:
             st.info("아직 작성된 보고가 없습니다.")
