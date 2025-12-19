@@ -317,9 +317,19 @@ def render_weekly_cards(df_weekly: pd.DataFrame, week_str: str, ncols: int = 3) 
 # 6) Timetable preview (iframe + loading overlay)
 # ======================================================
 
+@st.cache_data(ttl=300)
+def get_first_sheet_gid(secret_key: str) -> str:
+    sh = get_gspread_client().open_by_key(st.secrets[secret_key]["spreadsheet_id"])
+    return str(sh.worksheets()[0].id)
+
+def get_sheet_gid(secret_key: str) -> str:
+    try: gid = st.secrets[secret_key].get("gid")
+    except Exception: gid = None
+    return str(gid) if gid not in (None, "") else get_first_sheet_gid(secret_key)
+
 def render_sheet_preview(secret_key: str, loading_text: str = "시트를 불러오는 중...", editable: bool = False) -> None:
     sheet_id = st.secrets[secret_key]["spreadsheet_id"]
-    gid = st.secrets[secret_key].get("gid", "0")
+    gid = get_sheet_gid(secret_key)
 
     cb = st.session_state.get(f"{secret_key}_cb")
     cb_q = f"&cb={cb}" if cb else ""
@@ -417,7 +427,7 @@ col_left, col_right = st.columns([0.2, 0.8], gap="large")
 
 def render_left_sheet_controls(title: str, secret_key: str) -> None:
     sheet_id = st.secrets[secret_key]["spreadsheet_id"]
-    gid = st.secrets[secret_key].get("gid", "0")
+    gid = get_sheet_gid(secret_key)
 
     cb = st.session_state.get(f"{secret_key}_cb")
     cb_q = f"&cb={cb}" if cb else ""
