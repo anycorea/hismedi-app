@@ -6,7 +6,7 @@ import feedparser
 import requests
 from bs4 import BeautifulSoup
 
-from app.config import KEYWORDS, NEGATIVE_HINTS, RSS_SOURCES, DEFAULTS
+from news.config import KEYWORDS, NEGATIVE_HINTS, RSS_SOURCES, DEFAULTS
 from app.gsheet import open_sheet, ensure_tabs, meta_get, meta_set
 
 def normalize_ws(s: str) -> str:
