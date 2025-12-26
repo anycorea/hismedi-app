@@ -22,6 +22,10 @@ pyarrow>=16.1.0
 # 기타
 requests>=2.32
 pypdf>=4.3.1
+
+# =========================
+# News Scraper (추가)
+# =========================
 feedparser>=6.0.11
 beautifulsoup4>=4.12
 lxml>=5.2
