@@ -7,7 +7,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from news.config import KEYWORDS, NEGATIVE_HINTS, RSS_SOURCES, DEFAULTS
-from news.gsheet import open_sheets
+from news.gsheet import open_sheet, ensure_tabs, meta_get, meta_set
 
 def normalize_ws(s: str) -> str:
     return re.sub(r"\s+", " ", (s or "")).strip()
