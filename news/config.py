@@ -56,21 +56,25 @@ GOOGLE_SOURCES = [(f"GoogleNews-{i+1}", GOOGLE_NEWS_RSS(q)) for i, q in enumerat
 # RSS 고정 소스(전문지/정부 원문)
 # ----------------------------
 RSS_SOURCES = [
-    ("대한중소병원협회", "HTML:ksmha"),
-
-    ("데일리메디", "https://www.dailymedi.com/rss/allArticle.xml"),
-    ("의협신문", "https://www.doctorsnews.co.kr/rss/allArticle.xml"),
-
-    # 1) 병원·의료 전문 언론
+    # 1) 병원·의료 전문 언론 (RSS)
     ("병원신문", "https://www.khanews.com/rss/allArticle.xml"),
     ("의학신문-전체", "http://www.bosa.co.kr/rss/allArticle.xml"),
     ("의학신문-병원경영", "http://www.bosa.co.kr/rss/section.xml?section=010"),
     ("청년의사", "https://www.docdocdoc.co.kr/rss/allArticle.xml"),
 
-    # 2) 정부기관(원문)
+    # 1-2) 의료 언론 (HTML)
+    ("데일리메디", "HTML:dailymedi"),
+    ("의협신문", "https://www.doctorsnews.co.kr/rss/allArticle.xml"),
+
+    # 2) 협회·공공·정부 (HTML)
+    ("대한중소병원협회", "HTML:ksmha"),
+    ("대한병원협회", "HTML:kha"),
+    ("국민건강보험공단", "HTML:nhis"),
+    ("건강보험심사평가원", "HTML:hira"),
     ("보건복지부-보도자료", "HTML:mohw"),
     ("고용노동부-보도자료", "HTML:moel"),
-] 
+]
+
 
 # ----------------------------
 # 기본 설정
@@ -79,7 +83,7 @@ DEFAULTS = {
     "max_hamming": 6,
     "recent_sim_n": 800,
     "fetch_timeout_sec": 10,
-    # 정부 보도자료(HTML 크롤링) 페이지 수(1페이지=최신 약 10~20건)
+    # HTML 크롤링 페이지 수(1페이지=최신 약 10~20건)
     "gov_pages": 1,
     "rss_enabled": True,
     # 일부 환경에서 RSS가 403/리다이렉트 나는 것을 줄이기 위해 UA는 꼭 씁니다.
