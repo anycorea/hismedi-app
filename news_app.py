@@ -52,10 +52,14 @@ def load_news(sheet_id: str) -> pd.DataFrame:
 
 
 def _to_kst(series: pd.Series) -> pd.Series:
-    s = pd.to_datetime(series, errors="coerce", utc=False)
-    if getattr(s.dt, "tz", None) is not None:
-        s = s.dt.tz_convert("Asia/Seoul").dt.tz_localize(None)
-    return s
+    """Convert various published date formats to KST-naive datetimes (display-friendly).
+
+    - Accepts strings / mixed values / timezone-aware values.
+    - Unparseable values become NaT (and can be filtered out safely).
+    """
+    dt = pd.to_datetime(series, errors="coerce", utc=True)
+    # Convert UTC -> KST, then drop tz for simpler display/filtering
+    return dt.dt.tz_convert("Asia/Seoul").dt.tz_localize(None)
 
 
 st.set_page_config(page_title=APP_TITLE, layout="wide")
