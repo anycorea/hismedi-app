@@ -137,6 +137,7 @@ df, meta = load_news_and_meta()
 # 표준 컬럼 보정
 if "published_at" in df.columns and "발행(KST)" not in df.columns:
     df["발행(KST)"] = df["published_at"].apply(parse_dt)
+    df["발행(KST)"] = pd.to_datetime(df["발행(KST)"], errors="coerce")
 
 # 필터
 with st.sidebar:
