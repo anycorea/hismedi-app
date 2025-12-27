@@ -22,12 +22,12 @@ def get_gspread_client():
     )
 
 def _build_client():
-    sa_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
-    if not sa_json:
-        raise RuntimeError("Missing GOOGLE_SERVICE_ACCOUNT_JSON")
-    # 정상 JSON 문자열 전제
-    import json
-    info = json.loads(sa_json)
+    import streamlit as st
+
+    if "gcp_service_account" not in st.secrets:
+        raise RuntimeError("Missing [gcp_service_account] in Streamlit Secrets")
+
+    info = dict(st.secrets["gcp_service_account"])
     creds = Credentials.from_service_account_info(
         info,
         scopes=["https://www.googleapis.com/auth/spreadsheets"],
