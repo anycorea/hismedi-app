@@ -32,25 +32,6 @@ KEYWORDS = {
 
 NEGATIVE_HINTS = ["연예","스포츠","게임","가십","패션"]
 
-# ----------------------------
-# 검색 쿼리(보강용) — 폭넓게 커버
-# ----------------------------
-# Google News RSS / Naver News API(권장) 모두 같은 쿼리를 사용합니다.
-SEARCH_QUERIES = [
-    "(보건 OR 의료 OR 병원 OR 의원 OR 진료 OR 환자 OR 감염병 OR 백신) (정책 OR 제도 OR 지원 OR 대책 OR 지침)",
-    "(의사 OR 간호사 OR 의료기사 OR 전공의 OR 수련) (정책 OR 제도 OR 지원 OR 처우 OR 인력 OR 수가)",
-    "(병원 OR 의료) (고용 OR 채용 OR 인건비 OR 고용유지지원금 OR 노동 OR 근로 OR 임금 OR 산재 OR 근로기준법) (정책 OR 제도 OR 지원)",
-    "(환자안전 OR 의료사고 OR 의료법 OR 응급 OR 중환자) (대책 OR 개정 OR 정책 OR 제도)",
-]
-
-# ----------------------------
-# Google News RSS
-# ----------------------------
-def GOOGLE_NEWS_RSS(query: str) -> str:
-    # 한국 고정 파라미터 포함
-    return f"https://news.google.com/rss/search?q={quote(query)}&hl=ko&gl=KR&ceid=KR:ko"
-
-GOOGLE_SOURCES = [(f"GoogleNews-{i+1}", GOOGLE_NEWS_RSS(q)) for i, q in enumerate(SEARCH_QUERIES)]
 
 # ----------------------------
 # RSS 고정 소스(전문지/정부 원문)
@@ -62,14 +43,10 @@ RSS_SOURCES = [
     ("의학신문-병원경영", "http://www.bosa.co.kr/rss/section.xml?section=010"),
     ("청년의사", "https://www.docdocdoc.co.kr/rss/allArticle.xml"),
 
-    # 1-2) 의료 언론 (HTML)
-    ("데일리메디", "HTML:dailymedi"),
+    # 1-2) 의료 언론
     ("의협신문", "https://www.doctorsnews.co.kr/rss/allArticle.xml"),
 
-    # 2) 협회·공공·정부 (HTML)
-    ("대한병원협회", "HTML:kha"),
-    ("국민건강보험공단", "HTML:nhis"),
-    ("건강보험심사평가원", "HTML:hira"),
+    # 2) 정부 (HTML, 안정)
     ("보건복지부-보도자료", "HTML:mohw"),
     ("고용노동부-보도자료", "HTML:moel"),
 ]
