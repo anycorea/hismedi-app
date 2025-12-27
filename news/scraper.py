@@ -141,6 +141,51 @@ def crawl_moel_press(ua: str, timeout_sec: int, retries: int, backoff_sec: float
             })
     return out
 
+
+def crawl_ksmha_press(ua: str, timeout_sec: int, retries: int, backoff_sec: float, pages: int = 1):
+    """
+    대한중소병원협회 뉴스 (bo_table=6_6)
+    """
+    base = "http://www.ksmha.or.kr/bbs/board.php?bo_table=6_6"
+    out = []
+    for page in range(1, max(1, pages) + 1):
+        url = f"{base}&page={page}"
+        r = http_get(url, ua=ua, timeout_sec=timeout_sec, retries=retries, backoff_sec=backoff_sec)
+        soup = BeautifulSoup(r.text, "html.parser")
+
+        rows = soup.select("table tbody tr")
+        for tr in rows:
+            a = tr.select_one("a[href]")
+            if not a:
+                continue
+            title = normalize_ws(a.get_text(" ", strip=True))
+            href = a.get("href","")
+            if not title or "wr_id" not in href:
+                continue
+            link = "http://www.ksmha.or.kr" + href if href.startswith("/") else href
+
+            tds = [td.get_text(" ", strip=True) for td in tr.find_all("td")]
+            published_at = ""
+            for t in tds:
+                published_at = _parse_date_any(t)
+                if published_at:
+                    break
+
+            tags = pick_tags(title)
+            if not tags:
+                continue
+
+            link_c = canonicalize_url(link)
+            out.append({
+                "published_at": published_at,
+                "source": "대한중소병원협회",
+                "title": title,
+                "url": link_c,
+                "url_canonical": link_c,
+                "tags": ",".join(tags),
+            })
+    return out
+
 # ----------------------------
 # 태그 분류
 # ----------------------------
@@ -245,6 +290,8 @@ def collect_rss(ua: str, timeout_sec: int, retries: int, backoff_sec: float, gov
                     out.extend(crawl_mohw_press(ua, timeout_sec, retries, backoff_sec, pages=gov_pages))
                 elif feed_url == 'HTML:moel':
                     out.extend(crawl_moel_press(ua, timeout_sec, retries, backoff_sec, pages=gov_pages))
+                elif feed_url == 'HTML:ksmha':
+                    out.extend(crawl_ksmha_press(ua, timeout_sec, retries, backoff_sec, pages=gov_pages))
             except Exception:
                 pass
             continue
