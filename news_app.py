@@ -1,60 +1,60 @@
+import json
 import os
-import pandas as pd
-import streamlit as st
-import gspread
-from google.oauth2.service_account import Credentials
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+import gspread
+import pandas as pd
+import streamlit as st
+from google.oauth2.service_account import Credentials
+
 KST = ZoneInfo("Asia/Seoul")
 
-# ---------------------------
-# Google Sheets client
-# ---------------------------
 
-import json
-
-
+# ---------------------------------------------------------------------
+# Google Sheets (Service Account)
+# ---------------------------------------------------------------------
 def _normalize_private_key(info: dict) -> dict:
-    """Make private_key PEM robust against TOML/env formatting issues."""
+    """Return a copy of info with a normalized PEM private_key.
+
+    This makes the app resilient to:
+    - '\\n' vs '\n'
+    - Windows line endings (\r\n)
+    - Accidental leading/trailing spaces per line
+    """
     info = dict(info)
     pk = info.get("private_key", "")
+
     if isinstance(pk, str) and pk:
         pk = pk.replace("\\n", "\n").replace("\r\n", "\n").replace("\r", "\n")
-        # Remove accidental leading/trailing spaces per line
-        lines = [ln.strip() for ln in pk.split("\n") if ln.strip() != ""]
-        pk = "\n".join(lines) + "\n"
-        info["private_key"] = pk
+        lines = [ln.strip() for ln in pk.split("\n") if ln.strip()]
+        info["private_key"] = "\n".join(lines) + "\n"
+
     return info
 
 
 @st.cache_resource
-def get_gspread_client():
-    """Return an authorized gspread client.
+def get_gspread_client() -> gspread.Client:
+    """Build a cached gspread client.
 
     Priority:
-      1) Streamlit secrets: [gcp_service_account]
-      2) Env var: GOOGLE_SERVICE_ACCOUNT_JSON (full JSON string)
+    1) Streamlit secrets: [gcp_service_account]
+    2) Env var: GOOGLE_SERVICE_ACCOUNT_JSON (JSON string)
     """
-    # 1) Streamlit secrets
     if "gcp_service_account" in st.secrets:
         info = _normalize_private_key(dict(st.secrets["gcp_service_account"]))
-        creds = Credentials.from_service_account_info(
-            info,
-            scopes=["https://www.googleapis.com/auth/spreadsheets"],
-        )
-        return gspread.authorize(creds)
+    else:
+        sa_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
+        if not sa_json:
+            raise RuntimeError(
+                "Missing [gcp_service_account] in Streamlit Secrets and GOOGLE_SERVICE_ACCOUNT_JSON env var."
+            )
+        try:
+            info = json.loads(sa_json)
+        except json.JSONDecodeError as e:
+            raise RuntimeError("GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON.") from e
+        info = _normalize_private_key(info)
 
-    # 2) Fallback env var (JSON string)
-    sa_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
-    if not sa_json:
-        raise RuntimeError("Missing [gcp_service_account] in secrets and GOOGLE_SERVICE_ACCOUNT_JSON env var.")
-    try:
-        info = json.loads(sa_json)
-    except json.JSONDecodeError as e:
-        raise RuntimeError("GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON.") from e
-
-    info = _normalize_private_key(info)
     creds = Credentials.from_service_account_info(
         info,
         scopes=["https://www.googleapis.com/auth/spreadsheets"],
@@ -63,18 +63,19 @@ def get_gspread_client():
 
 
 @st.cache_resource
-def get_sheet():
+def get_sheet() -> gspread.Spreadsheet:
+    """Open and cache the target spreadsheet."""
     sheet_id = os.getenv("GSHEET_ID", "").strip() or str(st.secrets.get("GSHEET_ID", "")).strip()
     if not sheet_id:
-        raise RuntimeError("Missing GSHEET_ID (set env var or Streamlit secrets)")
+        raise RuntimeError("Missing GSHEET_ID (env or Streamlit secrets).")
+
     gc = get_gspread_client()
     return gc.open_by_key(sheet_id)
 
-# ---------------------------
-# Load data
-# ---------------------------
+
 @st.cache_data(ttl=60)
 def load_news_and_meta():
+    """Load NEWS + META worksheets into (df, meta_dict)."""
     sh = get_sheet()
     ws_news = sh.worksheet("NEWS")
     ws_meta = sh.worksheet("META")
@@ -82,29 +83,47 @@ def load_news_and_meta():
     news_values = ws_news.get_all_values()
     meta_values = ws_meta.get_all_values()
 
-    df = pd.DataFrame(news_values[1:], columns=news_values[0]) if len(news_values) > 1 else pd.DataFrame(columns=news_values[0] if news_values else [])
+    if len(news_values) > 1:
+        df = pd.DataFrame(news_values[1:], columns=news_values[0])
+    else:
+        df = pd.DataFrame(columns=(news_values[0] if news_values else []))
+
     meta = {}
     if len(meta_values) > 1:
         for r in meta_values[1:]:
             if len(r) >= 2 and r[0]:
                 meta[r[0]] = r[1]
+
     return df, meta
 
-def parse_dt(s):
+
+# ---------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------
+def parse_dt(x):
+    """Parse datetime values that may arrive as strings."""
+    if x is None or (isinstance(x, float) and pd.isna(x)):
+        return None
+    if isinstance(x, datetime):
+        return x
+    s = str(x).strip()
     if not s:
-        return pd.NaT
-    try:
-        # ISO 8601 포함(UTC) 전제
-        return pd.to_datetime(s, utc=True, errors="coerce").dt.tz_convert(KST)
-    except Exception:
-        return pd.NaT
+        return None
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(s, fmt)
+        except ValueError:
+            pass
+    return None
 
-def today_kst_date():
-    return datetime.now(KST).date()
 
-# ---------------------------
+def today_kst_date() -> str:
+    return datetime.now(KST).strftime("%Y-%m-%d")
+
+
+# ---------------------------------------------------------------------
 # UI
-# ---------------------------
+# ---------------------------------------------------------------------
 st.set_page_config(page_title="HISMEDI News Monitor", layout="wide")
 st.title("📰 보건·의료·노동 뉴스 모니터")
 
@@ -116,133 +135,79 @@ with st.sidebar:
 df, meta = load_news_and_meta()
 
 # 표준 컬럼 보정
-if df.empty:
-    st.info("NEWS 탭에 데이터가 아직 없습니다. (Actions가 기사 0건이거나 첫 실행 직후일 수 있어요)")
-else:
-    # 날짜 파싱
-    if "published_at" in df.columns:
-        df["published_at_dt"] = pd.to_datetime(df["published_at"], utc=True, errors="coerce").dt.tz_convert(KST)
-    else:
-        df["published_at_dt"] = pd.NaT
+if "published_at" in df.columns and "발행(KST)" not in df.columns:
+    df["발행(KST)"] = df["published_at"].apply(parse_dt)
 
-    # 태그 정리
-    if "tags" not in df.columns:
-        df["tags"] = ""
-
-    # 중복 처리
-    if "duplicate_of" not in df.columns:
-        df["duplicate_of"] = ""
-
-    # 기본 정렬
-    df = df.sort_values("published_at_dt", ascending=False, na_position="last")
-
-# ---- 상단 상태 카드 ----
-colA, colB, colC, colD = st.columns(4)
-colA.metric("마지막 실행(UTC)", meta.get("last_run_at", "-"))
-colB.metric("마지막 적재 건수", meta.get("last_inserted_count", "-"))
-colC.metric("마지막 에러", meta.get("last_error", "") or "없음")
-colD.metric("총 기사 수(NEWS)", f"{len(df):,}" if not df.empty else "0")
-
-st.divider()
-
-# ---- 필터 ----
-left, right = st.columns([2, 3])
-
-with left:
+# 필터
+with st.sidebar:
     st.subheader("필터")
+    date_default = today_kst_date()
+    date_from = st.date_input("시작일", value=datetime.strptime(date_default, "%Y-%m-%d").date())
+    query = st.text_input("검색(제목/요약)", value="")
 
-    only_today = st.toggle("오늘 들어온 기사만", value=True)
-    dedup_toggle = st.toggle("중복 기사 제외(duplicate_of 비움)", value=True)
+df_view = df.copy()
 
-    # 태그 필터: 보건/의료/노동
-    tag_options = ["전체", "보건", "의료", "노동"]
-    tag_pick = st.radio("태그", tag_options, horizontal=True)
+if "발행(KST)" in df_view.columns:
+    df_view["발행(KST)"] = df_view["발행(KST)"].apply(parse_dt)
+    df_view = df_view[df_view["발행(KST)"].notna()]
+    df_view = df_view[df_view["발행(KST)"].dt.date >= date_from]
 
-    # 소스 필터
-    sources = ["전체"]
-    if not df.empty and "source" in df.columns:
-        sources += sorted([s for s in df["source"].dropna().unique().tolist() if s])
-    source_pick = st.selectbox("언론사/소스", sources, index=0)
+if query:
+    q = query.strip()
+    cols = [c for c in ["title", "summary", "언론사", "제목", "요약"] if c in df_view.columns]
+    if cols:
+        mask = False
+        for c in cols:
+            mask = mask | df_view[c].astype(str).str.contains(q, case=False, na=False)
+        df_view = df_view[mask]
 
-    limit = st.slider("표시 개수", 20, 300, 80, step=10)
+# 컬럼 이름 통일(가능한 경우)
+rename_map = {}
+if "title" in df_view.columns and "제목" not in df_view.columns:
+    rename_map["title"] = "제목"
+if "summary" in df_view.columns and "요약" not in df_view.columns:
+    rename_map["summary"] = "요약"
+if "url" in df_view.columns and "원문" not in df_view.columns:
+    rename_map["url"] = "원문"
+if rename_map:
+    df_view = df_view.rename(columns=rename_map)
 
-with right:
-    st.subheader("검색")
-    q = st.text_input("제목/요약 검색", value="", placeholder="예: 전공의, 산재, 건강보험, 심평원 ...")
+# 정렬
+if "발행(KST)" in df_view.columns:
+    df_view = df_view.sort_values("발행(KST)", ascending=False)
 
-# ---- 필터 적용 ----
-view = df.copy() if not df.empty else df
+# 표시 컬럼
+preferred_cols = []
+for c in ["발행(KST)", "언론사", "제목", "요약", "원문"]:
+    if c in df_view.columns:
+        preferred_cols.append(c)
 
-if not view.empty:
-    if only_today:
-        kst_today = today_kst_date()
-        view = view[view["published_at_dt"].dt.date == kst_today]
-
-    if dedup_toggle:
-        view = view[view["duplicate_of"].fillna("").str.strip() == ""]
-
-    if tag_pick != "전체":
-        # tags 컬럼에 "보건/공공보건" 같은 값이 들어있을 수 있으니 포함검색
-        view = view[view["tags"].fillna("").str.contains(tag_pick)]
-
-    if source_pick != "전체" and "source" in view.columns:
-        view = view[view["source"] == source_pick]
-
-    if q.strip():
-        qq = q.strip()
-        view = view[
-            view["title"].fillna("").str.contains(qq, case=False) |
-            view["summary"].fillna("").str.contains(qq, case=False)
-        ]
-
-    view = view.head(limit)
-
-# ---- 오늘 기사 수 ----
-if not df.empty:
-    kst_today = today_kst_date()
-    today_count = (df["published_at_dt"].dt.date == kst_today).sum()
-    st.caption(f"📌 오늘(KST) 들어온 전체 기사 수: **{today_count:,}건**")
-
-st.divider()
-
-# ---- 리스트 출력(클릭 가능한 원문 링크) ----
-if view.empty:
-    st.warning("조건에 맞는 기사가 없습니다.")
+if preferred_cols:
+    df_show = df_view[preferred_cols].copy()
 else:
-    st.subheader("기사 목록")
+    df_show = df_view.copy()
 
-    # 링크 컬럼(마크다운)
-    def mk_link(row):
-        title = row.get("title", "")
-        url = row.get("url", "")
-        if url:
-            return f"[{title}]({url})"
-        return title
+st.subheader("기사 목록")
 
-    show = view.copy()
-    show["원문"] = show.apply(mk_link, axis=1)
+# Streamlit 버전에 따라 column_config가 다를 수 있어 안전하게 처리
+colcfg = {}
+if hasattr(st, "column_config") and hasattr(st.column_config, "DatetimeColumn") and "발행(KST)" in df_show.columns:
+    colcfg["발행(KST)"] = st.column_config.DatetimeColumn("발행(KST)", format="YYYY-MM-DD HH:mm")
 
-    cols = []
-    for c in ["published_at_dt", "source", "tags", "원문", "summary"]:
-        if c in show.columns:
-            cols.append(c)
+if hasattr(st, "column_config") and "원문" in df_show.columns:
+    if hasattr(st.column_config, "LinkColumn"):
+        colcfg["원문"] = st.column_config.LinkColumn("원문", help="클릭 → 원문 열기", display_text="열기")
+    elif hasattr(st.column_config, "TextColumn"):
+        colcfg["원문"] = st.column_config.TextColumn("원문(URL)", help="URL 복사해서 열기")
 
-    show2 = show[cols].rename(columns={"published_at_dt": "발행(KST)", "source": "소스", "tags": "태그", "summary": "요약"})
+st.dataframe(
+    df_show,
+    use_container_width=True,
+    hide_index=True,
+    column_config=colcfg if colcfg else None,
+)
 
-    st.dataframe(
-        show2,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "원문": st.column_config.MarkdownColumn("원문(클릭)", help="제목 클릭 → 원문"),
-            "발행(KST)": st.column_config.DatetimeColumn("발행(KST)", format="YYYY-MM-DD HH:mm"),
-        },
-    )
-
-st.divider()
-
-# ---- 수동 실행 안내(기본) ----
-with st.expander("수동 실행 / 자동 실행 시간 조정", expanded=False):
+with st.expander("ℹ️ 운영 안내", expanded=False):
     st.markdown(
         """
 ### 수동 실행
