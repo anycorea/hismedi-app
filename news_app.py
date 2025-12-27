@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from datetime import date, timedelta
 
 import pandas as pd
@@ -67,7 +68,47 @@ def _to_kst_datetime(series: pd.Series) -> pd.Series:
     s = pd.to_datetime(series, errors="coerce", utc=False)
     if getattr(s.dt, "tz", None) is not None:
         s = s.dt.tz_convert("Asia/Seoul").dt.tz_localize(None)
+   
+
+def _clean_summary(title: str, summary: str) -> str:
+    """
+    Many RSS feeds store 'summary' that repeats the title.
+    Heuristic cleanup:
+      - remove title if it appears at the start or inside
+      - collapse whitespace/newlines
+      - strip common boilerplate markers
+      - if too short after cleanup, return empty string
+    """
+    t = (title or "").strip()
+    s = (summary or "").strip()
+
+    if not s:
+        return ""
+
+    # normalize whitespace
+    s = s.replace("\n", " ")
+    s = re.sub(r"\s+", " ", s).strip()
+
+    # remove title repetitions
+    if t:
+        # exact prefix
+        if s.startswith(t):
+            s = s[len(t):].lstrip(" -:·|」’'\"")
+        # any occurrence (keep the longer remaining piece)
+        if t in s:
+            s = s.replace(t, " ").strip()
+            s = re.sub(r"\s+", " ", s).strip()
+
+    # remove common boilerplate
+    s = re.sub(r"^(\[.*?\]\s*)+", "", s).strip()
+    s = re.sub(r"^\s*사진\s*=\s*[^ ]+\s*", "", s).strip()
+
+    # if still very short, treat as no real summary
+    if len(s) < 25:
+        return ""
+
     return s
+ return s
 
 
 # =========================================================
@@ -216,12 +257,25 @@ df_out = df_out.rename(columns=rename_map)
 df_out["발행"] = pd.to_datetime(df_out["발행"], errors="coerce").dt.strftime("%Y-%m-%d %H:%M")
 
 if "요약" in df_out.columns:
+    # 실제 요약처럼 보이도록: 제목 반복 제거 + 공백 정리
+    if "제목" in df_out.columns:
+        df_out["요약"] = [
+            _clean_summary(t, s) for t, s in zip(df_out["제목"].fillna("").astype(str), df_out["요약"].fillna("").astype(str))
+        ]
+    else:
+        df_out["요약"] = df_out["요약"].fillna("").astype(str)
+
     df_out["요약"] = (
-        df_out["요약"]
+        pd.Series(df_out["요약"])
         .fillna("")
         .astype(str)
-        .str.replace("\n", " ", regex=False)
-        .str.slice(0, 180)
+        .str.replace("
+", " ", regex=False)
+        .str.replace("
+", " ", regex=False)
+        .str.replace("  ", " ", regex=False)
+        .str.strip()
+        .str.slice(0, 220)
     )
 
 column_config = {}
