@@ -80,14 +80,26 @@ if not sheet_id:
     st.error("GSHEET_ID가 설정되지 않았습니다. Streamlit secrets 또는 환경변수로 설정하세요.")
     st.stop()
 
-# 상단: 동기화 버튼만
-c1, c2 = st.columns([1, 5], vertical_alignment="center")
-with c1:
-    if st.button("🔄 동기화"):
-        load_news.clear()
-with c2:
-    st.write("")
+# ---------------- Filters: 최상단 한 줄 박스(동기화 포함) ----------------
+try:
+    box = st.container(border=True)
+except TypeError:
+    box = st.container()
 
+with box:
+    f0, f1, f2, f3 = st.columns([0.7, 1, 1, 2], vertical_alignment="center")
+    with f0:
+        if st.button("🔄 동기화"):
+            load_news.clear()
+    with f1:
+        default_from = date.today() - timedelta(days=7)
+        date_from = st.date_input("시작일", value=default_from)
+    with f2:
+        date_to = st.date_input("종료일", value=date.today())
+    with f3:
+        q = st.text_input("검색(제목/요약)", value="").strip()
+
+# 데이터 로드(필터 바로 아래에 배치되도록)
 df = load_news(sheet_id)
 if df.empty:
     st.warning("시트에 데이터가 없습니다.")
@@ -113,22 +125,6 @@ title_col = "title" if "title" in df.columns else None
 
 # 정렬
 df = df.sort_values("발행(KST)", ascending=False, na_position="last").reset_index(drop=True)
-
-# ---------------- Filters: 한 줄 박스 ----------------
-try:
-    box = st.container(border=True)
-except TypeError:
-    box = st.container()
-
-with box:
-    f1, f2, f3 = st.columns([1, 1, 2], vertical_alignment="center")
-    with f1:
-        default_from = date.today() - timedelta(days=7)
-        date_from = st.date_input("시작일", value=default_from)
-    with f2:
-        date_to = st.date_input("종료일", value=date.today())
-    with f3:
-        q = st.text_input("검색(제목/요약)", value="").strip()
 
 # ---------------- Apply filters ----------------
 df_view = df.copy()
@@ -177,7 +173,13 @@ df_out["발행"] = pd.to_datetime(df_out["발행"], errors="coerce").dt.strftime
 
 # 요약 줄바꿈/길이 정리
 if "요약" in df_out.columns:
-    df_out["요약"] = df_out["요약"].fillna("").astype(str).str.replace("\n", " ", regex=False).str.slice(0, 180)
+    df_out["요약"] = (
+        df_out["요약"]
+        .fillna("")
+        .astype(str)
+        .str.replace("\n", " ", regex=False)
+        .str.slice(0, 180)
+    )
 
 # 링크 컬럼 클릭(가능하면 LinkColumn)
 column_config = {}
