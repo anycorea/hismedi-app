@@ -91,38 +91,47 @@ if not sheet_id:
 # ---------------- Top controls ----------------
 with st.container():
     st.markdown('<div class="top-box">', unsafe_allow_html=True)
-    # ── 상단 필터/조작 바 ─────────────────────────────────────────────
-# (요청 순서) 시작일 · 종료일 · 태그 · 검색(키워드) · 동기화
 
-# 태그 옵션 준비(있을 때만)
-tag_col = "tags" if "tags" in df.columns else None
-tag_options = []
-if tag_col:
-    _tags = (
-        df[tag_col]
-        .fillna("")
-        .astype(str)
-        .str.split(",")
-        .explode()
-        .str.strip()
-    )
-    tag_options = sorted([t for t in _tags.unique().tolist() if t])
+    # (요청 순서) 시작일 · 종료일 · 태그 · 검색(키워드) · 동기화
+    df = load_news(sheet_id)
+    if df.empty:
+        st.warning("데이터가 없습니다.")
+        st.stop()
 
-c1, c2, c3, c4, c5 = st.columns([1.1, 1.1, 1.2, 2.2, 0.9], vertical_alignment="bottom")
-st.markdown('<div style="margin-top:-0.25rem; margin-bottom:0.25rem;">', unsafe_allow_html=True)
-with c1:
-    date_from = st.date_input("시작일", value=date.today() - timedelta(days=7), key="date_from")
-with c2:
-    date_to = st.date_input("종료일", value=date.today(), key="date_to")
-with c3:
-    selected_tags = st.multiselect("태그", options=tag_options, default=[], key="selected_tags")
-with c4:
-    keyword = st.text_input("검색(키워드)", value="", placeholder="예: 전공의, 간호사, 수가, 고용유지지원금 ...", key="keyword")
-with c5:
-    if st.button("🔄 동기화", use_container_width=True):
-        load_news.clear()
-        st.rerun()
-st.markdown("</div>", unsafe_allow_html=True)
+    # 태그 옵션 준비(있을 때만)
+    tag_col = "tags" if "tags" in df.columns else None
+    tag_options = []
+    if tag_col:
+        _tags = (
+            df[tag_col]
+            .fillna("")
+            .astype(str)
+            .str.split(",")
+            .explode()
+            .str.strip()
+        )
+        tag_options = sorted([t for t in _tags.unique().tolist() if t])
+
+    c1, c2, c3, c4, c5 = st.columns([1.1, 1.1, 1.2, 2.2, 0.9], vertical_alignment="bottom")
+    with c1:
+        date_from = st.date_input("시작일", value=date.today() - timedelta(days=7), key="date_from")
+    with c2:
+        date_to = st.date_input("종료일", value=date.today(), key="date_to")
+    with c3:
+        selected_tags = st.multiselect("태그", options=tag_options, default=[], key="selected_tags")
+    with c4:
+        keyword = st.text_input(
+            "검색(키워드)",
+            value="",
+            placeholder="예: 전공의, 간호사, 수가, 고용유지지원금 ...",
+            key="keyword",
+        )
+    with c5:
+        if st.button("🔄 동기화", use_container_width=True):
+            load_news.clear()
+            st.rerun()
+
+    st.markdown("</div>", unsafe_allow_html=True)
 
 
 df = load_news(sheet_id)
