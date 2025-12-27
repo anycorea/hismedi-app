@@ -3,7 +3,7 @@ name: scrape-health-labor-news
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "0 */4 * * *"
 
 jobs:
   scrape:
