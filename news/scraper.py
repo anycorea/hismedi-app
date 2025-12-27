@@ -5,31 +5,8 @@ from dateutil import parser as dateparser
 import feedparser
 import requests
 
-from news.config import KEYWORDS, NEGATIVE_HINTS, RSS_SOURCES, DEFAULTS, NAVER_API_QUERIES
+from news.config import KEYWORDS, NEGATIVE_HINTS, RSS_SOURCES, DEFAULTS
 from news.gsheet import open_sheet, ensure_tabs, meta_get, meta_set
-
-
-# ----------------------------
-# 네이버 API 자격증명 로더 (ENV 우선, 없으면 Streamlit secrets 지원)
-# ----------------------------
-def _get_naver_creds():
-    cid = os.getenv("NAVER_CLIENT_ID", "").strip()
-    csec = os.getenv("NAVER_CLIENT_SECRET", "").strip()
-    if cid and csec:
-        return cid, csec
-
-    # Streamlit Cloud에서 secrets로 넣었을 때도 동작하도록(스크래퍼를 streamlit에서 실행하는 경우)
-    try:
-        import streamlit as st  # type: ignore
-        scid = str(st.secrets.get("NAVER_CLIENT_ID", "")).strip()
-        scsec = str(st.secrets.get("NAVER_CLIENT_SECRET", "")).strip()
-        if scid and scsec:
-            return scid, scsec
-    except Exception:
-        pass
-
-    return "", ""
-
 
 # ----------------------------
 # 유틸
@@ -47,7 +24,6 @@ def canonicalize_url(url: str) -> str:
 def sha256_hex(s: str) -> str:
     return hashlib.sha256((s or "").encode("utf-8")).hexdigest()
 
-
 # ----------------------------
 # 태그 분류
 # ----------------------------
@@ -60,7 +36,6 @@ def pick_tags(text: str):
         if any(k in t for k in kws):
             tags.append(tag)
     return tags
-
 
 # ----------------------------
 # SimHash (제목 기반)
@@ -89,7 +64,6 @@ def simhash64(text: str):
 def hamming(a: int, b: int) -> int:
     return (a ^ b).bit_count()
 
-
 # ----------------------------
 # HTTP GET (재시도 포함) — RSS/GoogleNews 안정화
 # ----------------------------
@@ -107,7 +81,6 @@ def http_get(url: str, ua: str, timeout_sec: int, retries: int, backoff_sec: flo
             else:
                 break
     raise last_err
-
 
 # ----------------------------
 # 기존 인덱스 로드
@@ -141,7 +114,6 @@ def find_near_duplicate(sim_int: int, recent_sim, max_hamming: int):
         if hamming(sim_int, s) <= max_hamming:
             return url
     return ""
-
 
 # ----------------------------
 # RSS 수집(UA + requests → feedparser)
@@ -186,70 +158,6 @@ def collect_rss(ua: str, timeout_sec: int, retries: int, backoff_sec: float):
             })
     return out
 
-
-# ----------------------------
-# Naver News Search API (가장 안정적인 네이버 보강)
-# ----------------------------
-def collect_naver_news_api(ua: str, timeout_sec: int):
-    cid, csec = _get_naver_creds()
-    if not cid or not csec:
-        return []
-
-    out = []
-    headers = {
-        "X-Naver-Client-Id": cid,
-        "X-Naver-Client-Secret": csec,
-        "User-Agent": ua,
-    }
-
-    for q in NAVER_API_QUERIES:
-        try:
-            r = requests.get(
-                "https://openapi.naver.com/v1/search/news.json",
-                headers=headers,
-                params={"query": q, "display": 100, "sort": "date"},
-                timeout=timeout_sec,
-            )
-            r.raise_for_status()
-            data = r.json()
-        except Exception:
-            continue
-
-        for it in data.get("items", []):
-            title = normalize_ws(re.sub(r"<.*?>", "", it.get("title", "")))
-            link = canonicalize_url(it.get("originallink") or it.get("link") or "")
-            if not title or not link:
-                continue
-
-            published_at = ""
-            dt_raw = it.get("pubDate")
-            if dt_raw:
-                try:
-                    dt = dateparser.parse(dt_raw)
-                    if dt.tzinfo is None:
-                        dt = dt.replace(tzinfo=timezone.utc)
-                    published_at = dt.isoformat()
-                except Exception:
-                    published_at = ""
-
-            tags = pick_tags(title)
-            if not tags:
-                continue
-
-            out.append({
-                "published_at": published_at,
-                "source": "NaverAPI",
-                "title": title,
-                "url": link,
-                "url_canonical": link,
-                "tags": ",".join(tags),
-            })
-
-        time.sleep(0.12)
-
-    return out
-
-
 # ----------------------------
 # 메인
 # ----------------------------
@@ -282,8 +190,6 @@ def main():
 
     # 1) RSS(전문지/정부) + Google News RSS(검색 보강)
     items = collect_rss(ua=ua, timeout_sec=fetch_timeout_sec, retries=retries, backoff_sec=backoff)
-    # 2) Naver는 RSS 대신 API(키가 있을 때만)
-    items += collect_naver_news_api(ua=ua, timeout_sec=fetch_timeout_sec)
 
     for it in items:
         title_hash = sha256_hex(normalize_ws(it["title"]).lower())
@@ -326,7 +232,6 @@ def main():
         ws_news.append_rows(new_rows, value_input_option="RAW")
 
     meta_set(ws_meta, "last_inserted_count", str(inserted))
-
 
 if __name__ == "__main__":
     try:
