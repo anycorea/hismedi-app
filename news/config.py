@@ -18,10 +18,59 @@ KEYWORDS = {
 NEGATIVE_HINTS = ["연예","스포츠","게임","가십","패션"]
 
 RSS_SOURCES = [
-  ("SBS-속보", "https://news.sbs.co.kr/news/newsflashRssFeed.do?plink=RSSREADER"),
-  ("연합뉴스TV-사회", "http://www.yonhapnewstv.co.kr/category/news/society/feed/"),
-  ("연합뉴스TV-최신", "http://www.yonhapnewstv.co.kr/browse/feed/"),
-  ("한겨레-전체", "http://www.hani.co.kr/rss/"),
+    # ─────────────────────────
+    # 1. 병원 · 의료 전문 언론
+    # ─────────────────────────
+    ("병원신문-전체", "https://www.khanews.com/rss/allArticle.xml"),
+    ("의학신문-전체", "http://www.bosa.co.kr/rss/allArticle.xml"),
+    ("의학신문-병원경영", "http://www.bosa.co.kr/rss/section.xml?section=010"),
+    ("청년의사-전체", "https://www.docdocdoc.co.kr/rss/allArticle.xml"),
+
+    # ─────────────────────────
+    # 2. 정부기관 (정책·지원·제도 원문)
+    # ─────────────────────────
+    ("보건복지부-보도자료", "https://www.mohw.go.kr/rss/board.es?mid=a10101000000&bid=0015"),
+    ("보건복지부-공지사항", "https://www.mohw.go.kr/rss/board.es?mid=a10401000000&bid=0025"),
+
+    ("고용노동부-보도자료", "https://www.moel.go.kr/rss/news.do"),
+    ("고용노동부-정책자료", "https://www.moel.go.kr/rss/policy.do"),
+    ("고용노동부-공지사항", "https://www.moel.go.kr/rss/notice.do"),
+
+    # ─────────────────────────
+    # 3. Google News RSS (정책·지원 누락 방지용)
+    # ─────────────────────────
+    (
+        "GoogleNews-병원채용지원정책",
+        "https://news.google.com/rss/search?q=병원+채용+지원+정책"
+    ),
+    (
+        "GoogleNews-의료인력지원",
+        "https://news.google.com/rss/search?q=의료인력+지원+정부"
+    ),
+    (
+        "GoogleNews-간호사인력정책",
+        "https://news.google.com/rss/search?q=간호사+인력+지원+정책"
+    ),
+    (
+        "GoogleNews-병원고용노동정책",
+        "https://news.google.com/rss/search?q=병원+고용노동부+지원"
+    ),
+
+    # ─────────────────────────
+    # 4. 네이버 뉴스 검색 RSS (국내 기사 보강)
+    # ─────────────────────────
+    (
+        "NaverNews-병원채용지원",
+        "https://rss.naver.com/search/news.xml?query=병원%20채용%20지원"
+    ),
+    (
+        "NaverNews-의료인력정책",
+        "https://rss.naver.com/search/news.xml?query=의료인력%20지원%20정책"
+    ),
+    (
+        "NaverNews-간호사인력지원",
+        "https://rss.naver.com/search/news.xml?query=간호사%20인력%20지원"
+    ),
 ]
 
 DEFAULTS = {
