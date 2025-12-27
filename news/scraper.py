@@ -10,6 +10,28 @@ from news.gsheet import open_sheet, ensure_tabs, meta_get, meta_set
 
 
 # ----------------------------
+# 네이버 API 자격증명 로더 (ENV 우선, 없으면 Streamlit secrets 지원)
+# ----------------------------
+def _get_naver_creds():
+    cid = os.getenv("NAVER_CLIENT_ID", "").strip()
+    csec = os.getenv("NAVER_CLIENT_SECRET", "").strip()
+    if cid and csec:
+        return cid, csec
+
+    # Streamlit Cloud에서 secrets로 넣었을 때도 동작하도록(스크래퍼를 streamlit에서 실행하는 경우)
+    try:
+        import streamlit as st  # type: ignore
+        scid = str(st.secrets.get("NAVER_CLIENT_ID", "")).strip()
+        scsec = str(st.secrets.get("NAVER_CLIENT_SECRET", "")).strip()
+        if scid and scsec:
+            return scid, scsec
+    except Exception:
+        pass
+
+    return "", ""
+
+
+# ----------------------------
 # 유틸
 # ----------------------------
 def normalize_ws(s: str) -> str:
@@ -169,8 +191,7 @@ def collect_rss(ua: str, timeout_sec: int, retries: int, backoff_sec: float):
 # Naver News Search API (가장 안정적인 네이버 보강)
 # ----------------------------
 def collect_naver_news_api(ua: str, timeout_sec: int):
-    cid = os.getenv("NAVER_CLIENT_ID", "").strip()
-    csec = os.getenv("NAVER_CLIENT_SECRET", "").strip()
+    cid, csec = _get_naver_creds()
     if not cid or not csec:
         return []
 
