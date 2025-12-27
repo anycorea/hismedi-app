@@ -72,7 +72,7 @@ def fetch_article_text(url: str, ua: str, timeout_sec: int) -> str:
 
 def summarize_local(text: str) -> str:
     text = normalize_ws(text)
-    sents = re.split(r"(?<=[.!?。]|다\.)\s+", text)
+    sents = re.split(r"[.!?。]\s+", text)
     sents = [normalize_ws(s) for s in sents if len(s) >= 20]
     return " ".join(sents[:4])[:800]
 
