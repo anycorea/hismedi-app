@@ -1,9 +1,8 @@
-# hismedi-app/news/gsheet.py
 import os, json
 import gspread
 from google.oauth2.service_account import Credentials
 
-# ✅ summary 제거
+# ✅ summary 제거(요약 생성/저장 안 함)
 NEWS_HEADERS = [
   "published_at","source","title","url","url_canonical","tags",
   "title_hash","simhash","duplicate_of"
@@ -29,15 +28,13 @@ def open_sheet():
     return sh
 
 def ensure_tabs(sh):
-    """
-    - NEWS / META 탭이 없으면 생성
-    - NEWS 탭이 새로 생성될 때는 summary 없는 헤더로 생성
-    - 기존 NEWS 탭이 이미 있으면 헤더는 건드리지 않음(사용자가 직접 정리한다고 하셨으므로)
+    """NEWS/META 탭이 없으면 생성합니다.
+    - NEWS 탭 신규 생성 시 summary 없는 헤더로 생성
+    - 기존 NEWS 탭이 이미 있으면 헤더는 변경하지 않음(사용자가 직접 관리)
     """
     try:
         ws_news = sh.worksheet("NEWS")
     except Exception:
-        # cols는 헤더 수에 맞게 충분히(여유 포함)
         ws_news = sh.add_worksheet(title="NEWS", rows=2000, cols=max(20, len(NEWS_HEADERS) + 5))
         ws_news.append_row(NEWS_HEADERS, value_input_option="RAW")
 
