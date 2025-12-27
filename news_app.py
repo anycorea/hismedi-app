@@ -75,31 +75,79 @@ def _to_kst_datetime(series: pd.Series) -> pd.Series:
 # =========================================================
 st.set_page_config(page_title=APP_TITLE, layout="wide")
 
+# --- Compact, polished spacing (no sidebar) ---
+st.markdown(
+    """
+    <style>
+      /* 전체 상단 여백 축소 */
+      .block-container {
+        padding-top: 0.8rem !important;
+        padding-bottom: 1.0rem !important;
+      }
+      /* 위젯 간 세로 간격 축소 */
+      div[data-testid="stVerticalBlock"] > div:has(> div[data-testid="stVerticalBlock"]) {
+        gap: 0.5rem;
+      }
+      /* 필터 박스 스타일 */
+      .filter-box {
+        border: 1px solid rgba(49, 51, 63, 0.16);
+        border-radius: 14px;
+        padding: 0.75rem 0.85rem;
+        margin-bottom: 0.6rem;
+        background: rgba(255, 255, 255, 0.02);
+      }
+      .filter-label {
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: rgba(49, 51, 63, 0.75);
+        margin: 0 0 0.35rem 0;
+      }
+      /* 버튼 높이/정렬 */
+      div[data-testid="stButton"] > button {
+        height: 42px;
+        border-radius: 12px;
+        padding: 0 14px;
+      }
+      /* date_input / text_input 높이 느낌 통일 */
+      div[data-baseweb="input"] input {
+        height: 42px !important;
+      }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 sheet_id = (st.secrets.get("GSHEET_ID", "").strip() or DEFAULT_SHEET_ID)
 if not sheet_id:
     st.error("GSHEET_ID가 설정되지 않았습니다. Streamlit secrets 또는 환경변수로 설정하세요.")
     st.stop()
 
-# ---------------- Filters: 최상단 한 줄 박스(동기화 포함) ----------------
-try:
-    box = st.container(border=True)
-except TypeError:
-    box = st.container()
+# ---------------- Top filter row (동기화 포함) ----------------
+st.markdown('<div class="filter-box">', unsafe_allow_html=True)
 
-with box:
-    f0, f1, f2, f3 = st.columns([0.7, 1, 1, 2], vertical_alignment="center")
-    with f0:
-        if st.button("🔄 동기화"):
-            load_news.clear()
-    with f1:
-        default_from = date.today() - timedelta(days=7)
-        date_from = st.date_input("시작일", value=default_from)
-    with f2:
-        date_to = st.date_input("종료일", value=date.today())
-    with f3:
-        q = st.text_input("검색(제목/요약)", value="").strip()
+c0, c1, c2, c3 = st.columns([0.75, 1.15, 1.15, 2.2], vertical_alignment="center")
 
-# 데이터 로드(필터 바로 아래에 배치되도록)
+with c0:
+    st.markdown('<div class="filter-label">&nbsp;</div>', unsafe_allow_html=True)
+    if st.button("🔄 동기화", use_container_width=True):
+        load_news.clear()
+
+with c1:
+    st.markdown('<div class="filter-label">시작일</div>', unsafe_allow_html=True)
+    default_from = date.today() - timedelta(days=7)
+    date_from = st.date_input("시작일", value=default_from, label_visibility="collapsed")
+
+with c2:
+    st.markdown('<div class="filter-label">종료일</div>', unsafe_allow_html=True)
+    date_to = st.date_input("종료일", value=date.today(), label_visibility="collapsed")
+
+with c3:
+    st.markdown('<div class="filter-label">검색(제목/요약)</div>', unsafe_allow_html=True)
+    q = st.text_input("검색(제목/요약)", value="", label_visibility="collapsed").strip()
+
+st.markdown("</div>", unsafe_allow_html=True)
+
+# ---------------- Load & normalize data ----------------
 df = load_news(sheet_id)
 if df.empty:
     st.warning("시트에 데이터가 없습니다.")
@@ -107,7 +155,6 @@ if df.empty:
 
 df.columns = [str(c).strip() for c in df.columns]
 
-# published_at 찾기
 published_col = None
 for cand in ["published_at", "publishedAt", "pubDate", "date", "발행", "발행일"]:
     if cand in df.columns:
@@ -119,11 +166,9 @@ if published_col is None:
 
 df["발행(KST)"] = _to_kst_datetime(df[published_col])
 
-# 링크/제목 컬럼
 url_col = "url_canonical" if "url_canonical" in df.columns else ("url" if "url" in df.columns else None)
 title_col = "title" if "title" in df.columns else None
 
-# 정렬
 df = df.sort_values("발행(KST)", ascending=False, na_position="last").reset_index(drop=True)
 
 # ---------------- Apply filters ----------------
@@ -168,10 +213,8 @@ if url_col:
 
 df_out = df_out.rename(columns=rename_map)
 
-# 발행 포맷
 df_out["발행"] = pd.to_datetime(df_out["발행"], errors="coerce").dt.strftime("%Y-%m-%d %H:%M")
 
-# 요약 줄바꿈/길이 정리
 if "요약" in df_out.columns:
     df_out["요약"] = (
         df_out["요약"]
@@ -181,7 +224,6 @@ if "요약" in df_out.columns:
         .str.slice(0, 180)
     )
 
-# 링크 컬럼 클릭(가능하면 LinkColumn)
 column_config = {}
 if "원문" in df_out.columns:
     try:
