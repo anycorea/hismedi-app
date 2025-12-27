@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from datetime import date, timedelta
 
 import pandas as pd
@@ -90,16 +91,39 @@ if not sheet_id:
 # ---------------- Top controls ----------------
 with st.container():
     st.markdown('<div class="top-box">', unsafe_allow_html=True)
-    c0, c1, c2 = st.columns([0.9, 1.55, 1.55], vertical_alignment="bottom")
-    with c0:
-        st.markdown("&nbsp;", unsafe_allow_html=True)
-        if st.button("🔄 동기화", use_container_width=True):
-            load_news.clear()
-    with c1:
-        date_from = st.date_input("시작일", value=date.today() - timedelta(days=7))
-    with c2:
-        date_to = st.date_input("종료일", value=date.today())
-    st.markdown("</div>", unsafe_allow_html=True)
+    # ── 상단 필터/조작 바 ─────────────────────────────────────────────
+# (요청 순서) 시작일 · 종료일 · 태그 · 검색(키워드) · 동기화
+
+# 태그 옵션 준비(있을 때만)
+tag_col = "tags" if "tags" in df.columns else None
+tag_options = []
+if tag_col:
+    _tags = (
+        df[tag_col]
+        .fillna("")
+        .astype(str)
+        .str.split(",")
+        .explode()
+        .str.strip()
+    )
+    tag_options = sorted([t for t in _tags.unique().tolist() if t])
+
+c1, c2, c3, c4, c5 = st.columns([1.1, 1.1, 1.2, 2.2, 0.9], vertical_alignment="bottom")
+st.markdown('<div style="margin-top:-0.25rem; margin-bottom:0.25rem;">', unsafe_allow_html=True)
+with c1:
+    date_from = st.date_input("시작일", value=date.today() - timedelta(days=7), key="date_from")
+with c2:
+    date_to = st.date_input("종료일", value=date.today(), key="date_to")
+with c3:
+    selected_tags = st.multiselect("태그", options=tag_options, default=[], key="selected_tags")
+with c4:
+    keyword = st.text_input("검색(키워드)", value="", placeholder="예: 전공의, 간호사, 수가, 고용유지지원금 ...", key="keyword")
+with c5:
+    if st.button("🔄 동기화", use_container_width=True):
+        load_news.clear()
+        st.rerun()
+st.markdown("</div>", unsafe_allow_html=True)
+
 
 df = load_news(sheet_id)
 if df.empty:
@@ -118,6 +142,28 @@ df = df[pd.notna(df["발행"])]
 
 # 날짜 필터
 df = df[(df["발행"].dt.date >= date_from) & (df["발행"].dt.date <= date_to)]
+
+# 태그 필터(선택 시)
+if tag_col and selected_tags:
+    patt = "|".join([re.escape(t) for t in selected_tags])
+    df = df[df[tag_col].fillna("").astype(str).str.contains(patt)]
+
+# 키워드 검색(선택 시): 제목/출처/태그에서 부분일치
+kw = (keyword or "").strip().lower()
+if kw:
+    title_c = "title" if "title" in df.columns else None
+    source_c = "source" if "source" in df.columns else None
+
+    mask = pd.Series(False, index=df.index)
+    if title_c:
+        mask = mask | df[title_c].fillna("").astype(str).str.lower().str.contains(kw)
+    if source_c:
+        mask = mask | df[source_c].fillna("").astype(str).str.lower().str.contains(kw)
+    if tag_col:
+        mask = mask | df[tag_col].fillna("").astype(str).str.lower().str.contains(kw)
+
+    df = df[mask]
+
 df = df.sort_values("발행", ascending=False)
 
 title_col = "title" if "title" in df.columns else None
