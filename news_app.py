@@ -8,37 +8,22 @@ import gspread
 from google.oauth2.service_account import Credentials
 
 
-# =========================================================
-# Config
-# =========================================================
 APP_TITLE = "뉴스 모니터"
 DEFAULT_SHEET_ID = os.getenv("GSHEET_ID", "").strip()
 
 
-# =========================================================
-# Google Sheets (Service Account)
-# =========================================================
 def _normalize_private_key(info: dict) -> dict:
     info = dict(info)
     pk = info.get("private_key", "")
     if isinstance(pk, str) and pk:
-        pk = pk.replace("\n", "
-").replace("
-", "
-").replace("
-", "
-")
-        lines = [ln.strip() for ln in pk.split("
-") if ln.strip()]
-        info["private_key"] = "
-".join(lines) + "
-"
+        pk = pk.replace("\\n", "\n").replace("\r\n", "\n").replace("\r", "\n")
+        lines = [ln.strip() for ln in pk.split("\n") if ln.strip()]
+        info["private_key"] = "\n".join(lines) + "\n"
     return info
 
 
 @st.cache_resource
 def get_gspread_client():
-    # secrets 우선
     if "gcp_service_account" in st.secrets:
         info = _normalize_private_key(dict(st.secrets["gcp_service_account"]))
         creds = Credentials.from_service_account_info(
@@ -47,7 +32,6 @@ def get_gspread_client():
         )
         return gspread.authorize(creds)
 
-    # env fallback
     sa_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
     if not sa_json:
         raise RuntimeError("Missing service account credentials.")
@@ -74,24 +58,19 @@ def _to_kst(series: pd.Series) -> pd.Series:
     return s
 
 
-# =========================================================
-# UI
-# =========================================================
 st.set_page_config(page_title=APP_TITLE, layout="wide")
 
 st.markdown(
-    """
-    <style>
-      .block-container { padding-top: 0.7rem !important; }
-      .filter-box { border:1px solid rgba(49,51,63,.14); border-radius:14px; padding:.6rem .8rem; margin-bottom:.6rem; }
-      table.news { border-collapse:collapse; width:100%; font-size:14px; }
-      table.news th, table.news td { padding:10px 12px; border-bottom:1px solid rgba(49,51,63,.08); text-align:left; white-space:nowrap; }
-      table.news th { position:sticky; top:0; background:#fafafa; z-index:1; }
-      table.news tr:hover td { background:rgba(49,51,63,.03); }
-      a.newslink { text-decoration:none; }
-      a.newslink:hover { text-decoration:underline; }
-    </style>
-    """,
+    "<style>"
+    ".block-container { padding-top: 0.7rem !important; }"
+    ".filter-box { border:1px solid rgba(49,51,63,.14); border-radius:14px; padding:.6rem .8rem; margin-bottom:.6rem; }"
+    "table.news { border-collapse:collapse; width:100%; font-size:14px; }"
+    "table.news th, table.news td { padding:10px 12px; border-bottom:1px solid rgba(49,51,63,.08); text-align:left; white-space:nowrap; }"
+    "table.news th { position:sticky; top:0; background:#fafafa; z-index:1; }"
+    "table.news tr:hover td { background:rgba(49,51,63,.03); }"
+    "a.newslink { text-decoration:none; }"
+    "a.newslink:hover { text-decoration:underline; }"
+    "</style>",
     unsafe_allow_html=True,
 )
 
@@ -100,7 +79,6 @@ if not sheet_id:
     st.error("GSHEET_ID가 설정되지 않았습니다.")
     st.stop()
 
-# ---------------- Top controls ----------------
 st.markdown('<div class="filter-box">', unsafe_allow_html=True)
 c0, c1, c2 = st.columns([0.7, 1.3, 1.3], vertical_alignment="center")
 
@@ -116,7 +94,6 @@ with c2:
 
 st.markdown("</div>", unsafe_allow_html=True)
 
-# ---------------- Data ----------------
 df = load_news(sheet_id)
 if df.empty:
     st.warning("데이터가 없습니다.")
@@ -132,7 +109,6 @@ if not pub_col:
 df["발행"] = _to_kst(df[pub_col])
 df = df[pd.notna(df["발행"])]
 
-# 날짜 필터
 df = df[(df["발행"].dt.date >= date_from) & (df["발행"].dt.date <= date_to)]
 df = df.sort_values("발행", ascending=False)
 
@@ -143,7 +119,6 @@ if not title_col or not url_col:
     st.error("필수 컬럼(title, url/url_canonical)을 찾지 못했습니다.")
     st.stop()
 
-# ---------------- Render ----------------
 rows = []
 for _, r in df.iterrows():
     pub_str = r["발행"].strftime("%Y-%m-%d %H:%M")
@@ -164,8 +139,8 @@ html = (
     "<table class='news'>"
     "<thead><tr><th>발행</th><th>출처</th><th>제목</th></tr></thead>"
     "<tbody>"
-    + "".join(rows) +
-    "</tbody></table></div>"
+    + "".join(rows)
+    + "</tbody></table></div>"
 )
 
 st.markdown(html, unsafe_allow_html=True)
