@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import html
 from datetime import date, timedelta
 
 import pandas as pd
@@ -73,29 +74,17 @@ def _to_kst_datetime(series: pd.Series) -> pd.Series:
     return s
 
 
-def _clean_summary(title: str, summary: str) -> str:
-    """
-    '요약' 컬럼이 실제 요약이 아니라,
-    - 제목 반복
-    - '기사 읽어주기 서비스...', '최근 24시간...' 같은 고정 안내문
-    - '입력 2025-...' 같은 메타 문구
-    로 채워지는 경우가 많아 화면에서 제거/정리합니다.
-
-    전략:
-    1) 고정 안내/메타 문구 제거
-    2) 제목 반복 제거
-    3) 정리 후 너무 짧거나 안내문 성격이면 빈칸 처리
-    """
+def _clean_lead(title: str, text: str) -> str:
+    """요약이 안내문/메타/제목반복인 경우를 최대한 제거하고, '기사 첫부분'처럼 보이게 정리."""
     t = (title or "").strip()
-    s = (summary or "").strip()
+    s = (text or "").strip()
     if not s:
         return ""
 
-    # normalize whitespace
     s = s.replace("\n", " ").replace("\r", " ")
     s = re.sub(r"\s+", " ", s).strip()
 
-    # remove common boilerplate phrases (Korean news feeds)
+    # 메타/안내 문구 제거(빈번 패턴)
     boilerplate_patterns = [
         r"입력\s*\d{4}-\d{2}-\d{2}\s*\d{2}:\d{2}:\d{2}[^ ]*",
         r"기사\s*읽어주기\s*서비스는.*?브라우저에서만\s*사용[^.。]*\.?$",
@@ -107,7 +96,7 @@ def _clean_summary(title: str, summary: str) -> str:
         s = re.sub(p, " ", s, flags=re.IGNORECASE).strip()
         s = re.sub(r"\s+", " ", s).strip()
 
-    # remove title repetitions
+    # 제목 반복 제거
     if t:
         if s.startswith(t):
             s = s[len(t):].lstrip(" -:·|」’'\"")
@@ -115,16 +104,8 @@ def _clean_summary(title: str, summary: str) -> str:
             s = s.replace(t, " ").strip()
             s = re.sub(r"\s+", " ", s).strip()
 
-    # remove bracketed prefixes like [단독], [리포트]
+    # 머리표/대괄호 접두 제거
     s = re.sub(r"^(\[.*?\]\s*)+", "", s).strip()
-
-    # If summary still looks like a notice, drop it
-    if re.search(r"(읽어주기\s*서비스|브라우저에서만\s*사용|속보\s*및\s*알림)", s):
-        return ""
-
-    # too short => not a real summary
-    if len(s) < 40:
-        return ""
 
     return s
 
@@ -134,26 +115,59 @@ def _clean_summary(title: str, summary: str) -> str:
 # =========================================================
 st.set_page_config(page_title=APP_TITLE, layout="wide")
 
-# --- Compact spacing ---
+# --- Compact & modern spacing ---
 st.markdown(
     """
     <style>
-      .block-container { padding-top: 0.8rem !important; padding-bottom: 1.0rem !important; }
+      .block-container { padding-top: 0.7rem !important; padding-bottom: 0.9rem !important; }
       .filter-box {
-        border: 1px solid rgba(49, 51, 63, 0.16);
-        border-radius: 14px;
-        padding: 0.75rem 0.85rem;
-        margin-bottom: 0.6rem;
+        border: 1px solid rgba(49, 51, 63, 0.14);
+        border-radius: 16px;
+        padding: 0.70rem 0.85rem;
+        margin-bottom: 0.55rem;
         background: rgba(255, 255, 255, 0.02);
       }
       .filter-label {
         font-size: 0.85rem;
-        font-weight: 600;
-        color: rgba(49, 51, 63, 0.75);
-        margin: 0 0 0.35rem 0;
+        font-weight: 650;
+        color: rgba(49, 51, 63, 0.70);
+        margin: 0 0 0.30rem 0;
       }
-      div[data-testid="stButton"] > button { height: 42px; border-radius: 12px; padding: 0 14px; }
+      div[data-testid="stButton"] > button { height: 42px; border-radius: 14px; padding: 0 14px; }
       div[data-baseweb="input"] input { height: 42px !important; }
+      .news-wrap {
+        border: 1px solid rgba(49, 51, 63, 0.14);
+        border-radius: 16px;
+        overflow: auto;
+        max-height: 760px;
+      }
+      table.news {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 14px;
+      }
+      table.news thead th {
+        position: sticky;
+        top: 0;
+        background: rgba(250, 250, 250, 1);
+        border-bottom: 1px solid rgba(49, 51, 63, 0.14);
+        text-align: left;
+        padding: 10px 12px;
+        white-space: nowrap;
+        z-index: 5;
+      }
+      table.news tbody td {
+        border-bottom: 1px solid rgba(49, 51, 63, 0.08);
+        padding: 10px 12px;
+        vertical-align: top;
+      }
+      table.news tbody tr:hover td {
+        background: rgba(49, 51, 63, 0.03);
+      }
+      .nowrap { white-space: nowrap; }
+      a.newslink { text-decoration: none; }
+      a.newslink:hover { text-decoration: underline; }
+      .lead { color: rgba(49, 51, 63, 0.82); }
     </style>
     """,
     unsafe_allow_html=True,
@@ -202,7 +216,6 @@ for cand in ["published_at", "publishedAt", "pubDate", "date", "발행", "발행
     if cand in df.columns:
         published_col = cand
         break
-
 if published_col is None:
     st.error("발행일 컬럼(published_at)을 찾지 못했습니다.")
     st.stop()
@@ -211,6 +224,11 @@ df["발행(KST)"] = _to_kst_datetime(df[published_col])
 
 url_col = "url_canonical" if "url_canonical" in df.columns else ("url" if "url" in df.columns else None)
 title_col = "title" if "title" in df.columns else None
+summary_col = "summary" if "summary" in df.columns else None
+
+if url_col is None or title_col is None:
+    st.error("필수 컬럼(title, url/url_canonical)을 찾지 못했습니다.")
+    st.stop()
 
 df = df.sort_values("발행(KST)", ascending=False, na_position="last").reset_index(drop=True)
 
@@ -220,76 +238,73 @@ df_view = df_view[df_view["발행(KST)"].dt.date >= date_from]
 df_view = df_view[df_view["발행(KST)"].dt.date <= date_to]
 
 if q:
-    hay = ""
-    if title_col:
-        hay = df_view[title_col].fillna("").astype(str)
-    if "summary" in df_view.columns:
-        hay = hay + " " + df_view["summary"].fillna("").astype(str)
+    hay = df_view[title_col].fillna("").astype(str)
+    if summary_col:
+        hay = hay + " " + df_view[summary_col].fillna("").astype(str)
     df_view = df_view[hay.str.contains(q, case=False, na=False)]
 
 if df_view.empty:
     st.info("선택한 조건에 해당하는 기사가 없습니다.")
     st.stop()
 
-# ---------------- Table view ----------------
-show_cols = ["발행(KST)"]
-if "source" in df_view.columns:
-    show_cols.append("source")
-if title_col:
-    show_cols.append(title_col)
-if "summary" in df_view.columns:
-    show_cols.append("summary")
-if url_col:
-    show_cols.append(url_col)
+# ---------------- Build 'lead' preview (기사 시작부분) ----------------
+titles = df_view[title_col].fillna("").astype(str).tolist()
+summaries = df_view[summary_col].fillna("").astype(str).tolist() if summary_col else [""] * len(df_view)
 
-df_out = df_view[show_cols].copy()
+leads = []
+for t, s in zip(titles, summaries):
+    lead = _clean_lead(t, s)
+    lead = lead[:180].rstrip()
+    leads.append(lead)
 
-rename_map = {"발행(KST)": "발행", "source": "출처"}
-if title_col:
-    rename_map[title_col] = "제목"
-if "summary" in df_out.columns:
-    rename_map["summary"] = "요약"
-if url_col:
-    rename_map[url_col] = "원문"
+# ---------------- Render table (제목 클릭 = 원문) ----------------
+rows_html = []
+for idx, r in df_view.iterrows():
+    pub = r.get("발행(KST)")
+    pub_str = ""
+    try:
+        pub_ts = pd.to_datetime(pub, errors="coerce")
+        if pd.notna(pub_ts):
+            pub_str = pub_ts.strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        pub_str = ""
 
-df_out = df_out.rename(columns=rename_map)
+    src = str(r.get("source", "")).strip()
+    title = str(r.get(title_col, "")).strip()
+    url = str(r.get(url_col, "")).strip()
+    lead = leads[df_view.index.get_loc(idx)] if len(leads) == len(df_view) else ""
 
-df_out["발행"] = pd.to_datetime(df_out["발행"], errors="coerce").dt.strftime("%Y-%m-%d %H:%M")
+    pub_html = html.escape(pub_str)
+    src_html = html.escape(src)
+    title_html = html.escape(title)
+    url_html = html.escape(url, quote=True)
+    lead_html = html.escape(lead)
 
-if "요약" in df_out.columns:
-    if "제목" in df_out.columns:
-        df_out["요약"] = [
-            _clean_summary(t, s)
-            for t, s in zip(
-                df_out["제목"].fillna("").astype(str),
-                df_out["요약"].fillna("").astype(str),
-            )
-        ]
-    else:
-        df_out["요약"] = df_out["요약"].fillna("").astype(str)
-
-    df_out["요약"] = (
-        pd.Series(df_out["요약"])
-        .fillna("")
-        .astype(str)
-        .str.replace("\n", " ", regex=False)
-        .str.replace("\r", " ", regex=False)
-        .str.replace("  ", " ", regex=False)
-        .str.strip()
-        .str.slice(0, 220)
+    rows_html.append(
+        f"""<tr>
+  <td class='nowrap'>{pub_html}</td>
+  <td class='nowrap'>{src_html}</td>
+  <td><a class='newslink' href='{url_html}' target='_blank' rel='noopener noreferrer'>{title_html}</a></td>
+  <td class='lead'>{lead_html}</td>
+</tr>"""
     )
 
-column_config = {}
-if "원문" in df_out.columns:
-    try:
-        column_config["원문"] = st.column_config.LinkColumn("원문")
-    except Exception:
-        pass
+table_html = f"""
+<div class='news-wrap'>
+  <table class='news'>
+    <thead>
+      <tr>
+        <th class='nowrap'>발행</th>
+        <th class='nowrap'>출처</th>
+        <th>제목</th>
+        <th>기사 시작부분</th>
+      </tr>
+    </thead>
+    <tbody>
+      {''.join(rows_html)}
+    </tbody>
+  </table>
+</div>
+"""
 
-st.dataframe(
-    df_out,
-    use_container_width=True,
-    height=760,
-    hide_index=True,
-    column_config=column_config if column_config else None,
-)
+st.markdown(table_html, unsafe_allow_html=True)
