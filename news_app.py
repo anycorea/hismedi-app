@@ -100,21 +100,25 @@ def load_news_and_meta():
 # ---------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------
-def parse_dt(x):
-    """Parse datetime values that may arrive as strings."""
-    if x is None or (isinstance(x, float) and pd.isna(x)):
-        return None
-    if isinstance(x, datetime):
-        return x
-    s = str(x).strip()
-    if not s:
-        return None
-    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
-        try:
-            return datetime.strptime(s, fmt)
-        except ValueError:
-            pass
-    return None
+def to_kst_datetime(series: pd.Series) -> pd.Series:
+    """Convert a datetime-like series to timezone-aware KST datetimes.
+
+    Handles values like:
+    - 2025-12-27T09:19:33+09:00 (ISO8601 with offset)
+    - 2025-12-27 09:19:33
+    - 2025-12-27
+    """
+    dt = pd.to_datetime(series, errors="coerce")
+    # If tz-naive, assume it's already KST; if tz-aware, convert to KST.
+    try:
+        if getattr(dt.dt, "tz", None) is None:
+            dt = dt.dt.tz_localize(KST)
+        else:
+            dt = dt.dt.tz_convert(KST)
+    except Exception:
+        # As a last resort, keep as parsed datetimes (may be tz-naive)
+        pass
+    return dt
 
 
 def today_kst_date() -> str:
@@ -136,20 +140,21 @@ df, meta = load_news_and_meta()
 
 # 표준 컬럼 보정
 if "published_at" in df.columns and "발행(KST)" not in df.columns:
-    df["발행(KST)"] = df["published_at"].apply(parse_dt)
-    df["발행(KST)"] = pd.to_datetime(df["발행(KST)"], errors="coerce")
+    df["발행(KST)"] = to_kst_datetime(df["published_at"])
 
 # 필터
 with st.sidebar:
     st.subheader("필터")
-    date_default = today_kst_date()
-    date_from = st.date_input("시작일", value=datetime.strptime(date_default, "%Y-%m-%d").date())
+    # Default to showing the last 7 days so the first screen isn't empty
+    default_from = (datetime.now(KST) - pd.Timedelta(days=7)).date()
+    date_from = st.date_input("시작일", value=default_from)
     query = st.text_input("검색(제목/요약)", value="")
 
 df_view = df.copy()
 
 if "발행(KST)" in df_view.columns:
-    df_view["발행(KST)"] = df_view["발행(KST)"].apply(parse_dt)
+    # Ensure dtype stays datetime-like (do NOT re-parse with a narrow formatter)
+    df_view["발행(KST)"] = to_kst_datetime(df_view["발행(KST)"])
     df_view = df_view[df_view["발행(KST)"].notna()]
     df_view = df_view[df_view["발행(KST)"].dt.date >= date_from]
 
@@ -189,6 +194,9 @@ else:
     df_show = df_view.copy()
 
 st.subheader("기사 목록")
+
+if df_show.empty:
+    st.info("선택한 기간/검색 조건에 해당하는 기사가 없습니다. (예: 시작일을 더 과거로 조정)")
 
 # Streamlit 버전에 따라 column_config가 다를 수 있어 안전하게 처리
 colcfg = {}
