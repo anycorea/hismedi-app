@@ -118,7 +118,7 @@ with st.container():
     with c2:
         date_to = st.date_input("종료일", value=date.today(), key="date_to")
     with c3:
-        selected_tags = st.multiselect("태그", options=tag_options, default=[], key="selected_tags")
+        selected_tag = st.selectbox("태그", options=["전체"] + tag_options, index=0, key="selected_tag")
     with c4:
         keyword = st.text_input(
             "검색(키워드)",
@@ -152,10 +152,9 @@ df = df[pd.notna(df["발행"])]
 # 날짜 필터
 df = df[(df["발행"].dt.date >= date_from) & (df["발행"].dt.date <= date_to)]
 
-# 태그 필터(선택 시)
-if tag_col and selected_tags:
-    patt = "|".join([re.escape(t) for t in selected_tags])
-    df = df[df[tag_col].fillna("").astype(str).str.contains(patt)]
+# 태그 필터(단일 선택)
+if tag_col and selected_tag and selected_tag != "전체":
+    df = df[df[tag_col].fillna("").astype(str).str.contains(re.escape(selected_tag))]
 
 # 키워드 검색(선택 시): 제목/출처/태그에서 부분일치
 kw = (keyword or "").strip().lower()
