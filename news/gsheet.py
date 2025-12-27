@@ -51,6 +51,6 @@ def meta_set(ws_meta, key: str, value: str):
     rows = ws_meta.get_all_values()
     for i, r in enumerate(rows[1:], start=2):
         if len(r) >= 1 and r[0] == key:
-            ws_meta.update(f"B{i}", value)
+            ws_meta.update(f"B{i}", [[value]])
             return
     ws_meta.append_row([key, value], value_input_option="RAW")
