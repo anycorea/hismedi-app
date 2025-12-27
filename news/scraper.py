@@ -4,6 +4,7 @@ from dateutil import parser as dateparser
 
 import feedparser
 import requests
+from bs4 import BeautifulSoup
 
 from news.config import KEYWORDS, NEGATIVE_HINTS, RSS_SOURCES, DEFAULTS
 from news.gsheet import open_sheet, ensure_tabs, meta_get, meta_set
@@ -23,6 +24,122 @@ def canonicalize_url(url: str) -> str:
 
 def sha256_hex(s: str) -> str:
     return hashlib.sha256((s or "").encode("utf-8")).hexdigest()
+
+
+# ----------------------------
+# 정부 보도자료 HTML 크롤링 (MOHW / MOEL)
+# ----------------------------
+def _parse_date_any(s: str) -> str:
+    """Return ISO datetime (UTC) string if possible, else empty string."""
+    s = (s or "").strip()
+    if not s:
+        return ""
+    s2 = s.replace(".", "-")
+    m = re.search(r"(\d{4}-\d{2}-\d{2})", s2)
+    if not m:
+        return ""
+    try:
+        # 날짜만 있는 경우 00:00 UTC로 저장(표시단에서 KST 변환)
+        dt = datetime.strptime(m.group(1), "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        return dt.isoformat()
+    except Exception:
+        return ""
+
+def crawl_mohw_press(ua: str, timeout_sec: int, retries: int, backoff_sec: float, pages: int = 1):
+    """
+    보건복지부 보도자료(게시판 bid=0027) 목록 크롤링.
+    반환: list[dict] with keys: published_at, source, title, url, url_canonical, tags
+    """
+    base = "https://www.mohw.go.kr/board.es?mid=a10503010100&bid=0027"
+    out = []
+    for page in range(1, max(1, pages) + 1):
+        url = f"{base}&nPage={page}"
+        r = http_get(url, ua=ua, timeout_sec=timeout_sec, retries=retries, backoff_sec=backoff_sec)
+        soup = BeautifulSoup(r.text, "html.parser")
+
+        rows = soup.select("table tbody tr")
+        if not rows:
+            rows = soup.find_all("tr")
+
+        for tr in rows:
+            a = tr.select_one("a[href]")
+            if not a:
+                continue
+            title = normalize_ws(a.get_text(" ", strip=True)).replace("새글", "").strip()
+            href = (a.get("href") or "").strip()
+            if not title or not href:
+                continue
+            link = "https://www.mohw.go.kr" + href if href.startswith("/") else href
+
+            tds = [td.get_text(" ", strip=True) for td in tr.find_all("td")]
+            published_at = ""
+            for t in tds:
+                published_at = _parse_date_any(t)
+                if published_at:
+                    break
+
+            tags = pick_tags(title)
+            if not tags:
+                continue
+
+            link_c = canonicalize_url(link)
+            out.append({
+                "published_at": published_at,
+                "source": "보건복지부-보도자료",
+                "title": title,
+                "url": link_c,
+                "url_canonical": link_c,
+                "tags": ",".join(tags),
+            })
+    return out
+
+def crawl_moel_press(ua: str, timeout_sec: int, retries: int, backoff_sec: float, pages: int = 1):
+    """
+    고용노동부 보도자료(enewsList → enewsView) 목록 크롤링.
+    반환: list[dict] with keys: published_at, source, title, url, url_canonical, tags
+    """
+    base = "https://www.moel.go.kr/news/enews/report/enewsList.do"
+    out = []
+    for page in range(1, max(1, pages) + 1):
+        url = f"{base}?pageIndex={page}"
+        r = http_get(url, ua=ua, timeout_sec=timeout_sec, retries=retries, backoff_sec=backoff_sec)
+        soup = BeautifulSoup(r.text, "html.parser")
+
+        rows = soup.select("table tbody tr")
+        if not rows:
+            rows = soup.find_all("tr")
+
+        for tr in rows:
+            a = tr.select_one('a[href*="enewsView.do"]') or tr.select_one("a[href]")
+            if not a:
+                continue
+            title = normalize_ws(a.get_text(" ", strip=True))
+            href = (a.get("href") or "").strip()
+            if not title or "enewsView.do" not in href:
+                continue
+            link = "https://www.moel.go.kr" + href if href.startswith("/") else href
+
+            tds = [td.get_text(" ", strip=True) for td in tr.find_all("td")]
+            published_at = ""
+            for t in tds:
+                published_at = _parse_date_any(t)
+                if published_at:
+                    break
+
+            tags = pick_tags(title)
+            if not tags:
+                continue
+
+            link_c = canonicalize_url(link)
+            out.append({
+                "published_at": published_at,
+                "source": "고용노동부-보도자료",
+                "title": title,
+                "url": link_c,
+                "url_canonical": link_c,
+                "tags": ",".join(tags),
+            })
+    return out
 
 # ----------------------------
 # 태그 분류
@@ -118,9 +235,20 @@ def find_near_duplicate(sim_int: int, recent_sim, max_hamming: int):
 # ----------------------------
 # RSS 수집(UA + requests → feedparser)
 # ----------------------------
-def collect_rss(ua: str, timeout_sec: int, retries: int, backoff_sec: float):
+def collect_rss(ua: str, timeout_sec: int, retries: int, backoff_sec: float, gov_pages: int):
     out = []
     for source_name, feed_url in RSS_SOURCES:
+        # 정부 보도자료는 RSS가 아닌 HTML 목록을 크롤링합니다.
+        if (feed_url or '').startswith('HTML:'):
+            try:
+                if feed_url == 'HTML:mohw':
+                    out.extend(crawl_mohw_press(ua, timeout_sec, retries, backoff_sec, pages=gov_pages))
+                elif feed_url == 'HTML:moel':
+                    out.extend(crawl_moel_press(ua, timeout_sec, retries, backoff_sec, pages=gov_pages))
+            except Exception:
+                pass
+            continue
+
         try:
             r = http_get(feed_url, ua=ua, timeout_sec=timeout_sec, retries=retries, backoff_sec=backoff_sec)
             fp = feedparser.parse(r.content)
@@ -170,7 +298,12 @@ def main():
     recent_sim_n = int(meta_get(ws_meta, "recent_sim_n") or DEFAULTS["recent_sim_n"])
     fetch_timeout_sec = int(meta_get(ws_meta, "fetch_timeout_sec") or DEFAULTS["fetch_timeout_sec"])
     rss_enabled_raw = meta_get(ws_meta, "rss_enabled")
+    # 정부 보도자료(HTML) 페이지 수
+    gov_pages_meta = meta_get(ws_meta, "gov_pages")
     rss_enabled = DEFAULTS["rss_enabled"] if rss_enabled_raw == "" else (rss_enabled_raw.strip().upper() == "TRUE")
+
+    if gov_pages_meta == "":
+        meta_set(ws_meta, "gov_pages", str(DEFAULTS.get("gov_pages", 1)))
 
     ua = DEFAULTS["user_agent"]
     retries = int(DEFAULTS.get("http_retries", 2))
@@ -189,7 +322,8 @@ def main():
     new_rows = []
 
     # 1) RSS(전문지/정부) + Google News RSS(검색 보강)
-    items = collect_rss(ua=ua, timeout_sec=fetch_timeout_sec, retries=retries, backoff_sec=backoff)
+    gov_pages = int(meta_get(ws_meta, "gov_pages") or DEFAULTS.get("gov_pages", 1))
+    items = collect_rss(ua=ua, timeout_sec=fetch_timeout_sec, retries=retries, backoff_sec=backoff, gov_pages=gov_pages)
 
     for it in items:
         title_hash = sha256_hex(normalize_ws(it["title"]).lower())
