@@ -63,8 +63,8 @@ RSS_SOURCES = [
     ("청년의사", "https://www.docdocdoc.co.kr/rss/allArticle.xml"),
 
     # 2) 정부기관(원문)
-    ("보건복지부-보도자료", "https://www.mohw.go.kr/rss/board.es?mid=a10101000000&bid=0015"),
-    ("고용노동부-보도자료", "https://www.moel.go.kr/rss/news.do"),
+    ("보건복지부-보도자료", "HTML:mohw"),
+    ("고용노동부-보도자료", "HTML:moel"),
 ] + GOOGLE_SOURCES
 
 # ----------------------------
@@ -74,6 +74,8 @@ DEFAULTS = {
     "max_hamming": 6,
     "recent_sim_n": 800,
     "fetch_timeout_sec": 10,
+    # 정부 보도자료(HTML 크롤링) 페이지 수(1페이지=최신 약 10~20건)
+    "gov_pages": 1,
     "rss_enabled": True,
     # 일부 환경에서 RSS가 403/리다이렉트 나는 것을 줄이기 위해 UA는 꼭 씁니다.
     "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36 (compatible; NewsSheetBot/1.0)",
