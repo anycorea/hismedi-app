@@ -53,27 +53,6 @@ def GOOGLE_NEWS_RSS(query: str) -> str:
 GOOGLE_SOURCES = [(f"GoogleNews-{i+1}", GOOGLE_NEWS_RSS(q)) for i, q in enumerate(SEARCH_QUERIES)]
 
 # ----------------------------
-# Naver News는 RSS가 아니라 API를 권장(가장 안정적)
-# - scraper.py에서 NAVER_CLIENT_ID / NAVER_CLIENT_SECRET이 있으면 호출합니다.
-# ----------------------------
-NAVER_API_QUERIES = [
-    "보건 정책",
-    "의료 정책",
-    "병원 진료 정책",
-    "의료인력 지원",
-    "간호사 인력 지원",
-    "의사 인력 정책",
-    "의료기사 처우",
-    "환자안전 대책",
-    "고용 지원 병원",
-    "채용 지원 병원",
-    "인건비 지원 병원",
-    "고용유지지원금 병원",
-    "근로기준법 병원",
-    "산재 병원",
-]
-
-# ----------------------------
 # RSS 고정 소스(전문지/정부 원문)
 # ----------------------------
 RSS_SOURCES = [
