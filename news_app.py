@@ -61,16 +61,20 @@ def _to_kst(series: pd.Series) -> pd.Series:
 st.set_page_config(page_title=APP_TITLE, layout="wide")
 
 st.markdown(
-    "<style>"
-    ".block-container { padding-top: 0.7rem !important; }"
-    ".filter-box { border:1px solid rgba(49,51,63,.14); border-radius:14px; padding:.6rem .8rem; margin-bottom:.6rem; }"
-    "table.news { border-collapse:collapse; width:100%; font-size:14px; }"
-    "table.news th, table.news td { padding:10px 12px; border-bottom:1px solid rgba(49,51,63,.08); text-align:left; white-space:nowrap; }"
-    "table.news th { position:sticky; top:0; background:#fafafa; z-index:1; }"
-    "table.news tr:hover td { background:rgba(49,51,63,.03); }"
-    "a.newslink { text-decoration:none; }"
-    "a.newslink:hover { text-decoration:underline; }"
-    "</style>",
+    """
+    <style>
+      .block-container { padding-top: 0.7rem !important; }
+      .top-box { border: 1px solid rgba(49,51,63,.14); border-radius: 14px; padding: 0.6rem 0.8rem; margin-bottom: 0.6rem; }
+      .top-box button { height: 42px; }
+      table.news { border-collapse:collapse; width:100%; font-size:14px; }
+      table.news th, table.news td { padding:10px 12px; border-bottom:1px solid rgba(49,51,63,.08); text-align:left; white-space:nowrap; }
+      table.news th { position:sticky; top:0; background:#fafafa; z-index:1; }
+      table.news tr:hover td { background:rgba(49,51,63,.03); }
+      a.newslink { text-decoration:none; }
+      a.newslink:hover { text-decoration:underline; }
+    </style>
+    """
+    ,
     unsafe_allow_html=True,
 )
 
@@ -79,20 +83,19 @@ if not sheet_id:
     st.error("GSHEET_ID가 설정되지 않았습니다.")
     st.stop()
 
-st.markdown('<div class="filter-box">', unsafe_allow_html=True)
-c0, c1, c2 = st.columns([0.7, 1.3, 1.3], vertical_alignment="center")
-
-with c0:
-    if st.button("🔄 동기화", use_container_width=True):
-        load_news.clear()
-
-with c1:
-    date_from = st.date_input("시작일", value=date.today() - timedelta(days=7))
-
-with c2:
-    date_to = st.date_input("종료일", value=date.today())
-
-st.markdown("</div>", unsafe_allow_html=True)
+# ---------------- Top controls ----------------
+with st.container():
+    st.markdown('<div class="top-box">', unsafe_allow_html=True)
+    c0, c1, c2 = st.columns([0.9, 1.55, 1.55], vertical_alignment="bottom")
+    with c0:
+        st.markdown("&nbsp;", unsafe_allow_html=True)
+        if st.button("🔄 동기화", use_container_width=True):
+            load_news.clear()
+    with c1:
+        date_from = st.date_input("시작일", value=date.today() - timedelta(days=7))
+    with c2:
+        date_to = st.date_input("종료일", value=date.today())
+    st.markdown("</div>", unsafe_allow_html=True)
 
 df = load_news(sheet_id)
 if df.empty:
@@ -109,12 +112,12 @@ if not pub_col:
 df["발행"] = _to_kst(df[pub_col])
 df = df[pd.notna(df["발행"])]
 
+# 날짜 필터
 df = df[(df["발행"].dt.date >= date_from) & (df["발행"].dt.date <= date_to)]
 df = df.sort_values("발행", ascending=False)
 
 title_col = "title" if "title" in df.columns else None
 url_col = "url_canonical" if "url_canonical" in df.columns else ("url" if "url" in df.columns else None)
-
 if not title_col or not url_col:
     st.error("필수 컬럼(title, url/url_canonical)을 찾지 못했습니다.")
     st.stop()
@@ -125,7 +128,6 @@ for _, r in df.iterrows():
     src = str(r.get("source", "")).strip()
     title = str(r.get(title_col, "")).strip()
     url = str(r.get(url_col, "")).strip()
-
     rows.append(
         "<tr>"
         f"<td>{pub_str}</td>"
