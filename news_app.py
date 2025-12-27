@@ -11,35 +11,63 @@ KST = ZoneInfo("Asia/Seoul")
 # ---------------------------
 # Google Sheets client
 # ---------------------------
+
+import json
+
+
+def _normalize_private_key(info: dict) -> dict:
+    """Make private_key PEM robust against TOML/env formatting issues."""
+    info = dict(info)
+    pk = info.get("private_key", "")
+    if isinstance(pk, str) and pk:
+        pk = pk.replace("\\n", "\n").replace("\r\n", "\n").replace("\r", "\n")
+        # Remove accidental leading/trailing spaces per line
+        lines = [ln.strip() for ln in pk.split("\n") if ln.strip() != ""]
+        pk = "\n".join(lines) + "\n"
+        info["private_key"] = pk
+    return info
+
+
 @st.cache_resource
 def get_gspread_client():
+    """Return an authorized gspread client.
+
+    Priority:
+      1) Streamlit secrets: [gcp_service_account]
+      2) Env var: GOOGLE_SERVICE_ACCOUNT_JSON (full JSON string)
+    """
+    # 1) Streamlit secrets
+    if "gcp_service_account" in st.secrets:
+        info = _normalize_private_key(dict(st.secrets["gcp_service_account"]))
+        creds = Credentials.from_service_account_info(
+            info,
+            scopes=["https://www.googleapis.com/auth/spreadsheets"],
+        )
+        return gspread.authorize(creds)
+
+    # 2) Fallback env var (JSON string)
     sa_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
     if not sa_json:
-        raise RuntimeError("Missing GOOGLE_SERVICE_ACCOUNT_JSON in Streamlit secrets/env.")
-    creds = Credentials.from_service_account_info(
-        eval(sa_json) if sa_json.startswith("{") is False else None,  # fallback, will be overwritten below
-        scopes=["https://www.googleapis.com/auth/spreadsheets"],
-    )
+        raise RuntimeError("Missing [gcp_service_account] in secrets and GOOGLE_SERVICE_ACCOUNT_JSON env var.")
+    try:
+        info = json.loads(sa_json)
+    except json.JSONDecodeError as e:
+        raise RuntimeError("GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON.") from e
 
-def _build_client():
-    import streamlit as st
-
-    if "gcp_service_account" not in st.secrets:
-        raise RuntimeError("Missing [gcp_service_account] in Streamlit Secrets")
-
-    info = dict(st.secrets["gcp_service_account"])
+    info = _normalize_private_key(info)
     creds = Credentials.from_service_account_info(
         info,
         scopes=["https://www.googleapis.com/auth/spreadsheets"],
     )
     return gspread.authorize(creds)
 
+
 @st.cache_resource
 def get_sheet():
-    sheet_id = os.getenv("GSHEET_ID", "").strip()
+    sheet_id = os.getenv("GSHEET_ID", "").strip() or str(st.secrets.get("GSHEET_ID", "")).strip()
     if not sheet_id:
-        raise RuntimeError("Missing GSHEET_ID")
-    gc = _build_client()
+        raise RuntimeError("Missing GSHEET_ID (set env var or Streamlit secrets)")
+    gc = get_gspread_client()
     return gc.open_by_key(sheet_id)
 
 # ---------------------------
