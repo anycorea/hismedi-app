@@ -44,7 +44,9 @@ def get_gspread_client():
     # 2) env var fallback (JSON 문자열)
     sa_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
     if not sa_json:
-        raise RuntimeError("Missing [gcp_service_account] in secrets and GOOGLE_SERVICE_ACCOUNT_JSON env var.")
+        raise RuntimeError(
+            "Missing [gcp_service_account] in secrets and GOOGLE_SERVICE_ACCOUNT_JSON env var."
+        )
     info = json.loads(sa_json)
     info = _normalize_private_key(info)
     creds = Credentials.from_service_account_info(
@@ -68,47 +70,37 @@ def _to_kst_datetime(series: pd.Series) -> pd.Series:
     s = pd.to_datetime(series, errors="coerce", utc=False)
     if getattr(s.dt, "tz", None) is not None:
         s = s.dt.tz_convert("Asia/Seoul").dt.tz_localize(None)
-   
+    return s
+
 
 def _clean_summary(title: str, summary: str) -> str:
     """
-    Many RSS feeds store 'summary' that repeats the title.
-    Heuristic cleanup:
-      - remove title if it appears at the start or inside
-      - collapse whitespace/newlines
-      - strip common boilerplate markers
-      - if too short after cleanup, return empty string
+    RSS summary가 제목을 반복하는 경우가 많아 '요약다운' 문장으로 보이게 정리합니다.
+    - 제목 반복 제거(앞부분/중간)
+    - 공백/줄바꿈 정리
+    - 정리 후 너무 짧으면 빈칸 처리
     """
     t = (title or "").strip()
     s = (summary or "").strip()
-
     if not s:
         return ""
 
-    # normalize whitespace
-    s = s.replace("\n", " ")
+    s = s.replace("\n", " ").replace("\r", " ")
     s = re.sub(r"\s+", " ", s).strip()
 
-    # remove title repetitions
     if t:
-        # exact prefix
         if s.startswith(t):
-            s = s[len(t):].lstrip(" -:·|」’'\"")
-        # any occurrence (keep the longer remaining piece)
+            s = s[len(t) :].lstrip(" -:·|」’'\"")
         if t in s:
             s = s.replace(t, " ").strip()
             s = re.sub(r"\s+", " ", s).strip()
 
-    # remove common boilerplate
     s = re.sub(r"^(\[.*?\]\s*)+", "", s).strip()
     s = re.sub(r"^\s*사진\s*=\s*[^ ]+\s*", "", s).strip()
 
-    # if still very short, treat as no real summary
     if len(s) < 25:
         return ""
-
     return s
- return s
 
 
 # =========================================================
@@ -116,20 +108,11 @@ def _clean_summary(title: str, summary: str) -> str:
 # =========================================================
 st.set_page_config(page_title=APP_TITLE, layout="wide")
 
-# --- Compact, polished spacing (no sidebar) ---
+# --- Compact spacing ---
 st.markdown(
     """
     <style>
-      /* 전체 상단 여백 축소 */
-      .block-container {
-        padding-top: 0.8rem !important;
-        padding-bottom: 1.0rem !important;
-      }
-      /* 위젯 간 세로 간격 축소 */
-      div[data-testid="stVerticalBlock"] > div:has(> div[data-testid="stVerticalBlock"]) {
-        gap: 0.5rem;
-      }
-      /* 필터 박스 스타일 */
+      .block-container { padding-top: 0.8rem !important; padding-bottom: 1.0rem !important; }
       .filter-box {
         border: 1px solid rgba(49, 51, 63, 0.16);
         border-radius: 14px;
@@ -143,22 +126,14 @@ st.markdown(
         color: rgba(49, 51, 63, 0.75);
         margin: 0 0 0.35rem 0;
       }
-      /* 버튼 높이/정렬 */
-      div[data-testid="stButton"] > button {
-        height: 42px;
-        border-radius: 12px;
-        padding: 0 14px;
-      }
-      /* date_input / text_input 높이 느낌 통일 */
-      div[data-baseweb="input"] input {
-        height: 42px !important;
-      }
+      div[data-testid="stButton"] > button { height: 42px; border-radius: 12px; padding: 0 14px; }
+      div[data-baseweb="input"] input { height: 42px !important; }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-sheet_id = (st.secrets.get("GSHEET_ID", "").strip() or DEFAULT_SHEET_ID)
+sheet_id = st.secrets.get("GSHEET_ID", "").strip() or DEFAULT_SHEET_ID
 if not sheet_id:
     st.error("GSHEET_ID가 설정되지 않았습니다. Streamlit secrets 또는 환경변수로 설정하세요.")
     st.stop()
@@ -201,6 +176,7 @@ for cand in ["published_at", "publishedAt", "pubDate", "date", "발행", "발행
     if cand in df.columns:
         published_col = cand
         break
+
 if published_col is None:
     st.error("발행일 컬럼(published_at)을 찾지 못했습니다.")
     st.stop()
@@ -213,9 +189,7 @@ title_col = "title" if "title" in df.columns else None
 df = df.sort_values("발행(KST)", ascending=False, na_position="last").reset_index(drop=True)
 
 # ---------------- Apply filters ----------------
-df_view = df.copy()
-
-df_view = df_view[pd.notna(df_view["발행(KST)"])]
+df_view = df[pd.notna(df["발행(KST)"])].copy()
 df_view = df_view[df_view["발행(KST)"].dt.date >= date_from]
 df_view = df_view[df_view["발행(KST)"].dt.date <= date_to]
 
@@ -257,10 +231,13 @@ df_out = df_out.rename(columns=rename_map)
 df_out["발행"] = pd.to_datetime(df_out["발행"], errors="coerce").dt.strftime("%Y-%m-%d %H:%M")
 
 if "요약" in df_out.columns:
-    # 실제 요약처럼 보이도록: 제목 반복 제거 + 공백 정리
     if "제목" in df_out.columns:
         df_out["요약"] = [
-            _clean_summary(t, s) for t, s in zip(df_out["제목"].fillna("").astype(str), df_out["요약"].fillna("").astype(str))
+            _clean_summary(t, s)
+            for t, s in zip(
+                df_out["제목"].fillna("").astype(str),
+                df_out["요약"].fillna("").astype(str),
+            )
         ]
     else:
         df_out["요약"] = df_out["요약"].fillna("").astype(str)
@@ -269,10 +246,8 @@ if "요약" in df_out.columns:
         pd.Series(df_out["요약"])
         .fillna("")
         .astype(str)
-        .str.replace("
-", " ", regex=False)
-        .str.replace("
-", " ", regex=False)
+        .str.replace("\n", " ", regex=False)
+        .str.replace("\r", " ", regex=False)
         .str.replace("  ", " ", regex=False)
         .str.strip()
         .str.slice(0, 220)
