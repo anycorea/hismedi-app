@@ -9,6 +9,10 @@ from bs4 import BeautifulSoup
 from news.config import KEYWORDS, NEGATIVE_HINTS, RSS_SOURCES, DEFAULTS
 from news.gsheet import open_sheet, ensure_tabs, meta_get, meta_set
 
+
+# ----------------------------
+# 유틸
+# ----------------------------
 def normalize_ws(s: str) -> str:
     return re.sub(r"\s+", " ", (s or "")).strip()
 
@@ -22,6 +26,10 @@ def canonicalize_url(url: str) -> str:
 def sha256_hex(s: str) -> str:
     return hashlib.sha256((s or "").encode("utf-8")).hexdigest()
 
+
+# ----------------------------
+# 태그 분류
+# ----------------------------
 def pick_tags(text: str):
     t = text or ""
     if any(h in t for h in NEGATIVE_HINTS):
@@ -32,11 +40,15 @@ def pick_tags(text: str):
             tags.append(tag)
     return tags
 
+
+# ----------------------------
+# SimHash (제목 기반)
+# ----------------------------
 def tokenize(text: str):
     text = normalize_ws(text).lower()
     text = re.sub(r"[^0-9a-z가-힣 ]+", " ", text)
     toks = [w for w in text.split() if len(w) >= 2]
-    return toks[:500]
+    return toks[:200]
 
 def simhash64(text: str):
     toks = tokenize(text)
@@ -46,36 +58,20 @@ def simhash64(text: str):
     for tok in toks:
         h = int(hashlib.md5(tok.encode("utf-8")).hexdigest(), 16)
         for i in range(64):
-            v[i] += 1 if ((h>>i)&1) else -1
+            v[i] += 1 if ((h >> i) & 1) else -1
     out = 0
     for i in range(64):
         if v[i] >= 0:
-            out |= (1<<i)
+            out |= (1 << i)
     return str(out)
 
 def hamming(a: int, b: int) -> int:
     return (a ^ b).bit_count()
 
-def fetch_article_text(url: str, ua: str, timeout_sec: int) -> str:
-    try:
-        r = requests.get(url, headers={"User-Agent": ua}, timeout=timeout_sec)
-        r.raise_for_status()
-        soup = BeautifulSoup(r.text, "lxml")
-        for t in soup(["script","style","noscript"]):
-            t.decompose()
-        text = soup.get_text("\n")
-        lines = [normalize_ws(x) for x in text.split("\n")]
-        lines = [x for x in lines if len(x) >= 20]
-        return "\n".join(lines[:200])
-    except Exception:
-        return ""
 
-def summarize_local(text: str) -> str:
-    text = normalize_ws(text)
-    sents = re.split(r"[.!?。]\s+", text)
-    sents = [normalize_ws(s) for s in sents if len(s) >= 20]
-    return " ".join(sents[:4])[:800]
-
+# ----------------------------
+# 기존 인덱스 로드
+# ----------------------------
 def load_indexes(ws_news, recent_sim_n: int):
     values = ws_news.get_all_values()
     if len(values) <= 1:
@@ -92,9 +88,12 @@ def load_indexes(ws_news, recent_sim_n: int):
         th = row[6] if len(row) > 6 else ""
         sh = row[7] if len(row) > 7 else ""
         url = row[3] if len(row) > 3 else ""
-        if url_c: url_set.add(url_c)
-        if th: titlehash_set.add(th)
-        if sh.isdigit(): recent_sim.append((int(sh), url))
+        if url_c:
+            url_set.add(url_c)
+        if th:
+            titlehash_set.add(th)
+        if sh.isdigit():
+            recent_sim.append((int(sh), url))
     return url_set, titlehash_set, recent_sim
 
 def find_near_duplicate(sim_int: int, recent_sim, max_hamming: int):
@@ -103,6 +102,10 @@ def find_near_duplicate(sim_int: int, recent_sim, max_hamming: int):
             return url
     return ""
 
+
+# ----------------------------
+# RSS 수집
+# ----------------------------
 def collect_rss():
     out = []
     for source_name, feed_url in RSS_SOURCES:
@@ -138,17 +141,18 @@ def collect_rss():
             })
     return out
 
+
+# ----------------------------
+# 메인
+# ----------------------------
 def main():
     sh = open_sheet()
     ws_news, ws_meta = ensure_tabs(sh)
 
-    # META 설정값 읽기(없으면 기본값)
     max_hamming = int(meta_get(ws_meta, "max_hamming") or DEFAULTS["max_hamming"])
     recent_sim_n = int(meta_get(ws_meta, "recent_sim_n") or DEFAULTS["recent_sim_n"])
-    fetch_timeout_sec = int(meta_get(ws_meta, "fetch_timeout_sec") or DEFAULTS["fetch_timeout_sec"])
     rss_enabled_raw = meta_get(ws_meta, "rss_enabled")
     rss_enabled = DEFAULTS["rss_enabled"] if rss_enabled_raw == "" else (rss_enabled_raw.strip().upper() == "TRUE")
-    ua = DEFAULTS["user_agent"]
 
     meta_set(ws_meta, "last_run_at", datetime.now(timezone.utc).isoformat())
     meta_set(ws_meta, "last_error", "")
@@ -157,7 +161,7 @@ def main():
         meta_set(ws_meta, "last_inserted_count", "0")
         return
 
-    url_set, titlehash_set, recent_sim = load_indexes(ws_news, recent_sim_n=recent_sim_n)
+    url_set, titlehash_set, recent_sim = load_indexes(ws_news, recent_sim_n)
 
     inserted = 0
     new_rows = []
@@ -171,17 +175,21 @@ def main():
         if title_hash in titlehash_set:
             continue
 
-        content = fetch_article_text(it["url"], ua=ua, timeout_sec=fetch_timeout_sec)
-        summary = summarize_local(content)
-        sh_str = simhash64(it["title"] + " " + summary)
-
+        sh_str = simhash64(it["title"])
         dup_of = ""
         if sh_str.isdigit():
-            dup_of = find_near_duplicate(int(sh_str), recent_sim, max_hamming=max_hamming)
+            dup_of = find_near_duplicate(int(sh_str), recent_sim, max_hamming)
 
         row = [
-            it["published_at"], it["source"], it["title"], it["url"], it["url_canonical"],
-            it["tags"], title_hash, sh_str, dup_of, summary
+            it["published_at"],
+            it["source"],
+            it["title"],
+            it["url"],
+            it["url_canonical"],
+            it["tags"],
+            title_hash,
+            sh_str,
+            dup_of,
         ]
         new_rows.append(row)
         inserted += 1
@@ -200,11 +208,11 @@ def main():
 
     meta_set(ws_meta, "last_inserted_count", str(inserted))
 
+
 if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        # META에 에러 기록
         try:
             sh = open_sheet()
             _, ws_meta = ensure_tabs(sh)
