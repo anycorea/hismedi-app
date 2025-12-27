@@ -283,7 +283,7 @@ def hamming(a: int, b: int) -> int:
     return (a ^ b).bit_count()
 
 # ----------------------------
-# HTTP GET (재시도 포함) — RSS/GoogleNews 안정화
+# HTTP GET helper (retry / timeout / UA)
 # ----------------------------
 def http_get(url: str, ua: str, timeout_sec: int, retries: int, backoff_sec: float):
     last_err = None
@@ -430,7 +430,7 @@ def main():
     inserted = 0
     new_rows = []
 
-    # 1) RSS(전문지/정부) + Google News RSS(검색 보강)
+    # 1) RSS(전문지) + HTML 크롤링(정부/공공/협회)
     gov_pages = int(meta_get(ws_meta, "gov_pages") or DEFAULTS.get("gov_pages", 1))
     items = collect_rss(ua=ua, timeout_sec=fetch_timeout_sec, retries=retries, backoff_sec=backoff, gov_pages=gov_pages)
 
