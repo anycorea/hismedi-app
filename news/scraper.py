@@ -110,137 +110,14 @@ def crawl_moel_press(ua: str, timeout_sec: int, retries: int, backoff_sec: float
                 out.append(it)
     return out
 
-def crawl_dailymedi_press(ua: str, timeout_sec: int, retries: int, backoff_sec: float, pages: int = 1):
-    # 데일리메디는 RSS가 불안정/차단되는 경우가 있어 목록 HTML에서 기사 링크를 직접 수집
-    # 목록: /news/news_list.php?page=1
-    base = "https://www.dailymedi.com/news/news_list.php"
-    out = []
-    for p in range(1, max(1, pages) + 1):
-        url = f"{base}?page={p}"
-        r = http_get(url, ua=ua, timeout_sec=timeout_sec, retries=retries, backoff_sec=backoff_sec)
-        soup = BeautifulSoup(r.text, "html.parser")
-        # 기사 링크 패턴: /news/news_view.php?wr_id=...
-        for a in soup.select('a[href*="news_view.php"]'):
-            href = (a.get("href") or "").strip()
-            if "wr_id=" not in href:
-                continue
-            title = a.get_text(" ", strip=True)
-            link = urljoin("https://www.dailymedi.com/", href)
-            # 날짜는 목록 구조가 자주 바뀌어서: a 주변의 동일 row/parent에서 날짜 탐색
-            published_at = ""
-            parent_text = a.find_parent().get_text(" ", strip=True) if a.find_parent() else ""
-            published_at = _parse_date_any(parent_text)
-            it = _emit_item("데일리메디", title, link, published_at)
-            if it:
-                out.append(it)
-    # 중복 제거
-    seen=set(); ded=[]
-    for it in out:
-        if it["url_canonical"] in seen: 
-            continue
-        seen.add(it["url_canonical"]); ded.append(it)
-    return ded
 
-def crawl_ksmha_press(ua: str, timeout_sec: int, retries: int, backoff_sec: float, pages: int = 1):
-    base = "http://www.ksmha.or.kr/bbs/board.php?bo_table=6_6"
-    out=[]
-    for p in range(1, max(1, pages) + 1):
-        url = f"{base}&page={p}"
-        r = http_get(url, ua=ua, timeout_sec=timeout_sec, retries=retries, backoff_sec=backoff_sec)
-        soup = BeautifulSoup(r.text, "html.parser")
-        # 링크 패턴: wr_id=
-        for a in soup.select('a[href*="wr_id="]'):
-            href = (a.get("href") or "").strip()
-            if "bo_table=6_6" not in href:
-                # 상대경로일 수 있음
-                pass
-            title = a.get_text(" ", strip=True)
-            link = urljoin("http://www.ksmha.or.kr/", href)
-            published_at = ""
-            parent_tr = a.find_parent("tr")
-            if parent_tr:
-                published_at = _parse_date_any(parent_tr.get_text(" ", strip=True))
-            it = _emit_item("대한중소병원협회", title, link, published_at)
-            if it:
-                out.append(it)
-    seen=set(); ded=[]
-    for it in out:
-        if it["url_canonical"] in seen: 
-            continue
-        seen.add(it["url_canonical"]); ded.append(it)
-    return ded
 
-def crawl_kha_press(ua: str, timeout_sec: int, retries: int, backoff_sec: float, pages: int = 1):
-    # KHA 보도/뉴스 게시판(구조 변동 가능) - href에 bbs/board.php?bo_table=...
-    base = "https://www.kha.or.kr"
-    list_url = "https://www.kha.or.kr/bbs/board.php"
-    out=[]
-    for p in range(1, max(1, pages) + 1):
-        url = f"{list_url}?bo_table=news&page={p}"
-        r = http_get(url, ua=ua, timeout_sec=timeout_sec, retries=retries, backoff_sec=backoff_sec)
-        soup = BeautifulSoup(r.text, "html.parser")
-        for a in soup.select('a[href*="wr_id="]'):
-            href=(a.get("href") or "").strip()
-            title=a.get_text(" ", strip=True)
-            link=urljoin(base+"/", href)
-            published_at=_parse_date_any((a.find_parent("tr").get_text(" ", strip=True) if a.find_parent("tr") else ""))
-            it=_emit_item("대한병원협회", title, link, published_at)
-            if it: out.append(it)
-    seen=set(); ded=[]
-    for it in out:
-        if it["url_canonical"] in seen: continue
-        seen.add(it["url_canonical"]); ded.append(it)
-    return ded
 
-def crawl_nhis_press(ua: str, timeout_sec: int, retries: int, backoff_sec: float, pages: int = 1):
-    # NHIS 보도자료 페이지(구조 변동 가능): 링크에 bbsId 또는 articleNo 등이 포함될 수 있어 광범위 탐색
-    base = "https://www.nhis.or.kr"
-    list_url = "https://www.nhis.or.kr/nhis/together/wbhaec06300m01.do"
-    out=[]
-    for p in range(1, max(1, pages) + 1):
-        url = f"{list_url}?pageIndex={p}"
-        r = http_get(url, ua=ua, timeout_sec=timeout_sec, retries=retries, backoff_sec=backoff_sec)
-        soup = BeautifulSoup(r.text, "html.parser")
-        # 테이블 기반 우선
-        for tr in soup.select("table tbody tr"):
-            a = tr.select_one("a[href]")
-            if not a:
-                continue
-            href=(a.get("href") or "").strip()
-            title=a.get_text(" ", strip=True)
-            link=urljoin(base+"/", href)
-            published_at=_parse_date_any(tr.get_text(" ", strip=True))
-            it=_emit_item("국민건강보험공단", title, link, published_at)
-            if it: out.append(it)
-    seen=set(); ded=[]
-    for it in out:
-        if it["url_canonical"] in seen: continue
-        seen.add(it["url_canonical"]); ded.append(it)
-    return ded
 
-def crawl_hira_press(ua: str, timeout_sec: int, retries: int, backoff_sec: float, pages: int = 1):
-    base = "https://www.hira.or.kr"
-    list_url = "https://www.hira.or.kr/bbsDummy.do?pgmid=HIRAA020002000000"
-    out=[]
-    for p in range(1, max(1, pages) + 1):
-        url = f"{list_url}&pageIndex={p}"
-        r = http_get(url, ua=ua, timeout_sec=timeout_sec, retries=retries, backoff_sec=backoff_sec)
-        soup = BeautifulSoup(r.text, "html.parser")
-        for tr in soup.select("table tbody tr"):
-            a=tr.select_one("a[href]")
-            if not a: 
-                continue
-            href=(a.get("href") or "").strip()
-            title=a.get_text(" ", strip=True)
-            link=urljoin(base+"/", href)
-            published_at=_parse_date_any(tr.get_text(" ", strip=True))
-            it=_emit_item("건강보험심사평가원", title, link, published_at)
-            if it: out.append(it)
-    seen=set(); ded=[]
-    for it in out:
-        if it["url_canonical"] in seen: continue
-        seen.add(it["url_canonical"]); ded.append(it)
-    return ded
+
+
+
+
 
 # ----------------------------
 # 태그 분류
@@ -346,16 +223,6 @@ def collect_rss(ua: str, timeout_sec: int, retries: int, backoff_sec: float, gov
                     out.extend(crawl_mohw_press(ua, timeout_sec, retries, backoff_sec, pages=gov_pages))
                 elif feed_url == 'HTML:moel':
                     out.extend(crawl_moel_press(ua, timeout_sec, retries, backoff_sec, pages=gov_pages))
-                elif feed_url == 'HTML:dailymedi':
-                    out.extend(crawl_dailymedi_press(ua, timeout_sec, retries, backoff_sec, pages=gov_pages))
-                elif feed_url == 'HTML:ksmha':
-                    out.extend(crawl_ksmha_press(ua, timeout_sec, retries, backoff_sec, pages=gov_pages))
-                elif feed_url == 'HTML:kha':
-                    out.extend(crawl_kha_press(ua, timeout_sec, retries, backoff_sec, pages=gov_pages))
-                elif feed_url == 'HTML:nhis':
-                    out.extend(crawl_nhis_press(ua, timeout_sec, retries, backoff_sec, pages=gov_pages))
-                elif feed_url == 'HTML:hira':
-                    out.extend(crawl_hira_press(ua, timeout_sec, retries, backoff_sec, pages=gov_pages))
             except Exception:
                 pass
             continue
@@ -430,7 +297,7 @@ def main():
     inserted = 0
     new_rows = []
 
-    # 1) RSS(전문지) + HTML 크롤링(정부/공공/협회)
+    # 1) RSS(전문지) + HTML 크롤링(정부)
     gov_pages = int(meta_get(ws_meta, "gov_pages") or DEFAULTS.get("gov_pages", 1))
     items = collect_rss(ua=ua, timeout_sec=fetch_timeout_sec, retries=retries, backoff_sec=backoff, gov_pages=gov_pages)
 
