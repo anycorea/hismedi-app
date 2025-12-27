@@ -212,11 +212,23 @@ for _, r in df_view.iterrows():
     else:
         st.markdown(f"**{t}**")
 
-    meta_line = " · ".join([x for x in [
-        r.get("발행(KST)"),
-        src if src else None,
-        tags if tags else None,
-    ] if x is not None and str(x).strip() != ""])
+        pub = r.get("발행(KST)")
+    pub_str = ""
+    try:
+        if pd.notna(pub):
+            # pub can be pandas Timestamp/datetime
+            pub_str = pd.to_datetime(pub, errors="coerce")
+            if pd.notna(pub_str):
+                pub_str = pub_str.strftime("%Y-%m-%d %H:%M")
+            else:
+                pub_str = ""
+        else:
+            pub_str = ""
+    except Exception:
+        pub_str = ""
+
+    meta_parts = [p for p in [pub_str, (src if src else ""), (tags if tags else "")] if str(p).strip() != ""]
+    meta_line = " · ".join(meta_parts)
 
     if meta_line:
         st.caption(meta_line)
