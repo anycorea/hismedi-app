@@ -67,7 +67,6 @@ RSS_SOURCES = [
     ("의협신문", "https://www.doctorsnews.co.kr/rss/allArticle.xml"),
 
     # 2) 협회·공공·정부 (HTML)
-    ("대한중소병원협회", "HTML:ksmha"),
     ("대한병원협회", "HTML:kha"),
     ("국민건강보험공단", "HTML:nhis"),
     ("건강보험심사평가원", "HTML:hira"),
