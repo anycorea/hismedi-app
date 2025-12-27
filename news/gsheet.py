@@ -1,10 +1,12 @@
+# hismedi-app/news/gsheet.py
 import os, json
 import gspread
 from google.oauth2.service_account import Credentials
 
+# ✅ summary 제거
 NEWS_HEADERS = [
   "published_at","source","title","url","url_canonical","tags",
-  "title_hash","simhash","duplicate_of","summary"
+  "title_hash","simhash","duplicate_of"
 ]
 
 META_HEADERS = ["key","value"]
@@ -27,10 +29,16 @@ def open_sheet():
     return sh
 
 def ensure_tabs(sh):
+    """
+    - NEWS / META 탭이 없으면 생성
+    - NEWS 탭이 새로 생성될 때는 summary 없는 헤더로 생성
+    - 기존 NEWS 탭이 이미 있으면 헤더는 건드리지 않음(사용자가 직접 정리한다고 하셨으므로)
+    """
     try:
         ws_news = sh.worksheet("NEWS")
     except Exception:
-        ws_news = sh.add_worksheet(title="NEWS", rows=2000, cols=20)
+        # cols는 헤더 수에 맞게 충분히(여유 포함)
+        ws_news = sh.add_worksheet(title="NEWS", rows=2000, cols=max(20, len(NEWS_HEADERS) + 5))
         ws_news.append_row(NEWS_HEADERS, value_input_option="RAW")
 
     try:
@@ -38,6 +46,7 @@ def ensure_tabs(sh):
     except Exception:
         ws_meta = sh.add_worksheet(title="META", rows=200, cols=5)
         ws_meta.append_row(META_HEADERS, value_input_option="RAW")
+
     return ws_news, ws_meta
 
 def meta_get(ws_meta, key: str):
