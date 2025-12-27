@@ -75,31 +75,57 @@ def _to_kst_datetime(series: pd.Series) -> pd.Series:
 
 def _clean_summary(title: str, summary: str) -> str:
     """
-    RSS summary가 제목을 반복하는 경우가 많아 '요약다운' 문장으로 보이게 정리합니다.
-    - 제목 반복 제거(앞부분/중간)
-    - 공백/줄바꿈 정리
-    - 정리 후 너무 짧으면 빈칸 처리
+    '요약' 컬럼이 실제 요약이 아니라,
+    - 제목 반복
+    - '기사 읽어주기 서비스...', '최근 24시간...' 같은 고정 안내문
+    - '입력 2025-...' 같은 메타 문구
+    로 채워지는 경우가 많아 화면에서 제거/정리합니다.
+
+    전략:
+    1) 고정 안내/메타 문구 제거
+    2) 제목 반복 제거
+    3) 정리 후 너무 짧거나 안내문 성격이면 빈칸 처리
     """
     t = (title or "").strip()
     s = (summary or "").strip()
     if not s:
         return ""
 
+    # normalize whitespace
     s = s.replace("\n", " ").replace("\r", " ")
     s = re.sub(r"\s+", " ", s).strip()
 
+    # remove common boilerplate phrases (Korean news feeds)
+    boilerplate_patterns = [
+        r"입력\s*\d{4}-\d{2}-\d{2}\s*\d{2}:\d{2}:\d{2}[^ ]*",
+        r"기사\s*읽어주기\s*서비스는.*?브라우저에서만\s*사용[^.。]*\.?$",
+        r"최근\s*24시간\s*이내\s*속보\s*및\s*알림을\s*표시합니다\.?$",
+        r"※\s*이\s*사진은\s*기사\s*내용과\s*관련이\s*없습니다\.?$",
+        r"^\s*사진\s*=\s*[^ ]+\s*",
+    ]
+    for p in boilerplate_patterns:
+        s = re.sub(p, " ", s, flags=re.IGNORECASE).strip()
+        s = re.sub(r"\s+", " ", s).strip()
+
+    # remove title repetitions
     if t:
         if s.startswith(t):
-            s = s[len(t) :].lstrip(" -:·|」’'\"")
+            s = s[len(t):].lstrip(" -:·|」’'\"")
         if t in s:
             s = s.replace(t, " ").strip()
             s = re.sub(r"\s+", " ", s).strip()
 
+    # remove bracketed prefixes like [단독], [리포트]
     s = re.sub(r"^(\[.*?\]\s*)+", "", s).strip()
-    s = re.sub(r"^\s*사진\s*=\s*[^ ]+\s*", "", s).strip()
 
-    if len(s) < 25:
+    # If summary still looks like a notice, drop it
+    if re.search(r"(읽어주기\s*서비스|브라우저에서만\s*사용|속보\s*및\s*알림)", s):
         return ""
+
+    # too short => not a real summary
+    if len(s) < 40:
+        return ""
+
     return s
 
 
