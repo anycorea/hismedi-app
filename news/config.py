@@ -56,6 +56,11 @@ GOOGLE_SOURCES = [(f"GoogleNews-{i+1}", GOOGLE_NEWS_RSS(q)) for i, q in enumerat
 # RSS 고정 소스(전문지/정부 원문)
 # ----------------------------
 RSS_SOURCES = [
+    ("대한중소병원협회", "HTML:ksmha"),
+
+    ("데일리메디", "https://www.dailymedi.com/rss/allArticle.xml"),
+    ("의협신문", "https://www.doctorsnews.co.kr/rss/allArticle.xml"),
+
     # 1) 병원·의료 전문 언론
     ("병원신문", "https://www.khanews.com/rss/allArticle.xml"),
     ("의학신문-전체", "http://www.bosa.co.kr/rss/allArticle.xml"),
@@ -65,7 +70,7 @@ RSS_SOURCES = [
     # 2) 정부기관(원문)
     ("보건복지부-보도자료", "HTML:mohw"),
     ("고용노동부-보도자료", "HTML:moel"),
-] + GOOGLE_SOURCES
+] 
 
 # ----------------------------
 # 기본 설정
