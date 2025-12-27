@@ -64,10 +64,7 @@ RSS_SOURCES = [
 
     # 2) 정부기관(원문)
     ("보건복지부-보도자료", "https://www.mohw.go.kr/rss/board.es?mid=a10101000000&bid=0015"),
-    ("보건복지부-공지사항", "https://www.mohw.go.kr/rss/board.es?mid=a10401000000&bid=0025"),
     ("고용노동부-보도자료", "https://www.moel.go.kr/rss/news.do"),
-    ("고용노동부-정책자료", "https://www.moel.go.kr/rss/policy.do"),
-    ("고용노동부-공지사항", "https://www.moel.go.kr/rss/notice.do"),
 ] + GOOGLE_SOURCES
 
 # ----------------------------
