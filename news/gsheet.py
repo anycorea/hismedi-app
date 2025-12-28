@@ -2,7 +2,7 @@ import os, json
 import gspread
 from google.oauth2.service_account import Credentials
 
-# ✅ summary 제거(요약 생성/저장 안 함)
+# summary 제거(요약 생성/저장 안 함)
 NEWS_HEADERS = [
   "published_at","source","title","url","url_canonical","tags",
   "title_hash","simhash","duplicate_of"
