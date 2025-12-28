@@ -38,18 +38,18 @@ NEGATIVE_HINTS = ["연예","스포츠","게임","가십","패션"]
 RSS_SOURCES = [
     # 정부·공공기관
     ("보건복지부(보도)", "http://www.mohw.go.kr/rss/board.es?mid=a10503000000&bid=0027"),
-    ("질병관리청(감염)", "https://www.korea.kr/rss/dept_kdca.xml"),
     ("식약처(약/기기)", "https://www.mfds.go.kr/rss/news.do"),
     ("심평원(공지)", "https://www.hira.or.kr/rss/board.do?bid=notice"),
     ("고용노동부(정책)", "https://www.moel.go.kr/rss/policy.do"),
     # 병원·의료 전문 언론
     ("병원신문", "https://www.khanews.com/rss/allArticle.xml"),
-    ("데일리메디", "http://www.dailymedi.com/rss/rss.php"),
-    ("메디게이트", "https://www.medigatenews.com/rss"),
-    ("메디칼타임즈", "http://www.medicaltimes.com/Users/News/RssFeed.xml"),
+    ("데일리메디", "https://news.google.com/rss/search?q=source:데일리메디&hl=ko&gl=KR&ceid=KR:ko"),
+    ("메디게이트", "https://news.google.com/rss/search?q=source:메디게이트뉴스&hl=ko&gl=KR&ceid=KR:ko"),
+    ("메디칼타임즈", "https://news.google.com/rss/search?q=source:메디칼타임즈&hl=ko&gl=KR&ceid=KR:ko"),
     ("의학신문", "http://www.bosa.co.kr/rss/allArticle.xml"),
     ("청년의사", "https://www.docdocdoc.co.kr/rss/allArticle.xml"),
     ("의협신문", "https://www.doctorsnews.co.kr/rss/allArticle.xml"),
+    ("라포르시안", "https://www.rapportian.com/rss/allSection.xml"),
 ]
 
 # ----------------------------
