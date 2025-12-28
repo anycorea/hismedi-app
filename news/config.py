@@ -32,20 +32,15 @@ KEYWORDS = {
 
 NEGATIVE_HINTS = ["연예","스포츠","게임","가십","패션"]
 
-
 # ----------------------------
 # RSS 고정 소스(전문지/정부 원문)
 # ----------------------------
 RSS_SOURCES = [
     # 1) 병원·의료 전문 언론 (RSS)
     ("병원신문", "https://www.khanews.com/rss/allArticle.xml"),
-    ("의학신문-전체", "http://www.bosa.co.kr/rss/allArticle.xml"),
-    ("의학신문-병원경영", "http://www.bosa.co.kr/rss/section.xml?section=010"),
+    ("의학신문", "http://www.bosa.co.kr/rss/allArticle.xml"),
     ("청년의사", "https://www.docdocdoc.co.kr/rss/allArticle.xml"),
-
-    # 1-2) 의료 언론
     ("의협신문", "https://www.doctorsnews.co.kr/rss/allArticle.xml"),
-
     # 2) 정부 (HTML, 안정)
     ("보건복지부-보도자료", "HTML:mohw"),
     ("고용노동부-보도자료", "HTML:moel"),
