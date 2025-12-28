@@ -43,9 +43,9 @@ RSS_SOURCES = [
     ("고용노동부(정책)", "https://www.moel.go.kr/rss/policy.do"),
     # 병원·의료 전문 언론
     ("병원신문", "https://www.khanews.com/rss/allArticle.xml"),
-    ("데일리메디", "https://news.google.com/rss/search?q=source:데일리메디&hl=ko&gl=KR&ceid=KR:ko"),
-    ("메디게이트", "https://news.google.com/rss/search?q=source:메디게이트뉴스&hl=ko&gl=KR&ceid=KR:ko"),
-    ("메디칼타임즈", "https://news.google.com/rss/search?q=source:메디칼타임즈&hl=ko&gl=KR&ceid=KR:ko"),
+    ("데일리메디", "https://www.dailymedi.com/rss/allArticle.xml"),
+    ("메디게이트", "https://www.medigatenews.com/rss/allArticle.xml"),
+    ("메디칼타임즈", "http://www.medicaltimes.com/rss/allArticle.xml"),
     ("의학신문", "http://www.bosa.co.kr/rss/allArticle.xml"),
     ("청년의사", "https://www.docdocdoc.co.kr/rss/allArticle.xml"),
     ("의협신문", "https://www.doctorsnews.co.kr/rss/allArticle.xml"),
