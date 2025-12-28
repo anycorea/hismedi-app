@@ -37,7 +37,7 @@ NEGATIVE_HINTS = ["연예","스포츠","게임","가십","패션"]
 # ----------------------------
 RSS_SOURCES = [
     # 정부·공공기관
-    ("보건복지부(정책)", "https://www.korea.kr/rss/dept_mohw.xml"),
+    ("보건복지부(보도)", "http://www.mohw.go.kr/rss/board.es?mid=a10503000000&bid=0027"),
     ("질병관리청(감염)", "https://www.korea.kr/rss/dept_kdca.xml"),
     ("식약처(약/기기)", "https://www.mfds.go.kr/rss/news.do"),
     ("심평원(공지)", "https://www.hira.or.kr/rss/board.do?bid=notice"),
