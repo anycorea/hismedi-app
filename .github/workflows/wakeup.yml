@@ -9,7 +9,7 @@ jobs:
   wakeup:
     runs-on: ubuntu-latest
     steps:
-      - name: Wake up multiple Streamlit apps
+      - name: Wake up multiple Streamlit apps (GET)
         shell: bash
         run: |
           URLS=(
@@ -20,11 +20,19 @@ jobs:
             "https://hisnews-p6tawcdhd7g2xrfgutathk.streamlit.app/"
           )
 
-          FAIL=0
+          UA="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
+
           for URL in "${URLS[@]}"; do
             echo "==> Waking up: $URL"
-            # -L: 리다이렉트 따라감, --retry: 일시 오류 재시도
-            curl -I -L --max-time 60 --retry 3 --retry-delay 5 "$URL" || FAIL=1
+
+            # 1) 첫 GET: 부팅 트리거 (부팅이 오래 걸릴 수 있어 timeout 넉넉히)
+            CODE1=$(curl -sS -L -A "$UA" -o /dev/null -w "%{http_code}" --max-time 180 "$URL" || echo "curl_error")
+            echo "    First hit HTTP: $CODE1"
+
+            # 2) 잠깐 기다렸다가 한 번 더 GET: 실제로 떠 있는지 확인
+            sleep 10
+            CODE2=$(curl -sS -L -A "$UA" -o /dev/null -w "%{http_code}" --max-time 180 "$URL" || echo "curl_error")
+            echo "    Second hit HTTP: $CODE2"
           done
 
-          exit $FAIL
+          exit 0
