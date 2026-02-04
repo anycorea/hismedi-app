@@ -39,7 +39,12 @@ for _, row in filtered.iterrows():
 
         with c1:
             if row.get("photo_url"):
-                st.image(row["photo_url"], use_container_width=True)
+                photo = str(row.get("photo_url", "")).strip()
+                if photo.startswith("http"):
+                    try:
+                        st.image(photo, use_container_width=True)
+                    except Exception:
+                        pass
 
         with c2:
             st.markdown(f"**{row['doctor_name']} {row.get('title','')}**")
