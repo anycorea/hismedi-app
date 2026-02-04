@@ -38,8 +38,9 @@ for _, row in filtered.iterrows():
         c1, c2 = st.columns([1, 4])
 
         with c1:
-            if row.get("photo_url"):
-                st.image(row["photo_url"], use_container_width=True)
+            photo = row.get("photo_url")
+            if isinstance(photo, str) and photo.strip():
+                st.image(photo, use_container_width=True)
 
         with c2:
             st.markdown(f"**{row['doctor_name']} {row.get('title','')}**")
