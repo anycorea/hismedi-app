@@ -1,167 +1,145 @@
 import streamlit as st
-from urllib.parse import urlsplit, urlunsplit, parse_qs, urlencode
+from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
 from src.sheets import load_departments, load_doctors
-from src.schedule import get_schedule  # 진료일정 자동추출 사용 중이면 유지
 
 st.set_page_config(page_title="Hismedi", layout="wide")
-
-# =========================
-# 스타일 (모바일 예약 최우선)
-# =========================
-st.markdown(
-    """
-<style>
-.block-container { padding-top: 1.2rem; padding-bottom: 2rem; }
-.big-cta a{
-  display:block;
-  text-align:center;
-  padding:14px 16px;
-  border-radius:14px;
-  font-weight:800;
-  text-decoration:none !important;
-  border:1px solid rgba(0,0,0,.12);
-  box-shadow: 0 6px 18px rgba(0,0,0,.06);
-}
-.card { padding: 10px 4px 2px 4px; }
-</style>
-""",
-    unsafe_allow_html=True,
-)
 
 st.title("Hismedi")
 st.caption("진료 예약을 가장 빠르게")
 
-# =========================
-# 데이터 로드
-# =========================
+# -----------------------------
+# helpers
+# -----------------------------
+def build_reservation_url(base_url: str, dept_id: str | int | None = None) -> str | None:
+    """
+    base_url: 예) https://hismedi.kr/medical/reservation_form.asp
+             예) https://hismedi.kr/medical/reservation_form.asp?sidx=7
+    dept_id: departments.dept_id (sidx로 사용)
+    """
+    if not base_url:
+        return None
+
+    base_url = str(base_url).strip()
+    if not base_url.startswith("http"):
+        return None
+
+    u = urlparse(base_url)
+    qs = parse_qs(u.query)
+
+    # dept_id가 있으면 sidx를 보장
+    if dept_id is not None and str(dept_id).strip() != "":
+        qs["sidx"] = [str(dept_id).strip()]
+
+    new_query = urlencode(qs, doseq=True)
+    out = urlunparse((u.scheme, u.netloc, u.path, u.params, new_query, u.fragment))
+
+    # 폼으로 바로 스크롤 (HTML에 form id="boardfrm" 가 있음)
+    if "#boardfrm" not in out:
+        out = out + "#boardfrm"
+
+    return out
+
+
+# -----------------------------
+# data
+# -----------------------------
 departments = load_departments()
 doctors = load_doctors()
 
-# =========================
-# 유틸: 예약 URL 생성
-# - anchor: boardfrm / bbsagree
-# - dept_id가 있으면 ?sidx=dept_id 를 넣어 "진료과 자동선택" 유도
-# =========================
-DEFAULT_RESERVE_BASE = "http://www.hismedi.kr/medical/reservation_form.asp"
-
-def build_reserve_url(base_url: str | None = None, dept_id: int | str | None = None, anchor: str | None = None) -> str:
-    url = (base_url or DEFAULT_RESERVE_BASE).strip()
-    if not url:
-        url = DEFAULT_RESERVE_BASE
-
-    parts = urlsplit(url)
-    q = parse_qs(parts.query)
-
-    # dept_id가 있으면 sidx를 진료과로 강제(자동선택 목적)
-    if dept_id is not None and str(dept_id).strip():
-        q["sidx"] = [str(dept_id).strip()]
-
-    new_query = urlencode(q, doseq=True)
-    rebuilt = urlunsplit((parts.scheme, parts.netloc, parts.path, new_query, ""))
-
-    if anchor:
-        return rebuilt + f"#{anchor}"
-    return rebuilt
-
-# =========================
-# 유틸: 안전 이미지
-# =========================
-def render_photo(photo_url: str | None):
-    photo = str(photo_url or "").strip()
-    if not (photo.startswith("http://") or photo.startswith("https://")):
-        return
-    try:
-        st.image(photo, use_container_width=True)
-    except Exception:
-        pass
-
-# =========================
-# 상단 예약 CTA (앵커 점프 2버튼)
-# =========================
 st.divider()
 
-# 공용 예약 링크가 시트에 있다면 base로 사용, 없으면 DEFAULT 사용
-global_base = ""
+# -----------------------------
+# TOP: 진료과 선택 + 진료 예약하기 (가장 우선)
+# -----------------------------
 if not departments.empty:
-    global_base = str(departments.iloc[0].get("dept_reservation_url") or "").strip()
-if not global_base:
-    global_base = DEFAULT_RESERVE_BASE
+    active_depts = departments[departments.get("is_active", True) == True].copy()
 
-reserve_form_url = build_reserve_url(global_base, dept_id=None, anchor="boardfrm")
-privacy_url = build_reserve_url(global_base, dept_id=None, anchor="bbsagree")
+    # 표시순서 있으면 정렬
+    if "display_order" in active_depts.columns:
+        active_depts = active_depts.sort_values("display_order", na_position="last")
 
-c1, c2 = st.columns(2)
-with c1:
-    st.markdown(f'<div class="big-cta"><a href="{reserve_form_url}" target="_blank">예약 폼 바로가기</a></div>', unsafe_allow_html=True)
-with c2:
-    st.markdown(f'<div class="big-cta"><a href="{privacy_url}" target="_blank">개인정보 동의/처리방침</a></div>', unsafe_allow_html=True)
+    dept_names = active_depts["dept_name"].fillna("").tolist()
+    dept_map = dict(zip(active_depts["dept_name"], active_depts["dept_id"]))
+
+    colA, colB = st.columns([3, 2])
+    with colA:
+        selected_dept_name = st.selectbox("진료과 선택", dept_names, index=0)
+    with colB:
+        dept_id = dept_map.get(selected_dept_name)
+
+        # dept_reservation_url이 시트에 있고, 거기에 sidx를 강제 주입
+        base = active_depts[active_depts["dept_name"] == selected_dept_name].iloc[0].get("dept_reservation_url")
+        reserve_url = build_reservation_url(base, dept_id=dept_id)
+
+        if reserve_url:
+            st.link_button("진료 예약하기", reserve_url, use_container_width=True)
 
 st.divider()
 
-# =========================
+# -----------------------------
 # 검색
-# =========================
-q = st.text_input("의사 / 진료과 검색", placeholder="예) 정형외과, 문종렬").strip()
+# -----------------------------
+q = st.text_input("의사 / 진료과 검색", placeholder="예) 정형외과, 문종렬")
 
+filtered = doctors
 if q:
-    filtered = doctors[
-        doctors["doctor_name"].str.contains(q, na=False)
-        | doctors["dept_name"].str.contains(q, na=False)
-    ]
-else:
-    filtered = doctors
+    q = q.strip()
+    name_ok = doctors.get("doctor_name", "").astype(str).str.contains(q, na=False)
+    dept_ok = doctors.get("dept_name", "").astype(str).str.contains(q, na=False)
+    filtered = doctors[name_ok | dept_ok]
 
-# =========================
+# 표시순서가 있으면 정렬
+if "display_order" in filtered.columns:
+    filtered = filtered.sort_values("display_order", na_position="last")
+
+# -----------------------------
 # 의사 리스트
-# - 예약하기: 해당 의사의 dept_id로 ?sidx=dept_id 만들어서 "진료과 자동선택" 유도
-# - 앵커: #boardfrm 로 폼 위치 바로 점프
-# =========================
+# -----------------------------
 for _, row in filtered.iterrows():
     with st.container():
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-
         c1, c2 = st.columns([1, 4])
 
+        # 사진
         with c1:
-            render_photo(row.get("photo_url"))
+            photo = str(row.get("photo_url", "")).strip()
+            if photo.startswith("http"):
+                try:
+                    st.image(photo, use_container_width=True)
+                except Exception:
+                    st.empty()
 
         with c2:
-            doctor_name = row.get("doctor_name", "")
-            title = row.get("title", "")
-            dept_name = row.get("dept_name", "")
-            dept_id = row.get("dept_id", None)
+            doctor_name = str(row.get("doctor_name", "")).strip()
+            title = str(row.get("title", "")).strip()
+            dept_name = str(row.get("dept_name", "")).strip()
 
-            st.markdown(f"**{doctor_name} {title}**")
+            st.markdown(f"**{doctor_name} {title}**" if title else f"**{doctor_name}**")
             if dept_name:
                 st.caption(dept_name)
 
-            # 상세 링크는 그대로 사용
-            detail = str(row.get("doctor_detail_url") or "").strip()
+            # 예약: 의사별 링크 우선, 없으면 진료과 링크(+sidx 강제)
+            doctor_reserve = str(row.get("doctor_reservation_url", "")).strip()
+            dept_reserve = str(row.get("dept_reservation_url", "")).strip()
+            dept_id = row.get("dept_id")
 
-            # 예약 링크: 서버가 sidx로 진료과를 선택하는 구조를 사용하므로 dept_id로 생성
-            # (row의 doctor_reservation_url이 staffidx 기반으로 잘못 채워져 있어도 안전)
-            reserve_url = build_reserve_url(global_base, dept_id=dept_id, anchor="boardfrm")
-            privacy_url2 = build_reserve_url(global_base, dept_id=dept_id, anchor="bbsagree")
+            reserve_url = None
+            if doctor_reserve.startswith("http"):
+                reserve_url = build_reservation_url(doctor_reserve, dept_id=None)  # doctor_reserve에 sidx가 있으면 그대로
+            else:
+                reserve_url = build_reservation_url(dept_reserve, dept_id=dept_id)
 
-            b1, b2, b3 = st.columns(3)
+            # 상세(진료일정/상세)
+            detail = str(row.get("doctor_detail_url", "")).strip()
+            if detail and not detail.startswith("http"):
+                detail = ""
+
+            b1, b2 = st.columns(2)
             with b1:
-                st.link_button("예약하기", reserve_url, use_container_width=True)
+                if reserve_url:
+                    st.link_button("진료 예약하기", reserve_url, use_container_width=True)
             with b2:
-                st.link_button("개인정보", privacy_url2, use_container_width=True)
-            with b3:
                 if detail:
                     st.link_button("진료일정 / 상세", detail, use_container_width=True)
 
-            # 진료일정 자동 요약 (detail이 있을 때만)
-            if detail:
-                schedule = get_schedule(detail)
-                if schedule:
-                    lines = [f"- {k}: {v}" for k, v in schedule.items()]
-                    st.markdown("**진료일정(요약)**")
-                    st.markdown("\n".join(lines))
-                else:
-                    st.caption("진료일정: 상세보기에서 확인")
-
-        st.markdown("</div>", unsafe_allow_html=True)
         st.divider()
