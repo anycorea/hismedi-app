@@ -4,7 +4,6 @@ from src.sheets import load_departments
 
 st.set_page_config(page_title="히즈메디병원", layout="wide")
 
-# ---- tiny utils ----
 S = lambda x: "" if x is None else str(x).strip()
 
 def ok(x):
@@ -27,18 +26,20 @@ def A(lbl, url, cls, k):
 
 CALL = "1588-0223"
 
-# ---- CSS (minimal + mobile polish) ----
 st.markdown("""
 <style>
-/* Streamlit UI hide (may vary by deploy env) */
+/* Streamlit UI hide (env-dependent) */
 [data-testid="stToolbar"]{display:none !important;}
 [data-testid="stDecoration"]{display:none !important;}
 #MainMenu{visibility:hidden;}
 footer{visibility:hidden;}
 .viewerBadge_container__1QSob,.viewerBadge_link__1S137,.viewerBadge_text__1JaDK{display:none !important;}
 
-/* Top spacing (avoid title crop) */
-div.block-container{padding-top:1.50rem; padding-bottom:2rem;}
+/* Fix title crop: give header breathing room */
+header{padding-top:1.2rem;}
+
+/* Spacing */
+div.block-container{padding-top:.75rem; padding-bottom:2rem;}
 h1{margin-top:.15rem; padding-top:0; line-height:1.15;}
 
 /* Call button */
@@ -59,7 +60,7 @@ h1{margin-top:.15rem; padding-top:0; line-height:1.15;}
 
 /* Dept cards */
 .hm-dept{padding:14px 0; border-bottom:1px solid rgba(49,51,63,.08);}
-.hm-title{font-size:22px; font-weight:900; margin:0 0 10px;}
+.hm-title{font-size:16px; font-weight:900; margin:0 0 10px;} /* ↓ 진료과 이름 살짝 줄임 */
 .hm-row{display:flex; gap:10px; flex-wrap:nowrap; width:100%;}
 .hm-btn{flex:1 1 0; text-align:center; padding:10px 8px; border-radius:10px; white-space:nowrap;
   text-decoration:none; font-weight:800; font-size:14px; color:inherit;
@@ -70,11 +71,9 @@ h1{margin-top:.15rem; padding-top:0; line-height:1.15;}
 </style>
 """, unsafe_allow_html=True)
 
-# ---- header + call button ----
 st.title("히즈메디병원")
 st.markdown(f'<a class="hm-call" href="tel:{CALL}">📞 대표번호 전화하기 · {CALL}</a>', unsafe_allow_html=True)
 
-# ---- 안내문 (replaced) ----
 st.markdown(f"""
 <div class="hm-info">
   <div class="title">안내</div>
@@ -114,7 +113,6 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# ---- data ----
 df = load_departments()
 if df is None or df.empty:
     st.info("현재 진료과 정보가 없습니다."); st.stop()
@@ -125,7 +123,6 @@ for c in ("dept_id","dept_name","dept_reservation_url","dept_detail_url","dept_s
 df = df[df["is_active"].apply(ok)]
 if "display_order" in df.columns: df = df.sort_values("display_order", na_position="last")
 
-# ---- render ----
 for i, (_, r) in enumerate(df.iterrows()):
     did, name = r.get("dept_id"), (S(r.get("dept_name")) or "진료과")
     ped = "소아청소년과" in name.replace(" ", "")
