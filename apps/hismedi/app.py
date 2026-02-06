@@ -38,7 +38,7 @@ footer{visibility:hidden;}
 .viewerBadge_container__1QSob,.viewerBadge_link__1S137,.viewerBadge_text__1JaDK{display:none !important;}
 
 /* Top spacing (avoid title crop) */
-div.block-container{padding-top:.75rem; padding-bottom:2rem;}
+div.block-container{padding-top:1.15rem; padding-bottom:2rem;}
 h1{margin-top:.15rem; padding-top:0; line-height:1.15;}
 
 /* Call button */
