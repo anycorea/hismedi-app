@@ -60,6 +60,7 @@ div.block-container{padding-top: .6rem; padding-bottom: 2rem;}
 </style>
 """, unsafe_allow_html=True)
 
+st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
 st.title("히즈메디병원")
 st.markdown(f'<a class="hm-call" href="tel:{CALL}">📞 대표번호 전화하기 · {CALL}</a>', unsafe_allow_html=True)
 
