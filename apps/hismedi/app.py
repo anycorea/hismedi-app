@@ -3,104 +3,6 @@ from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 from src.sheets import load_departments
 
 st.set_page_config(page_title="히즈메디병원", layout="wide")
-
-# -----------------------------
-# helpers
-# -----------------------------
-def safe_str(x) -> str:
-    return "" if x is None else str(x).strip()
-
-def truthy(x) -> bool:
-    s = safe_str(x).lower()
-    if s in ("true", "1", "y", "yes"):
-        return True
-    if s in ("false", "0", "n", "no", ""):
-        return False
-    return bool(x)
-
-def build_url_with_sidx(base_url: str, dept_id=None) -> str | None:
-    base_url = safe_str(base_url)
-    if not base_url or not base_url.startswith("http"):
-        return None
-
-    u = urlparse(base_url)
-    qs = parse_qs(u.query)
-
-    if dept_id is not None and safe_str(dept_id) != "":
-        qs["sidx"] = [safe_str(dept_id)]
-
-    new_query = urlencode(qs, doseq=True)
-    return urlunparse((u.scheme, u.netloc, u.path, u.params, new_query, u.fragment))
-
-def add_anchor(url: str | None, anchor: str) -> str | None:
-    if not url:
-        return None
-    return url if anchor in url else f"{url}{anchor}"
-
-def btn_html(label: str, url: str | None, kind: str, key: str) -> str:
-    """
-    kind: reserve / info / schedule
-    url 없으면 비활성 버튼처럼 보이게
-    key는 HTML id에 넣어서 유니크하게
-    """
-    cls = f"hm-btn hm-{kind}"
-    if url and url.startswith("http"):
-        return f'<a id="{key}" class="{cls}" href="{url}" target="_blank" rel="noopener noreferrer">{label}</a>'
-    return f'<span id="{key}" class="{cls} hm-disabled">{label}</span>'
-
-# -----------------------------
-# CSS (모바일에서도 1줄 유지: nowrap)
-# -----------------------------
-st.markdown(
-    """
-<style>
-/* 카드 내부 버튼줄: 항상 한 줄 */
-.hm-row{
-  display:flex;
-  gap:10px;
-  flex-wrap:nowrap;          /* 줄바꿈 금지 */
-  width:100%;
-  margin-top:10px;
-}
-
-/* 버튼 공통 */
-.hm-btn{
-  flex:1 1 0;                /* 3개가 동일 비율로 가로폭 분배 */
-  text-align:center;
-  padding:10px 8px;
-  border-radius:10px;
-  text-decoration:none;
-  font-weight:600;
-  font-size:14px;
-  border:1px solid rgba(49,51,63,0.2);
-  background: rgba(49,51,63,0.03);
-  color: inherit;
-  white-space:nowrap;        /* 글자도 줄바꿈 금지 */
-}
-
-/* 강조(예약) */
-.hm-reserve{
-  border:1px solid rgba(255, 75, 75, 0.6);
-}
-
-/* 비활성 */
-.hm-disabled{
-  opacity:0.45;
-  cursor:not-allowed;
-}
-
-/* 아주 작은 화면에서 글자가 너무 길면 축약 느낌(잘림) */
-@media (max-width: 360px){
-  .hm-btn{ font-size:13px; padding:9px 6px; }
-}
-</style>
-""",
-    unsafe_allow_html=True,
-)
-
-# -----------------------------
-# header
-# -----------------------------
 st.title("히즈메디병원")
 
 st.markdown(
@@ -120,76 +22,89 @@ st.markdown(
 **ㅇ 점심시간 12:30~13:30**
 
 **※ 대표번호 : ☏1588-0223**
-""",
+"""
 )
 
-st.divider()
+# --- CSS: 모바일 1열 + 버튼 3개 한 줄(줄바꿈 금지) ---
+st.markdown(
+    """
+<style>
+.hm-dept{padding:14px 0; border-bottom:1px solid rgba(49,51,63,0.08);}
+.hm-title{font-size:22px; font-weight:800; margin:0 0 10px 0;}
+.hm-row{display:flex; gap:10px; flex-wrap:nowrap; width:100%;}
+.hm-btn{
+  flex:1 1 0; text-align:center; padding:10px 8px; border-radius:10px;
+  text-decoration:none; font-weight:700; font-size:14px;
+  border:1px solid rgba(49,51,63,0.18); background:rgba(49,51,63,0.02);
+  color:inherit; white-space:nowrap;
+}
+.hm-reserve{border-color:rgba(255,75,75,0.6);}
+.hm-disabled{opacity:0.45; cursor:not-allowed;}
+</style>
+""",
+    unsafe_allow_html=True,
+)
 
-# -----------------------------
-# data
-# -----------------------------
-departments = load_departments()
+def s(x):  # safe str
+    return "" if x is None else str(x).strip()
 
-if departments is None or departments.empty:
+def is_true(x):
+    v = s(x).lower()
+    return v in ("true", "1", "y", "yes") if v in ("true", "false", "1", "0", "y", "n", "yes", "no", "") else bool(x)
+
+def with_sidx(url, dept_id):
+    url = s(url)
+    if not url.startswith("http"):
+        return None
+    u = urlparse(url)
+    qs = parse_qs(u.query)
+    if s(dept_id):
+        qs["sidx"] = [s(dept_id)]
+    q = urlencode(qs, doseq=True)
+    return urlunparse((u.scheme, u.netloc, u.path, u.params, q, u.fragment))
+
+def with_anchor(url, anchor):
+    if not url:
+        return None
+    return url if anchor in url else url + anchor
+
+def btn(label, url, cls, key):
+    if url and url.startswith("http"):
+        return f'<a id="{key}" class="hm-btn {cls}" href="{url}" target="_blank" rel="noopener noreferrer">{label}</a>'
+    return f'<span id="{key}" class="hm-btn {cls} hm-disabled">{label}</span>'
+
+df = load_departments()
+if df is None or df.empty:
     st.info("현재 진료과 정보가 없습니다.")
     st.stop()
 
-dept_df = departments.copy()
+for c in ("dept_id","dept_name","dept_reservation_url","dept_detail_url","dept_schedule_url","display_order","is_active"):
+    if c not in df.columns:
+        df[c] = ""
 
-need_cols = [
-    "dept_id",
-    "dept_name",
-    "dept_reservation_url",
-    "dept_detail_url",
-    "dept_schedule_url",
-    "display_order",
-    "is_active",
-]
-for c in need_cols:
-    if c not in dept_df.columns:
-        dept_df[c] = ""
+df = df[df["is_active"].apply(is_true)]
+if "display_order" in df.columns:
+    df = df.sort_values("display_order", na_position="last")
 
-dept_df = dept_df[dept_df["is_active"].apply(truthy)]
+for i, (_, r) in enumerate(df.iterrows()):
+    dept_id = r.get("dept_id")
+    dept_name = s(r.get("dept_name")) or "진료과"
 
-if dept_df.empty:
-    st.info("현재 활성화된 진료과가 없습니다.")
-    st.stop()
+    reserve = with_anchor(with_sidx(r.get("dept_reservation_url"), dept_id), "#boardfrm")
+    detail = with_sidx(r.get("dept_detail_url"), dept_id) if s(r.get("dept_detail_url")).startswith("http") else s(r.get("dept_detail_url"))
+    sched  = with_sidx(r.get("dept_schedule_url"), dept_id) if s(r.get("dept_schedule_url")).startswith("http") else s(r.get("dept_schedule_url"))
 
-if "display_order" in dept_df.columns:
-    dept_df = dept_df.sort_values("display_order", na_position="last")
-
-dept_df["dept_name"] = dept_df["dept_name"].astype(str)
-
-# -----------------------------
-# cards (2열)
-# -----------------------------
-cols = st.columns(2, gap="large")
-
-for i, (_, row) in enumerate(dept_df.iterrows()):
-    dept_id = row.get("dept_id")
-    dept_name = safe_str(row.get("dept_name"))
-
-    base_reserve = row.get("dept_reservation_url")
-    base_detail = row.get("dept_detail_url")
-    base_schedule = row.get("dept_schedule_url")
-
-    reserve_url = add_anchor(build_url_with_sidx(base_reserve, dept_id), "#boardfrm")
-    detail_url = build_url_with_sidx(base_detail, dept_id) if safe_str(base_detail).startswith("http") else safe_str(base_detail)
-    schedule_url = build_url_with_sidx(base_schedule, dept_id) if safe_str(base_schedule).startswith("http") else safe_str(base_schedule)
-
-    # 유니크 key 만들기 (중복 방지)
-    k_base = f"dept_{safe_str(dept_id) or i}"
-
-    with cols[i % 2]:
-        with st.container(border=True):
-            st.markdown(f"### {dept_name}")
-
-            # 버튼 3개를 "항상 한 줄"로
-            row_html = f"""
-<div class="hm-row">
-  {btn_html("예약", reserve_url, "reserve", f"{k_base}_reserve")}
-  {btn_html("의료진", detail_url, "info", f"{k_base}_detail")}
-  {btn_html("진료일정", schedule_url, "schedule", f"{k_base}_schedule")}
+    k = f"dept_{s(dept_id) or i}"
+    st.markdown(
+        f"""
+<div class="hm-dept">
+  <div class="hm-title">{dept_name}</div>
+  <div class="hm-row">
+    {btn("예약", reserve, "hm-reserve", f"{k}_r")}
+    {btn("의료진", detail, "", f"{k}_d")}
+    {btn("진료일정", sched, "", f"{k}_s")}
+  </div>
 </div>
-"""
-            st.markdown(row_html, unsafe_allow_html=True)
+""",
+        unsafe_allow_html=True,
+    )
