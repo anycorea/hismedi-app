@@ -10,6 +10,14 @@ st.set_page_config(page_title="히즈메디병원", layout="wide")
 def safe_str(x) -> str:
     return "" if x is None else str(x).strip()
 
+def truthy(x) -> bool:
+    s = safe_str(x).lower()
+    if s in ("true", "1", "y", "yes"):
+        return True
+    if s in ("false", "0", "n", "no", ""):
+        return False
+    return bool(x)
+
 def build_url_with_sidx(base_url: str, dept_id=None) -> str | None:
     base_url = safe_str(base_url)
     if not base_url or not base_url.startswith("http"):
@@ -22,32 +30,17 @@ def build_url_with_sidx(base_url: str, dept_id=None) -> str | None:
         qs["sidx"] = [safe_str(dept_id)]
 
     new_query = urlencode(qs, doseq=True)
-    out = urlunparse((u.scheme, u.netloc, u.path, u.params, new_query, u.fragment))
-    return out
+    return urlunparse((u.scheme, u.netloc, u.path, u.params, new_query, u.fragment))
 
 def add_anchor(url: str | None, anchor: str) -> str | None:
     if not url:
         return None
     return url if anchor in url else f"{url}{anchor}"
 
-def truthy(x) -> bool:
-    # 구글시트에서 TRUE/FALSE, True/False, 빈칸 등 섞일 수 있어서 안전 처리
-    s = safe_str(x).lower()
-    if s in ("true", "1", "y", "yes"):
-        return True
-    if s in ("false", "0", "n", "no", ""):
-        return False
-    return bool(x)
-
 # -----------------------------
-# header (로고 -> 실패 시 텍스트)
+# header (텍스트만)
 # -----------------------------
-LOGO_URL = "http://www.hismedi.kr/images/h1_logo.gif"
-
-try:
-    st.image(LOGO_URL, width=220)
-except Exception:
-    st.title("히즈메디병원")
+st.title("히즈메디병원")
 
 # -----------------------------
 # 안내문
@@ -85,7 +78,6 @@ if departments is None or departments.empty:
 
 dept_df = departments.copy()
 
-# 필수 컬럼 보정(없어도 앱이 죽지 않게)
 need_cols = [
     "dept_id",
     "dept_name",
@@ -99,91 +91,55 @@ for c in need_cols:
     if c not in dept_df.columns:
         dept_df[c] = ""
 
-# 활성만 노출(컬럼이 있는 경우)
+# 활성만 노출
 dept_df = dept_df[dept_df["is_active"].apply(truthy)]
 
-# 정렬(있으면)
+# 정렬
 if "display_order" in dept_df.columns:
     dept_df = dept_df.sort_values("display_order", na_position="last")
 
 dept_df["dept_name"] = dept_df["dept_name"].astype(str)
 
-st.subheader("진료과")
-
-# 선택 상태
-if "selected_dept_id" not in st.session_state:
-    st.session_state.selected_dept_id = None
-
-# 모바일 고려: 2열 카드
+# -----------------------------
+# 진료과 카드: 버튼 3개를 카드 안에 배치
+# -----------------------------
 cols = st.columns(2, gap="large")
 
-# 카드 렌더
 for i, (_, row) in enumerate(dept_df.iterrows()):
     dept_id = row.get("dept_id")
     dept_name = safe_str(row.get("dept_name"))
+
+    base_reserve = row.get("dept_reservation_url")
+    base_detail = row.get("dept_detail_url")
+    base_schedule = row.get("dept_schedule_url")
+
+    # 예약: sidx 포함 + 폼으로 점프(#boardfrm)
+    reserve_url = add_anchor(build_url_with_sidx(base_reserve, dept_id), "#boardfrm")
+
+    # 의료진/일정: 시트에 URL 있으면 그대로(필요 시 sidx도 보강)
+    detail_url = build_url_with_sidx(base_detail, dept_id) if safe_str(base_detail).startswith("http") else safe_str(base_detail)
+    schedule_url = build_url_with_sidx(base_schedule, dept_id) if safe_str(base_schedule).startswith("http") else safe_str(base_schedule)
 
     with cols[i % 2]:
         with st.container(border=True):
             st.markdown(f"### {dept_name}")
 
-            selected = (st.session_state.selected_dept_id == dept_id)
+            b1, b2, b3 = st.columns(3, gap="small")
 
-            if st.button(
-                "선택됨" if selected else "선택하기",
-                key=f"pick_{dept_id}",
-                use_container_width=True,
-                disabled=selected,
-            ):
-                st.session_state.selected_dept_id = dept_id
-                st.rerun()
+            with b1:
+                if reserve_url:
+                    st.link_button("예약", reserve_url, use_container_width=True)
+                else:
+                    st.button("예약", use_container_width=True, disabled=True)
 
-st.divider()
+            with b2:
+                if detail_url and detail_url.startswith("http"):
+                    st.link_button("의료진", detail_url, use_container_width=True)
+                else:
+                    st.button("의료진", use_container_width=True, disabled=True)
 
-# -----------------------------
-# 선택된 진료과 -> 버튼 3개 펼치기
-# -----------------------------
-selected_dept_id = st.session_state.selected_dept_id
-
-if selected_dept_id is None:
-    st.info("원하시는 진료과를 선택해 주세요.")
-    st.stop()
-
-selected_row = dept_df[dept_df["dept_id"] == selected_dept_id].head(1)
-if selected_row.empty:
-    st.info("선택된 진료과 정보를 찾을 수 없습니다.")
-    st.stop()
-
-dept_name = safe_str(selected_row.iloc[0].get("dept_name"))
-st.subheader(f"선택된 진료과: {dept_name}")
-
-base_reserve = selected_row.iloc[0].get("dept_reservation_url")
-base_detail = selected_row.iloc[0].get("dept_detail_url")
-base_schedule = selected_row.iloc[0].get("dept_schedule_url")
-
-# 예약: sidx 강제 + 폼으로 점프(#boardfrm)
-reserve_url = build_url_with_sidx(base_reserve, selected_dept_id)
-reserve_url = add_anchor(reserve_url, "#boardfrm")
-
-# 의료진/일정: 시트에 URL이 있으면 그대로 사용, 없으면 비활성
-detail_url = build_url_with_sidx(base_detail, selected_dept_id) if safe_str(base_detail).startswith("http") else safe_str(base_detail)
-schedule_url = build_url_with_sidx(base_schedule, selected_dept_id) if safe_str(base_schedule).startswith("http") else safe_str(base_schedule)
-
-b1, b2, b3 = st.columns(3, gap="large")
-
-with b1:
-    if reserve_url:
-        st.link_button("예약하기", reserve_url, use_container_width=True)
-    else:
-        st.button("예약하기", use_container_width=True, disabled=True)
-
-with b2:
-    if detail_url and detail_url.startswith("http"):
-        st.link_button("의료진 정보", detail_url, use_container_width=True)
-    else:
-        st.button("의료진 정보", use_container_width=True, disabled=True)
-
-with b3:
-    if schedule_url and schedule_url.startswith("http"):
-        st.link_button("진료일정", schedule_url, use_container_width=True)
-    else:
-        st.button("진료일정", use_container_width=True, disabled=True)
+            with b3:
+                if schedule_url and schedule_url.startswith("http"):
+                    st.link_button("진료일정", schedule_url, use_container_width=True)
+                else:
+                    st.button("진료일정", use_container_width=True, disabled=True)
