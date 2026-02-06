@@ -27,9 +27,9 @@ def A(lbl, url, cls):
 
 st.markdown("""
 <style>
-/* ✅ 제목 잘림 대응: header만 보정 */
-header{padding-top: calc(env(safe-area-inset-top) + 1.3rem);}
-div.block-container{padding-top: .6rem; padding-bottom: 2rem;}
+/* 상단 잘림 방지: h1 직접 수정 금지(잘림 원인), 대신 레이아웃만 */
+header{padding-top:calc(env(safe-area-inset-top) + .6rem);}
+div.block-container{padding-top:.6rem; padding-bottom:2rem;}
 
 /* Call */
 .hm-call{display:block; margin:.2rem 0 .55rem; padding:12px; border-radius:14px;
@@ -49,7 +49,7 @@ div.block-container{padding-top: .6rem; padding-bottom: 2rem;}
 
 /* Dept */
 .hm-dept{padding:14px 0; border-bottom:1px solid rgba(49,51,63,.08);}
-.hm-title{font-size:16px; font-weight:900; margin:0 0 10px;} /* 진료과 이름 살짝 줄임 */
+.hm-title{font-size:16px; font-weight:900; margin:0 0 10px;}
 .hm-row{display:flex; gap:10px; flex-wrap:nowrap; width:100%;}
 .hm-btn{flex:1 1 0; text-align:center; padding:10px 8px; border-radius:10px; white-space:nowrap;
   text-decoration:none; font-weight:800; font-size:14px; color:inherit;
@@ -60,7 +60,9 @@ div.block-container{padding-top: .6rem; padding-bottom: 2rem;}
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
+# (필요 시 아주 미세하게만 아래로 내림: 1줄)
+st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+
 st.title("히즈메디병원")
 st.markdown(f'<a class="hm-call" href="tel:{CALL}">📞 대표번호 전화하기 · {CALL}</a>', unsafe_allow_html=True)
 
@@ -107,7 +109,8 @@ df = load_departments()
 if df is None or df.empty:
     st.info("현재 진료과 정보가 없습니다."); st.stop()
 
-for c in ("dept_id","dept_name","dept_reservation_url","dept_detail_url","dept_schedule_url","display_order","is_active"):
+# ✅ doctors 시트는 미사용. departments에 새 컬럼만 추가
+for c in ("dept_id","dept_name","dept_reservation_url","dept_schedule_detail_url","display_order","is_active"):
     if c not in df.columns: df[c] = ""
 
 df = df[df["is_active"].apply(ok)]
@@ -120,16 +123,16 @@ for i, (_, r) in enumerate(df.iterrows()):
     ped = "소아청소년과" in name.replace(" ", "")
 
     reserve = None if ped else anc(sidx(r.get("dept_reservation_url"), did), "#boardfrm")
-    detail  = sidx(r.get("dept_detail_url"), did) if S(r.get("dept_detail_url")).startswith("http") else S(r.get("dept_detail_url"))
-    sched   = sidx(r.get("dept_schedule_url"), did) if S(r.get("dept_schedule_url")).startswith("http") else S(r.get("dept_schedule_url"))
+
+    # ✅ 통합 버튼: 의사정보·진료시간표 (departments.dept_schedule_detail_url)
+    doc_sched = sidx(r.get("dept_schedule_detail_url"), did) if S(r.get("dept_schedule_detail_url")).startswith("http") else S(r.get("dept_schedule_detail_url"))
 
     st.markdown(f"""
 <div class="hm-dept">
   <div class="hm-title">{name}</div>
   <div class="hm-row">
     {A("예약", reserve, "hm-r")}
-    {A("의료진", detail, "")}
-    {A("진료일정", sched, "")}
+    {A("의사정보·진료시간표", doc_sched, "")}
   </div>
   {('<div class="hm-sub">예약 없이 당일진료</div>' if ped else '')}
 </div>
