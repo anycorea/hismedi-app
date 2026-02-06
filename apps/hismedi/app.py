@@ -30,7 +30,7 @@ st.markdown("""
 /* ✅ 제목 잘림 대응: 모바일 safe-area + Streamlit header 높이 보정 (Fork 보이게 유지) */
 header{padding-top:calc(env(safe-area-inset-top) + .9rem);}
 div.block-container{padding-top:.6rem; padding-bottom:2rem;}
-h1{margin:.15rem 0 .35rem; line-height:1.15;}
+h1{margin:.35rem 0 .35rem; padding-top:.15rem;}
 
 /* Call */
 .hm-call{display:block; margin:.2rem 0 .55rem; padding:12px; border-radius:14px;
