@@ -2,222 +2,156 @@ import streamlit as st
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 from src.sheets import load_departments
 
-# 페이지 기본 설정
 st.set_page_config(page_title="히즈메디병원", layout="wide")
 
-# 상수 및 함수 정의 (이전 코드와 동일)
-CALL = "1588-0223"
 S = lambda x: "" if x is None else str(x).strip()
-ok = lambda x: x.lower() in ("true", "1", "y", "yes") if isinstance(x, str) else bool(x)
-sidx = lambda url, did: urlunparse((urlparse(url).scheme, urlparse(url).netloc, urlparse(url).path, urlparse(url).params, urlencode({"sidx": [did]}, doseq=True), urlparse(url).fragment)) if url and url.startswith("http") and did else None
-anc = lambda url, a: url + a if url and a not in url else url if url else None
+CALL = "1588-0223"
 
-# HTML 버튼 생성 함수 (스타일 변경)
+def ok(x):
+    v = S(x).lower()
+    return v in ("true", "1", "y", "yes") if v in ("true","false","1","0","y","n","yes","no","") else bool(x)
+
+def sidx(url, did):
+    url = S(url)
+    if not url.startswith("http"): return None
+    u = urlparse(url); q = parse_qs(u.query)
+    if S(did): q["sidx"] = [S(did)]
+    return urlunparse((u.scheme, u.netloc, u.path, u.params, urlencode(q, doseq=True), u.fragment))
+
+def anc(url, a): return None if not url else (url if a in url else url + a)
+
 def A(lbl, url, cls):
     if url and url.startswith("http"):
         return f'<a class="hm-btn {cls}" href="{url}" target="_blank" rel="noopener noreferrer">{lbl}</a>'
     return f'<span class="hm-btn {cls} hm-dis">{lbl}</span>'
 
-# CSS 스타일 정의 (폰트, 색상, 버튼 스타일 조정)
 st.markdown("""
 <style>
-/* 전체 폰트 사이즈 및 색상 설정 */
+/* 상단 여백 최소화 */
+header {
+    padding-top: calc(env(safe-area-inset-top) + .2rem);
+}
+div.block-container {
+    padding-top: .2rem;
+    padding-bottom: 1rem;
+    margin-top: -1rem; /* 추가적인 margin 조정 */
+}
+
+/* 폰트 크기 및 색상 */
 body {
     font-size: 16px;
     color: #333;
-    font-family: sans-serif; /* 기본 폰트 변경 */
-}
-
-/* 초기화 스타일 */
-ul {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-}
-
-/* 상단 여백 제거 (최대) */
-.appview-container .main .block-container {
-    padding-top: 0.2rem !important;
-    margin-top: -2rem !important;
-}
-
-/* Streamlit 앱 전체 컨테이너 조정 */
-.stApp {
-    margin-top: -40px;
 }
 
 /* 제목 스타일 */
 h1 {
-    font-size: 28px !important;
+    font-size: 24px;
     font-weight: bold;
-    color: #3498db; /* 색상 변경 */
-    margin-bottom: 10px;
-    text-align: center; /* 가운데 정렬 */
+    margin-bottom: 0.5rem;
 }
 
-/* 대표번호 전화하기 스타일 */
+/* Call */
 .hm-call {
     display: block;
-    margin: 10px auto; /* 가운데 정렬 및 상하 간격 */
-    padding: 12px 20px;
-    border-radius: 8px;
+    margin: 0.5rem auto; /* 가운데 정렬 */
+    padding: 12px;
+    border-radius: 12px;
     text-decoration: none;
-    font-weight: bold;
+    font-weight: 900;
     text-align: center;
-    border: 2px solid #3498db; /* 테두리 색상 변경 */
-    background: white;
-    color: #3498db; /* 글자 색상 변경 */
-    transition: background-color 0.3s ease, color 0.3s ease;
-    font-size: 18px; /* 크게 */
-    width: 80%; /* 너비 조정 */
+    border: 1px solid rgba(49,51,63,.18);
+    background: rgba(49,51,63,.05);
+    color: inherit;
+    max-width: 300px; /* 최대 너비 설정 */
+}
+
+/* Info */
+.hm-info {
+    margin: 0.5rem auto; /* 가운데 정렬 */
+    padding: 0.85rem;
+    border-radius: 12px;
+    border: 1px solid rgba(49,51,63,.10);
+    background: rgba(49,51,63,.02);
+    font-size: 0.9rem;
+    line-height: 1.4;
+    color: rgba(49,51,63,.86);
     max-width: 400px; /* 최대 너비 설정 */
 }
-
-.hm-call:hover {
-    background-color: #3498db;
-    color: white;
-}
-
-/* 안내 문구 스타일 */
-.hm-info {
-    margin: 1rem auto;
-    padding: 1rem;
-    border-radius: 10px;
-    border: 1px solid #ddd;
-    background: #f9f9f9;
-    font-size: 1rem;
-    line-height: 1.6;
-    color: #555;
-    width: 90%;
-    max-width: 600px;
-}
-
 .hm-info .title {
-    font-size: 1.2rem;
-    font-weight: bold;
-    color: #333;
-    margin-bottom: 0.5rem;
+    font-weight: 900;
+    margin-bottom: 0.25rem;
 }
-
 .hm-info .section {
-    margin-top: 1rem;
-    padding-top: 0.8rem;
-    border-top: 1px solid #eee;
+    margin-top: 0.6rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid rgba(49,51,63,.08);
 }
-
 .hm-info .label {
-    font-weight: bold;
-    color: #333;
+    font-weight: 900;
 }
-
 .hm-info ul {
-    margin-left: 1.5rem;
+    margin: 0.25rem 0 0 1.05rem;
 }
-
 .hm-info li {
-    margin-bottom: 0.3rem;
+    margin: 0.18rem 0;
 }
-
 .hm-info .muted {
-    color: #777;
-    font-size: 0.9rem;
+    color: rgba(49,51,63,.66);
+    font-size: 0.8rem;
 }
 
-/* 진료과 선택 안내 문구 스타일 */
-.hm-dept-info {
-    font-size: 1rem;
-    color: #555;
-    margin-bottom: 1rem;
-    text-align: center;
+/* Dept */
+.hm-dept {
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(49,51,63,.08);
 }
-
-/* Expander 스타일 조정 */
-.streamlit .stExpander {
-    border: 1px solid #ddd;
-    border-radius: 8px;
-    margin-bottom: 0.5rem;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+.hm-title {
+    font-size: 15px;
+    font-weight: 900;
+    margin: 0 0 8px;
 }
-
-.streamlit .stExpander:last-child {
-    margin-bottom: 0;
-}
-
-.streamlit .stExpander > div[data-baseweb="expandable-container"] > div {
-    padding: 1rem;
-}
-
-/* 진료과 이름 스타일 조정 (Expander summary) */
-.streamlit .stExpander > div[data-baseweb="expandable-container"] > div[data-testid="stExpanderInnerContainer"] > summary {
-    font-size: 1.1rem;
-    font-weight: 600;
-    color: #333;
-}
-
-/* Expander 내부 hm-dept 스타일 조정 */
-.streamlit .stExpander .hm-dept {
-    padding: 0;
-    border-bottom: none;
-}
-
-.streamlit .stExpander .hm-row {
+.hm-row {
     display: flex;
-    flex-direction: column;
-    align-items: stretch; /* 버튼 너비를 맞춤 */
-    gap: 0.5rem; /* 버튼 간 위아래 간격 */
-    margin-top: 0.5rem;
+    gap: 8px;
+    flex-wrap: wrap; /* 줄바꿈 활성화 */
+    width: 100%;
 }
-
-/* 버튼 스타일 (글자 크기, 굵기 조정) */
 .hm-btn {
-    display: block;
-    padding: 12px 15px;
-    border-radius: 6px;
-    text-decoration: none;
-    font-weight: 600;
-    font-size: 1rem; /* 글자 크기 키움 */
-    color: #333;
-    border: 1px solid #ccc;
-    background: #f0f0f0;
-    transition: background-color 0.3s ease;
+    flex: 1; /* 각 버튼이 가능한 한 넓게 확장 */
     text-align: center;
-    width: 100%; /* Expander 너비에 맞춤 */
-    box-sizing: border-box; /* 패딩, border 포함 */
+    padding: 8px;
+    border-radius: 8px;
+    white-space: nowrap;
+    text-decoration: none;
+    font-weight: 800;
+    font-size: 13px; /* 폰트 크기 줄임 */
+    color: inherit;
+    border: 1px solid rgba(49,51,63,.18);
+    background: rgba(49,51,63,.02);
+    min-width: 45%; /* 최소 너비 설정 */
+    box-sizing: border-box; /* padding 포함 */
 }
-
-.hm-btn:hover {
-    background-color: #ddd;
-}
-
 .hm-r {
-    border-color: #e74c3c;
-    color: #e74c3c;
+    border-color: rgba(255,75,75,.65);
 }
-
-.hm-r:hover {
-    background-color: #e74c3c;
-    color: white;
-}
-
 .hm-dis {
-    opacity: 0.5;
+    opacity: .45;
     cursor: not-allowed;
 }
-
 .hm-sub {
-    margin-top: 0.5rem;
-    font-size: 0.9rem;
-    color: #777;
-    text-align: center;
+    margin-top: 6px;
+    font-size: 11px;
+    color: rgba(49,51,63,.55);
 }
 </style>
 """, unsafe_allow_html=True)
 
-# 초기 화면 설정
-st.markdown("# 히즈메디병원")
+# (필요 시 아주 미세하게만 아래로 내림: 1줄)
+st.markdown("<div style='height:5px'></div>", unsafe_allow_html=True)
+
+st.title("히즈메디병원")
 st.markdown(f'<a class="hm-call" href="tel:{CALL}">📞 대표번호 전화하기 · {CALL}</a>', unsafe_allow_html=True)
 
-# 안내 문구
 st.markdown(f"""
 <div class="hm-info">
   <div class="title">안내</div>
@@ -257,44 +191,35 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# 진료과 선택 안내 문구 추가
-st.markdown('<div class="hm-dept-info">아래 진료과를 선택하시면 예약, 의사정보 등을 볼 수 있습니다.</div>', unsafe_allow_html=True)
-
-# 데이터 로드 및 전처리
 df = load_departments()
 if df is None or df.empty:
-    st.info("현재 진료과 정보가 없습니다.");
-    st.stop()
+    st.info("현재 진료과 정보가 없습니다."); st.stop()
 
-for c in ("dept_id", "dept_name", "dept_reservation_url", "dept_schedule_detail_url", "display_order", "is_active"):
-    if c not in df.columns:
-        df[c] = ""
+# ✅ doctors 시트는 미사용. departments에 새 컬럼만 추가
+for c in ("dept_id","dept_name","dept_reservation_url","dept_schedule_detail_url","display_order","is_active"):
+    if c not in df.columns: df[c] = ""
 
 df = df[df["is_active"].apply(ok)]
 if "display_order" in df.columns:
     df = df.sort_values("display_order", na_position="last")
 
-# 컬럼 나누기
-cols = st.columns(3)
-
-# 각 진료과 정보를 컬럼에 번갈아 배치
 for i, (_, r) in enumerate(df.iterrows()):
-    col = cols[i % 3]
     did = r.get("dept_id")
     name = S(r.get("dept_name")) or "진료과"
     ped = "소아청소년과" in name.replace(" ", "")
 
     reserve = None if ped else anc(sidx(r.get("dept_reservation_url"), did), "#boardfrm")
+
+    # ✅ 통합 버튼: 의사정보·진료시간표 (departments.dept_schedule_detail_url)
     doc_sched = sidx(r.get("dept_schedule_detail_url"), did) if S(r.get("dept_schedule_detail_url")).startswith("http") else S(r.get("dept_schedule_detail_url"))
 
-    with col:
-        with st.expander(name):
-            st.markdown(f"""
-            <div class="hm-dept">
-              <div class="hm-row">
-                {A("예약", reserve, "hm-r")}
-                {A("의사정보·진료시간표", doc_sched, "")}
-              </div>
-              {('<div class="hm-sub">예약 없이 당일진료</div>' if ped else '')}
-            </div>
-            """, unsafe_allow_html=True)
+    st.markdown(f"""
+<div class="hm-dept">
+  <div class="hm-title">{name}</div>
+  <div class="hm-row">
+    {A("예약", reserve, "hm-r")}
+    {A("의사정보·진료시간표", doc_sched, "")}
+  </div>
+  {('<div class="hm-sub">예약 없이 당일진료</div>' if ped else '')}
+</div>
+""", unsafe_allow_html=True)
