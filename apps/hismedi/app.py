@@ -27,12 +27,37 @@ body {
     color: #333; /* 기본 글자색 */
 }
 
+/* 페이지 상단 여백 제거 */
+.appview-container .main .block-container {
+    padding-top: 1rem;
+}
+
 /* 제목 스타일 */
 h1 {
     font-size: 24px !important;
     font-weight: bold;
     color: #377ba8; /* 제목 색상 */
-    margin-bottom: 20px;
+    margin-bottom: 15px; /* 간격 조정 */
+}
+
+/* 대표번호 전화하기 스타일 (이전 스타일로 복원) */
+.hm-call {
+    display: block;
+    margin: 0.2rem 0 0.55rem;
+    padding: 10px; /* 패딩 값 조정 */
+    border-radius: 12px;
+    text-decoration: none;
+    font-weight: 900;
+    text-align: center;
+    border: 1px solid rgba(49, 51, 63, 0.18);
+    background: rgba(49, 51, 63, 0.05);
+    color: inherit;
+    transition: background-color 0.3s ease;
+    font-size: 14px; /* 폰트 크기 조정 */
+}
+
+.hm-call:hover {
+    background-color: rgba(49, 51, 63, 0.15);
 }
 
 /* 안내 문구 스타일 */
@@ -91,12 +116,12 @@ h1 {
 .hm-btn {
     flex: 1 1 0;
     text-align: center;
-    padding: 0.7rem 0.6rem;
+    padding: 0.6rem 0.5rem; /* 패딩 값 조정 */
     border-radius: 8px;
     white-space: nowrap;
     text-decoration: none;
     font-weight: 600; /* 굵기 조정 */
-    font-size: 0.85rem; /* 크기 조정 */
+    font-size: 0.75rem; /* 크기 조정 */
     color: inherit;
     border: 1px solid rgba(49, 51, 63, 0.15);
     background: rgba(49, 51, 63, 0.03);
@@ -120,6 +145,28 @@ h1 {
     margin-top: 0.5rem;
     font-size: 0.8rem;
     color: rgba(49, 51, 63, 0.5);
+}
+
+/* Expander 스타일 조정 */
+.streamlit .stExpander {
+    border: 1px solid rgba(49, 51, 63, 0.1);
+    border-radius: 10px;
+    margin-bottom: 0.5rem; /* Expander 간 간격 조정 */
+}
+
+.streamlit .stExpander:last-child {
+    margin-bottom: 0; /* 마지막 Expander 간 간격 제거 */
+}
+
+.streamlit .stExpander > div[data-baseweb="expandable-container"] > div {
+    padding: 0.7rem; /* 내용 padding 조정 */
+}
+
+/* 진료과 이름 스타일 조정 (Expander summary) */
+.streamlit .stExpander > div[data-baseweb="expandable-container"] > div[data-testid="stExpanderInnerContainer"] > summary {
+    font-size: 1rem; /* 폰트 크기 조정 */
+    font-weight: bold; /* 폰트 굵기 조정 */
+    color: #444; /* 폰트 색상 조정 */
 }
 </style>
 """, unsafe_allow_html=True)
