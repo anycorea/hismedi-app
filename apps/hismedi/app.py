@@ -27,9 +27,15 @@ body {
     color: #333; /* 기본 글자색 */
 }
 
-/* 페이지 상단 여백 제거 (더욱 줄임) */
+/* 상단 여백 제거 (더욱 강력하게) */
 .appview-container .main .block-container {
-    padding-top: 0.5rem !important; /* 더 적은 값으로 조정 */
+    padding-top: 0.2rem !important; /* 최소화 */
+    margin-top: -1rem !important; /* 음수 마진으로 추가 조정 */
+}
+
+/* Streamlit 앱 전체 컨테이너 조정 */
+.stApp {
+    margin-top: -20px; /* 추가적인 상단 마진 조정 */
 }
 
 /* 제목 스타일 */
@@ -37,14 +43,14 @@ h1 {
     font-size: 24px !important;
     font-weight: bold;
     color: #377ba8; /* 제목 색상 */
-    margin-bottom: 12px; /* 간격 조정 */
+    margin-bottom: 10px; /* 간격 조정 */
 }
 
 /* 대표번호 전화하기 스타일 (이전 스타일로 복원) */
 .hm-call {
     display: block;
     margin: 0.2rem 0 0.55rem;
-    padding: 8px; /* 패딩 값 조정 */
+    padding: 6px; /* 패딩 값 조정 */
     border-radius: 12px;
     text-decoration: none;
     font-weight: 900;
@@ -53,7 +59,7 @@ h1 {
     background: rgba(49, 51, 63, 0.05);
     color: inherit;
     transition: background-color 0.3s ease;
-    font-size: 14px; /* 폰트 크기 조정 */
+    font-size: 13px; /* 폰트 크기 조정 */
 }
 
 .hm-call:hover {
@@ -63,25 +69,25 @@ h1 {
 /* 안내 문구 스타일 */
 .hm-info {
     margin: 0.5rem 0 1.5rem;
-    padding: 0.8rem; /* 패딩 값 조정 */
+    padding: 0.6rem; /* 패딩 값 조정 */
     border-radius: 12px;
     border: 1px solid rgba(49, 51, 63, 0.1);
     background: rgba(49, 51, 63, 0.02);
-    font-size: 0.9rem;
-    line-height: 1.5;
+    font-size: 0.8rem;
+    line-height: 1.4;
     color: rgba(49, 51, 63, 0.8);
 }
 
 .hm-info .title {
-    font-size: 1.0rem; /* 폰트 크기 조정 */
+    font-size: 0.9rem; /* 폰트 크기 조정 */
     font-weight: bold;
     color: #555; /* 소제목 색상 */
-    margin-bottom: 0.4rem; /* 간격 조정 */
+    margin-bottom: 0.3rem; /* 간격 조정 */
 }
 
 .hm-info .section {
-    margin-top: 0.6rem; /* 간격 조정 */
-    padding-top: 0.5rem; /* 패딩 값 조정 */
+    margin-top: 0.5rem; /* 간격 조정 */
+    padding-top: 0.4rem; /* 패딩 값 조정 */
     border-top: 1px solid rgba(49, 51, 63, 0.08);
 }
 
@@ -90,25 +96,25 @@ h1 {
 }
 
 .hm-info ul {
-    margin: 0.3rem 0 0 1.2rem; /* 간격 조정 */
+    margin: 0.2rem 0 0 1.1rem; /* 간격 조정 */
     padding-left: 0;
     list-style-type: disc;
 }
 
 .hm-info li {
-    margin: 0.15rem 0; /* 간격 조정 */
+    margin: 0.1rem 0; /* 간격 조정 */
 }
 
 .hm-info .muted {
     color: rgba(49, 51, 63, 0.6);
-    font-size: 0.8rem;
+    font-size: 0.7rem;
 }
 
 /* 진료과 선택 안내 문구 스타일 */
 .hm-dept-info {
-    font-size: 0.9rem;
+    font-size: 0.8rem;
     color: #777;
-    margin-bottom: 0.8rem; /* 간격 조정 */
+    margin-bottom: 0.6rem; /* 간격 조정 */
     text-align: center;
 }
 
@@ -116,12 +122,12 @@ h1 {
 .hm-btn {
     flex: 1 1 0;
     text-align: center;
-    padding: 0.5rem 0.4rem; /* 패딩 값 조정 */
-    border-radius: 8px;
+    padding: 0.4rem 0.3rem; /* 패딩 값 조정 */
+    border-radius: 6px;
     white-space: nowrap;
     text-decoration: none;
     font-weight: 600; /* 굵기 조정 */
-    font-size: 0.7rem; /* 크기 조정 */
+    font-size: 0.65rem; /* 크기 조정 */
     color: inherit;
     border: 1px solid rgba(49, 51, 63, 0.15);
     background: rgba(49, 51, 63, 0.03);
@@ -142,16 +148,16 @@ h1 {
 }
 
 .hm-sub {
-    margin-top: 0.4rem; /* 간격 조정 */
-    font-size: 0.7rem; /* 크기 조정 */
+    margin-top: 0.3rem; /* 간격 조정 */
+    font-size: 0.6rem; /* 크기 조정 */
     color: rgba(49, 51, 63, 0.5);
 }
 
 /* Expander 스타일 조정 */
 .streamlit .stExpander {
     border: 1px solid rgba(49, 51, 63, 0.1);
-    border-radius: 8px; /* 둥글기 조정 */
-    margin-bottom: 0.4rem; /* Expander 간 간격 조정 */
+    border-radius: 6px; /* 둥글기 조정 */
+    margin-bottom: 0.3rem; /* Expander 간 간격 조정 */
 }
 
 .streamlit .stExpander:last-child {
@@ -159,12 +165,12 @@ h1 {
 }
 
 .streamlit .stExpander > div[data-baseweb="expandable-container"] > div {
-    padding: 0.6rem; /* 내용 padding 조정 */
+    padding: 0.5rem; /* 내용 padding 조정 */
 }
 
 /* 진료과 이름 스타일 조정 (Expander summary) */
 .streamlit .stExpander > div[data-baseweb="expandable-container"] > div[data-testid="stExpanderInnerContainer"] > summary {
-    font-size: 0.9rem; /* 폰트 크기 조정 */
+    font-size: 0.8rem; /* 폰트 크기 조정 */
     font-weight: bold; /* 폰트 굵기 조정 */
     color: #444; /* 폰트 색상 조정 */
 }
@@ -176,7 +182,13 @@ h1 {
 }
 
 .streamlit .stExpander .hm-row {
-    margin-top: 0.2rem; /* 상단 margin 추가 */
+    margin-top: 0.1rem; /* 상단 margin 추가 */
+    display: flex; /* Flexbox 레이아웃 적용 */
+    flex-direction: column; /* 컬럼 방향으로 정렬 */
+}
+
+.streamlit .stExpander .hm-btn {
+    margin-bottom: 0.2rem; /* 버튼 간 간격 추가 */
 }
 </style>
 """, unsafe_allow_html=True)
