@@ -23,185 +23,201 @@ st.markdown("""
 <style>
 /* 전체 폰트 사이즈 및 색상 설정 */
 body {
-    font-size: 15px;
-    color: #333; /* 기본 글자색 */
+    font-size: 16px;
+    color: #333;
+    font-family: sans-serif; /* 기본 폰트 변경 */
+}
+
+/* 초기화 스타일 */
+ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
 }
 
 /* 상단 여백 제거 (최대) */
 .appview-container .main .block-container {
-    padding-top: 0.1rem !important; /* 최소화 */
-    margin-top: -1.5rem !important; /* 음수 마진으로 추가 조정 */
+    padding-top: 0.2rem !important;
+    margin-top: -2rem !important;
 }
 
 /* Streamlit 앱 전체 컨테이너 조정 */
 .stApp {
-    margin-top: -30px; /* 추가적인 상단 마진 조정 */
+    margin-top: -40px;
 }
 
 /* 제목 스타일 */
 h1 {
-    font-size: 24px !important;
+    font-size: 28px !important;
     font-weight: bold;
-    color: #377ba8; /* 제목 색상 */
-    margin-bottom: 8px; /* 간격 조정 */
+    color: #3498db; /* 색상 변경 */
+    margin-bottom: 10px;
+    text-align: center; /* 가운데 정렬 */
 }
 
-/* 대표번호 전화하기 스타일 (이전 스타일로 복원) */
+/* 대표번호 전화하기 스타일 */
 .hm-call {
     display: block;
-    margin: 0.2rem 0 0.55rem;
-    padding: 5px; /* 패딩 값 조정 */
-    border-radius: 10px;
+    margin: 10px auto; /* 가운데 정렬 및 상하 간격 */
+    padding: 12px 20px;
+    border-radius: 8px;
     text-decoration: none;
-    font-weight: 900;
+    font-weight: bold;
     text-align: center;
-    border: 1px solid rgba(49, 51, 63, 0.18);
-    background: rgba(49, 51, 63, 0.05);
-    color: inherit;
-    transition: background-color 0.3s ease;
-    font-size: 12px; /* 폰트 크기 조정 */
+    border: 2px solid #3498db; /* 테두리 색상 변경 */
+    background: white;
+    color: #3498db; /* 글자 색상 변경 */
+    transition: background-color 0.3s ease, color 0.3s ease;
+    font-size: 18px; /* 크게 */
+    width: 80%; /* 너비 조정 */
+    max-width: 400px; /* 최대 너비 설정 */
 }
 
 .hm-call:hover {
-    background-color: rgba(49, 51, 63, 0.15);
+    background-color: #3498db;
+    color: white;
 }
 
 /* 안내 문구 스타일 */
 .hm-info {
-    margin: 0.4rem 0 1.2rem;
-    padding: 0.5rem; /* 패딩 값 조정 */
+    margin: 1rem auto;
+    padding: 1rem;
     border-radius: 10px;
-    border: 1px solid rgba(49, 51, 63, 0.1);
-    background: rgba(49, 51, 63, 0.02);
-    font-size: 0.7rem;
-    line-height: 1.3;
-    color: rgba(49, 51, 63, 0.8);
+    border: 1px solid #ddd;
+    background: #f9f9f9;
+    font-size: 1rem;
+    line-height: 1.6;
+    color: #555;
+    width: 90%;
+    max-width: 600px;
 }
 
 .hm-info .title {
-    font-size: 0.8rem; /* 폰트 크기 조정 */
+    font-size: 1.2rem;
     font-weight: bold;
-    color: #555; /* 소제목 색상 */
-    margin-bottom: 0.2rem; /* 간격 조정 */
+    color: #333;
+    margin-bottom: 0.5rem;
 }
 
 .hm-info .section {
-    margin-top: 0.4rem; /* 간격 조정 */
-    padding-top: 0.3rem; /* 패딩 값 조정 */
-    border-top: 1px solid rgba(49, 51, 63, 0.08);
+    margin-top: 1rem;
+    padding-top: 0.8rem;
+    border-top: 1px solid #eee;
 }
 
 .hm-info .label {
     font-weight: bold;
+    color: #333;
 }
 
 .hm-info ul {
-    margin: 0.1rem 0 0 1rem; /* 간격 조정 */
-    padding-left: 0;
-    list-style-type: disc;
+    margin-left: 1.5rem;
 }
 
 .hm-info li {
-    margin: 0.05rem 0; /* 간격 조정 */
+    margin-bottom: 0.3rem;
 }
 
 .hm-info .muted {
-    color: rgba(49, 51, 63, 0.6);
-    font-size: 0.6rem;
+    color: #777;
+    font-size: 0.9rem;
 }
 
 /* 진료과 선택 안내 문구 스타일 */
 .hm-dept-info {
-    font-size: 0.7rem;
-    color: #777;
-    margin-bottom: 0.5rem; /* 간격 조정 */
+    font-size: 1rem;
+    color: #555;
+    margin-bottom: 1rem;
     text-align: center;
-}
-
-/* 버튼 스타일 (글자 크기, 굵기 조정) */
-.hm-btn {
-    flex: 1 1 0;
-    text-align: center;
-    padding: 0.5rem 0.4rem; /* 패딩 값 조정 */
-    border-radius: 6px;
-    white-space: nowrap;
-    text-decoration: none;
-    font-weight: 600; /* 굵기 조정 */
-    font-size: 0.7rem; /* 크기 조정 */
-    color: inherit;
-    border: 1px solid rgba(49, 51, 63, 0.15);
-    background: rgba(49, 51, 63, 0.03);
-    transition: background-color 0.3s ease;
-    min-width: 45%; /* 최소 너비 설정 */
-}
-
-.hm-btn:hover {
-    background-color: rgba(49, 51, 63, 0.1);
-}
-
-.hm-r {
-    border-color: rgba(255, 75, 75, 0.5);
-}
-
-.hm-dis {
-    opacity: 0.45;
-    cursor: not-allowed;
-}
-
-.hm-sub {
-    margin-top: 0.2rem; /* 간격 조정 */
-    font-size: 0.5rem; /* 크기 조정 */
-    color: rgba(49, 51, 63, 0.5);
 }
 
 /* Expander 스타일 조정 */
 .streamlit .stExpander {
-    border: 1px solid rgba(49, 51, 63, 0.1);
-    border-radius: 6px; /* 둥글기 조정 */
-    margin-bottom: 0.2rem; /* Expander 간 간격 조정 */
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    margin-bottom: 0.5rem;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
 }
 
 .streamlit .stExpander:last-child {
-    margin-bottom: 0; /* 마지막 Expander 간 간격 제거 */
+    margin-bottom: 0;
 }
 
 .streamlit .stExpander > div[data-baseweb="expandable-container"] > div {
-    padding: 0.4rem; /* 내용 padding 조정 */
+    padding: 1rem;
 }
 
 /* 진료과 이름 스타일 조정 (Expander summary) */
 .streamlit .stExpander > div[data-baseweb="expandable-container"] > div[data-testid="stExpanderInnerContainer"] > summary {
-    font-size: 0.7rem; /* 폰트 크기 조정 */
-    font-weight: bold; /* 폰트 굵기 조정 */
-    color: #444; /* 폰트 색상 조정 */
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #333;
 }
 
-/* Expander 내부 hm-dept 스타일 조정 (간격 및 레이아웃 조정) */
+/* Expander 내부 hm-dept 스타일 조정 */
 .streamlit .stExpander .hm-dept {
-    padding: 0; /* 내부 padding 제거 */
-    border-bottom: none; /* border 제거 */
+    padding: 0;
+    border-bottom: none;
 }
 
 .streamlit .stExpander .hm-row {
-    margin-top: 0.1rem; /* 상단 margin 추가 */
-    display: flex; /* Flexbox 레이아웃 적용 */
-    flex-direction: row; /* 가로 방향으로 정렬 */
-    justify-content: space-between; /* 양쪽 정렬 */
-    align-items: center; /* 수직 중앙 정렬 */
+    display: flex;
+    flex-direction: column;
+    align-items: stretch; /* 버튼 너비를 맞춤 */
+    gap: 0.5rem; /* 버튼 간 위아래 간격 */
+    margin-top: 0.5rem;
 }
 
-.streamlit .stExpander .hm-btn {
-    width: 48%; /* 각 버튼이 차지하는 너비 조정 */
-    margin-bottom: 0; /* 버튼 간 하단 간격 제거 */
+/* 버튼 스타일 (글자 크기, 굵기 조정) */
+.hm-btn {
+    display: block;
+    padding: 12px 15px;
+    border-radius: 6px;
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 1rem; /* 글자 크기 키움 */
+    color: #333;
+    border: 1px solid #ccc;
+    background: #f0f0f0;
+    transition: background-color 0.3s ease;
+    text-align: center;
+    width: 100%; /* Expander 너비에 맞춤 */
+    box-sizing: border-box; /* 패딩, border 포함 */
+}
+
+.hm-btn:hover {
+    background-color: #ddd;
+}
+
+.hm-r {
+    border-color: #e74c3c;
+    color: #e74c3c;
+}
+
+.hm-r:hover {
+    background-color: #e74c3c;
+    color: white;
+}
+
+.hm-dis {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.hm-sub {
+    margin-top: 0.5rem;
+    font-size: 0.9rem;
+    color: #777;
+    text-align: center;
 }
 </style>
 """, unsafe_allow_html=True)
 
-# 초기 화면 설정 (제목 스타일 변경)
-st.markdown("# 히즈메디병원")  # 제목 스타일 적용
+# 초기 화면 설정
+st.markdown("# 히즈메디병원")
 st.markdown(f'<a class="hm-call" href="tel:{CALL}">📞 대표번호 전화하기 · {CALL}</a>', unsafe_allow_html=True)
 
-# 안내 문구 (스타일 변경)
+# 안내 문구
 st.markdown(f"""
 <div class="hm-info">
   <div class="title">안내</div>
@@ -254,16 +270,16 @@ for c in ("dept_id", "dept_name", "dept_reservation_url", "dept_schedule_detail_
     if c not in df.columns:
         df[c] = ""
 
-df = df[df["is_active"].apply(lambda x: ok(S(x)))]
+df = df[df["is_active"].apply(ok)]
 if "display_order" in df.columns:
     df = df.sort_values("display_order", na_position="last")
 
 # 컬럼 나누기
-cols = st.columns(3)  # 3개의 컬럼으로 나눔
+cols = st.columns(3)
 
 # 각 진료과 정보를 컬럼에 번갈아 배치
 for i, (_, r) in enumerate(df.iterrows()):
-    col = cols[i % 3]  # 컬럼 번호 선택
+    col = cols[i % 3]
     did = r.get("dept_id")
     name = S(r.get("dept_name")) or "진료과"
     ped = "소아청소년과" in name.replace(" ", "")
@@ -272,7 +288,7 @@ for i, (_, r) in enumerate(df.iterrows()):
     doc_sched = sidx(r.get("dept_schedule_detail_url"), did) if S(r.get("dept_schedule_detail_url")).startswith("http") else S(r.get("dept_schedule_detail_url"))
 
     with col:
-        with st.expander(name):  # expander를 사용하여 확장/축소 가능
+        with st.expander(name):
             st.markdown(f"""
             <div class="hm-dept">
               <div class="hm-row">
