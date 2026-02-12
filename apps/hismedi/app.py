@@ -2,41 +2,26 @@ import streamlit as st
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 from src.sheets import load_departments
 
-# 페이지 기본 설정 (타이틀, 레이아웃)
+# 페이지 기본 설정
 st.set_page_config(page_title="히즈메디병원", layout="wide")
 
-# 상수 및 함수 정의
-CALL = "1588-0223"  # 병원 대표 번호
-
-# None 값을 빈 문자열로 변환하고, 문자열 앞뒤 공백 제거
+# 상수 및 함수 정의 (이전 코드와 동일)
+CALL = "1588-0223"
 S = lambda x: "" if x is None else str(x).strip()
+ok = lambda x: x.lower() in ("true", "1", "y", "yes") if isinstance(x, str) else bool(x)
+sidx = lambda url, did: urlunparse((urlparse(url).scheme, urlparse(url).netloc, urlparse(url).path, urlparse(url).params, urlencode({"sidx": [did]}, doseq=True), urlparse(url).fragment)) if url and url.startswith("http") and did else None
+anc = lambda url, a: url + a if url and a not in url else url if url else None
 
-# 문자열을 소문자로 변환하여 True/False 값 판단
-def ok(x):
-    v = S(x).lower()
-    return v in ("true", "1", "y", "yes") if v in ("true","false","1","0","y","n","yes","no","") else bool(x)
-
-# URL에 'sidx' 파라미터 추가 또는 업데이트
-def sidx(url, did):
-    url = S(url)
-    if not url.startswith("http"): return None
-    u = urlparse(url); q = parse_qs(u.query)
-    if S(did): q["sidx"] = [S(did)]
-    return urlunparse((u.scheme, u.netloc, u.path, u.params, urlencode(q, doseq=True), u.fragment))
-
-# URL에 앵커(#) 추가
-def anc(url, a): return None if not url else (url if a in url else url + a)
-
-# HTML 버튼 생성 함수
+# HTML 버튼 생성 함수 (스타일 변경)
 def A(lbl, url, cls):
     if url and url.startswith("http"):
         return f'<a class="hm-btn {cls}" href="{url}" target="_blank" rel="noopener noreferrer">{lbl}</a>'
     return f'<span class="hm-btn {cls} hm-dis">{lbl}</span>'
 
-# CSS 스타일 정의 (폰트 크기, 디자인 변경)
+# CSS 스타일 정의 (이전 코드와 동일, 필요한 경우 추가 스타일 정의)
 st.markdown("""
 <style>
-/* 전체 폰트 사이즈 설정 */
+/* 여기에 기존 CSS 스타일을 추가 */
 body {
     font-size: 16px;
 }
@@ -170,14 +155,9 @@ div.block-container {
 </style>
 """, unsafe_allow_html=True)
 
-# 약간의 여백 추가 (선택 사항)
-st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
-
-# 제목 및 안내 문구
+# 초기 화면 설정
 st.title("히즈메디병원")
 st.markdown(f'<a class="hm-call" href="tel:{CALL}">📞 대표번호 전화하기 · {CALL}</a>', unsafe_allow_html=True)
-
-# 병원 정보
 st.markdown(f"""
 <div class="hm-info">
   <div class="title">안내</div>
@@ -217,24 +197,26 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# 진료과 정보 로드
+# 데이터 로드 및 전처리
 df = load_departments()
 if df is None or df.empty:
-    st.info("현재 진료과 정보가 없습니다."); st.stop()
+    st.info("현재 진료과 정보가 없습니다.");
+    st.stop()
 
-# 데이터프레임 컬럼 확인 및 초기화
-for c in ("dept_id","dept_name","dept_reservation_url","dept_schedule_detail_url","display_order","is_active"):
-    if c not in df.columns: df[c] = ""
+for c in ("dept_id", "dept_name", "dept_reservation_url", "dept_schedule_detail_url", "display_order", "is_active"):
+    if c not in df.columns:
+        df[c] = ""
 
-# 활성 진료과 필터링
-df = df[df["is_active"].apply(ok)]
-
-# 정렬
+df = df[df["is_active"].apply(lambda x: ok(S(x)))]
 if "display_order" in df.columns:
     df = df.sort_values("display_order", na_position="last")
 
-# 각 진료과 정보 표시
+# 컬럼 나누기
+cols = st.columns(3)  # 3개의 컬럼으로 나눔
+
+# 각 진료과 정보를 컬럼에 번갈아 배치
 for i, (_, r) in enumerate(df.iterrows()):
+    col = cols[i % 3]  # 컬럼 번호 선택
     did = r.get("dept_id")
     name = S(r.get("dept_name")) or "진료과"
     ped = "소아청소년과" in name.replace(" ", "")
@@ -242,13 +224,14 @@ for i, (_, r) in enumerate(df.iterrows()):
     reserve = None if ped else anc(sidx(r.get("dept_reservation_url"), did), "#boardfrm")
     doc_sched = sidx(r.get("dept_schedule_detail_url"), did) if S(r.get("dept_schedule_detail_url")).startswith("http") else S(r.get("dept_schedule_detail_url"))
 
-    st.markdown(f"""
-<div class="hm-dept">
-  <div class="hm-title">{name}</div>
-  <div class="hm-row">
-    {A("예약", reserve, "hm-r")}
-    {A("의사정보·진료시간표", doc_sched, "")}
-  </div>
-  {('<div class="hm-sub">예약 없이 당일진료</div>' if ped else '')}
-</div>
-""", unsafe_allow_html=True)
+    with col:
+        with st.expander(name):  # expander를 사용하여 확장/축소 가능
+            st.markdown(f"""
+            <div class="hm-dept">
+              <div class="hm-row">
+                {A("예약", reserve, "hm-r")}
+                {A("의사정보·진료시간표", doc_sched, "")}
+              </div>
+              {('<div class="hm-sub">예약 없이 당일진료</div>' if ped else '')}
+            </div>
+            """, unsafe_allow_html=True)
