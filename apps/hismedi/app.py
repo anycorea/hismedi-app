@@ -18,128 +18,97 @@ def A(lbl, url, cls):
         return f'<a class="hm-btn {cls}" href="{url}" target="_blank" rel="noopener noreferrer">{lbl}</a>'
     return f'<span class="hm-btn {cls} hm-dis">{lbl}</span>'
 
-# CSS 스타일 정의 (이전 코드와 동일, 필요한 경우 추가 스타일 정의)
+# CSS 스타일 정의 (폰트, 색상, 버튼 스타일 조정)
 st.markdown("""
 <style>
-/* 여기에 기존 CSS 스타일을 추가 */
+/* 전체 폰트 사이즈 및 색상 설정 */
 body {
-    font-size: 16px;
+    font-size: 15px;
+    color: #333; /* 기본 글자색 */
 }
 
-/* 상단 여백 조정 */
-header {
-    padding-top: calc(env(safe-area-inset-top) + 0.6rem);
+/* 제목 스타일 */
+h1 {
+    font-size: 24px !important;
+    font-weight: bold;
+    color: #377ba8; /* 제목 색상 */
+    margin-bottom: 20px;
 }
 
-/* 블록 컨테이너 여백 조정 */
-div.block-container {
-    padding-top: 0.6rem;
-    padding-bottom: 2rem;
-}
-
-/* 전화 걸기 버튼 스타일 */
-.hm-call {
-    display: block;
-    margin: 0.2rem 0 0.55rem;
-    padding: 12px;
-    border-radius: 14px;
-    text-decoration: none;
-    font-weight: 900;
-    text-align: center;
-    border: 1px solid rgba(49, 51, 63, 0.18);
-    background: rgba(49, 51, 63, 0.05);
-    color: inherit;
-    transition: background-color 0.3s ease; /* 호버 효과 추가 */
-}
-
-.hm-call:hover {
-    background-color: rgba(49, 51, 63, 0.15); /* 호버 시 배경색 변경 */
-}
-
-/* 정보 섹션 스타일 */
+/* 안내 문구 스타일 */
 .hm-info {
-    margin: 0.35rem 0 1rem;
-    padding: 1.1rem 1rem;  /* 패딩 값 증가 */
-    border-radius: 15px;  /* border-radius 값 증가 */
-    border: 1px solid rgba(49, 51, 63, 0.10);
+    margin: 0.5rem 0 1.5rem;
+    padding: 1rem;
+    border-radius: 12px;
+    border: 1px solid rgba(49, 51, 63, 0.1);
     background: rgba(49, 51, 63, 0.02);
-    font-size: 1rem;  /* 폰트 크기 증가 */
-    line-height: 1.6;  /* 줄 간격 조정 */
-    color: rgba(49, 51, 63, 0.86);
+    font-size: 0.9rem;
+    line-height: 1.5;
+    color: rgba(49, 51, 63, 0.8);
 }
 
 .hm-info .title {
-    font-weight: bold;  /* 폰트 굵게 */
+    font-size: 1.1rem;
+    font-weight: bold;
+    color: #555; /* 소제목 색상 */
     margin-bottom: 0.5rem;
-    font-size: 1.2rem;  /* 제목 폰트 크기 증가 */
 }
 
 .hm-info .section {
-    margin-top: 1rem;
-    padding-top: 0.8rem;
+    margin-top: 0.7rem;
+    padding-top: 0.6rem;
     border-top: 1px solid rgba(49, 51, 63, 0.08);
 }
 
 .hm-info .label {
-    font-weight: 900;
+    font-weight: bold;
 }
 
 .hm-info ul {
-    margin: 0.5rem 0 0 1.5rem;  /* 들여쓰기 조정 */
-    padding-left: 0; /* 기본 ul 스타일 제거 */
-    list-style-type: disc; /* 글머리 기호 추가 */
+    margin: 0.4rem 0 0 1.3rem;
+    padding-left: 0;
+    list-style-type: disc;
 }
 
 .hm-info li {
-    margin: 0.3rem 0;
+    margin: 0.2rem 0;
 }
 
 .hm-info .muted {
-    color: rgba(49, 51, 63, 0.66);
+    color: rgba(49, 51, 63, 0.6);
+    font-size: 0.8rem;
+}
+
+/* 진료과 선택 안내 문구 스타일 */
+.hm-dept-info {
     font-size: 0.9rem;
+    color: #777;
+    margin-bottom: 1rem;
+    text-align: center;
 }
 
-/* 진료과 스타일 */
-.hm-dept {
-    padding: 16px 0;  /* 패딩 값 증가 */
-    border-bottom: 1px solid rgba(49, 51, 63, 0.08);
-}
-
-.hm-title {
-    font-size: 1.3rem;  /* 폰트 크기 증가 */
-    font-weight: bold;
-    margin: 0 0 12px;
-}
-
-.hm-row {
-    display: flex;
-    gap: 12px;  /* 간격 증가 */
-    flex-wrap: nowrap;
-    width: 100%;
-}
-
-/* 버튼 스타일 */
+/* 버튼 스타일 (글자 크기, 굵기 조정) */
 .hm-btn {
     flex: 1 1 0;
     text-align: center;
-    padding: 12px 10px;  /* 패딩 값 증가 */
-    border-radius: 12px;  /* border-radius 값 증가 */
+    padding: 0.7rem 0.6rem;
+    border-radius: 8px;
     white-space: nowrap;
     text-decoration: none;
-    font-weight: 800;
-    font-size: 1rem;  /* 폰트 크기 증가 */
+    font-weight: 600; /* 굵기 조정 */
+    font-size: 0.85rem; /* 크기 조정 */
     color: inherit;
-    border: 1px solid rgba(49, 51, 63, 0.18);
-    background: rgba(49, 51, 63, 0.02);
-    transition: background-color 0.3s ease; /* 호버 효과 추가 */
+    border: 1px solid rgba(49, 51, 63, 0.15);
+    background: rgba(49, 51, 63, 0.03);
+    transition: background-color 0.3s ease;
 }
 
 .hm-btn:hover {
-    background-color: rgba(49, 51, 63, 0.15); /* 호버 시 배경색 변경 */
+    background-color: rgba(49, 51, 63, 0.1);
 }
 
 .hm-r {
-    border-color: rgba(255, 75, 75, 0.65);
+    border-color: rgba(255, 75, 75, 0.5);
 }
 
 .hm-dis {
@@ -148,16 +117,18 @@ div.block-container {
 }
 
 .hm-sub {
-    margin-top: 10px;
-    font-size: 0.9rem;
-    color: rgba(49, 51, 63, 0.55);
+    margin-top: 0.5rem;
+    font-size: 0.8rem;
+    color: rgba(49, 51, 63, 0.5);
 }
 </style>
 """, unsafe_allow_html=True)
 
-# 초기 화면 설정
-st.title("히즈메디병원")
+# 초기 화면 설정 (제목 스타일 변경)
+st.markdown("# 히즈메디병원")  # 제목 스타일 적용
 st.markdown(f'<a class="hm-call" href="tel:{CALL}">📞 대표번호 전화하기 · {CALL}</a>', unsafe_allow_html=True)
+
+# 안내 문구 (스타일 변경)
 st.markdown(f"""
 <div class="hm-info">
   <div class="title">안내</div>
@@ -196,6 +167,9 @@ st.markdown(f"""
   </div>
 </div>
 """, unsafe_allow_html=True)
+
+# 진료과 선택 안내 문구 추가
+st.markdown('<div class="hm-dept-info">아래 진료과를 선택하시면 예약, 의사정보 등을 볼 수 있습니다.</div>', unsafe_allow_html=True)
 
 # 데이터 로드 및 전처리
 df = load_departments()
