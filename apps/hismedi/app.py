@@ -2,15 +2,21 @@ import streamlit as st
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 from src.sheets import load_departments
 
+# 페이지 기본 설정 (타이틀, 레이아웃)
 st.set_page_config(page_title="히즈메디병원", layout="wide")
 
-S = lambda x: "" if x is None else str(x).strip()
-CALL = "1588-0223"
+# 상수 및 함수 정의
+CALL = "1588-0223"  # 병원 대표 번호
 
+# None 값을 빈 문자열로 변환하고, 문자열 앞뒤 공백 제거
+S = lambda x: "" if x is None else str(x).strip()
+
+# 문자열을 소문자로 변환하여 True/False 값 판단
 def ok(x):
     v = S(x).lower()
     return v in ("true", "1", "y", "yes") if v in ("true","false","1","0","y","n","yes","no","") else bool(x)
 
+# URL에 'sidx' 파라미터 추가 또는 업데이트
 def sidx(url, did):
     url = S(url)
     if not url.startswith("http"): return None
@@ -18,54 +24,160 @@ def sidx(url, did):
     if S(did): q["sidx"] = [S(did)]
     return urlunparse((u.scheme, u.netloc, u.path, u.params, urlencode(q, doseq=True), u.fragment))
 
+# URL에 앵커(#) 추가
 def anc(url, a): return None if not url else (url if a in url else url + a)
 
+# HTML 버튼 생성 함수
 def A(lbl, url, cls):
     if url and url.startswith("http"):
         return f'<a class="hm-btn {cls}" href="{url}" target="_blank" rel="noopener noreferrer">{lbl}</a>'
     return f'<span class="hm-btn {cls} hm-dis">{lbl}</span>'
 
+# CSS 스타일 정의 (폰트 크기, 디자인 변경)
 st.markdown("""
 <style>
-/* 상단 잘림 방지: h1 직접 수정 금지(잘림 원인), 대신 레이아웃만 */
-header{padding-top:calc(env(safe-area-inset-top) + .6rem);}
-div.block-container{padding-top:.6rem; padding-bottom:2rem;}
+/* 전체 폰트 사이즈 설정 */
+body {
+    font-size: 16px;
+}
 
-/* Call */
-.hm-call{display:block; margin:.2rem 0 .55rem; padding:12px; border-radius:14px;
-  text-decoration:none; font-weight:900; text-align:center;
-  border:1px solid rgba(49,51,63,.18); background:rgba(49,51,63,.05); color:inherit;}
+/* 상단 여백 조정 */
+header {
+    padding-top: calc(env(safe-area-inset-top) + 0.6rem);
+}
 
-/* Info */
-.hm-info{margin:.35rem 0 1rem; padding:.85rem .9rem; border-radius:14px;
-  border:1px solid rgba(49,51,63,.10); background:rgba(49,51,63,.02);
-  font-size:.90rem; line-height:1.48; color:rgba(49,51,63,.86);}
-.hm-info .title{font-weight:900; margin-bottom:.25rem;}
-.hm-info .section{margin-top:.70rem; padding-top:.60rem; border-top:1px solid rgba(49,51,63,.08);}
-.hm-info .label{font-weight:900;}
-.hm-info ul{margin:.25rem 0 0 1.05rem;}
-.hm-info li{margin:.18rem 0;}
-.hm-info .muted{color:rgba(49,51,63,.66); font-size:.86rem;}
+/* 블록 컨테이너 여백 조정 */
+div.block-container {
+    padding-top: 0.6rem;
+    padding-bottom: 2rem;
+}
 
-/* Dept */
-.hm-dept{padding:14px 0; border-bottom:1px solid rgba(49,51,63,.08);}
-.hm-title{font-size:16px; font-weight:900; margin:0 0 10px;}
-.hm-row{display:flex; gap:10px; flex-wrap:nowrap; width:100%;}
-.hm-btn{flex:1 1 0; text-align:center; padding:10px 8px; border-radius:10px; white-space:nowrap;
-  text-decoration:none; font-weight:800; font-size:14px; color:inherit;
-  border:1px solid rgba(49,51,63,.18); background:rgba(49,51,63,.02);}
-.hm-r{border-color:rgba(255,75,75,.65);}
-.hm-dis{opacity:.45; cursor:not-allowed;}
-.hm-sub{margin-top:8px; font-size:12px; color:rgba(49,51,63,.55);}
+/* 전화 걸기 버튼 스타일 */
+.hm-call {
+    display: block;
+    margin: 0.2rem 0 0.55rem;
+    padding: 12px;
+    border-radius: 14px;
+    text-decoration: none;
+    font-weight: 900;
+    text-align: center;
+    border: 1px solid rgba(49, 51, 63, 0.18);
+    background: rgba(49, 51, 63, 0.05);
+    color: inherit;
+    transition: background-color 0.3s ease; /* 호버 효과 추가 */
+}
+
+.hm-call:hover {
+    background-color: rgba(49, 51, 63, 0.15); /* 호버 시 배경색 변경 */
+}
+
+/* 정보 섹션 스타일 */
+.hm-info {
+    margin: 0.35rem 0 1rem;
+    padding: 1.1rem 1rem;  /* 패딩 값 증가 */
+    border-radius: 15px;  /* border-radius 값 증가 */
+    border: 1px solid rgba(49, 51, 63, 0.10);
+    background: rgba(49, 51, 63, 0.02);
+    font-size: 1rem;  /* 폰트 크기 증가 */
+    line-height: 1.6;  /* 줄 간격 조정 */
+    color: rgba(49, 51, 63, 0.86);
+}
+
+.hm-info .title {
+    font-weight: bold;  /* 폰트 굵게 */
+    margin-bottom: 0.5rem;
+    font-size: 1.2rem;  /* 제목 폰트 크기 증가 */
+}
+
+.hm-info .section {
+    margin-top: 1rem;
+    padding-top: 0.8rem;
+    border-top: 1px solid rgba(49, 51, 63, 0.08);
+}
+
+.hm-info .label {
+    font-weight: 900;
+}
+
+.hm-info ul {
+    margin: 0.5rem 0 0 1.5rem;  /* 들여쓰기 조정 */
+    padding-left: 0; /* 기본 ul 스타일 제거 */
+    list-style-type: disc; /* 글머리 기호 추가 */
+}
+
+.hm-info li {
+    margin: 0.3rem 0;
+}
+
+.hm-info .muted {
+    color: rgba(49, 51, 63, 0.66);
+    font-size: 0.9rem;
+}
+
+/* 진료과 스타일 */
+.hm-dept {
+    padding: 16px 0;  /* 패딩 값 증가 */
+    border-bottom: 1px solid rgba(49, 51, 63, 0.08);
+}
+
+.hm-title {
+    font-size: 1.3rem;  /* 폰트 크기 증가 */
+    font-weight: bold;
+    margin: 0 0 12px;
+}
+
+.hm-row {
+    display: flex;
+    gap: 12px;  /* 간격 증가 */
+    flex-wrap: nowrap;
+    width: 100%;
+}
+
+/* 버튼 스타일 */
+.hm-btn {
+    flex: 1 1 0;
+    text-align: center;
+    padding: 12px 10px;  /* 패딩 값 증가 */
+    border-radius: 12px;  /* border-radius 값 증가 */
+    white-space: nowrap;
+    text-decoration: none;
+    font-weight: 800;
+    font-size: 1rem;  /* 폰트 크기 증가 */
+    color: inherit;
+    border: 1px solid rgba(49, 51, 63, 0.18);
+    background: rgba(49, 51, 63, 0.02);
+    transition: background-color 0.3s ease; /* 호버 효과 추가 */
+}
+
+.hm-btn:hover {
+    background-color: rgba(49, 51, 63, 0.15); /* 호버 시 배경색 변경 */
+}
+
+.hm-r {
+    border-color: rgba(255, 75, 75, 0.65);
+}
+
+.hm-dis {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.hm-sub {
+    margin-top: 10px;
+    font-size: 0.9rem;
+    color: rgba(49, 51, 63, 0.55);
+}
 </style>
 """, unsafe_allow_html=True)
 
-# (필요 시 아주 미세하게만 아래로 내림: 1줄)
+# 약간의 여백 추가 (선택 사항)
 st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
 
+# 제목 및 안내 문구
 st.title("히즈메디병원")
 st.markdown(f'<a class="hm-call" href="tel:{CALL}">📞 대표번호 전화하기 · {CALL}</a>', unsafe_allow_html=True)
 
+# 병원 정보
 st.markdown(f"""
 <div class="hm-info">
   <div class="title">안내</div>
@@ -105,26 +217,29 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
+# 진료과 정보 로드
 df = load_departments()
 if df is None or df.empty:
     st.info("현재 진료과 정보가 없습니다."); st.stop()
 
-# ✅ doctors 시트는 미사용. departments에 새 컬럼만 추가
+# 데이터프레임 컬럼 확인 및 초기화
 for c in ("dept_id","dept_name","dept_reservation_url","dept_schedule_detail_url","display_order","is_active"):
     if c not in df.columns: df[c] = ""
 
+# 활성 진료과 필터링
 df = df[df["is_active"].apply(ok)]
+
+# 정렬
 if "display_order" in df.columns:
     df = df.sort_values("display_order", na_position="last")
 
+# 각 진료과 정보 표시
 for i, (_, r) in enumerate(df.iterrows()):
     did = r.get("dept_id")
     name = S(r.get("dept_name")) or "진료과"
     ped = "소아청소년과" in name.replace(" ", "")
 
     reserve = None if ped else anc(sidx(r.get("dept_reservation_url"), did), "#boardfrm")
-
-    # ✅ 통합 버튼: 의사정보·진료시간표 (departments.dept_schedule_detail_url)
     doc_sched = sidx(r.get("dept_schedule_detail_url"), did) if S(r.get("dept_schedule_detail_url")).startswith("http") else S(r.get("dept_schedule_detail_url"))
 
     st.markdown(f"""
