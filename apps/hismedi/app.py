@@ -27,127 +27,41 @@ def A(lbl, url, cls):
 
 st.markdown("""
 <style>
-/* 상단 여백 최소화 */
-header {
-    padding-top: calc(env(safe-area-inset-top) + .2rem);
-}
-div.block-container {
-    padding-top: .2rem;
-    padding-bottom: 1rem;
-    margin-top: -1rem; /* 추가적인 margin 조정 */
-}
-
-/* 폰트 크기 및 색상 */
-body {
-    font-size: 16px;
-    color: #333;
-}
-
-/* 제목 스타일 */
-h1 {
-    font-size: 24px;
-    font-weight: bold;
-    margin-bottom: 0.5rem;
-}
+/* 상단 잘림 방지: h1 직접 수정 금지(잘림 원인), 대신 레이아웃만 */
+header{padding-top:calc(env(safe-area-inset-top) + .6rem);}
+div.block-container{padding-top:.6rem; padding-bottom:2rem;}
 
 /* Call */
-.hm-call {
-    display: block;
-    margin: 0.5rem auto; /* 가운데 정렬 */
-    padding: 12px;
-    border-radius: 12px;
-    text-decoration: none;
-    font-weight: 900;
-    text-align: center;
-    border: 1px solid rgba(49,51,63,.18);
-    background: rgba(49,51,63,.05);
-    color: inherit;
-    max-width: 300px; /* 최대 너비 설정 */
-}
+.hm-call{display:block; margin:.2rem 0 .55rem; padding:12px; border-radius:14px;
+  text-decoration:none; font-weight:900; text-align:center;
+  border:1px solid rgba(49,51,63,.18); background:rgba(49,51,63,.05); color:inherit;}
 
 /* Info */
-.hm-info {
-    margin: 0.5rem auto; /* 가운데 정렬 */
-    padding: 0.85rem;
-    border-radius: 12px;
-    border: 1px solid rgba(49,51,63,.10);
-    background: rgba(49,51,63,.02);
-    font-size: 0.9rem;
-    line-height: 1.4;
-    color: rgba(49,51,63,.86);
-    max-width: 400px; /* 최대 너비 설정 */
-}
-.hm-info .title {
-    font-weight: 900;
-    margin-bottom: 0.25rem;
-}
-.hm-info .section {
-    margin-top: 0.6rem;
-    padding-top: 0.5rem;
-    border-top: 1px solid rgba(49,51,63,.08);
-}
-.hm-info .label {
-    font-weight: 900;
-}
-.hm-info ul {
-    margin: 0.25rem 0 0 1.05rem;
-}
-.hm-info li {
-    margin: 0.18rem 0;
-}
-.hm-info .muted {
-    color: rgba(49,51,63,.66);
-    font-size: 0.8rem;
-}
+.hm-info{margin:.35rem 0 1rem; padding:.85rem .9rem; border-radius:14px;
+  border:1px solid rgba(49,51,63,.10); background:rgba(49,51,63,.02);
+  font-size:.90rem; line-height:1.48; color:rgba(49,51,63,.86);}
+.hm-info .title{font-weight:900; margin-bottom:.25rem;}
+.hm-info .section{margin-top:.70rem; padding-top:.60rem; border-top:1px solid rgba(49,51,63,.08);}
+.hm-info .label{font-weight:900;}
+.hm-info ul{margin:.25rem 0 0 1.05rem;}
+.hm-info li{margin:.18rem 0;}
+.hm-info .muted{color:rgba(49,51,63,.66); font-size:.86rem;}
 
 /* Dept */
-.hm-dept {
-    padding: 10px 0;
-    border-bottom: 1px solid rgba(49,51,63,.08);
-}
-.hm-title {
-    font-size: 15px;
-    font-weight: 900;
-    margin: 0 0 8px;
-}
-.hm-row {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap; /* 줄바꿈 활성화 */
-    width: 100%;
-}
-.hm-btn {
-    flex: 1; /* 각 버튼이 가능한 한 넓게 확장 */
-    text-align: center;
-    padding: 8px;
-    border-radius: 8px;
-    white-space: nowrap;
-    text-decoration: none;
-    font-weight: 800;
-    font-size: 13px; /* 폰트 크기 줄임 */
-    color: inherit;
-    border: 1px solid rgba(49,51,63,.18);
-    background: rgba(49,51,63,.02);
-    min-width: 45%; /* 최소 너비 설정 */
-    box-sizing: border-box; /* padding 포함 */
-}
-.hm-r {
-    border-color: rgba(255,75,75,.65);
-}
-.hm-dis {
-    opacity: .45;
-    cursor: not-allowed;
-}
-.hm-sub {
-    margin-top: 6px;
-    font-size: 11px;
-    color: rgba(49,51,63,.55);
-}
+.hm-dept{padding:14px 0; border-bottom:1px solid rgba(49,51,63,.08);}
+.hm-title{font-size:16px; font-weight:900; margin:0 0 10px;}
+.hm-row{display:flex; gap:10px; flex-wrap:nowrap; width:100%;}
+.hm-btn{flex:1 1 0; text-align:center; padding:10px 8px; border-radius:10px; white-space:nowrap;
+  text-decoration:none; font-weight:800; font-size:14px; color:inherit;
+  border:1px solid rgba(49,51,63,.18); background:rgba(49,51,63,.02);}
+.hm-r{border-color:rgba(255,75,75,.65);}
+.hm-dis{opacity:.45; cursor:not-allowed;}
+.hm-sub{margin-top:8px; font-size:12px; color:rgba(49,51,63,.55);}
 </style>
 """, unsafe_allow_html=True)
 
 # (필요 시 아주 미세하게만 아래로 내림: 1줄)
-st.markdown("<div style='height:5px'></div>", unsafe_allow_html=True)
+st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
 
 st.title("히즈메디병원")
 st.markdown(f'<a class="hm-call" href="tel:{CALL}">📞 대표번호 전화하기 · {CALL}</a>', unsafe_allow_html=True)
