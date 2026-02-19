@@ -1,0 +1,26 @@
+name: Streamlit Keep Alive
+
+on:
+  schedule:
+    # 한국 시간 기준 매일 오전 9시, 오후 9시 두 번 실행 (충분히 깨워주기 위함)
+    - cron: '0 0,12 * * *'
+  workflow_dispatch: # 수동으로도 실행할 수 있게 버튼 생성
+
+jobs:
+  auto_commit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Make changes to keep-alive file
+        run: |
+          echo "Last keep-alive: $(date)" > keep_alive.txt
+
+      - name: Push changes
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add keep_alive.txt
+          git commit -m "Auto-wake: Update keep-alive timestamp"
+          git push
