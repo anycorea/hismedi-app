@@ -182,13 +182,17 @@ def main():
         }
         /* 기간 선택 드롭다운 텍스트를 더 굵게, 배경색 강하게 */
         [data-testid="stSidebar"] div[data-baseweb="select"] > div {
-            background-color: #bfdbfe;  /* 더 진한 파란톤 */
+            background-color: #bfdbfe;
             border-radius: 4px;
             border: 1px solid #1d4ed8;
         }
         [data-testid="stSidebar"] div[data-baseweb="select"] span {
             font-size: 0.9rem;
             font-weight: 800;
+            text-align: center !important; /* 텍스트 중앙 정렬 추가 및 !important 적용 */
+            display: block;      /* span을 block 요소로 변경 */
+            width: 100%;         /* span 너비 100% 지정 */
+            margin: auto;        /* span 중앙 정렬 */
         }
         </style>
         """,
