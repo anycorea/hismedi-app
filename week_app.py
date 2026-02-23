@@ -189,8 +189,6 @@ def main():
         [data-testid="stSidebar"] div[data-baseweb="select"] span {
             font-size: 0.9rem;
             font-weight: 800;
-            text-align: center; /* 텍스트 중앙 정렬 추가 */
-            display: block;      /* span을 block 요소로 변경 */
         }
         </style>
         """,
