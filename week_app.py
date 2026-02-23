@@ -139,19 +139,6 @@ def main():
 
     st.set_page_config(page_title=app_title, layout="wide")
 
-    # CSS Injection을 위한 HTML 코드
-    css = """
-    <style>
-        /* 드롭다운 내부 텍스트 가운데 정렬 */
-        [data-testid="stSidebar"] div[data-baseweb="select"] > div > div[data-testid="stSelectboxInput"] {
-            text-align: center !important;
-        }
-    </style>
-    """
-
-    # Streamlit 앱에 CSS 코드 삽입
-    st.markdown(css, unsafe_allow_html=True)
-
     # Global layout & spacing styles
     st.markdown(
         """
@@ -195,16 +182,14 @@ def main():
         }
         /* 기간 선택 드롭다운 텍스트를 더 굵게, 배경색 강하게 */
         [data-testid="stSidebar"] div[data-baseweb="select"] > div {
-            background-color: #bfdbfe;
+            background-color: #bfdbfe;  /* 더 진한 파란톤 */
             border-radius: 4px;
             border: 1px solid #1d4ed8;
         }
-        /*
         [data-testid="stSidebar"] div[data-baseweb="select"] span {
             font-size: 0.9rem;
             font-weight: 800;
         }
-        */
         </style>
         """,
         unsafe_allow_html=True,
