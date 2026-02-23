@@ -189,14 +189,33 @@ def main():
         [data-testid="stSidebar"] div[data-baseweb="select"] span {
             font-size: 0.9rem;
             font-weight: 800;
-            text-align: center !important; /* 텍스트 중앙 정렬 추가 및 !important 적용 */
-            display: block;      /* span을 block 요소로 변경 */
-            width: 100%;         /* span 너비 100% 지정 */
-            margin: auto;        /* span 중앙 정렬 */
+            /* text-align: center !important; */
+            /* display: block; */
+            /* width: 100%; */
+            /* margin: auto; */
+            /* padding: 0 !important; */
         }
         </style>
         """,
         unsafe_allow_html=True,
+    )
+
+    # JavaScript to center the text in the selectbox
+    components.html(
+        """
+        <script>
+            window.onload = function() {
+                var spans = document.querySelectorAll('[data-testid="stSidebar"] div[data-baseweb="select"] span');
+                spans.forEach(function(span) {
+                    span.style.textAlign = 'center';
+                    span.style.display = 'block';
+                    span.style.width = '100%';
+                });
+            };
+        </script>
+        """,
+        height=0,
+        width=0,
     )
 
     df = load_data()
