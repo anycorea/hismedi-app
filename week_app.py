@@ -182,40 +182,17 @@ def main():
         }
         /* 기간 선택 드롭다운 텍스트를 더 굵게, 배경색 강하게 */
         [data-testid="stSidebar"] div[data-baseweb="select"] > div {
-            background-color: #bfdbfe;
+            background-color: #bfdbfe;  /* 더 진한 파란톤 */
             border-radius: 4px;
             border: 1px solid #1d4ed8;
         }
         [data-testid="stSidebar"] div[data-baseweb="select"] span {
             font-size: 0.9rem;
             font-weight: 800;
-            /* text-align: center !important; */
-            /* display: block; */
-            /* width: 100%; */
-            /* margin: auto; */
-            /* padding: 0 !important; */
         }
         </style>
         """,
         unsafe_allow_html=True,
-    )
-
-    # JavaScript to center the text in the selectbox
-    components.html(
-        """
-        <script>
-            window.onload = function() {
-                var spans = document.querySelectorAll('[data-testid="stSidebar"] div[data-baseweb="select"] span');
-                spans.forEach(function(span) {
-                    span.style.textAlign = 'center';
-                    span.style.display = 'block';
-                    span.style.width = '100%';
-                });
-            };
-        </script>
-        """,
-        height=0,
-        width=0,
     )
 
     df = load_data()
