@@ -20,13 +20,29 @@ st.markdown("""
 @st.cache_resource
 def get_sheet():
     try:
-        # 깃허브 Secrets에 저장된 GOOGLE_CREDENTIALS 사용
-        creds_json = json.loads(st.secrets["GOOGLE_CREDENTIALS"])
+        # 제공해주신 [gcp_service_account] 섹션을 그대로 딕셔너리로 변환
+        creds_dict = {
+            "type": st.secrets["gcp_service_account"]["type"],
+            "project_id": st.secrets["gcp_service_account"]["project_id"],
+            "private_key_id": st.secrets["gcp_service_account"]["private_key_id"],
+            "private_key": st.secrets["gcp_service_account"]["private_key"],
+            "client_email": st.secrets["gcp_service_account"]["client_email"],
+            "client_id": st.secrets["gcp_service_account"]["client_id"],
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": st.secrets["gcp_service_account"]["token_uri"],
+            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+            "client_x509_cert_url": f"https://www.googleapis.com/robot/v1/metadata/x509/{st.secrets['gcp_service_account']['client_email'].replace('@', '%40')}"
+        }
+        
         scopes = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
-        creds = Credentials.from_service_account_info(creds_json, scopes=scopes)
+        creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
         client = gspread.authorize(creds)
-        # 지정하신 시트 및 워크시트명 연결
-        return client.open_by_key("1JL8mtgT1-h9gJWPtY2GO-Ydqjw-4dxb9ykyWfVUXseU").worksheet("약무신청서 - New_stop")
+        
+        # [drug_gsheet] 섹션에서 정보 로드
+        ss_id = st.secrets["drug_gsheet"]["spreadsheet_id"]
+        ws_name = st.secrets["drug_gsheet"]["worksheet_name"]
+        
+        return client.open_by_key(ss_id).worksheet(ws_name)
     except Exception as e:
         st.error(f"⚠️ 시트 연결 실패: {e}")
         return None
