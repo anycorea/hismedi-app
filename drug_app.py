@@ -9,50 +9,44 @@ st.set_page_config(page_title="HISMEDI 약무 서비스", layout="wide")
 
 st.markdown("""
     <style>
-    /* 사이드바 배경색 및 간격 초밀착 조정 */
+    /* 사이드바 배경색 및 폰트 */
     [data-testid="stSidebar"] { background-color: #f8f9fa; border-right: 1px solid #dee2e6; }
-    [data-testid="stSidebar"] [data-testid="stVerticalBlock"] { gap: 0.3rem !important; padding-top: 1rem !important; }
-    
-    /* 사이드바 내부 위젯 간격 줄이기 */
-    .st-emotion-cache-16idsys p { margin-bottom: 0px !important; }
-    div[data-testid="stVerticalBlock"] > div { margin-top: -5px !important; }
     
     /* 제목 스타일 */
-    .main-header { font-size: 1.6rem; font-weight: 800; color: #1E3A8A; margin-bottom: 15px; }
+    .main-header { font-size: 1.8rem; font-weight: 800; color: #1E3A8A; margin-bottom: 20px; }
     
     /* 탭 디자인 */
-    .stTabs [data-baseweb="tab-list"] { gap: 5px; }
+    .stTabs [data-baseweb="tab-list"] { gap: 8px; }
     .stTabs [data-baseweb="tab"] { 
-        background-color: #f1f3f5; border-radius: 5px; padding: 8px 15px; font-weight: bold; color: #495057; font-size: 0.9rem;
+        background-color: #f1f3f5; border-radius: 5px; padding: 10px 18px; font-weight: bold; color: #495057;
     }
     .stTabs [aria-selected="true"] { background-color: #1E3A8A !important; color: white !important; }
     
     /* 섹션 제목 스타일 (박스 제거 후 간결하게) */
     .section-title { 
-        font-size: 1.0rem; font-weight: bold; color: #1E40AF; 
-        margin: 20px 0 10px 0; border-bottom: 2px solid #e9ecef; padding-bottom: 3px;
+        font-size: 1.05rem; font-weight: bold; color: #1E40AF; 
+        margin: 25px 0 15px 0; border-bottom: 2px solid #e9ecef; padding-bottom: 5px;
     }
-    
-    /* 입력 필드 높이 살짝 조절 */
-    div[data-baseweb="input"] { min-height: 35px; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. 데이터 조회 함수 ---
+# --- 2. 데이터 조회 함수 (심평원 CSV 대응) ---
 @st.cache_data
 def get_drug_info(edi_code):
     if not edi_code: return {}
     try:
         df = pd.read_csv("drug_master.csv", encoding='utf-8-sig')
-        df.columns = [c.strip() for c in df.columns] 
+        df.columns = [c.strip() for c in df.columns] # 헤더 공백 제거
         
         df['제품코드'] = df['제품코드'].astype(str).str.strip()
         target = df[df['제품코드'] == str(edi_code).strip()]
         
         if not target.empty:
             res = target.iloc[0]
+            # 상한금액 열 찾기 (공백 대응)
             col_price = next((c for c in df.columns if '상한금액' in c), None)
             price_val = str(res[col_price]).replace(',', '').strip() if col_price else "0"
+            # 적용일자 열 찾기
             col_date = next((c for c in df.columns if '전일' in c), None)
             date_val = str(res[col_date]).strip() if col_date else ""
 
@@ -77,27 +71,28 @@ def get_sheet():
 
 sheet = get_sheet()
 
-# --- 4. 왼쪽 사이드바 (신청자 정보 우선 + 간격 축소) ---
+# --- 4. 왼쪽 사이드바 (구조 조정) ---
 with st.sidebar:
-    st.markdown("### HISMEDI † Drug Service")
+    st.markdown("## HISMEDI † Drug Service")
+    st.divider()
     
-    # [1] 신청자 정보 (최상단)
-    st.markdown("**📋 신청자 정보**")
-    app_user = st.text_input("성명", placeholder="성명 입력", label_visibility="collapsed", key="u_name")
-    app_date = st.date_input("신청일", datetime.now(), label_visibility="collapsed", key="u_date").strftime('%Y-%m-%d')
-    app_status = st.selectbox("진행상황", ["신청완료", "처리중", "처리완료"], label_visibility="collapsed", key="u_stat")
-    app_remark = st.text_area("비고(공통)", placeholder="기타 요청사항", label_visibility="collapsed", key="u_rem", height=80)
+    # [1] 신청자 정보 (위로 이동)
+    st.subheader("📋 신청자 정보")
+    app_user = st.text_input("👤 신청자 성명", placeholder="성명 입력")
+    app_date = st.date_input("📅 신청일", datetime.now()).strftime('%Y-%m-%d')
+    app_status = st.selectbox("⚙️ 진행상황", ["신청완료", "처리중", "처리완료"])
+    app_remark = st.text_area("📝 비고 (공통 요청사항)")
     
-    st.markdown("<hr style='margin: 10px 0;'>", unsafe_allow_html=True) # 좁은 구분선
+    st.divider()
     
-    # [2] EDI 정보 조회기 (하단)
-    st.markdown("**🔍 EDI 정보 조회기**")
-    search_code = st.text_input("제품코드", placeholder="조회용 코드 입력", label_visibility="collapsed", key="sb_search")
+    # [2] EDI 정보 조회기 (아래로 이동)
+    st.subheader("🔍 EDI 정보 조회기")
+    search_code = st.text_input("제품코드 입력", placeholder="조회 전용", key="sb_search")
     if search_code:
         s_res = get_drug_info(search_code)
         if s_res:
             st.info(f"**{s_res['name']}**\n\n{s_res['comp']}\n\n{s_res['price']}원 | {s_res['spec']}")
-        else: st.warning("정보 없음")
+        else: st.warning("정보를 찾을 수 없습니다.")
 
 # --- 5. 공통 함수 및 입력 헬퍼 ---
 def handle_submit(row_data):
@@ -109,6 +104,7 @@ def handle_submit(row_data):
         st.success("데이터베이스에 저장되었습니다."); st.balloons()
 
 def render_drug_input(prefix, title, key_id):
+    """약제 정보 입력 필드 (박스 및 열 설명 제거)"""
     st.markdown(f'<div class="section-title">{title}</div>', unsafe_allow_html=True)
     c1, c2, c3 = st.columns([1, 2, 1])
     edi = c1.text_input(f"{prefix} EDI 코드", key=f"edi_{key_id}")
@@ -139,7 +135,7 @@ with tabs[0]:
     data[14] = cc2.selectbox("중지 사유", ["생산중단", "자진취하", "대체발생", "기타"], key="t1_s1")
     data[19] = cc3.text_input("현재 재고량", key="t1_v1")
     
-    st.markdown("<br>", unsafe_allow_html=True)
+    st.divider()
     if st.button("🚀 사용중지 신청 제출", use_container_width=True): handle_submit(data)
 
 # ② 신규입고
@@ -155,7 +151,7 @@ with tabs[1]:
     data[31] = cc2.date_input("입고 희망일", key="t2_v2").strftime('%Y-%m-%d')
     data[33] = cc3.text_input("상한가 외 사유", key="t2_v3")
     
-    st.markdown("<br>", unsafe_allow_html=True)
+    st.divider()
     if st.button("🚀 신규입고 신청 제출", use_container_width=True): handle_submit(data)
 
 # ③ 대체입고 ~ ⑥ 단가인상
@@ -165,16 +161,16 @@ for i, title in enumerate(["대체입고", "급여코드변경", "단가인하",
         data = [""] * 56
         data[0] = title
         
-        # 기존 정보
+        # 기존 정보 (D~M열)
         res1 = render_drug_input("기존/이전", "기존 약제 정보", f"t{i}_old")
         data[3], data[4], data[5], data[7], data[10], data[9] = res1[0], res1[1], res1[2], res1[4], res1[7], res1[6]
         
-        # 대체 정보
+        # 대체 정보 (AK~AT열)
         res2 = render_drug_input("대체/변경", "대체 약제 정보", f"t{i}_new")
         data[36], data[37], data[38], data[40], data[43], data[42] = res2[0], res2[1], res2[2], res2[4], res2[7], res2[6]
         
         st.markdown('<div class="section-title">추가 정보</div>', unsafe_allow_html=True)
-        data[48] = st.text_area("변경 및 입고 요청 사유", key=f"t{i}_area", height=100)
+        data[48] = st.text_area("변경 및 입고 요청 사유", key=f"t{i}_area")
         
-        st.markdown("<br>", unsafe_allow_html=True)
+        st.divider()
         if st.button(f"🚀 {title} 신청 제출", use_container_width=True): handle_submit(data)
