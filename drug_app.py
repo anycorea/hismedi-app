@@ -24,19 +24,23 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. 심평원 실시간 API 조회 함수 ---
-@st.cache_data(ttl=3600) # 1시간 동안 결과 캐싱
+# --- 2. 심평원 실시간 API 조회 함수 (Secret 위치 보완) ---
+@st.cache_data(ttl=3600)
 def get_drug_info(edi_code):
     if not edi_code: return {}
     
+    # Secret 위치를 유연하게 탐색 (루트에 있거나 [app] 아래에 있는 경우 모두 대응)
     api_key = st.secrets.get("hira_api_key")
     if not api_key:
-        return {"error": "API 키가 설정되지 않았습니다."}
+        api_key = st.secrets.get("app", {}).get("hira_api_key")
+    
+    if not api_key:
+        return {"error": "API 키가 설정되지 않았습니다. Secret 설정을 확인해주세요."}
 
     url = "http://apis.data.go.kr/B551182/dgamtInfoService/getMdclSvcGrdeList"
     params = {
         'serviceKey': api_key,
-        'mdsCd': edi_code,  # 제품코드(EDI)
+        'mdsCd': edi_code,
         'numOfRows': '1',
         'pageNo': '1'
     }
@@ -48,11 +52,11 @@ def get_drug_info(edi_code):
             item = root.find(".//item")
             if item is not None:
                 return {
-                    "name": item.findtext("itmNm", ""),     # 제품명
-                    "comp": item.findtext("enpNm", ""),     # 업체명
-                    "price": item.findtext("maxAmt", "0"),  # 상한금액
-                    "spec": item.findtext("unit", ""),      # 규격/단위
-                    "date": item.findtext("applcStdt", "")  # 적용일자
+                    "name": item.findtext("itmNm", ""),     
+                    "comp": item.findtext("enpNm", ""),     
+                    "price": item.findtext("maxAmt", "0"),  
+                    "spec": item.findtext("unit", ""),      
+                    "date": item.findtext("applcStdt", "")  
                 }
     except Exception as e:
         return {"error": f"연결 오류: {str(e)}"}
@@ -86,10 +90,12 @@ with st.sidebar:
     search_code = st.text_input("제품코드 입력", placeholder="실시간 조회용", key="sb_search")
     if search_code:
         s_res = get_drug_info(search_code)
-        if "error" in s_res: st.error(s_res["error"])
+        if "error" in s_res: 
+            st.error(s_res["error"])
         elif s_res:
             st.info(f"**{s_res['name']}**\n\n{s_res['comp']}\n\n{s_res['price']}원 | {s_res['spec']}\n\n적용일: {s_res['date']}")
-        else: st.warning("정보를 찾을 수 없습니다.")
+        else: 
+            st.warning("정보를 찾을 수 없습니다.")
 
 # --- 5. 공통 함수 및 입력 헬퍼 ---
 def handle_submit(row_data):
@@ -97,8 +103,11 @@ def handle_submit(row_data):
         st.error("왼쪽 메뉴에서 신청자 성명을 입력해주세요."); return
     if sheet:
         row_data[1], row_data[2], row_data[54], row_data[55] = app_date, app_user, app_remark, app_status
-        sheet.append_row(row_data)
-        st.success("데이터베이스에 실시간 저장되었습니다."); st.balloons()
+        try:
+            sheet.append_row(row_data)
+            st.success("데이터베이스에 성공적으로 저장되었습니다."); st.balloons()
+        except Exception as e:
+            st.error(f"저장 오류: {e}")
 
 def render_drug_input(prefix, title, key_id):
     st.markdown(f'<div class="section-title">{title}</div>', unsafe_allow_html=True)
@@ -115,7 +124,7 @@ def render_drug_input(prefix, title, key_id):
     date = c6.text_input(f"{prefix} 적용일", value=m.get("date", ""), key=f"dt_{key_id}")
     return [edi, name, comp, "", price, "", date, spec]
 
-# --- 6. 메인 화면 탭 구성 (1~6번 동일 유지) ---
+# --- 6. 메인 화면 탭 구성 ---
 tabs = st.tabs(["① 사용중지", "② 신규입고", "③ 대체입고", "④ 급여코드변경", "⑤ 단가인하", "⑥ 단가인상"])
 
 # ① 사용중지
@@ -150,7 +159,7 @@ with tabs[1]:
     st.divider()
     if st.button("🚀 신규입고 신청 제출", use_container_width=True): handle_submit(data)
 
-# ③ 대체입고 ~ ⑥ 단가인상 (공통 루프)
+# ③ 대체입고 ~ ⑥ 단가인상
 for i, title in enumerate(["대체입고", "급여코드변경", "단가인하", "단가인상"], start=2):
     with tabs[i]:
         st.markdown(f'<div class="main-header">{i+1}. {title} 신청</div>', unsafe_allow_html=True)
