@@ -10,13 +10,20 @@ st.set_page_config(page_title="HISMEDI 약무 서비스", layout="wide")
 
 st.markdown("""
     <style>
+    /* 사이드바 배경색 및 디자인 */
     [data-testid="stSidebar"] { background-color: #f8f9fa; border-right: 1px solid #dee2e6; }
+    
+    /* 메인 헤더 */
     .main-header { font-size: 1.8rem; font-weight: 800; color: #1E3A8A; margin-bottom: 20px; }
+    
+    /* 탭 디자인 */
     .stTabs [data-baseweb="tab-list"] { gap: 8px; }
     .stTabs [data-baseweb="tab"] { 
         background-color: #f1f3f5; border-radius: 5px; padding: 10px 18px; font-weight: bold; color: #495057;
     }
     .stTabs [aria-selected="true"] { background-color: #1E3A8A !important; color: white !important; }
+    
+    /* 섹션 제목 (D~M, AK~AT 박스 제거 버전) */
     .section-title { 
         font-size: 1.05rem; font-weight: bold; color: #1E40AF; 
         margin: 25px 0 15px 0; border-bottom: 2px solid #e9ecef; padding-bottom: 5px;
@@ -24,18 +31,23 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. 심평원 실시간 API 조회 함수 (Secret 위치 보완) ---
+# --- 2. 심평원 실시간 API 조회 함수 (Secret 그룹 대응 보완) ---
 @st.cache_data(ttl=3600)
 def get_drug_info(edi_code):
     if not edi_code: return {}
     
-    # Secret 위치를 유연하게 탐색 (루트에 있거나 [app] 아래에 있는 경우 모두 대응)
+    # [해결책] Secret의 다양한 위치 탐색
+    # 1. 루트 레벨 확인
     api_key = st.secrets.get("hira_api_key")
+    # 2. [API] 섹션 확인
+    if not api_key:
+        api_key = st.secrets.get("API", {}).get("hira_api_key")
+    # 3. [app] 섹션 확인
     if not api_key:
         api_key = st.secrets.get("app", {}).get("hira_api_key")
     
     if not api_key:
-        return {"error": "API 키가 설정되지 않았습니다. Secret 설정을 확인해주세요."}
+        return {"error": "API 키가 설정되지 않았습니다. [API] 섹션 아래에 hira_api_key가 있는지 확인해주세요."}
 
     url = "http://apis.data.go.kr/B551182/dgamtInfoService/getMdclSvcGrdeList"
     params = {
@@ -105,7 +117,7 @@ def handle_submit(row_data):
         row_data[1], row_data[2], row_data[54], row_data[55] = app_date, app_user, app_remark, app_status
         try:
             sheet.append_row(row_data)
-            st.success("데이터베이스에 성공적으로 저장되었습니다."); st.balloons()
+            st.success("데이터베이스에 저장되었습니다."); st.balloons()
         except Exception as e:
             st.error(f"저장 오류: {e}")
 
@@ -166,11 +178,11 @@ for i, title in enumerate(["대체입고", "급여코드변경", "단가인하",
         data = [""] * 56
         data[0] = title
         
-        # 기존 정보 (D~M열)
+        # 기존 정보 (D~M열 반영)
         res1 = render_drug_input("기존/이전", "기존 약제 정보", f"t{i}_old")
         data[3], data[4], data[5], data[7], data[10], data[9] = res1[0], res1[1], res1[2], res1[4], res1[7], res1[6]
         
-        # 대체 정보 (AK~AT열)
+        # 대체 정보 (AK~AT열 반영)
         res2 = render_drug_input("대체/변경", "대체 약제 정보", f"t{i}_new")
         data[36], data[37], data[38], data[40], data[43], data[42] = res2[0], res2[1], res2[2], res2[4], res2[7], res2[6]
         
