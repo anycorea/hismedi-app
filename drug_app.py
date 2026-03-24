@@ -24,56 +24,62 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. 심평원 실시간 API 조회 함수 (디버깅 강화) ---
-@st.cache_data(ttl=60) # 디버깅을 위해 캐시 시간을 1분으로 단축
+# --- 2. KPIS(의약품관리종합정보센터) SOAP API 조회 함수 ---
+@st.cache_data(ttl=600)
 def get_drug_info(edi_code):
     if not edi_code: return {}
     
-    # Secret 위치 탐색
-    api_key = st.secrets.get("hira_api_key")
-    if not api_key: api_key = st.secrets.get("API", {}).get("hira_api_key")
-    if not api_key: api_key = st.secrets.get("app", {}).get("hira_api_key")
+    # Secret에서 키 가져오기
+    api_key = st.secrets.get("hira_api_key") or st.secrets.get("API", {}).get("hira_api_key") or st.secrets.get("app", {}).get("hira_api_key")
     
     if not api_key:
-        return {"error": "API 키를 찾을 수 없습니다. Secret 설정을 확인하세요."}
+        return {"error": "API 키가 설정되지 않았습니다."}
 
-    url = "http://apis.data.go.kr/B551182/dgamtInfoService/getMdclSvcGrdeList"
+    # KPIS SOAP 엔드포인트 (WSDL 제외 주소)
+    url = "http://openapi.kpis.or.kr/services/msupStdCdInfo"
     
-    # EDI 코드 정제 (공백 제거)
-    clean_code = str(edi_code).strip()
-    
-    params = {
-        'serviceKey': api_key,
-        'mdsCd': clean_code,
-        'numOfRows': '1',
-        'pageNo': '1'
+    # KPIS SOAP 요청 몸체 (XML)
+    soap_body = f"""<?xml version="1.0" encoding="UTF-8"?>
+    <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ser="http://service.kpis.or.kr/">
+       <soapenv:Header/>
+       <soapenv:Body>
+          <ser:getMsupStdCdInfo>
+             <serviceKey>{api_key}</serviceKey>
+             <stdCd>{edi_code}</stdCd>
+          </ser:getMsupStdCdInfo>
+       </soapenv:Body>
+    </soapenv:Envelope>"""
+
+    headers = {
+        "Content-Type": "text/xml;charset=UTF-8",
+        "SOAPAction": ""
     }
-    
+
     try:
-        # 인증키에 특수문자가 포함된 경우를 대비해 직접 호출
-        response = requests.get(url, params=params, timeout=5)
+        response = requests.post(url, data=soap_body.encode('utf-8'), headers=headers, timeout=10)
         
         if response.status_code == 200:
-            root = ET.fromstring(response.text)
+            # SOAP 응답에서 데이터 추출
+            root = ET.fromstring(response.content)
             
-            # API 결과 코드 확인 (00이 정상)
-            res_code = root.find(".//resultCode")
-            res_msg = root.find(".//resultMsg")
+            # KPIS 응답 구조 파싱 (네임스페이스 무시하고 찾기 위해 .//* 사용)
+            item = root.find(".//return")
             
-            if res_code is not None and res_code.text != "00":
-                return {"error": f"API 에러: {res_msg.text} (코드:{res_code.text})"}
-
-            item = root.find(".//item")
             if item is not None:
+                # 결과 코드 확인 (KPIS는 resultCode 대신 특정 필드 유무로 판단)
+                item_nm = item.findtext("itemNm")
+                if not item_nm:
+                    return {"error": "검색 결과가 없습니다. (코드를 확인하세요)"}
+
                 return {
-                    "name": item.findtext("itmNm", ""),     
-                    "comp": item.findtext("enpNm", ""),     
-                    "price": item.findtext("maxAmt", "0"),  
-                    "spec": item.findtext("unit", ""),      
-                    "date": item.findtext("applcStdt", "")  
+                    "name": item_nm,                            # 약품명
+                    "comp": item.findtext("entpNm", ""),       # 업체명
+                    "price": item.findtext("maxAmt", "0"),     # 상한금액
+                    "spec": f"{item.findtext('spec', '')} {item.findtext('unit', '')}".strip(), # 규격+단위
+                    "date": item.findtext("applcStdt", "")     # 적용일자
                 }
             else:
-                return {"error": "해당 EDI 코드에 대한 검색 결과가 없습니다."}
+                return {"error": "API 응답 형식이 올바르지 않습니다."}
         else:
             return {"error": f"서버 응답 오류 (HTTP {response.status_code})"}
             
@@ -105,14 +111,12 @@ with st.sidebar:
     st.divider()
     
     st.subheader("🔍 EDI 정보 조회기")
-    search_code = st.text_input("제품코드 입력", placeholder="예: 648500030", key="sb_search")
+    search_code = st.text_input("제품코드 입력", placeholder="실시간 조회용", key="sb_search")
     if search_code:
-        with st.spinner('조회 중...'):
+        with st.spinner('KPIS 데이터 조회 중...'):
             s_res = get_drug_info(search_code)
             if "error" in s_res: 
                 st.error(s_res["error"])
-                if "SERVICE_KEY_IS_NOT_REGISTERED" in s_res["error"]:
-                    st.warning("팁: Decoding 인증키를 사용했는지 확인하세요. 승인 직후라면 1~2시간 뒤에 다시 시도하세요.")
             elif s_res:
                 st.info(f"**{s_res['name']}**\n\n{s_res['comp']}\n\n{s_res['price']}원 | {s_res['spec']}\n\n적용일: {s_res['date']}")
 
@@ -133,12 +137,11 @@ def render_drug_input(prefix, title, key_id):
     c1, c2, c3 = st.columns([1, 2, 1])
     edi = c1.text_input(f"{prefix} EDI 코드", key=f"edi_{key_id}")
     
-    # 조회가 성공했을 때만 데이터 채우기
     m = get_drug_info(edi) if edi else {}
     if "error" in m:
-        st.caption(f":red[{m['error']}]") # 입력창 하단에 에러 표시
+        st.caption(f":red[{m['error']}]")
         m = {}
-    
+
     name = c2.text_input(f"{prefix} 제품명", value=m.get("name", ""), key=f"nm_{key_id}")
     comp = c3.text_input(f"{prefix} 업체명", value=m.get("comp", ""), key=f"cp_{key_id}")
     
@@ -151,21 +154,29 @@ def render_drug_input(prefix, title, key_id):
 # --- 6. 메인 화면 탭 구성 ---
 tabs = st.tabs(["① 사용중지", "② 신규입고", "③ 대체입고", "④ 급여코드변경", "⑤ 단가인하", "⑥ 단가인상"])
 
-# [탭 구성 로직 생략 없이 위와 동일하게 유지...]
 for i, title in enumerate(["사용중지", "신규입고", "대체입고", "급여코드변경", "단가인하", "단가인상"]):
     with tabs[i]:
         st.markdown(f'<div class="main-header">{i+1}. {title} 신청</div>', unsafe_allow_html=True)
         row = [""] * 56
         row[0] = title
-        if i < 2: # 단일 정보
+        
+        if i < 2: # 단일 정보 (D~M열)
             res = render_drug_input("신청", f"{title} 약제 정보", f"t{i}")
             row[3], row[4], row[5], row[7], row[10], row[9] = res[0], res[1], res[2], res[4], res[7], res[6]
-        else: # 기존/대체 정보
-            res1 = render_drug_input("기존", "기존 약제 정보", f"t{i}_old")
+            if i == 0: # 사용중지 전용 필드
+                cc1, cc2 = st.columns(2)
+                row[13] = cc1.date_input("사용중지일", key="t0_d").strftime('%Y-%m-%d')
+                row[14] = cc2.selectbox("사유", ["생산중단", "자진취하", "대체발생", "기타"], key="t0_s")
+        else: # 비포/애프터 정보 (D~M, AK~AT)
+            res1 = render_drug_input("기존/이전", "기존 약제 정보", f"t{i}_old")
             row[3], row[4], row[5], row[7], row[10], row[9] = res1[0], res1[1], res1[2], res1[4], res1[7], res1[6]
-            res2 = render_drug_input("대체", "대체 약제 정보", f"t{i}_new")
+            
+            res2 = render_drug_input("대체/변경", "대체/변경 약제 정보", f"t{i}_new")
             row[36], row[37], row[38], row[40], row[43], row[42] = res2[0], res2[1], res2[2], res2[4], res2[7], res2[6]
-        
+            
+            st.markdown('<div class="section-title">추가 사유</div>', unsafe_allow_html=True)
+            row[48] = st.text_area("변경 및 입고 요청 사유", key=f"t{i}_area", height=100)
+            
         st.divider()
         if st.button(f"🚀 {title} 신청 제출", key=f"btn_{i}", use_container_width=True):
             handle_submit(row)
