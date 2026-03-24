@@ -4,7 +4,7 @@ import pandas as pd
 from google.oauth2.service_account import Credentials
 from datetime import datetime
 
-# --- 1. 페이지 설정 및 디자인 ---
+# --- 1. 페이지 설정 및 디자인 (CSS 유지) ---
 st.set_page_config(page_title="HISMEDI Drug Service", layout="wide")
 
 st.markdown("""
@@ -20,9 +20,10 @@ st.markdown("""
     }
     .stTabs [aria-selected="true"] { background-color: #1E3A8A !important; color: #ffffff !important; }
     
-    /* 제품코드 입력창 강조 */
+    /* 제품코드 입력창 오렌지색 강조 유지 */
     div[data-testid="stVerticalBlock"] div:has(label:contains("제품코드")) input {
         background-color: #fffdec !important; border: 2px solid #fbbf24 !important; font-weight: 700 !important;
+        color: #000000 !important;
     }
 
     .drug-table { width: 100%; border-collapse: collapse; margin-bottom: 15px; border: 1px solid #e2e8f0; font-size: 0.85rem; }
@@ -52,7 +53,7 @@ def load_master_data():
         return df
     except: return pd.DataFrame()
 
-@st.cache_data(ttl=2) # 실시간성 확보
+@st.cache_data(ttl=2) # 실시간 데이터 로드
 def load_db_data():
     try:
         ss = get_spreadsheet()
@@ -64,14 +65,18 @@ master_df = load_master_data()
 # --- 3. 옵션 리스트 ---
 OP_INSIDE_OUT = ["원내", "원외", "원내/외"]
 OP_STATUS = ["신청완료", "처리중", "처리완료"]
+# [요청사항 반영] 처리자(완료자) 리스트
+OP_PROCESSORS = ["한승주 팀장", "이소영 대리", "변혜진 주임"]
 OP_DEPT = ["내과", "신장내과", "소아청소년과", "외과", "정형외과", "신경외과", "비뇨의학과", "산부인과", "이비인후과", "가정의학과", "마취통증의학과", "영상의학과"]
 
 # --- 4. 사이드바 ---
 with st.sidebar:
     st.markdown('<p class="sidebar-title">HISMEDI † Drug Service</p>', unsafe_allow_html=True)
     st.divider()
-    app_user = st.text_input("사용자 성명", key="global_user")
+    # [요청사항 반영] 사용자 성명 -> 신청자 성명
+    app_user = st.text_input("신청자 성명", key="global_user")
     app_date = st.date_input("오늘 날짜", datetime.now(), key="global_date").strftime('%Y-%m-%d')
+    st.info("신청 시 성명을 입력해 주세요.")
 
 # --- 5. 헬퍼 함수 ---
 def get_drug_info(edi_code, df):
@@ -93,7 +98,7 @@ def render_drug_table(edi_val, label_title="약제 정보"):
     return [edi_val, m.get("제품명", ""), m.get("업체명", ""), m.get("규격", ""), m.get("단위", ""), price, m.get("주성분명", ""), m.get("전일", "")]
 
 def handle_submit(row_data, category):
-    if not app_user: st.error("성명을 입력해주세요."); return
+    if not app_user: st.error("신청자 성명을 입력해주세요."); return
     try:
         ss = get_spreadsheet()
         ws = ss.worksheet("New_stop")
@@ -108,7 +113,7 @@ def handle_submit(row_data, category):
 tab_names = ["📊 진행현황 대시보드", "사용중지", "신규입고", "대체입고", "급여코드변경", "단가인하▼", "단가인상▲", "약가조회"]
 tabs = st.tabs(tab_names)
 
-# [Tab 0] 진행현황 Dashboard (통합형 대시보드)
+# [Tab 0] 진행현황 Dashboard
 with tabs[0]:
     st.markdown('<div class="section-header">📊 통합 신청 현황 및 실시간 처리</div>', unsafe_allow_html=True)
     
@@ -116,27 +121,29 @@ with tabs[0]:
     if raw_df.empty:
         st.info("데이터가 없습니다.")
     else:
-        # 1. 편집용 데이터프레임 구성 (주요 컬럼만 추출하여 편집 창에 노출)
-        # 0:구분, 1:신청일, 2:신청자, 4:완료자(처리자), 5:상태, 6:코드1, 7:제품명1, 39:코드2, 40:제품명2
+        # 편집용 데이터프레임 구성
         cols = raw_df.columns
         edit_df = raw_df.copy()
-        edit_df.insert(0, "선택", False) # 가장 앞에 상세조회용 체크박스 추가
+        edit_df.insert(0, "상세조회", False) # 체크박스 추가
         
-        # 2. 통합 검색 기능
-        search_bar = st.text_input("🔍 검색 (제품명, 신청자, 상태 등)", key="global_search_bar")
+        # 통합 검색
+        search_bar = st.text_input("🔍 검색 (제품명, 코드, 신청자, 상태 등 입력)", key="global_search_bar")
         if search_bar:
             edit_df = edit_df[edit_df.apply(lambda r: r.astype(str).str.contains(search_bar).any(), axis=1)]
 
-        # 3. 데이터 에디터 (표에서 직접 수정)
-        st.write("💡 **상태** 또는 **완료자**를 표에서 직접 수정 후 하단 버튼을 누르세요.")
+        st.write("💡 **진행상황** 또는 **완료자**를 직접 수정한 후 하단 버튼을 눌러주세요.")
+        
+        # [요청사항 반영] st.data_editor 설정
         edited_df = st.data_editor(
-            edit_df.iloc[::-1], # 최신순
+            edit_df.iloc[::-1], # 최신순 표시
             column_config={
-                "선택": st.column_config.CheckboxColumn("조회", default=False),
+                "상세조회": st.column_config.CheckboxColumn("조회", default=False),
                 cols[5]: st.column_config.SelectboxColumn("진행상황", options=OP_STATUS, required=True),
-                cols[4]: st.column_config.TextColumn("완료자(처리자)"),
+                # 완료자(처리자) 드롭다운 적용
+                cols[4]: st.column_config.SelectboxColumn("완료자(처리자)", options=OP_PROCESSORS),
                 cols[0]: st.column_config.TextColumn("구분", disabled=True),
                 cols[1]: st.column_config.TextColumn("신청일", disabled=True),
+                cols[2]: st.column_config.TextColumn("신청자", disabled=True),
                 cols[7]: st.column_config.TextColumn("제품명1", disabled=True),
                 cols[40]: st.column_config.TextColumn("제품명2", disabled=True),
             },
@@ -146,25 +153,25 @@ with tabs[0]:
             key="main_data_editor"
         )
 
-        # 4. 일괄 저장 기능
+        # 일괄 저장 기능
         if st.button("💾 변경사항 구글 시트에 최종 반영하기", use_container_width=True):
             try:
                 ss = get_spreadsheet()
                 ws = ss.worksheet("New_stop")
-                # 변경된 데이터만 찾아서 업데이트 로직 (간소화를 위해 전체 순회 업데이트 또는 편집된 행 업데이트)
-                # 여기서는 편집된 데이터의 index를 추적하여 해당 셀만 업데이트합니다.
+                # 편집된 데이터를 시트에 반영
                 for idx, row in edited_df.iterrows():
-                    real_row_idx = row.name + 2 # 원래 데이터프레임의 인덱스 + 2(헤더+1)
-                    # 상태(컬럼 6)와 완료자(컬럼 5) 업데이트
+                    real_row_idx = row.name + 2 # 헤더 보정
+                    # 진행상황(6번컬럼), 완료자(5번컬럼) 업데이트
                     ws.update_cell(real_row_idx, 6, row[cols[5]]) 
                     ws.update_cell(real_row_idx, 5, row[cols[4]])
+                    # 완료 처리 시 완료일자 자동 입력
                     if row[cols[5]] == "처리완료":
-                         ws.update_cell(real_row_idx, 4, datetime.now().strftime('%Y-%m-%d')) # 완료일
-                st.success("시트에 모든 변경사항이 저장되었습니다."); st.cache_data.clear(); st.rerun()
+                         ws.update_cell(real_row_idx, 4, datetime.now().strftime('%Y-%m-%d'))
+                st.success("시트에 성공적으로 반영되었습니다."); st.cache_data.clear(); st.rerun()
             except Exception as e: st.error(f"저장 실패: {e}")
 
-        # 5. 선택 항목 상세 보기
-        selected_rows = edited_df[edited_df["선택"] == True]
+        # 선택 항목 상세 보기
+        selected_rows = edited_df[edited_df["상세조회"] == True]
         if not selected_rows.empty:
             st.markdown('<div class="section-header">🔍 선택 항목 상세 내역</div>', unsafe_allow_html=True)
             for _, sel in selected_rows.iterrows():
@@ -186,7 +193,7 @@ with tabs[0]:
                     st.write(f"**비고:** {sel[cols[38]]}")
                     st.markdown('</div>', unsafe_allow_html=True)
 
-# [Tab 1-6] 신청 양식들 (기존 58개 컬럼 로직 유지)
+# [Tab 1-7] 신청 양식 로직 (기존 58개 컬럼 유지)
 with tabs[1]: # 사용중지
     row = [""] * 58
     st.markdown('<div class="section-header">사용중지 신청</div>', unsafe_allow_html=True)
@@ -219,7 +226,6 @@ with tabs[3]: # 대체입고
     row[56] = st.date_input("입고일", key="t3_be").strftime('%Y-%m-%d')
     if st.button("🚀 대체입고 제출", key="b3", use_container_width=True): handle_submit(row, "대체입고")
 
-# ... 나머지 탭들도 동일하게 handle_submit(row, 카테고리명) 호출 ...
 for idx, tab_name in zip([4, 5], ["급여코드변경", "단가인하▼"]):
     with tabs[idx]:
         row = [""] * 58
