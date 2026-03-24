@@ -22,19 +22,29 @@ st.markdown("""
     }
     .stTabs [aria-selected="true"] { background-color: #1E3A8A !important; color: #ffffff !important; }
 
-    /* 약제 정보 테이블 (회색 헤더 스타일) */
+    /* [오렌지 박스] 제품코드 입력창 전용 */
+    div[data-testid="stVerticalBlock"] div:has(input[aria-label*="제품코드"]) input {
+        background-color: #fffdec !important; 
+        border: 2px solid #fbbf24 !important; 
+        font-weight: 700 !important;
+        color: #000000 !important;
+    }
+
+    /* [회색 박스] 나머지 모든 입력 필드 (Selectbox, Date, Number, Text) */
+    div[data-baseweb="input"] > div, 
+    div[data-baseweb="select"] > div,
+    div[data-baseweb="base-input"] > textarea {
+        background-color: #f1f3f5 !important; /* 차분한 회색 배경 */
+        border: 1px solid #d1d5db !important;
+        border-radius: 4px;
+    }
+
+    /* 약제 정보 테이블 (자동완성 표시용) */
     .drug-table { width: 100%; border-collapse: collapse; margin-bottom: 15px; border: 1px solid #e2e8f0; font-size: 0.85rem; }
     .drug-table th { background-color: #f1f5f9; color: #475569; font-weight: 700; padding: 6px; border: 1px solid #e2e8f0; text-align: center; }
     .drug-table td { background-color: #ffffff; color: #000000; font-weight: 600; padding: 8px; border: 1px solid #e2e8f0; text-align: center; }
     .blue-cell { background-color: #f0f7ff !important; color: #1E40AF !important; font-weight: 800 !important; }
     .red-cell { color: #dc2626 !important; font-weight: 800 !important; }
-
-    /* [중요] 제품코드 입력창만 오렌지 강조, 나머지는 표준 스타일 */
-    div[data-testid="stVerticalBlock"] div:has(input[aria-label*="제품코드"]) input {
-        background-color: #fffdec !important; 
-        border: 2px solid #fbbf24 !important; 
-        font-weight: 700 !important;
-    }
 
     .section-header { font-size: 1rem; font-weight: 800; color: #1E3A8A; margin: 20px 0 10px 0; padding-bottom: 5px; border-bottom: 2px solid #1E3A8A; }
     </style>
@@ -73,7 +83,7 @@ OP_STOP_CRIT = ["즉시", "재고소진후"]
 OP_USE_PERIOD = ["한시적 사용", "지속적 사용"]
 OP_IN_REASON = ["생산중단", "품절", "대체 약제로 변경 예정", "회수약품", "제조사 변경", "EDI 코드 삭제", "유통기한 만료", "기타"]
 
-# --- 4. 사이드바 (알파벳 및 접미사 제거) ---
+# --- 4. 사이드바 ---
 with st.sidebar:
     st.markdown('<p class="sidebar-title">HISMEDI † Drug Service</p>', unsafe_allow_html=True)
     st.divider()
@@ -86,7 +96,7 @@ with st.sidebar:
     done_date = st.date_input("완료 일자", datetime.now(), key="global_done_date").strftime('%Y-%m-%d')
     app_status = st.selectbox("진행 상황", ["신청완료", "처리중", "처리완료"], key="global_status")
 
-# --- 5. 공통 UI 헬퍼 함수 (접미 숫자 제거) ---
+# --- 5. 공통 UI 헬퍼 함수 ---
 def render_drug_table(edi_val, label_title="약제 정보"):
     m = get_drug_info(edi_val, master_df)
     st.markdown(f"**{label_title}**")
@@ -113,7 +123,7 @@ def handle_submit(row_data, category):
         st.success(f"[{category}] 저장 완료!"); st.balloons()
     except Exception as e: st.error(f"저장 실패: {e}")
 
-# --- 6. 메인 탭 구현 ---
+# --- 6. 메인 탭 구현 (7개 전 탭 완성) ---
 tab_names = ["사용중지", "신규입고", "대체입고", "급여코드변경", "단가변경적용(상한가인하▼)", "단가변경적용(상한가인상▲)", "🔍 약가조회"]
 tabs = st.tabs(tab_names)
 
@@ -152,7 +162,7 @@ with tabs[1]:
 with tabs[2]:
     row = [""] * 58
     st.markdown('<div class="section-header">기존 약제 정보</div>', unsafe_allow_html=True)
-    edi1 = st.text_input("제품코드 입력 (기존)", key="t2_e1")
+    edi1 = st.text_input("제품코드 입력", key="t2_e1")
     row[6:14] = render_drug_table(edi1, "[기존 약제]")
     c1, c2, c3, c4 = st.columns(4)
     row[14], row[15], row[30], row[22] = c1.selectbox("원내구분", ["원내", "원외"], key="t2_o"), c2.selectbox("급여구분", ["급여", "비급여"], key="t2_p"), c3.selectbox("신규약제와병용사용", ["Y", "N"], key="t2_ae"), c4.selectbox("재고여부", ["유", "무"], key="t2_w")
@@ -160,7 +170,7 @@ with tabs[2]:
     row[25], row[26], row[27], row[28] = c5.selectbox("반품가능여부", ["가능", "불가"], key="t2_z"), c6.date_input("반품예정일", key="t2_aa").strftime('%Y-%m-%d'), c7.number_input("반품량", 0, key="t2_ab"), c8.date_input("코드사용중지일", key="t2_ac").strftime('%Y-%m-%d')
     st.divider()
     st.markdown('<div class="section-header">대체 약제 정보</div>', unsafe_allow_html=True)
-    edi2 = st.text_input("제품코드 입력 (대체)", key="t2_e2")
+    edi2 = st.text_input("제품코드 입력", key="t2_e2")
     m2 = get_drug_info(edi2, master_df)
     price2 = str(m2.get("상한금액", "-")).replace(',', '')
     row[39:47] = [edi2, m2.get("제품명", ""), m2.get("업체명", ""), m2.get("규격", ""), m2.get("단위", ""), price2, m2.get("주성분명", ""), m2.get("전일", "")]
@@ -178,7 +188,7 @@ for i in [3, 4]:
         title = tab_names[i]
         row = [""] * 58
         st.markdown(f'<div class="section-header">반품 약제 정보</div>', unsafe_allow_html=True)
-        e1 = st.text_input(f"제품코드 입력 (기존)", key=f"t{i}_e1")
+        e1 = st.text_input(f"제품코드 입력", key=f"t{i}_e1")
         row[6:14] = render_drug_table(e1, "[반품 약제]")
         c1, c2, c3, c4 = st.columns(4)
         row[14], row[15], row[21], row[22] = c1.selectbox("원내구분", ["원내", "원외"], key=f"t{i}_o"), c2.selectbox("급여구분", ["급여", "비급여"], key=f"t{i}_p"), c3.selectbox("변경내용", OP_CHANGE_CONTENT, key=f"t{i}_v"), c4.selectbox("재고여부", ["유", "무"], key=f"t{i}_w")
@@ -186,7 +196,7 @@ for i in [3, 4]:
         row[26], row[27], row[28] = c5.date_input("반품예정일", key=f"t{i}_aa").strftime('%Y-%m-%d'), c6.number_input("반품량", 0, key=f"t{i}_ab"), c7.date_input("코드사용중지일", key=f"t{i}_ac").strftime('%Y-%m-%d')
         st.divider()
         st.markdown(f'<div class="section-header">변경 약제 정보</div>', unsafe_allow_html=True)
-        e2 = st.text_input(f"제품코드 입력 (변경)", key=f"t{i}_e2")
+        e2 = st.text_input(f"제품코드 입력 ", key=f"t{i}_e2")
         m2 = get_drug_info(e2, master_df)
         row[39:47] = [e2, m2.get("제품명", ""), m2.get("업체명", ""), m2.get("규격", ""), m2.get("단위", ""), str(m2.get("상한금액", "")).replace(',', ''), m2.get("주성분명", ""), m2.get("전일", "")]
         c8, c9, c10, c11, c12 = st.columns(5)
@@ -205,7 +215,7 @@ with tabs[5]:
     row[37], row[21] = c5.date_input("단가변경_품절일", key="t5_al").strftime('%Y-%m-%d'), c6.selectbox("변경내용", OP_CHANGE_CONTENT, key="t5_v")
     if st.button("🚀 단가인상 제출", key="b5", use_container_width=True): handle_submit(row, tab_names[5])
 
-# [7] 약가조회
+# [7] 약가조회 (동일 스타일 유지)
 with tabs[6]:
     st.markdown('<div class="section-header">Master DB 통합 조회</div>', unsafe_allow_html=True)
     s_edi = st.text_input("조회할 제품코드 입력", key="search_edi")
