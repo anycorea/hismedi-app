@@ -25,28 +25,25 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. KPIS SOAP API 조회 함수 (WSDL 기반 정밀 교정) ---
+# --- 2. KPIS SOAP API 조회 함수 (arg0, arg1 적용) ---
 @st.cache_data(ttl=600)
 def get_drug_info(edi_code):
     if not edi_code: return {}
     
-    # Secret에서 키 가져오기 (여러 섹션 대응)
     api_key = st.secrets.get("hira_api_key") or st.secrets.get("API", {}).get("hira_api_key") or st.secrets.get("app", {}).get("hira_api_key")
     if not api_key: return {"error": "Secret에 API 키가 설정되지 않았습니다."}
 
-    # Decoding된 키 사용
     decoded_key = urllib.parse.unquote(api_key)
-
     url = "http://openapi.kpis.or.kr/services/msupStdCdInfo"
     
-    # [교정 완료] WSDL에서 명시한 네임스페이스 'http://ws.skf.sk.biz.kpis.or.kr/' 적용
+    # [교정] 에러 메시지에 따라 파라미터명을 arg0, arg1로 변경
     soap_envelope = f"""<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ns1="http://ws.skf.sk.biz.kpis.or.kr/">
     <soapenv:Header/>
     <soapenv:Body>
         <ns1:getMsupStdCdInfo>
-            <serviceKey>{decoded_key}</serviceKey>
-            <stdCd>{edi_code}</stdCd>
+            <arg0>{decoded_key}</arg0>
+            <arg1>{edi_code}</arg1>
         </ns1:getMsupStdCdInfo>
     </soapenv:Body>
 </soapenv:Envelope>"""
@@ -60,18 +57,18 @@ def get_drug_info(edi_code):
         response = requests.post(url, data=soap_envelope.encode('utf-8'), headers=headers, timeout=10)
         
         if response.status_code == 200:
-            # XML 응답 파싱
             root = ET.fromstring(response.content)
-            # return 태그 찾기
+            # KPIS 응답에서 정보 추출
             item = root.find(".//return")
             
             if item is not None:
-                item_nm = item.findtext("itemNm")
-                if not item_nm:
-                    return {"error": "조회 결과가 없습니다. (코드 확인 필요)"}
+                # 응답 태그명은 보통 itemNm 또는 itmNm 입니다.
+                name = item.findtext("itemNm") or item.findtext("itmNm")
+                if not name:
+                    return {"error": "조회 결과가 없습니다. (코드를 확인하세요)"}
 
                 return {
-                    "name": item_nm,
+                    "name": name,
                     "comp": item.findtext("entpNm", ""),
                     "price": item.findtext("maxAmt", "0"),
                     "spec": f"{item.findtext('spec', '')} {item.findtext('unit', '')}".strip(),
@@ -81,14 +78,13 @@ def get_drug_info(edi_code):
                 return {"error": "API 응답에서 정보를 찾을 수 없습니다."}
         
         elif response.status_code == 500:
-            # 서버 에러 상세 분석
             try:
                 fault_root = ET.fromstring(response.content)
                 fault_msg = fault_root.find(".//faultstring")
                 detail = fault_msg.text if fault_msg is not None else "Unknown SOAP Fault"
                 return {"error": f"KPIS 서버 에러(500): {detail}"}
             except:
-                return {"error": "KPIS 서버 내부 오류(500)가 발생했습니다."}
+                return {"error": "KPIS 서버 내부 오류(500) 발생"}
         else:
             return {"error": f"HTTP 오류: {response.status_code}"}
             
