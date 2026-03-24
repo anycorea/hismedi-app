@@ -12,8 +12,6 @@ st.markdown("""
     .block-container { padding-top: 1.5rem !important; background-color: #ffffff !important; }
     [data-testid="stHeader"] { display: none; }
     .sidebar-title { font-size: 1.4rem; font-weight: 800; color: #1E3A8A; margin-bottom: 20px; }
-    
-    /* 탭 디자인 */
     .stTabs [data-baseweb="tab-list"] { gap: 5px; margin-bottom: 20px; }
     .stTabs [data-baseweb="tab"] { 
         height: 45px; min-width: 100px; background-color: #f8fafc; 
@@ -21,25 +19,17 @@ st.markdown("""
         font-size: 0.9rem; font-weight: 700; color: #64748b;
     }
     .stTabs [aria-selected="true"] { background-color: #1E3A8A !important; color: #ffffff !important; }
-    
-    /* 배경색 지정 클래스 */
     .status-container { background-color: #f0f7ff; padding: 20px; border-radius: 12px; border: 1px solid #dbeafe; }
     .search-container { background-color: #fffef0; padding: 20px; border-radius: 12px; border: 1px solid #fef3c7; }
-
-    /* 제품코드 입력창 오렌지색 강조 */
     div[data-testid="stVerticalBlock"] div:has(label:contains("제품코드")) input {
-        background-color: #fffdec !important; border: 2px solid #fbbf24 !important; font-weight: 700 !important;
-        color: #000000 !important;
+        background-color: #fffdec !important; border: 2px solid #fbbf24 !important; font-weight: 700 !important; color: #000000 !important;
     }
-
-    /* 약제 정보 테이블 디자인 */
     .drug-table { width: 100%; border-collapse: collapse; margin-bottom: 15px; border: 1px solid #e2e8f0; font-size: 0.85rem; }
     .drug-table th { background-color: #f1f5f9; color: #475569; font-weight: 700; padding: 6px; border: 1px solid #e2e8f0; text-align: center; }
     .drug-table td { background-color: #ffffff; color: #000000; font-weight: 600; padding: 8px; border: 1px solid #e2e8f0; text-align: center; }
     .blue-cell { background-color: #f0f7ff !important; color: #1E40AF !important; font-weight: 800 !important; }
     .red-cell { color: #dc2626 !important; font-weight: 800 !important; }
     .section-header { font-size: 1rem; font-weight: 800; color: #1E3A8A; margin: 10px 0 10px 0; padding-bottom: 5px; border-bottom: 2px solid #1E3A8A; }
-    
     .detail-view { background-color: #ffffff; border: 1px solid #cbd5e1; border-radius: 8px; padding: 15px; margin-top: 10px; }
     </style>
     """, unsafe_allow_html=True)
@@ -56,7 +46,6 @@ def load_master_data():
     try:
         ss = get_spreadsheet()
         df = pd.DataFrame(ss.worksheet("Master").get_all_records())
-        # 제품코드를 확실하게 텍스트(문자열)로 변환
         df['제품코드'] = df['제품코드'].astype(str).str.strip()
         return df
     except: return pd.DataFrame()
@@ -66,10 +55,6 @@ def load_db_data():
     try:
         ss = get_spreadsheet()
         df = pd.DataFrame(ss.worksheet("New_stop").get_all_records())
-        # 모든 코드성 컬럼은 문자열로 변환 (콤마 방지)
-        for col in df.columns:
-            if "코드" in str(col):
-                df[col] = df[col].astype(str).str.replace(".0", "", regex=False)
         return df
     except: return pd.DataFrame()
 
@@ -79,6 +64,13 @@ master_df = load_master_data()
 OP_INSIDE_OUT = ["원내", "원외", "원내/외"]
 OP_STATUS = ["신청완료", "처리중", "처리완료"]
 OP_PROCESSORS = ["한승주 팀장", "이소영 대리", "변혜진 주임"]
+OP_DEPT = ["내과", "신장내과", "소아청소년과", "외과", "정형외과", "신경외과", "비뇨의학과", "산부인과", "이비인후과", "가정의학과", "마취통증의학과", "영상의학과"]
+OP_STOP_REASON = ["생산중단", "품절", "대체 약제로 변경 예정", "회수약품", "제조사 변경", "EDI 코드 삭제", "유통기한 만료", "기타"]
+OP_CHANGE_CONTENT = ["급여코드 삭제", "상한가 인하", "상한가 인상"]
+OP_STOCK_METHOD = ["재고 소진", "반품", "폐기"]
+OP_USE_PERIOD = ["한시적 사용", "지속적 사용"]
+OP_YN = ["Y", "N"]
+OP_POSSIBLE = ["가능", "불가"]
 
 # --- 4. 사이드바 ---
 with st.sidebar:
@@ -86,152 +78,214 @@ with st.sidebar:
     st.divider()
     app_user = st.text_input("신청자 성명", key="global_user")
     app_date = st.date_input("오늘 날짜", datetime.now(), key="global_date").strftime('%Y-%m-%d')
-    st.info("신청 시 성명을 정확히 입력하세요.")
 
 # --- 5. 헬퍼 함수 ---
-def get_drug_info(edi_code, df):
-    if not edi_code or df.empty: return {}
-    target = df[df['제품코드'] == str(edi_code).strip()]
+def get_drug_info(edi_code):
+    if not edi_code or master_df.empty: return {}
+    target = master_df[master_df['제품코드'] == str(edi_code).strip()]
     return target.iloc[0].to_dict() if not target.empty else {}
 
-def render_drug_table(edi_val, label_title="약제 정보"):
-    m = get_drug_info(edi_val, master_df)
-    st.markdown(f"**{label_title}**")
+def render_drug_table(edi_val, drug_num=1, label="약제 정보"):
+    m = get_drug_info(edi_val)
+    st.markdown(f"**{label}**")
     price = str(m.get("상한금액", "-")).replace(',', '')
     table_html = f"""<table class="drug-table">
-        <tr><th>제품코드</th><th>제품명</th><th>업체명</th><th>규격</th></tr>
+        <tr><th>제품코드{drug_num}</th><th>제품명{drug_num}</th><th>업체명{drug_num}</th><th>규격{drug_num}</th></tr>
         <tr><td>{edi_val if edi_val else "-"}</td><td class="blue-cell">{m.get("제품명", "-")}</td><td>{m.get("업체명", "-")}</td><td>{m.get("규격", "-")}</td></tr>
-        <tr><th>단위</th><th>상한금액</th><th>주성분명</th><th>의약품 구분</th></tr>
+        <tr><th>단위{drug_num}</th><th>상한금액{drug_num}</th><th>주성분명{drug_num}</th><th>의약품 구분{drug_num}</th></tr>
         <tr><td>{m.get("단위", "-")}</td><td class="red-cell">{price} 원</td><td>{m.get("주성분명", "-")}</td><td>{m.get("전일", "-")}</td></tr>
     </table>"""
     st.markdown(table_html, unsafe_allow_html=True)
-    return [edi_val, m.get("제품명", ""), m.get("업체명", ""), m.get("규격", ""), m.get("단위", ""), price, m.get("주성분명", ""), m.get("전일", "")]
+    return {
+        f"제품코드{drug_num}": edi_val,
+        f"제품명{drug_num}": m.get("제품명", ""),
+        f"업체명{drug_num}": m.get("업체명", ""),
+        f"규격{drug_num}": m.get("규격", ""),
+        f"단위{drug_num}": m.get("단위", ""),
+        f"상한금액{drug_num}": price,
+        f"주성분명{drug_num}": m.get("주성분명", ""),
+        f"의약품 구분{drug_num}": m.get("전일", "")
+    }
 
-def handle_submit(row_data, category):
+def handle_safe_submit(category, data_dict):
+    """헤더 이름을 기준으로 구글 시트에 안전하게 저장"""
     if not app_user: st.error("신청자 성명을 입력해주세요."); return
     try:
         ss = get_spreadsheet()
         ws = ss.worksheet("New_stop")
-        row_data[0], row_data[1], row_data[2], row_data[5] = category, app_date, app_user, "신청완료"
-        ws.append_row(row_data)
-        st.success("성공적으로 접수되었습니다!"); st.balloons()
+        headers = ws.row_values(1) # 첫 번째 줄 헤더 가져오기
+        
+        # 공통 정보 추가
+        data_dict.update({
+            "신청구분": category, "신청일": app_date, "신청자": app_user, "진행상황": "신청완료"
+        })
+        
+        # 헤더 순서에 맞춰 리스트 생성
+        row_to_append = [str(data_dict.get(h, "")) for h in headers]
+        ws.append_row(row_to_append)
+        
+        st.success(f"[{category}] 접수 완료!"); st.balloons()
         st.cache_data.clear(); st.rerun()
-    except Exception as e: st.error(f"저장 실패: {e}")
+    except Exception as e: st.error(f"저장 중 오류 발생: {e}")
 
 # --- 6. 메인 탭 구현 ---
 tab_names = ["📊 진행현황", "사용중지", "신규입고", "대체입고", "급여코드변경", "단가인하▼", "단가인상▲", "🔍 약가조회"]
 tabs = st.tabs(tab_names)
 
-# [Tab 0] 진행현황 (연한 파랑 배경)
+# [Tab 0] 진행현황
 with tabs[0]:
     st.markdown('<div class="status-container">', unsafe_allow_html=True)
-    st.markdown('<div class="section-header">📊 실시간 통합 신청 및 처리 현황</div>', unsafe_allow_html=True)
-    
-    raw_df = load_db_data()
-    if raw_df.empty:
-        st.info("데이터가 없습니다.")
-    else:
-        cols = raw_df.columns
-        edit_df = raw_df.copy()
-        edit_df.insert(0, "상세조회", False)
+    st.markdown('<div class="section-header">📊 통합 신청 및 처리 현황</div>', unsafe_allow_html=True)
+    db_df = load_db_data()
+    if not db_df.empty:
+        search = st.text_input("🔍 검색 (제품명, 신청자 등)", key="dash_search")
+        if search: db_df = db_df[db_df.apply(lambda r: r.astype(str).str.contains(search).any(), axis=1)]
         
-        search_bar = st.text_input("🔍 통합 검색 (제품명, 코드, 신청자 등)", key="global_search_bar")
-        if search_bar:
-            edit_df = edit_df[edit_df.apply(lambda r: r.astype(str).str.contains(search_bar).any(), axis=1)]
-
-        # 데이터 에디터 설정 (코드: 텍스트 / 금액&수량: 숫자 포맷팅)
+        # 에디터 설정
         edited_df = st.data_editor(
-            edit_df.iloc[::-1],
+            db_df.iloc[::-1],
             column_config={
-                "상세조회": st.column_config.CheckboxColumn("조회"),
-                cols[5]: st.column_config.SelectboxColumn("진행상황", options=OP_STATUS),
-                cols[4]: st.column_config.SelectboxColumn("완료자", options=OP_PROCESSORS),
-                cols[6]: st.column_config.TextColumn("제품코드1"), # 텍스트 형식 강제
-                cols[39]: st.column_config.TextColumn("제품코드2"), # 텍스트 형식 강제
-                cols[17]: st.column_config.NumberColumn("입고가", format="%d"),
-                cols[24]: st.column_config.NumberColumn("재고량", format="%d"),
-                cols[27]: st.column_config.NumberColumn("반품량", format="%d"),
-                cols[0]: st.column_config.TextColumn("구분", disabled=True),
-                cols[1]: st.column_config.TextColumn("신청일", disabled=True),
-                cols[7]: st.column_config.TextColumn("제품명1", disabled=True),
+                "진행상황": st.column_config.SelectboxColumn("진행상황", options=OP_STATUS),
+                "완료자": st.column_config.SelectboxColumn("완료자", options=OP_PROCESSORS),
+                "제품코드1": st.column_config.TextColumn("제품코드1"),
+                "제품코드2": st.column_config.TextColumn("제품코드2")
             },
-            hide_index=True,
-            use_container_width=True,
-            height=400
+            hide_index=True, use_container_width=True, height=400
         )
-
         if st.button("💾 변경사항 최종 반영하기", use_container_width=True):
             try:
-                ss = get_spreadsheet()
-                ws = ss.worksheet("New_stop")
+                ss = get_spreadsheet(); ws = ss.worksheet("New_stop")
+                headers = ws.row_values(1)
+                st_idx = headers.index("진행상황") + 1
+                ed_idx = headers.index("완료자") + 1
                 for idx, row in edited_df.iterrows():
-                    real_row_idx = row.name + 2 
-                    ws.update_cell(real_row_idx, 6, row[cols[5]]) # 상태
-                    ws.update_cell(real_row_idx, 5, row[cols[4]]) # 완료자
-                    if row[cols[5]] == "처리완료":
-                         ws.update_cell(real_row_idx, 4, datetime.now().strftime('%Y-%m-%d'))
+                    real_idx = row.name + 2
+                    ws.update_cell(real_idx, st_idx, row["진행상황"])
+                    ws.update_cell(real_idx, ed_idx, row["완료자"])
+                    if row["진행상황"] == "처리완료": 
+                        ws.update_cell(real_idx, headers.index("완료일") + 1, datetime.now().strftime('%Y-%m-%d'))
                 st.success("반영 완료!"); st.cache_data.clear(); st.rerun()
-            except Exception as e: st.error(f"저장 실패: {e}")
-
-        # 상세조회 섹션
-        selected = edited_df[edited_df["상세조회"] == True]
-        if not selected.empty:
-            for _, sel in selected.iterrows():
-                st.markdown('<div class="detail-view">', unsafe_allow_html=True)
-                st.write(f"**[{sel[cols[0]]}] 상세 정보** | 신청자: {sel[cols[2]]} ({sel[cols[1]]})")
-                c1, c2 = st.columns(2)
-                c1.write(f"대상: {sel[cols[6]]} - {sel[cols[7]]} | {sel[cols[9]]}")
-                c2.write(f"신규: {sel[cols[39]]} - {sel[cols[40]]} | {sel[cols[42]]}")
-                st.write(f"**비고:** {sel[cols[38]]}")
-                st.markdown('</div>', unsafe_allow_html=True)
+            except Exception as e: st.error(f"오류: {e}")
     st.markdown('</div>', unsafe_allow_html=True)
 
-# [Tab 1-6] 신청 양식 (기본 흰색 배경 유지)
-with tabs[1]: # 사용중지
-    row = [""] * 58
+# [Tab 1] 사용중지 (그룹1: 약제1)
+with tabs[1]:
+    d = {}
     st.markdown('<div class="section-header">사용중지 신청</div>', unsafe_allow_html=True)
-    edi = st.text_input("제품코드 입력", key="t1_edi")
-    row[6:14] = render_drug_table(edi)
+    edi1 = st.text_input("제품코드 입력", key="t1_edi")
+    d.update(render_drug_table(edi1, 1))
     c1, c2, c3, c4 = st.columns(4)
-    row[14], row[15], row[16], row[17] = c1.selectbox("원내구분", OP_INSIDE_OUT, key="t1_o"), c2.selectbox("급여구분", ["급여", "비급여"], key="t1_p"), c3.text_input("구입처", key="t1_q"), c4.number_input("개당입고가", 0, key="t1_r")
-    row[18] = st.date_input("사용중지일", key="t1_s").strftime('%Y-%m-%d')
-    row[38] = st.text_area("비고(기타)", key="t1_am")
-    if st.button("🚀 사용중지 제출", key="b1", use_container_width=True): handle_submit(row, "사용중지")
+    d["원내구분1"] = c1.selectbox("원내구분1", OP_INSIDE_OUT, key="t1_inout")
+    d["급여구분1"] = c2.selectbox("급여구분1", ["급여", "비급여"], key="t1_pay")
+    d["구입처1"] = c3.text_input("구입처1", key="t1_vendor")
+    d["개당입고가1"] = c4.number_input("개당입고가1", 0, key="t1_price")
+    
+    c5, c6, c7, c8 = st.columns(4)
+    d["사용중지일1"] = c5.date_input("사용중지일1", key="t1_stopd").strftime('%Y-%m-%d')
+    d["사용중지사유1"] = c6.selectbox("사용중지사유1", OP_STOP_REASON, key="t1_reason")
+    d["사용중지사유_기타1"] = c7.text_input("사용중지사유_기타1", key="t1_etc_reason")
+    d["재고여부1"] = c8.selectbox("재고여부1", ["유", "무"], key="t1_stock_yn")
+    
+    c9, c10, c11, c12 = st.columns(4)
+    d["재고처리방법1"] = c9.selectbox("재고처리방법1", OP_STOCK_METHOD, key="t1_method")
+    d["재고량1"] = c10.number_input("재고량1", 0, key="t1_stock_vol")
+    d["반품가능여부1"] = c11.selectbox("반품가능여부1", OP_POSSIBLE, key="t1_ret_yn")
+    d["반품예정일1"] = c12.date_input("반품예정일1", key="t1_retd").strftime('%Y-%m-%d')
+    d["반품량1"] = st.number_input("반품량1", 0, key="t1_ret_vol")
+    d["비고(기타 요청사항)1"] = st.text_area("비고(기타 요청사항)1", key="t1_memo")
+    if st.button("🚀 사용중지 제출", use_container_width=True): handle_safe_submit("사용중지", d)
 
-with tabs[2]: # 신규입고
-    row = [""] * 58
+# [Tab 2] 신규입고 (그룹1: 약제1)
+with tabs[2]:
+    d = {}
     st.markdown('<div class="section-header">신규입고 신청</div>', unsafe_allow_html=True)
-    edi = st.text_input("제품코드 입력 ", key="t2_edi")
-    row[6:14] = render_drug_table(edi)
-    row[34] = st.date_input("입고일", key="t2_ai").strftime('%Y-%m-%d')
-    if st.button("🚀 신규입고 제출", key="b2", use_container_width=True): handle_submit(row, "신규입고")
+    edi1 = st.text_input("제품코드 입력", key="t2_edi")
+    d.update(render_drug_table(edi1, 1))
+    c1, c2, c3, c4 = st.columns(4)
+    d["원내구분1"] = c1.selectbox("원내구분1", OP_INSIDE_OUT, key="t2_inout")
+    d["급여구분1"] = c2.selectbox("급여구분1", ["급여", "비급여"], key="t2_pay")
+    d["구입처1"] = c3.text_input("구입처1", key="t2_vendor")
+    d["개당입고가1"] = c4.number_input("개당입고가1", 0, key="t2_price")
+    
+    c5, c6, c7, c8 = st.columns(4)
+    d["입고요청진료과1"] = c5.selectbox("입고요청진료과1", OP_DEPT, key="t2_dept")
+    d["원내유무(동일성분)1"] = c6.selectbox("원내유무(동일성분)1", ["유", "무"], key="t2_same_yn")
+    d["입고요청사유1"] = c7.selectbox("입고요청사유1", OP_STOP_REASON, key="t2_reason")
+    d["사용기간1"] = c8.selectbox("사용기간1", OP_USE_PERIOD, key="t2_period")
+    
+    c9, c10, c11 = st.columns(3)
+    d["입고일1"] = c9.date_input("입고일1", key="t2_ind").strftime('%Y-%m-%d')
+    d["코드사용시작일1"] = c10.date_input("코드사용시작일1", key="t2_startd").strftime('%Y-%m-%d')
+    d["상한가외입고사유1"] = c11.text_input("상한가외입고사유1", key="t2_over_reason")
+    d["비고(기타 요청사항)1"] = st.text_area("비고(기타 요청사항)1", key="t2_memo")
+    if st.button("🚀 신규입고 제출", use_container_width=True): handle_safe_submit("신규입고", d)
 
-with tabs[3]: # 대체입고
-    row = [""] * 58
-    st.markdown('<div class="section-header">기존/대체 약제 입력</div>', unsafe_allow_html=True)
-    e1 = st.text_input("기존 제품코드", key="t3_e1"); row[6:14] = render_drug_table(e1)
-    e2 = st.text_input("대체 제품코드", key="t3_e2"); row[39:47] = render_drug_table(e2, "대체 약제")
-    if st.button("🚀 대체입고 제출", key="b3", use_container_width=True): handle_submit(row, "대체입고")
+# [Tab 3] 대체입고 (그룹2: 약제1 & 2)
+with tabs[3]:
+    d = {}
+    st.markdown('<div class="section-header">기존 약제 정보</div>', unsafe_allow_html=True)
+    edi1 = st.text_input("기존 제품코드 입력", key="t3_edi1")
+    d.update(render_drug_table(edi1, 1, "(기존약제)"))
+    c1, c2, c3, c4 = st.columns(4)
+    d["원내구분1"], d["급여구분1"], d["구입처1"], d["개당입고가1"] = c1.selectbox("원내구분1", OP_INSIDE_OUT, key="t3_o1"), c2.selectbox("급여구분1", ["급여", "비급여"], key="t3_p1"), c3.text_input("구입처1", key="t3_v1"), c4.number_input("개당입고가1", 0, key="t3_pr1")
+    c5, c6, c7, c8 = st.columns(4)
+    d["재고여부1"], d["재고처리방법1"], d["재고량1"], d["반품가능여부1"] = c5.selectbox("재고여부1", ["유", "무"], key="t3_s1"), c6.selectbox("재고처리방법1", OP_STOCK_METHOD, key="t3_m1"), c7.number_input("재고량1", 0, key="t3_sv1"), c8.selectbox("반품가능여부1", OP_POSSIBLE, key="t3_py1")
+    c9, c10, c11, c12 = st.columns(4)
+    d["반품예정일1"], d["반품량1"], d["코드중지기준1"], d["사용중지일1"] = c9.date_input("반품예정일1", key="t3_rd1").strftime('%Y-%m-%d'), c10.number_input("반품량1", 0, key="t3_rv1"), c11.selectbox("코드중지기준1", ["즉시", "재고소진후"], key="t3_cs1"), c12.date_input("사용중지일1", key="t3_sd1").strftime('%Y-%m-%d')
+    d["신규약제와병용사용1"] = st.selectbox("신규약제와병용사용1", OP_YN, key="t3_co1")
+    
+    st.markdown('<div class="section-header">대체 약제 정보</div>', unsafe_allow_html=True)
+    edi2 = st.text_input("대체 제품코드 입력", key="t3_edi2")
+    d.update(render_drug_table(edi2, 2, "(대체약제)"))
+    c13, c14, c15, c16 = st.columns(4)
+    d["원내구분2"], d["급여구분2"], d["구입처2"], d["개당입고가2"] = c13.selectbox("원내구분2", OP_INSIDE_OUT, key="t3_o2"), c14.selectbox("급여구분2", ["급여", "비급여"], key="t3_p2"), c15.text_input("구입처2", key="t3_v2"), c16.number_input("개당입고가2", 0, key="t3_pr2")
+    c17, c18, c19, c20 = st.columns(4)
+    d["입고요청사유2"], d["사용기간2"], d["입고일2"], d["코드사용시작일2"] = c17.selectbox("입고요청사유2", OP_STOP_REASON, key="t3_rs2"), c18.selectbox("사용기간2", OP_USE_PERIOD, key="t3_pd2"), c19.date_input("입고일2", key="t3_id2").strftime('%Y-%m-%d'), c20.date_input("코드사용시작일2", key="t3_ss2").strftime('%Y-%m-%d')
+    d["기존약제와병용사용2"] = st.selectbox("기존약제와병용사용2", OP_YN, key="t3_co2")
+    d["상한가외입고사유2"] = st.text_input("상한가외입고사유2", key="t3_ov2")
+    d["비고(기타 요청사항)2"] = st.text_area("비고(기타 요청사항)2", key="t3_memo2")
+    if st.button("🚀 대체입고 제출", use_container_width=True): handle_safe_submit("대체입고", d)
 
-for idx, tab_name in zip([4, 5], ["급여코드변경", "단가인하▼"]):
+# [Tab 4/5] 급여코드변경 & 단가인하 (그룹2)
+for idx, title in zip([4, 5], ["급여코드변경", "단가인하▼"]):
     with tabs[idx]:
-        row = [""] * 58
-        e1 = st.text_input(f"현재 제품코드", key=f"t{idx}_e1"); row[6:14] = render_drug_table(e1)
-        e2 = st.text_input(f"새 제품코드", key=f"t{idx}_e2"); row[39:47] = render_drug_table(e2, "변경 약제")
-        if st.button(f"🚀 {tab_name} 제출", key=f"b{idx}", use_container_width=True): handle_submit(row, tab_name)
+        d = {}
+        st.markdown(f'<div class="section-header">기존 약제 ({title})</div>', unsafe_allow_html=True)
+        edi1 = st.text_input(f"{title} 대상 코드", key=f"t{idx}_edi1")
+        d.update(render_drug_table(edi1, 1, "(기존약제)"))
+        c1, c2, c3, c4 = st.columns(4)
+        d["원내구분1"], d["급여구분1"], d["변경내용1"], d["재고여부1"] = c1.selectbox("원내구분1", OP_INSIDE_OUT, key=f"t{idx}_o1"), c2.selectbox("급여구분1", ["급여", "비급여"], key=f"t{idx}_p1"), c3.selectbox("변경내용1", OP_CHANGE_CONTENT, key=f"t{idx}_v1"), c4.selectbox("재고여부1", ["유", "무"], key=f"t{idx}_s1")
+        c5, c6, c7, c8 = st.columns(4)
+        d["재고처리방법1"], d["재고량1"], d["반품가능여부1"], d["반품예정일1"] = c5.selectbox("재고처리방법1", OP_STOCK_METHOD, key=f"t{idx}_m1"), c6.number_input("재고량1", 0, key=f"t{idx}_sv1"), c7.selectbox("반품가능여부1", OP_POSSIBLE, key=f"t{idx}_py1"), c8.date_input("반품예정일1", key=f"t{idx}_rd1").strftime('%Y-%m-%d')
+        d["반품량1"] = st.number_input("반품량1", 0, key=f"t{idx}_rv1")
+        
+        st.markdown(f'<div class="section-header">변경 약제 ({title})</div>', unsafe_allow_html=True)
+        edi2 = st.text_input(f"{title} 변경 코드", key=f"t{idx}_edi2")
+        d.update(render_drug_table(edi2, 2, "(변경약제)"))
+        c9, c10, c11 = st.columns(3)
+        d["코드사용시작일2"] = c9.date_input("코드사용시작일2", key=f"t{idx}_ss2").strftime('%Y-%m-%d')
+        d["상한가외입고사유2"] = c10.text_input("상한가외입고사유2", key=f"t{idx}_ov2")
+        d["비고(기타 요청사항)2"] = st.text_area("비고(기타 요청사항)2", key=f"t{idx}_memo2")
+        if st.button(f"🚀 {title} 제출", use_container_width=True): handle_safe_submit(title, d)
 
-with tabs[6]: # 단가인상
-    row = [""] * 58
-    edi = st.text_input("인상 대상 코드", key="t6_edi"); row[6:14] = render_drug_table(edi)
-    if st.button("🚀 단가인상 제출", key="b6", use_container_width=True): handle_submit(row, "단가인상")
+# [Tab 6] 단가인상 (그룹1)
+with tabs[6]:
+    d = {}
+    st.markdown('<div class="section-header">단가인상 신청</div>', unsafe_allow_html=True)
+    edi1 = st.text_input("인상 대상 코드", key="t6_edi1")
+    d.update(render_drug_table(edi1, 1))
+    c1, c2, c3, c4 = st.columns(4)
+    d["원내구분1"], d["급여구분1"], d["변경내용1"], d["사용중지일1"] = c1.selectbox("원내구분1", OP_INSIDE_OUT, key="t6_o1"), c2.selectbox("급여구분1", ["급여", "비급여"], key="t6_p1"), c3.selectbox("변경내용1", OP_CHANGE_CONTENT, key="t6_v1"), c4.date_input("사용중지일1", key="t6_sd1").strftime('%Y-%m-%d')
+    d["비고(기타 요청사항)1"] = st.text_area("비고(기타 요청사항)1", key="t6_memo")
+    if st.button("🚀 단가인상 제출", use_container_width=True): handle_safe_submit("단가인상", d)
 
-# [Tab 7] 약가조회 (연한 오렌지 배경)
+# [Tab 7] 약가조회
 with tabs[7]:
     st.markdown('<div class="search-container">', unsafe_allow_html=True)
     st.markdown('<div class="section-header">🔍 Master DB 통합 조회</div>', unsafe_allow_html=True)
-    s_edi = st.text_input("조회할 제품코드 입력 (콤마 없이 숫자만)", key="search_edi")
+    s_edi = st.text_input("조회할 제품코드 입력 (숫자만)", key="search_edi")
     if s_edi:
-        render_drug_table(s_edi, "검색 결과")
-        m = get_drug_info(s_edi, master_df)
+        render_drug_table(s_edi, 1, "검색 결과")
+        m = get_drug_info(s_edi)
         if m: st.info(f"투여: {m.get('투여','-')} | 분류: {m.get('분류','-')} | 비고: {m.get('비고','-')}")
     st.markdown('</div>', unsafe_allow_html=True)
