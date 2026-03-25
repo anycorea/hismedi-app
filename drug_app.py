@@ -22,7 +22,9 @@ st.markdown("""
     .blue-cell { background-color: #f0f7ff !important; color: #1E40AF !important; font-weight: 800 !important; }
     .red-cell { color: #dc2626 !important; font-weight: 800 !important; }
     .section-header { font-size: 1rem; font-weight: 800; color: #1E3A8A; margin: 15px 0 10px 0; padding-bottom: 5px; border-bottom: 2px solid #1E3A8A; }
-    .detail-view { background-color: #ffffff; border: 1px solid #cbd5e1; border-radius: 8px; padding: 15px; margin-top: 10px; }
+    .detail-row { padding: 5px 0; border-bottom: 1px solid #eee; display: flex; }
+    .detail-label { font-weight: bold; width: 200px; color: #475569; }
+    .detail-value { color: #000; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -38,7 +40,6 @@ def load_master_data():
     try:
         ss = get_spreadsheet()
         df = pd.DataFrame(ss.worksheet("Master").get_all_records())
-        # 제품코드를 강제로 문자열로 변환하고 공백 제거 (0 유지)
         df['제품코드'] = df['제품코드'].astype(str).str.strip().str.zfill(9) 
         return df
     except: return pd.DataFrame()
@@ -48,7 +49,6 @@ def load_db_data():
     try:
         ss = get_spreadsheet()
         df = pd.DataFrame(ss.worksheet("New_stop").get_all_records())
-        # 모든 데이터를 문자열로 처리하여 '0'으로 시작하는 코드 보존
         df = df.astype(str).replace(['nan', 'None', 'None', ''], '')
         return df
     except: return pd.DataFrame()
@@ -92,7 +92,6 @@ with st.sidebar:
 # --- 6. 헬퍼 함수 ---
 def get_drug_info(edi_code):
     if not edi_code or master_df.empty: return {}
-    # 입력된 코드를 문자열로 취급하여 검색
     target = master_df[master_df['제품코드'] == str(edi_code).strip()]
     return target.iloc[0].to_dict() if not target.empty else {}
 
@@ -100,7 +99,6 @@ def render_drug_table(edi_val, drug_num=1, label="약제 정보"):
     m = get_drug_info(edi_val)
     st.markdown(f"**{label}**")
     price = str(m.get("상한금액", "-")).replace(',', '')
-    # 제품코드를 문자열로 그대로 출력 (텍스트 형식 유지)
     table_html = f"""<table class="drug-table">
         <tr><th>제품코드{drug_num}</th><th>제품명{drug_num}</th><th>업체명{drug_num}</th><th>규격{drug_num}</th></tr>
         <tr><td>{str(edi_val) if edi_val else "-"}</td><td class="blue-cell">{m.get("제품명", "-")}</td><td>{m.get("업체명", "-")}</td><td>{m.get("규격", "-")}</td></tr>
@@ -118,11 +116,11 @@ def handle_safe_submit(category, data_dict):
     if not app_user: 
         st.error("신청자 성명을 입력해주세요."); return
     
+    # 비고 통합 체크용 필드 (비고(기타 요청사항))
     exclude_keys = [
         "제품명1", "업체명1", "규격1", "단위1", "상한금액1", "주성분명1", "의약품 구분1",
         "제품명2", "업체명2", "규격2", "단위2", "상한금액2", "주성분명2", "의약품 구분2",
-        "비고(기타 요청사항)1", "비고(기타 요청사항)2",
-        "사용중지사유_기타1", "상한가외입고사유1", "상한가외입고사유2"
+        "비고(기타 요청사항)", "사용중지사유_기타1", "상한가외입고사유1", "상한가외입고사유2"
     ]
     
     for k, v in data_dict.items():
@@ -136,7 +134,6 @@ def handle_safe_submit(category, data_dict):
         ss = get_spreadsheet(); ws = ss.worksheet("New_stop")
         headers = ws.row_values(1)
         data_dict.update({"신청구분": category, "신청일": app_date, "신청자": app_user, "진행상황": "신청완료"})
-        # 모든 데이터를 문자열로 변환하여 시트에 전송 (0 보존)
         row_to_append = [str(data_dict.get(h, "")) for h in headers]
         ws.append_row(row_to_append, value_input_option='RAW')
         st.success(f"[{category}] 접수 완료!"); st.balloons()
@@ -146,16 +143,23 @@ def handle_safe_submit(category, data_dict):
 # --- 7. 상단 네비게이션 ---
 t_col1, t_col2, t_col3 = st.columns([1.2, 0.6, 1.2])
 with t_col1:
-    if st.button("📊 진행현황", key="top_status", use_container_width=True): st.session_state.active_menu = "📊 진행현황"
+    if st.button("📊 진행현황", key="top_status", use_container_width=True): 
+        st.session_state.active_menu = "📊 진행현황"
 with t_col2:
     auth_code = st.text_input("권한코드", type="password", placeholder="****", label_visibility="collapsed", key="auth_p")
+    # 요구사항: 4자리(1452) 입력 시 자동으로 진행현황 탭 이동
+    if auth_code == "1452":
+        if st.session_state.active_menu != "📊 진행현황":
+            st.session_state.active_menu = "📊 진행현황"
+            st.rerun()
     is_admin = (auth_code == "1452")
 with t_col3:
-    if st.button("🔍 약가조회", key="top_search", use_container_width=True): st.session_state.active_menu = "🔍 약가조회"
+    if st.button("🔍 약가조회", key="top_search", use_container_width=True): 
+        st.session_state.active_menu = "🔍 약가조회"
 
 # --- 8. 메인 컨텐츠 영역 ---
 
-# [1] 진행현황 (삭제 기능 추가)
+# [1] 진행현황
 if st.session_state.active_menu == "📊 진행현황":
     st.markdown('<div class="section-header">📊 통합 신청 및 처리 현황</div>', unsafe_allow_html=True)
     db_df = load_db_data()
@@ -164,15 +168,15 @@ if st.session_state.active_menu == "📊 진행현황":
         if search: db_df = db_df[db_df.apply(lambda r: r.astype(str).str.contains(search).any(), axis=1)]
         edit_df_view = db_df.copy()
         edit_df_view['완료일'] = pd.to_datetime(edit_df_view['완료일'], errors='coerce').dt.date
-        edit_df_view.insert(0, "상세조회", False)
         
+        # 조회 체크박스 (항상 노출)
+        edit_df_view.insert(0, "조회", False)
         # 관리자일 경우 삭제 체크박스 추가
         if is_admin:
             edit_df_view.insert(1, "삭제", False)
         
-        # 컬럼 설정 (제품코드를 TextColumn으로 명시하여 0 유지)
         col_cfg = {
-            "상세조회": st.column_config.CheckboxColumn("조회", width="small"),
+            "조회": st.column_config.CheckboxColumn("조회", width="small"),
             "진행상황": st.column_config.SelectboxColumn("진행상황", options=OP_STATUS, width="medium"),
             "완료자": st.column_config.SelectboxColumn("완료자", options=OP_PROCESSORS, width="medium"),
             "완료일": st.column_config.DateColumn("완료일", format="YYYY-MM-DD", default=datetime.now().date(), width="medium"),
@@ -185,53 +189,63 @@ if st.session_state.active_menu == "📊 진행현황":
         edited_df = st.data_editor(
             edit_df_view.iloc[::-1],
             column_config=col_cfg,
-            hide_index=True, use_container_width=True, height=520, disabled=not is_admin 
+            hide_index=True, use_container_width=True, height=520, disabled=False 
         )
         
         if is_admin:
-            if st.button("💾 변경사항 최종 반영하기 (삭제 포함)", use_container_width=True):
+            if st.button("💾 변경사항 최종 반영하기 (삭제 포함)", key="save_sync_btn", use_container_width=True):
                 try:
-                    ss = get_spreadsheet(); ws = ss.worksheet("New_stop")
-                    headers = ws.row_values(1)
-                    
-                    # 1. 삭제 처리 (역순으로 삭제해야 인덱스가 꼬이지 않음)
-                    # 원본 데이터프레임 기준으로 인덱스 추출
-                    rows_to_delete = edited_df[edited_df["삭제"] == True]
-                    if not rows_to_delete.empty:
-                        # 원본 db_df의 인덱스를 사용하여 시트 상의 실제 행 번호 계산 (헤더 포함 +2)
-                        delete_indices = sorted(rows_to_delete.index.tolist(), reverse=True)
-                        for idx in delete_indices:
-                            ws.delete_rows(idx + 2) # gspread는 1-based index
-                    
-                    # 2. 나머지 데이터 업데이트 (진행상황, 완료자, 완료일)
-                    # 삭제되지 않은 행들에 대해 업데이트 진행
-                    remaining_df = edited_df[edited_df["삭제"] == False]
-                    st_col, ed_col, dt_col = headers.index("진행상황")+1, headers.index("완료자")+1, headers.index("완료일")+1
-                    
-                    # 시트 정보를 새로 불러와서 업데이트 (삭제 후 인덱스 정렬됨)
-                    for idx, row in remaining_df.iterrows():
-                        # 삭제 후의 실제 위치를 찾기 위해 고유값(신청일+제품코드+신청자 등)을 쓰거나 
-                        # 전체 데이터를 다시 덮어쓰는 것이 안전하지만, 여기서는 기존 인덱스 로직을 보정하여 처리
-                        # (단순화를 위해 삭제가 있는 경우 rerun 후 업데이트 권장 혹은 전체 업데이트 방식 사용)
-                        pass 
-                    
-                    # [가장 안전한 방식] 삭제가 포함된 경우 전체 데이터를 다시 정리하여 업로드
-                    if not rows_to_delete.empty or True: # 항상 안전하게 전체 동기화
-                        updated_all_df = load_db_data() # 최신 DB 로드
-                        # edited_df에서 삭제 안 된 것들만 필터링하여 시트 헤더 순서대로 재배치 후 일괄 업데이트는 복잡하므로
-                        # 여기서는 개별 셀 업데이트 로직 유지하되 삭제 후 새로고침 유도
-                        for idx, row in remaining_df.iterrows():
-                            # 삭제로 인해 밀려난 인덱스 계산이 복잡하므로, 개별 업데이트 수행
-                            # 실제로는 삭제 행위를 먼저 전체 수행하고, 남은 데이터를 루프 돌며 처리
-                            real_idx = idx + 2 - len([i for i in delete_indices if i < idx])
-                            ws.update_cell(real_idx, st_col, row["진행상황"])
-                            ws.update_cell(real_idx, ed_col, row["완료자"])
-                            if row["완료일"]: ws.update_cell(real_idx, dt_col, str(row["완료일"]))
-
-                    st.success("데이터가 성공적으로 동기화되었습니다."); st.cache_data.clear(); st.rerun()
+                    with st.spinner("구글 시트 동기화 중..."):
+                        ss = get_spreadsheet(); ws = ss.worksheet("New_stop")
+                        headers = ws.row_values(1)
+                        
+                        # 1. 삭제 대상 처리 (역순 인덱스 삭제)
+                        rows_to_delete = edited_df[edited_df["삭제"] == True]
+                        delete_count = len(rows_to_delete)
+                        
+                        # 안전한 배치 업데이트를 위해: 삭제되지 않은 행들만 모아서 전체 덮어쓰기 (가장 확실함)
+                        remaining_df = edited_df[edited_df["삭제"] == False].copy()
+                        # UI용 컬럼 제거
+                        if "삭제" in remaining_df.columns: remaining_df = remaining_df.drop(columns=["삭제"])
+                        if "조회" in remaining_df.columns: remaining_df = remaining_df.drop(columns=["조회"])
+                        
+                        # 다시 시간순(기존순서)으로 변경
+                        remaining_df = remaining_df.iloc[::-1]
+                        
+                        # 데이터 준비
+                        data_to_write = remaining_df[headers].values.tolist()
+                        
+                        # 시트 초기화 및 업데이트 (A2부터 끝까지)
+                        ws.batch_clear(["A2:Z2000"])
+                        if data_to_write:
+                            ws.update("A2", data_to_write, value_input_option='RAW')
+                            
+                        if delete_count > 0:
+                            st.success(f"데이터 {delete_count}건을 삭제하고 동기화했습니다.")
+                        else:
+                            st.success("변경사항이 성공적으로 반영되었습니다.")
+                        
+                        st.cache_data.clear(); st.rerun()
                 except Exception as e: st.error(f"오류: {e}")
 
-# [2-7] 신청서 섹션들 (제품코드 문자열 유지 반영)
+        # 요구사항: 조회 체크박스 클릭 시 상세 정보를 세로로 출력
+        selected_rows = edited_df[edited_df["조회"] == True]
+        if not selected_rows.empty:
+            st.divider()
+            st.markdown("### 📋 선택 항목 상세 정보")
+            for idx, row in selected_rows.iterrows():
+                with st.expander(f"📌 {row.get('제품명1', '정보')} ({row.get('신청구분', '상세')})", expanded=True):
+                    # 삭제/조회 컬럼 제외하고 세로로 출력
+                    for col in row.index:
+                        if col not in ["삭제", "조회"]:
+                            st.markdown(f"""
+                                <div class="detail-row">
+                                    <div class="detail-label">{col}</div>
+                                    <div class="detail-value">: {row[col]}</div>
+                                </div>
+                            """, unsafe_allow_html=True)
+
+# [2-7] 신청서 섹션들
 elif st.session_state.active_menu in ["사용중지", "신규입고", "대체입고", "삭제코드변경", "단가인하▼", "단가인상▲"]:
     curr = st.session_state.active_menu
     d = {}
@@ -239,7 +253,6 @@ elif st.session_state.active_menu in ["사용중지", "신규입고", "대체입
     edi1 = st.text_input(f"대상 제품코드 입력 (텍스트)", key=f"t_edi1")
     d.update(render_drug_table(edi1, 1))
     
-    # 각 탭별 상세 항목 배치 (기존 로직 유지)
     if curr == "사용중지":
         c1, c2, c3, c4 = st.columns(4); d["원내구분1"], d["급여구분1"], d["구입처1"], d["개당입고가1"] = c1.selectbox("원내구분1", OP_INSIDE_OUT, key="t1_io"), c2.selectbox("급여구분1", ["급여", "비급여"], key="t1_pay"), c3.text_input("구입처1", key="t1_vd"), c4.number_input("개당입고가1", 0, key="t1_pr")
         c5, c6, c7, c8 = st.columns(4); d["사용중지일1"], d["사용중지사유1"], d["사용중지사유_기타1"], d["재고여부1"] = c5.date_input("사용중지일1", key="t1_sd").strftime('%Y-%m-%d'), c6.selectbox("사용중지사유1", OP_STOP_REASON, key="t1_rs"), c7.text_input("사용중지사유_기타1", key="t1_ers"), c8.selectbox("재고여부1", ["유", "무"], key="t1_syn")
@@ -258,7 +271,6 @@ elif st.session_state.active_menu in ["사용중지", "신규입고", "대체입
         c13, c14, c15, c16 = st.columns(4); d["원내구분2"], d["급여구분2"], d["구입처2"], d["개당입고가2"] = c13.selectbox("원내구분2", OP_INSIDE_OUT, key="t3_o2"), c14.selectbox("급여구분2", ["급여", "비급여"], key="t3_p2"), c15.text_input("구입처2", key="t3_v2"), c16.number_input("개당입고가2", 0, key="t3_pr2")
         c17, c18, c19, c20 = st.columns(4); d["입고요청사유2"], d["사용기간2"], d["입고일2"], d["코드사용시작일2"] = c17.selectbox("입고요청사유2", OP_STOP_REASON, key="t3_rs2"), c18.selectbox("사용기간2", OP_USE_PERIOD, key="t3_pd2"), c19.date_input("입고일2", key="t3_id2").strftime('%Y-%m-%d'), c20.date_input("코드사용시작일2", key="t3_ss2").strftime('%Y-%m-%d')
         cs1, cs2 = st.columns(2); d["기존약제와병용사용2"], d["상한가외입고사유2"] = cs1.selectbox("기존약제와병용사용2", OP_YN, key="t3_co2"), cs2.text_input("상한가외입고사유2", key="t3_ov2")
-        d["비고(기타 요청사항)2"] = st.text_area("비고(기타 요청사항)2", key="t3_mm2")
     elif curr in ["삭제코드변경", "단가인하▼"]:
         c1, c2, c3, c4 = st.columns(4); d["원내구분1"], d["급여구분1"], d["구입처1"], d["개당입고가1"] = c1.selectbox("원내구분1", OP_INSIDE_OUT, key="t_o1"), c2.selectbox("급여구분1", ["급여", "비급여"], key="t_p1"), c3.text_input("구입처1", key="t_v1"), c4.number_input("개당입고가1", 0, key="t_pr1")
         c5, c6, c7, c8 = st.columns(4); d["변경내용1"], d["재고여부1"], d["재고처리방법1"], d["재고량1"] = c5.selectbox("변경내용1", OP_CHANGE_CONTENT, key="t_cn1"), c6.selectbox("재고여부1", ["유", "무"], key="t_s1"), c7.selectbox("재고처리방법1", OP_STOCK_METHOD, key="t_m1"), c8.number_input("재고량1", 0, key="t_sv1")
@@ -269,15 +281,15 @@ elif st.session_state.active_menu in ["사용중지", "신규입고", "대체입
         st.markdown('<div class="section-header">변경 약제 정보</div>', unsafe_allow_html=True); edi2 = st.text_input("변경 제품코드 입력", key="t_edi2"); d.update(render_drug_table(edi2, 2, "(변경약제)"))
         c13, c14, c15, c16 = st.columns(4); d["원내구분2"], d["급여구분2"], d["구입처2"], d["개당입고가2"] = c13.selectbox("원내구분2", OP_INSIDE_OUT, key="t_o2"), c14.selectbox("급여구분2", ["급여", "비급여"], key="t_p2"), c15.text_input("구입처2", key="t_v2"), c16.number_input("개당입고가2", 0, key="t_pr2")
         c17, c18 = st.columns(2); d["코드사용시작일2"], d["상한가외입고사유2"] = c17.date_input("코드사용시작일2", key="t_ss2").strftime('%Y-%m-%d'), c18.text_input("상한가외입고사유2", key="t_ov2")
-        d["비고(기타 요청사항)2"] = st.text_area("비고(기타 요청사항)2", key="t_mm2")
     elif curr == "단가인상▲":
         c1, c2, c3, c4 = st.columns(4); d["원내구분1"], d["급여구분1"], d["구입처1"], d["개당입고가1"] = c1.selectbox("원내구분1", OP_INSIDE_OUT, key="t6_o1"), c2.selectbox("급여구분1", ["급여", "비급여"], key="t6_p1"), c3.text_input("구입처1", key="t6_v1"), c4.number_input("개당입고가1", 0, key="t6_pr1")
         c5, c6, c7, c8 = st.columns(4); d["변경내용1"] = c5.selectbox("변경내용1", OP_CHANGE_CONTENT, key="t6_cn1"); d["사용중지일1"] = c6.date_input("품절일1", key="t6_sd1").strftime('%Y-%m-%d'); d["입고일1"] = c7.date_input("재입고일자1", key="t6_id1").strftime('%Y-%m-%d'); d["인상전입고가1"] = c8.number_input("인상전입고가1", 0, key="t6_pre_pr")
         c9 = st.columns(1)[0]; d["코드사용시작일1"] = c9.date_input("코드사용시작일1", key="t6_ss1").strftime('%Y-%m-%d')
     
-    if curr != "약가조회":
-        d[f"비고(기타 요청사항)1"] = st.text_area("비고(기타 요청사항)1", key="final_memo")
-        if st.button(f"🚀 {curr} 제출", key="final_btn", use_container_width=True): handle_safe_submit(curr, d)
+    # [통합 비고란] 모든 신청 화면에서 "비고(기타 요청사항)" 하나로 통일
+    d["비고(기타 요청사항)"] = st.text_area("비고(기타 요청사항)", key="final_memo")
+    if st.button(f"🚀 {curr} 제출", key="final_btn", use_container_width=True): 
+        handle_safe_submit(curr, d)
 
 # [8] 약가조회
 elif st.session_state.active_menu == "🔍 약가조회":
