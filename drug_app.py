@@ -23,28 +23,17 @@ st.markdown("""
     .red-cell { color: #dc2626 !important; font-weight: 800 !important; }
     .section-header { font-size: 1rem; font-weight: 800; color: #1E3A8A; margin: 15px 0 10px 0; padding-bottom: 5px; border-bottom: 2px solid #1E3A8A; }
     
-    /* 상세 정보 수직 출력 스타일 */
-    .vertical-detail-container {
+    /* 상세 정보 수직 나열 스타일 */
+    .vertical-detail {
         background-color: #f8fafc;
         border: 1px solid #cbd5e1;
         border-radius: 8px;
-        padding: 20px;
+        padding: 15px;
         margin-top: 10px;
     }
-    .vertical-row {
-        display: flex;
-        border-bottom: 1px solid #e2e8f0;
-        padding: 5px 0;
-    }
-    .vertical-label {
-        width: 180px;
-        font-weight: 800;
-        color: #1E3A8A;
-    }
-    .vertical-value {
-        flex: 1;
-        color: #334155;
-    }
+    .v-row { display: flex; border-bottom: 1px solid #e2e8f0; padding: 4px 0; }
+    .v-label { width: 200px; font-weight: 800; color: #475569; }
+    .v-value { flex: 1; color: #000; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -136,7 +125,7 @@ def handle_safe_submit(category, data_dict):
     if not app_user: 
         st.error("신청자 성명을 입력해주세요."); return
     
-    # 필수 입력 예외 처리 (약제정보 및 비고 통합 항목)
+    # 비고 통합 예외 리스트
     exclude_keys = [
         "제품명1", "업체명1", "규격1", "단위1", "상한금액1", "주성분명1", "의약품 구분1",
         "제품명2", "업체명2", "규격2", "단위2", "상한금액2", "주성분명2", "의약품 구분2",
@@ -163,24 +152,19 @@ def handle_safe_submit(category, data_dict):
 # --- 7. 상단 네비게이션 ---
 t_col1, t_col2, t_col3 = st.columns([1.2, 0.6, 1.2])
 with t_col1:
-    if st.button("📊 진행현황", key="top_status", use_container_width=True): 
-        st.session_state.active_menu = "📊 진행현황"
+    if st.button("📊 진행현황", key="top_status", use_container_width=True): st.session_state.active_menu = "📊 진행현황"
 with t_col2:
     auth_code = st.text_input("권한코드", type="password", placeholder="****", label_visibility="collapsed", key="auth_p")
-    # 요구사항: 1452 입력 시 즉시 탭 이동
+    # 요구사항: 1452 입력 시 자동으로 진행현황 탭 이동
     if auth_code == "1452" and st.session_state.active_menu != "📊 진행현황":
         st.session_state.active_menu = "📊 진행현황"
         st.rerun()
     is_admin = (auth_code == "1452")
 with t_col3:
-    if st.button("🔍 약가조회", key="top_search", use_container_width=True): 
-        st.session_state.active_menu = "🔍 약가조회"
-
-st.divider()
+    if st.button("🔍 약가조회", key="top_search", use_container_width=True): st.session_state.active_menu = "🔍 약가조회"
 
 # --- 8. 메인 컨텐츠 영역 ---
 
-# [1] 진행현황 (삭제/조회 수직출력/동기화 강화)
 if st.session_state.active_menu == "📊 진행현황":
     st.markdown('<div class="section-header">📊 통합 신청 및 처리 현황</div>', unsafe_allow_html=True)
     db_df = load_db_data()
@@ -209,66 +193,50 @@ if st.session_state.active_menu == "📊 진행현황":
         edited_df = st.data_editor(
             edit_df_view.iloc[::-1],
             column_config=col_cfg,
-            hide_index=True, use_container_width=True, height=520, disabled=False 
+            hide_index=True, use_container_width=True, height=520, disabled=not is_admin 
         )
         
         if is_admin:
-            if st.button("💾 변경사항 최종 반영하기 (삭제 포함)", key="save_sync_btn", use_container_width=True):
+            if st.button("💾 변경사항 최종 반영하기 (삭제 포함)", use_container_width=True):
                 try:
-                    with st.spinner("구글 시트 동기화 중... 잠시만 기다려주세요."):
+                    with st.spinner("구글 시트와 동기화 중..."):
                         ss = get_spreadsheet(); ws = ss.worksheet("New_stop")
                         headers = ws.row_values(1)
                         
-                        # 삭제 대상 처리
+                        # 1. 삭제 및 업데이트 데이터 정리
+                        # 중요: JSON 에러 방지를 위해 모든 데이터를 문자열로 변환
                         remaining_df = edited_df[edited_df["삭제"] == False].copy()
-                        delete_count = len(edited_df[edited_df["삭제"] == True])
-                        
-                        # ---------------------------------------------------------
-                        # ★ 핵심 수정: JSON 날짜 에러 방지 - 모든 데이터를 문자열로 강제 변환
-                        # ---------------------------------------------------------
                         for col in remaining_df.columns:
                             remaining_df[col] = remaining_df[col].apply(lambda x: "" if pd.isna(x) or x is None else str(x))
                         
-                        # UI 전용 임시 컬럼 제거
                         if "삭제" in remaining_df.columns: remaining_df.drop(columns=["삭제"], inplace=True)
                         if "조회" in remaining_df.columns: remaining_df.drop(columns=["조회"], inplace=True)
                         
-                        # 정렬 원복 (역순 표시한 걸 정순으로 되돌림)
+                        # 2. 시트 순서(과거->최신) 정렬 원복
                         remaining_df = remaining_df.iloc[::-1]
                         
-                        # 구글 시트 업데이트 (배치 방식)
+                        # 3. 시트 영역 초기화 및 일괄 업데이트 (빈 줄 방지)
                         data_to_write = remaining_df[headers].values.tolist()
-                        ws.batch_clear(["A2:Z3000"]) 
+                        ws.batch_clear(["A2:Z3000"])
                         if data_to_write:
                             ws.update("A2", data_to_write, value_input_option='RAW')
                             
-                        if delete_count > 0:
-                            st.success(f"데이터 {delete_count}건을 삭제하고 전체 동기화를 완료했습니다.")
-                        else:
-                            st.success("데이터 업데이트를 성공적으로 완료했습니다.")
-                        
-                        st.cache_data.clear(); st.rerun()
-                except Exception as e: st.error(f"동기화 중 오류 발생: {e}")
+                        st.success("삭제 및 변경사항이 즉시 동기화되었습니다."); st.cache_data.clear(); st.rerun()
+                except Exception as e: st.error(f"오류: {e}")
 
-        # 요구사항: 조회 체크박스 클릭 시 상세 정보를 수직으로 나열
+        # 상세 조회 (수직 출력 요구사항 반영)
         selected_rows = edited_df[edited_df["조회"] == True]
         if not selected_rows.empty:
             st.divider()
-            st.markdown("### 📋 선택 항목 상세 정보 (수직 뷰)")
+            st.markdown("### 📋 선택 항목 상세 정보")
             for _, row in selected_rows.iterrows():
-                st.markdown(f'<div class="vertical-detail-container">', unsafe_allow_html=True)
-                # 삭제, 조회 컬럼 제외하고 모든 정보 출력
-                display_cols = [c for c in row.index if c not in ["삭제", "조회"] and str(row[c]).strip() != ""]
-                for col in display_cols:
-                    st.markdown(f"""
-                        <div class="vertical-row">
-                            <div class="vertical-label">{col}</div>
-                            <div class="vertical-value">: {row[col]}</div>
-                        </div>
-                    """, unsafe_allow_html=True)
+                st.markdown('<div class="vertical-detail">', unsafe_allow_html=True)
+                for col in row.index:
+                    if col not in ["삭제", "조회"] and str(row[col]) != "":
+                        st.markdown(f'<div class="v-row"><div class="v-label">{col}</div><div class="v-value">: {row[col]}</div></div>', unsafe_allow_html=True)
                 st.markdown('</div>', unsafe_allow_html=True)
 
-# [2-7] 신청서 섹션들 (비고란 통합 적용)
+# [2-7] 신청서 섹션들 (비고란 통합 반영)
 elif st.session_state.active_menu in ["사용중지", "신규입고", "대체입고", "삭제코드변경", "단가인하▼", "단가인상▲"]:
     curr = st.session_state.active_menu
     d = {}
@@ -309,10 +277,9 @@ elif st.session_state.active_menu in ["사용중지", "신규입고", "대체입
         c5, c6, c7, c8 = st.columns(4); d["변경내용1"] = c5.selectbox("변경내용1", OP_CHANGE_CONTENT, key="t6_cn1"); d["사용중지일1"] = c6.date_input("품절일1", key="t6_sd1").strftime('%Y-%m-%d'); d["입고일1"] = c7.date_input("재입고일자1", key="t6_id1").strftime('%Y-%m-%d'); d["인상전입고가1"] = c8.number_input("인상전입고가1", 0, key="t6_pre_pr")
         c9 = st.columns(1)[0]; d["코드사용시작일1"] = c9.date_input("코드사용시작일1", key="t6_ss1").strftime('%Y-%m-%d')
     
-    # [통합 비고란] 모든 화면에서 "비고(기타 요청사항)" 하나로 통일
-    d["비고(기타 요청사항)"] = st.text_area("비고(기타 요청사항)", key="final_memo")
-    if st.button(f"🚀 {curr} 제출", key="final_btn", use_container_width=True): 
-        handle_safe_submit(curr, d)
+    # [통합] 비고란을 하나로 통일하여 화면 하단에 배치
+    d["비고(기타 요청사항)"] = st.text_area("비고(기타 요청사항)", key="unified_memo")
+    if st.button(f"🚀 {curr} 제출", key="final_submit_btn", use_container_width=True): handle_safe_submit(curr, d)
 
 # [8] 약가조회
 elif st.session_state.active_menu == "🔍 약가조회":
