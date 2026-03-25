@@ -111,22 +111,24 @@ def render_drug_table(edi_val, drug_num=1, label="약제 정보"):
     }
 
 def handle_safe_submit(category, data_dict):
-    # 1) 신청자 성명 체크
+    # 1) 신청자 성명 필수 체크
     if not app_user: 
         st.error("신청자 성명을 입력해주세요."); return
     
-    # 2) 필수 항목 체크 (약제정보 표 항목 및 비고 제외)
-    # 표 항목: 제품명, 업체명, 규격, 단위, 상한금액, 주성분명, 의약품 구분 (1, 2 모두)
-    # 비고 항목: 비고(기타 요청사항) (1, 2 모두)
+    # 2) 필수 입력 예외 항목 설정
     exclude_keys = [
         "제품명1", "업체명1", "규격1", "단위1", "상한금액1", "주성분명1", "의약품 구분1",
         "제품명2", "업체명2", "규격2", "단위2", "상한금액2", "주성분명2", "의약품 구분2",
-        "비고(기타 요청사항)1", "비고(기타 요청사항)2"
+        "비고(기타 요청사항)1", "비고(기타 요청사항)2",
+        "사용중지사유_기타1", "상한가외입고사유1", "상한가외입고사유2" # 추가된 예외항목
     ]
     
     for k, v in data_dict.items():
         if k not in exclude_keys:
-            # 문자열이 비었거나, 숫자값이 0인 경우 입력 누락으로 간주
+            # 반품불가사유1은 '비활성(Skip)' 상태일 때는 체크하지 않음
+            if k == "반품불가사유1" and "반품불가사유1_skip" in st.session_state and st.session_state["반품불가사유1_skip"]:
+                continue
+                
             if v == "" or v is None:
                 st.error(f"'{k}' 항목을 입력하거나 선택해주세요."); return
     
@@ -152,7 +154,7 @@ with t_col3:
 
 # --- 8. 메인 컨텐츠 영역 ---
 
-# [1] 진행현황
+# [1] 진행현황 (표 자동 확장 설정 적용)
 if st.session_state.active_menu == "📊 진행현황":
     st.markdown('<div class="section-header">📊 통합 신청 및 처리 현황</div>', unsafe_allow_html=True)
     db_df = load_db_data()
@@ -162,17 +164,19 @@ if st.session_state.active_menu == "📊 진행현황":
         edit_df_view = db_df.copy()
         edit_df_view['완료일'] = pd.to_datetime(edit_df_view['완료일'], errors='coerce').dt.date
         edit_df_view.insert(0, "상세조회", False)
+        
+        # use_container_width=True 와 개별 컬럼 설정을 통한 자동 크기 조정
         edited_df = st.data_editor(
             edit_df_view.iloc[::-1],
             column_config={
-                "상세조회": st.column_config.CheckboxColumn("조회"),
-                "진행상황": st.column_config.SelectboxColumn("진행상황", options=OP_STATUS),
-                "완료자": st.column_config.SelectboxColumn("완료자", options=OP_PROCESSORS),
-                "완료일": st.column_config.DateColumn("완료일", format="YYYY-MM-DD", default=datetime.now().date()),
+                "상세조회": st.column_config.CheckboxColumn("조회", width="small"),
+                "진행상황": st.column_config.SelectboxColumn("진행상황", options=OP_STATUS, width="medium"),
+                "완료자": st.column_config.SelectboxColumn("완료자", options=OP_PROCESSORS, width="medium"),
+                "완료일": st.column_config.DateColumn("완료일", format="YYYY-MM-DD", default=datetime.now().date(), width="medium"),
                 "제품코드1": st.column_config.TextColumn("제품코드1", disabled=True),
                 "제품명1": st.column_config.TextColumn("제품명1", disabled=True)
             },
-            hide_index=True, use_container_width=True, height=480, disabled=not is_admin 
+            hide_index=True, use_container_width=True, height=520, disabled=not is_admin 
         )
         if is_admin:
             if st.button("💾 변경사항 최종 반영하기", use_container_width=True):
@@ -228,7 +232,6 @@ elif st.session_state.active_menu == "대체입고":
     c13, c14, c15, c16 = st.columns(4); d["원내구분2"], d["급여구분2"], d["구입처2"], d["개당입고가2"] = c13.selectbox("원내구분2", OP_INSIDE_OUT, key="t3_o2"), c14.selectbox("급여구분2", ["급여", "비급여"], key="t3_p2"), c15.text_input("구입처2", key="t3_v2"), c16.number_input("개당입고가2", 0, key="t3_pr2")
     c17, c18, c19, c20 = st.columns(4); d["입고요청사유2"], d["사용기간2"], d["입고일2"], d["코드사용시작일2"] = c17.selectbox("입고요청사유2", OP_STOP_REASON, key="t3_rs2"), c18.selectbox("사용기간2", OP_USE_PERIOD, key="t3_pd2"), c19.date_input("입고일2", key="t3_id2").strftime('%Y-%m-%d'), c20.date_input("코드사용시작일2", key="t3_ss2").strftime('%Y-%m-%d')
     
-    # [수정] 기존약제와병용사용2 및 상한가외입고사유2를 1행으로 변경
     c_sub1, c_sub2 = st.columns(2)
     d["기존약제와병용사용2"] = c_sub1.selectbox("기존약제와병용사용2", OP_YN, key="t3_co2")
     d["상한가외입고사유2"] = c_sub2.text_input("상한가외입고사유2", key="t3_ov2")
@@ -236,14 +239,27 @@ elif st.session_state.active_menu == "대체입고":
     d["비고(기타 요청사항)2"] = st.text_area("비고(기타 요청사항)2", key="t3_mm2")
     if st.button("🚀 대체입고 제출", key="btn_t3", use_container_width=True): handle_safe_submit("대체입고", d)
 
-# [5] 삭제코드변경
+# [5] 삭제코드변경 (조건부 활성화 로직 적용)
 elif st.session_state.active_menu == "삭제코드변경":
     d = {}
     st.markdown('<div class="section-header">삭제코드변경 신청 (삭제 대상 코드)</div>', unsafe_allow_html=True)
     edi1 = st.text_input("대상 코드 입력", key="t4_edi1"); d.update(render_drug_table(edi1, 1, "(삭제대상)"))
     c1, c2, c3, c4 = st.columns(4); d["원내구분1"], d["급여구분1"], d["구입처1"], d["개당입고가1"] = c1.selectbox("원내구분1", OP_INSIDE_OUT, key="t4_o1"), c2.selectbox("급여구분1", ["급여", "비급여"], key="t4_p1"), c3.text_input("구입처1", key="t4_v1"), c4.number_input("개당입고가1", 0, key="t4_pr1")
     c5, c6, c7, c8 = st.columns(4); d["변경내용1"], d["재고여부1"], d["재고처리방법1"], d["재고량1"] = c5.selectbox("변경내용1", OP_CHANGE_CONTENT, key="t4_cn1"), c6.selectbox("재고여부1", ["유", "무"], key="t4_s1"), c7.selectbox("재고처리방법1", OP_STOCK_METHOD, key="t4_m1"), c8.number_input("재고량1", 0, key="t4_sv1")
-    c9, c10, c11, c12 = st.columns(4); d["반품가능여부1"], d["반품불가사유1"], d["반품예정일1"], d["반품량1"] = c9.selectbox("반품가능여부1", OP_POSSIBLE, key="t4_py1"), c10.text_input("반품불가사유1", key="t4_nrs1"), c11.date_input("반품예정일1", key="t4_rd1").strftime('%Y-%m-%d'), c12.number_input("반품량1", 0, key="t4_rv1")
+    
+    # [조건부 활성화 로직] 반품가능여부1에 따른 처리
+    c9, c10, c11, c12 = st.columns(4)
+    d["반품가능여부1"] = c9.selectbox("반품가능여부1", OP_POSSIBLE, key="t4_py1")
+    
+    # 반품가능여부가 '불가'일 때만 반품불가사유 활성화 및 필수입력
+    if d["반품가능여부1"] == "불가":
+        d["반품불가사유1"] = c10.text_input("반품불가사유1 (필수)", key="t4_nrs1")
+        st.session_state["반품불가사유1_skip"] = False
+    else:
+        d["반품불가사유1"] = c10.text_input("반품불가사유1 (비활성)", key="t4_nrs1", disabled=True)
+        st.session_state["반품불가사유1_skip"] = True
+        
+    d["반품예정일1"], d["반품량1"] = c11.date_input("반품예정일1", key="t4_rd1").strftime('%Y-%m-%d'), c12.number_input("반품량1", 0, key="t4_rv1")
     
     st.markdown('<div class="section-header">변경 약제 정보</div>', unsafe_allow_html=True)
     edi2 = st.text_input("변경 코드 입력", key="t4_edi2"); d.update(render_drug_table(edi2, 2, "(변경약제)"))
@@ -259,7 +275,19 @@ elif st.session_state.active_menu == "단가인하▼":
     edi1 = st.text_input("대상 코드 입력", key="t5_edi1"); d.update(render_drug_table(edi1, 1))
     c1, c2, c3, c4 = st.columns(4); d["원내구분1"], d["급여구분1"], d["구입처1"], d["개당입고가1"] = c1.selectbox("원내구분1", OP_INSIDE_OUT, key="t5_o1"), c2.selectbox("급여구분1", ["급여", "비급여"], key="t5_p1"), c3.text_input("구입처1", key="t5_v1"), c4.number_input("개당입고가1", 0, key="t5_pr1")
     c5, c6, c7, c8 = st.columns(4); d["변경내용1"], d["재고여부1"], d["재고처리방법1"], d["재고량1"] = c5.selectbox("변경내용1", OP_CHANGE_CONTENT, key="t5_cn1"), c6.selectbox("재고여부1", ["유", "무"], key="t5_s1"), c7.selectbox("재고처리방법1", OP_STOCK_METHOD, key="t5_m1"), c8.number_input("재고량1", 0, key="t5_sv1")
-    c9, c10, c11, c12 = st.columns(4); d["반품가능여부1"], d["반품불가사유1"], d["반품예정일1"], d["반품량1"] = c9.selectbox("반품가능여부1", OP_POSSIBLE, key="t5_py1"), c10.text_input("반품불가사유1", key="t5_nrs1"), c11.date_input("반품예정일1", key="t5_rd1").strftime('%Y-%m-%d'), c12.number_input("반품량1", 0, key="t5_rv1")
+    
+    # [조건부 활성화 로직] 반품가능여부1에 따른 처리
+    c9, c10, c11, c12 = st.columns(4)
+    d["반품가능여부1"] = c9.selectbox("반품가능여부1", OP_POSSIBLE, key="t5_py1")
+    
+    if d["반품가능여부1"] == "불가":
+        d["반품불가사유1"] = c10.text_input("반품불가사유1 (필수)", key="t5_nrs1")
+        st.session_state["반품불가사유1_skip"] = False
+    else:
+        d["반품불가사유1"] = c10.text_input("반품불가사유1 (비활성)", key="t5_nrs1", disabled=True)
+        st.session_state["반품불가사유1_skip"] = True
+        
+    d["반품예정일1"], d["반품량1"] = c11.date_input("반품예정일1", key="t5_rd1").strftime('%Y-%m-%d'), c12.number_input("반품량1", 0, key="t5_rv1")
     
     st.markdown('<div class="section-header">변경 약제 정보</div>', unsafe_allow_html=True)
     edi2 = st.text_input("변경 코드 입력", key="t5_edi2"); d.update(render_drug_table(edi2, 2))
