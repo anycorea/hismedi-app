@@ -82,7 +82,7 @@ with st.sidebar:
     if col2.button("신규입고"): st.session_state.active_menu = "신규입고"
     col3, col4 = st.columns(2)
     if col3.button("대체입고"): st.session_state.active_menu = "대체입고"
-    if col4.button("삭제코드변경"): st.session_state.active_menu = "삭제코드변경" # 이름 변경 반영
+    if col4.button("삭제코드변경"): st.session_state.active_menu = "삭제코드변경"
     col5, col6 = st.columns(2)
     if col5.button("단가인하▼"): st.session_state.active_menu = "단가인하▼"
     if col6.button("단가인상▲"): st.session_state.active_menu = "단가인상▲"
@@ -111,7 +111,25 @@ def render_drug_table(edi_val, drug_num=1, label="약제 정보"):
     }
 
 def handle_safe_submit(category, data_dict):
-    if not app_user: st.error("신청자 성명을 입력해주세요."); return
+    # 1) 신청자 성명 체크
+    if not app_user: 
+        st.error("신청자 성명을 입력해주세요."); return
+    
+    # 2) 필수 항목 체크 (약제정보 표 항목 및 비고 제외)
+    # 표 항목: 제품명, 업체명, 규격, 단위, 상한금액, 주성분명, 의약품 구분 (1, 2 모두)
+    # 비고 항목: 비고(기타 요청사항) (1, 2 모두)
+    exclude_keys = [
+        "제품명1", "업체명1", "규격1", "단위1", "상한금액1", "주성분명1", "의약품 구분1",
+        "제품명2", "업체명2", "규격2", "단위2", "상한금액2", "주성분명2", "의약품 구분2",
+        "비고(기타 요청사항)1", "비고(기타 요청사항)2"
+    ]
+    
+    for k, v in data_dict.items():
+        if k not in exclude_keys:
+            # 문자열이 비었거나, 숫자값이 0인 경우 입력 누락으로 간주
+            if v == "" or v is None:
+                st.error(f"'{k}' 항목을 입력하거나 선택해주세요."); return
+    
     try:
         ss = get_spreadsheet(); ws = ss.worksheet("New_stop")
         headers = ws.row_values(1)
@@ -207,26 +225,28 @@ elif st.session_state.active_menu == "대체입고":
     
     st.markdown('<div class="section-header">대체 약제 정보</div>', unsafe_allow_html=True)
     edi2 = st.text_input("대체 제품코드 입력", key="t3_edi2"); d.update(render_drug_table(edi2, 2, "(대체약제)"))
-    # 누락된 항목 추가
     c13, c14, c15, c16 = st.columns(4); d["원내구분2"], d["급여구분2"], d["구입처2"], d["개당입고가2"] = c13.selectbox("원내구분2", OP_INSIDE_OUT, key="t3_o2"), c14.selectbox("급여구분2", ["급여", "비급여"], key="t3_p2"), c15.text_input("구입처2", key="t3_v2"), c16.number_input("개당입고가2", 0, key="t3_pr2")
     c17, c18, c19, c20 = st.columns(4); d["입고요청사유2"], d["사용기간2"], d["입고일2"], d["코드사용시작일2"] = c17.selectbox("입고요청사유2", OP_STOP_REASON, key="t3_rs2"), c18.selectbox("사용기간2", OP_USE_PERIOD, key="t3_pd2"), c19.date_input("입고일2", key="t3_id2").strftime('%Y-%m-%d'), c20.date_input("코드사용시작일2", key="t3_ss2").strftime('%Y-%m-%d')
-    d["기존약제와병용사용2"], d["상한가외입고사유2"] = st.selectbox("기존약제와병용사용2", OP_YN, key="t3_co2"), st.text_input("상한가외입고사유2", key="t3_ov2")
+    
+    # [수정] 기존약제와병용사용2 및 상한가외입고사유2를 1행으로 변경
+    c_sub1, c_sub2 = st.columns(2)
+    d["기존약제와병용사용2"] = c_sub1.selectbox("기존약제와병용사용2", OP_YN, key="t3_co2")
+    d["상한가외입고사유2"] = c_sub2.text_input("상한가외입고사유2", key="t3_ov2")
+    
     d["비고(기타 요청사항)2"] = st.text_area("비고(기타 요청사항)2", key="t3_mm2")
     if st.button("🚀 대체입고 제출", key="btn_t3", use_container_width=True): handle_safe_submit("대체입고", d)
 
-# [5] 삭제코드변경 (구 급여코드변경)
+# [5] 삭제코드변경
 elif st.session_state.active_menu == "삭제코드변경":
     d = {}
     st.markdown('<div class="section-header">삭제코드변경 신청 (삭제 대상 코드)</div>', unsafe_allow_html=True)
     edi1 = st.text_input("대상 코드 입력", key="t4_edi1"); d.update(render_drug_table(edi1, 1, "(삭제대상)"))
-    # 누락된 항목 및 반품불가사유1 추가
     c1, c2, c3, c4 = st.columns(4); d["원내구분1"], d["급여구분1"], d["구입처1"], d["개당입고가1"] = c1.selectbox("원내구분1", OP_INSIDE_OUT, key="t4_o1"), c2.selectbox("급여구분1", ["급여", "비급여"], key="t4_p1"), c3.text_input("구입처1", key="t4_v1"), c4.number_input("개당입고가1", 0, key="t4_pr1")
     c5, c6, c7, c8 = st.columns(4); d["변경내용1"], d["재고여부1"], d["재고처리방법1"], d["재고량1"] = c5.selectbox("변경내용1", OP_CHANGE_CONTENT, key="t4_cn1"), c6.selectbox("재고여부1", ["유", "무"], key="t4_s1"), c7.selectbox("재고처리방법1", OP_STOCK_METHOD, key="t4_m1"), c8.number_input("재고량1", 0, key="t4_sv1")
     c9, c10, c11, c12 = st.columns(4); d["반품가능여부1"], d["반품불가사유1"], d["반품예정일1"], d["반품량1"] = c9.selectbox("반품가능여부1", OP_POSSIBLE, key="t4_py1"), c10.text_input("반품불가사유1", key="t4_nrs1"), c11.date_input("반품예정일1", key="t4_rd1").strftime('%Y-%m-%d'), c12.number_input("반품량1", 0, key="t4_rv1")
     
     st.markdown('<div class="section-header">변경 약제 정보</div>', unsafe_allow_html=True)
     edi2 = st.text_input("변경 코드 입력", key="t4_edi2"); d.update(render_drug_table(edi2, 2, "(변경약제)"))
-    # 누락된 항목 추가
     c13, c14, c15, c16 = st.columns(4); d["원내구분2"], d["급여구분2"], d["구입처2"], d["개당입고가2"] = c13.selectbox("원내구분2", OP_INSIDE_OUT, key="t4_o2"), c14.selectbox("급여구분2", ["급여", "비급여"], key="t4_p2"), c15.text_input("구입처2", key="t4_v2"), c16.number_input("개당입고가2", 0, key="t4_pr2")
     c17, c18 = st.columns(2); d["코드사용시작일2"], d["상한가외입고사유2"] = c17.date_input("코드사용시작일2", key="t4_ss2").strftime('%Y-%m-%d'), c18.text_input("상한가외입고사유2", key="t4_ov2")
     d["비고(기타 요청사항)2"] = st.text_area("비고(기타 요청사항)2", key="t4_mm2")
@@ -254,7 +274,6 @@ elif st.session_state.active_menu == "단가인상▲":
     st.markdown('<div class="section-header">단가인상▲ 신청</div>', unsafe_allow_html=True)
     edi1 = st.text_input("대상 코드 입력", key="t6_edi1"); d.update(render_drug_table(edi1, 1))
     c1, c2, c3, c4 = st.columns(4); d["원내구분1"], d["급여구분1"], d["구입처1"], d["개당입고가1"] = c1.selectbox("원내구분1", OP_INSIDE_OUT, key="t6_o1"), c2.selectbox("급여구분1", ["급여", "비급여"], key="t6_p1"), c3.text_input("구입처1", key="t6_v1"), c4.number_input("개당입고가1", 0, key="t6_pr1")
-    # 이름변경 및 신규항목 추가 (사용중지일1->품절일1, 입고일1->재입고일자1 등)
     c5, c6, c7, c8 = st.columns(4); d["변경내용1"] = c5.selectbox("변경내용1", OP_CHANGE_CONTENT, key="t6_cn1"); d["사용중지일1"] = c6.date_input("품절일1", key="t6_sd1").strftime('%Y-%m-%d'); d["입고일1"] = c7.date_input("재입고일자1", key="t6_id1").strftime('%Y-%m-%d'); d["인상전입고가1"] = c8.number_input("인상전입고가1", 0, key="t6_pre_pr")
     c9 = st.columns(1)[0]; d["코드사용시작일1"] = c9.date_input("코드사용시작일1", key="t6_ss1").strftime('%Y-%m-%d')
     d["비고(기타 요청사항)1"] = st.text_area("비고(기타 요청사항)1", key="t6_memo")
