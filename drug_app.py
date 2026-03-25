@@ -121,7 +121,7 @@ def handle_safe_submit(category, data_dict):
     exclude_keys = [
         "제품명1", "업체명1", "규격1", "단위1", "상한금액1", "주성분명1", "의약품 구분1",
         "제품명2", "업체명2", "규격2", "단위2", "상한금액2", "주성분명2", "의약품 구분2",
-        "비고(기타 요청사항)",
+        "비고(기타 요청사항)1", "비고(기타 요청사항)2",
         "사용중지사유_기타1", "상한가외입고사유1", "상한가외입고사유2"
     ]
     
@@ -195,18 +195,34 @@ if st.session_state.active_menu == "📊 진행현황":
                     headers = ws.row_values(1)
                     
                     # 1. 삭제 처리 (역순으로 삭제해야 인덱스가 꼬이지 않음)
+                    # 원본 데이터프레임 기준으로 인덱스 추출
                     rows_to_delete = edited_df[edited_df["삭제"] == True]
                     if not rows_to_delete.empty:
+                        # 원본 db_df의 인덱스를 사용하여 시트 상의 실제 행 번호 계산 (헤더 포함 +2)
                         delete_indices = sorted(rows_to_delete.index.tolist(), reverse=True)
                         for idx in delete_indices:
                             ws.delete_rows(idx + 2) # gspread는 1-based index
                     
                     # 2. 나머지 데이터 업데이트 (진행상황, 완료자, 완료일)
+                    # 삭제되지 않은 행들에 대해 업데이트 진행
                     remaining_df = edited_df[edited_df["삭제"] == False]
                     st_col, ed_col, dt_col = headers.index("진행상황")+1, headers.index("완료자")+1, headers.index("완료일")+1
                     
+                    # 시트 정보를 새로 불러와서 업데이트 (삭제 후 인덱스 정렬됨)
+                    for idx, row in remaining_df.iterrows():
+                        # 삭제 후의 실제 위치를 찾기 위해 고유값(신청일+제품코드+신청자 등)을 쓰거나 
+                        # 전체 데이터를 다시 덮어쓰는 것이 안전하지만, 여기서는 기존 인덱스 로직을 보정하여 처리
+                        # (단순화를 위해 삭제가 있는 경우 rerun 후 업데이트 권장 혹은 전체 업데이트 방식 사용)
+                        pass 
+                    
+                    # [가장 안전한 방식] 삭제가 포함된 경우 전체 데이터를 다시 정리하여 업로드
                     if not rows_to_delete.empty or True: # 항상 안전하게 전체 동기화
+                        updated_all_df = load_db_data() # 최신 DB 로드
+                        # edited_df에서 삭제 안 된 것들만 필터링하여 시트 헤더 순서대로 재배치 후 일괄 업데이트는 복잡하므로
+                        # 여기서는 개별 셀 업데이트 로직 유지하되 삭제 후 새로고침 유도
                         for idx, row in remaining_df.iterrows():
+                            # 삭제로 인해 밀려난 인덱스 계산이 복잡하므로, 개별 업데이트 수행
+                            # 실제로는 삭제 행위를 먼저 전체 수행하고, 남은 데이터를 루프 돌며 처리
                             real_idx = idx + 2 - len([i for i in delete_indices if i < idx])
                             ws.update_cell(real_idx, st_col, row["진행상황"])
                             ws.update_cell(real_idx, ed_col, row["완료자"])
@@ -215,7 +231,7 @@ if st.session_state.active_menu == "📊 진행현황":
                     st.success("데이터가 성공적으로 동기화되었습니다."); st.cache_data.clear(); st.rerun()
                 except Exception as e: st.error(f"오류: {e}")
 
-# [2-7] 신청서 섹션들
+# [2-7] 신청서 섹션들 (제품코드 문자열 유지 반영)
 elif st.session_state.active_menu in ["사용중지", "신규입고", "대체입고", "삭제코드변경", "단가인하▼", "단가인상▲"]:
     curr = st.session_state.active_menu
     d = {}
@@ -223,7 +239,7 @@ elif st.session_state.active_menu in ["사용중지", "신규입고", "대체입
     edi1 = st.text_input(f"대상 제품코드 입력 (텍스트)", key=f"t_edi1")
     d.update(render_drug_table(edi1, 1))
     
-    # 각 탭별 상세 항목 배치
+    # 각 탭별 상세 항목 배치 (기존 로직 유지)
     if curr == "사용중지":
         c1, c2, c3, c4 = st.columns(4); d["원내구분1"], d["급여구분1"], d["구입처1"], d["개당입고가1"] = c1.selectbox("원내구분1", OP_INSIDE_OUT, key="t1_io"), c2.selectbox("급여구분1", ["급여", "비급여"], key="t1_pay"), c3.text_input("구입처1", key="t1_vd"), c4.number_input("개당입고가1", 0, key="t1_pr")
         c5, c6, c7, c8 = st.columns(4); d["사용중지일1"], d["사용중지사유1"], d["사용중지사유_기타1"], d["재고여부1"] = c5.date_input("사용중지일1", key="t1_sd").strftime('%Y-%m-%d'), c6.selectbox("사용중지사유1", OP_STOP_REASON, key="t1_rs"), c7.text_input("사용중지사유_기타1", key="t1_ers"), c8.selectbox("재고여부1", ["유", "무"], key="t1_syn")
@@ -242,6 +258,7 @@ elif st.session_state.active_menu in ["사용중지", "신규입고", "대체입
         c13, c14, c15, c16 = st.columns(4); d["원내구분2"], d["급여구분2"], d["구입처2"], d["개당입고가2"] = c13.selectbox("원내구분2", OP_INSIDE_OUT, key="t3_o2"), c14.selectbox("급여구분2", ["급여", "비급여"], key="t3_p2"), c15.text_input("구입처2", key="t3_v2"), c16.number_input("개당입고가2", 0, key="t3_pr2")
         c17, c18, c19, c20 = st.columns(4); d["입고요청사유2"], d["사용기간2"], d["입고일2"], d["코드사용시작일2"] = c17.selectbox("입고요청사유2", OP_STOP_REASON, key="t3_rs2"), c18.selectbox("사용기간2", OP_USE_PERIOD, key="t3_pd2"), c19.date_input("입고일2", key="t3_id2").strftime('%Y-%m-%d'), c20.date_input("코드사용시작일2", key="t3_ss2").strftime('%Y-%m-%d')
         cs1, cs2 = st.columns(2); d["기존약제와병용사용2"], d["상한가외입고사유2"] = cs1.selectbox("기존약제와병용사용2", OP_YN, key="t3_co2"), cs2.text_input("상한가외입고사유2", key="t3_ov2")
+        d["비고(기타 요청사항)2"] = st.text_area("비고(기타 요청사항)2", key="t3_mm2")
     elif curr in ["삭제코드변경", "단가인하▼"]:
         c1, c2, c3, c4 = st.columns(4); d["원내구분1"], d["급여구분1"], d["구입처1"], d["개당입고가1"] = c1.selectbox("원내구분1", OP_INSIDE_OUT, key="t_o1"), c2.selectbox("급여구분1", ["급여", "비급여"], key="t_p1"), c3.text_input("구입처1", key="t_v1"), c4.number_input("개당입고가1", 0, key="t_pr1")
         c5, c6, c7, c8 = st.columns(4); d["변경내용1"], d["재고여부1"], d["재고처리방법1"], d["재고량1"] = c5.selectbox("변경내용1", OP_CHANGE_CONTENT, key="t_cn1"), c6.selectbox("재고여부1", ["유", "무"], key="t_s1"), c7.selectbox("재고처리방법1", OP_STOCK_METHOD, key="t_m1"), c8.number_input("재고량1", 0, key="t_sv1")
@@ -252,13 +269,14 @@ elif st.session_state.active_menu in ["사용중지", "신규입고", "대체입
         st.markdown('<div class="section-header">변경 약제 정보</div>', unsafe_allow_html=True); edi2 = st.text_input("변경 제품코드 입력", key="t_edi2"); d.update(render_drug_table(edi2, 2, "(변경약제)"))
         c13, c14, c15, c16 = st.columns(4); d["원내구분2"], d["급여구분2"], d["구입처2"], d["개당입고가2"] = c13.selectbox("원내구분2", OP_INSIDE_OUT, key="t_o2"), c14.selectbox("급여구분2", ["급여", "비급여"], key="t_p2"), c15.text_input("구입처2", key="t_v2"), c16.number_input("개당입고가2", 0, key="t_pr2")
         c17, c18 = st.columns(2); d["코드사용시작일2"], d["상한가외입고사유2"] = c17.date_input("코드사용시작일2", key="t_ss2").strftime('%Y-%m-%d'), c18.text_input("상한가외입고사유2", key="t_ov2")
+        d["비고(기타 요청사항)2"] = st.text_area("비고(기타 요청사항)2", key="t_mm2")
     elif curr == "단가인상▲":
         c1, c2, c3, c4 = st.columns(4); d["원내구분1"], d["급여구분1"], d["구입처1"], d["개당입고가1"] = c1.selectbox("원내구분1", OP_INSIDE_OUT, key="t6_o1"), c2.selectbox("급여구분1", ["급여", "비급여"], key="t6_p1"), c3.text_input("구입처1", key="t6_v1"), c4.number_input("개당입고가1", 0, key="t6_pr1")
         c5, c6, c7, c8 = st.columns(4); d["변경내용1"] = c5.selectbox("변경내용1", OP_CHANGE_CONTENT, key="t6_cn1"); d["사용중지일1"] = c6.date_input("품절일1", key="t6_sd1").strftime('%Y-%m-%d'); d["입고일1"] = c7.date_input("재입고일자1", key="t6_id1").strftime('%Y-%m-%d'); d["인상전입고가1"] = c8.number_input("인상전입고가1", 0, key="t6_pre_pr")
         c9 = st.columns(1)[0]; d["코드사용시작일1"] = c9.date_input("코드사용시작일1", key="t6_ss1").strftime('%Y-%m-%d')
     
     if curr != "약가조회":
-        d["비고(기타 요청사항)"] = st.text_area("비고(기타 요청사항)", key="final_memo")
+        d[f"비고(기타 요청사항)1"] = st.text_area("비고(기타 요청사항)1", key="final_memo")
         if st.button(f"🚀 {curr} 제출", key="final_btn", use_container_width=True): handle_safe_submit(curr, d)
 
 # [8] 약가조회
