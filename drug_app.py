@@ -69,7 +69,15 @@ def load_db_data():
             data = ws.get_all_records()
             if not data: return pd.DataFrame()
             df = pd.DataFrame(data)
+            # 모든 데이터를 문자열로 변환하고 빈 값 처리
             df = df.astype(str).replace(['nan', 'None', 'None', ''], '')
+            
+            # [수정된 부분] 제품코드가 포함된 모든 컬럼의 앞 '0'을 보존 (9자리)
+            for col in df.columns:
+                if "제품코드" in col:
+                    # 값이 있는 경우에만 작동 (빈 칸에 000000000이 생기는 것 방지)
+                    df[col] = df[col].apply(lambda x: x.strip().zfill(9) if x and x.strip() and x != '0' else x)
+            
             return df
     except Exception as e:
         return pd.DataFrame()
