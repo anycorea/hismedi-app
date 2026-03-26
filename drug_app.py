@@ -188,14 +188,23 @@ if st.session_state.active_menu == "📊 진행현황":
         edit_df_view['sheet_row'] = range(2, len(edit_df_view) + 2)
         edit_df_view = edit_df_view.iloc[::-1]
         
+        # [위치 조정] 진행상황 - 거래명세표 - 제품코드1 순서로 데이터프레임 컬럼 재배치
+        all_cols = edit_df_view.columns.tolist()
+        if "진행상황" in all_cols and "거래명세표" in all_cols and "제품코드1" in all_cols:
+            all_cols.remove("거래명세표")
+            idx_status = all_cols.index("진행상황")
+            all_cols.insert(idx_status + 1, "거래명세표")
+            edit_df_view = edit_df_view[all_cols]
+        
         edit_df_view.insert(0, "상세조회", False)
         if is_admin: edit_df_view.insert(1, "삭제", False)
         
-        # 컬럼 순서 및 구성 설정 (거래명세표 추가)
+        # 컬럼 구성 설정
         col_cfg = {
             "상세조회": st.column_config.CheckboxColumn("조회", width="small", disabled=False),
             "진행상황": st.column_config.SelectboxColumn("진행상황", options=OP_STATUS, width="small", disabled=not is_admin),
-            "거래명세표": st.column_config.LinkColumn("거래명세표🔗", width="small", display_text="보기"), # 링크로 표시
+            "거래명세표": st.column_config.LinkColumn("거래명세표🔗", width="small", display_text="보기"),
+            "제품코드1": st.column_config.TextColumn("제품코드1", width="small", disabled=True),
             "완료자": st.column_config.SelectboxColumn("완료자", options=OP_PROCESSORS, width="small", disabled=not is_admin),
             "완료일": st.column_config.DateColumn("완료일", format="YYYY-MM-DD", width="small", disabled=not is_admin),
             "신청구분": st.column_config.TextColumn("신청구분", width="small", disabled=True),
@@ -205,7 +214,7 @@ if st.session_state.active_menu == "📊 진행현황":
         }
         if is_admin: col_cfg["삭제"] = st.column_config.CheckboxColumn("삭제", width="small", disabled=False)
 
-        edited_df = st.data_editor(edit_df_view, column_config=col_cfg, hide_index=True, use_container_width=True, height=520, key="main_editor_final_v4")
+        edited_df = st.data_editor(edit_df_view, column_config=col_cfg, hide_index=True, use_container_width=True, height=520, key="main_editor_final_v5")
         
         selected_rows = edited_df[edited_df["상세조회"] == True]
         if not selected_rows.empty:
@@ -224,7 +233,7 @@ if st.session_state.active_menu == "📊 진행현황":
                     ss = get_spreadsheet(); ws = ss.worksheet("New_stop")
                     headers = ws.row_values(1)
                     idx_status, idx_worker, idx_date = headers.index("진행상황")+1, headers.index("완료자")+1, headers.index("완료일")+1
-                    idx_file = headers.index("거래명세표")+1 # 거래명세표 열 번호
+                    idx_file = headers.index("거래명세표")+1
                     
                     rows_to_delete = edited_df[edited_df["삭제"] == True]
                     if not rows_to_delete.empty:
@@ -238,7 +247,7 @@ if st.session_state.active_menu == "📊 진행현황":
                         ws.update_cell(actual_r, idx_status, row["진행상황"])
                         ws.update_cell(actual_r, idx_worker, row["완료자"])
                         ws.update_cell(actual_r, idx_date, str(row["완료일"]) if row["완료일"] else "")
-                        ws.update_cell(actual_r, idx_file, row["거래명세표"]) # 수정된 URL 반영
+                        ws.update_cell(actual_r, idx_file, row["거래명세표"])
                     st.success("동기화 완료!"); st.cache_data.clear(); st.rerun()
                 except Exception as e: st.error(f"오류: {e}")
     else:
@@ -285,7 +294,7 @@ elif st.session_state.active_menu in ["사용중지", "신규입고", "대체입
         c5, c6, c7, c8 = st.columns(4); d["변경내용1"] = c5.selectbox("변경내용1", OP_CHANGE_CONTENT, key="t6_cn1"); d["사용중지일1"] = c6.date_input("품절일1", key="t6_sd1").strftime('%Y-%m-%d'); d["입고일1"] = c7.date_input("재입고일자1", key="t6_id1").strftime('%Y-%m-%d'); d["인상전입고가1"] = c8.text_input("인상전입고가1", key="t6_pre_pr")
         c9 = st.columns(1)[0]; d["코드사용시작일1"] = c9.date_input("코드사용시작일1", key="t6_ss1").strftime('%Y-%m-%d')
     
-    # [추가] 비고란 및 거래명세표 URL 입력 영역
+    # 비고란 및 거래명세표 URL 영역
     st.divider()
     col_memo, col_file = st.columns([2, 1])
     with col_memo: d["비고(기타 요청사항)"] = st.text_area("비고(기타 요청사항)", key="final_memo")
