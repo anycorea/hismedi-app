@@ -11,7 +11,7 @@ st.markdown("""
     <style>
     .block-container { padding-top: 1.5rem !important; background-color: #ffffff !important; }
     [data-testid="stHeader"] { display: none; }
-    .sidebar-title { font-size: 1.4rem; font-weight: 800; color: #1E3A8A; margin-bottom: 20px; }
+    .sidebar-title { font-size: 1.4rem; font-weight: 800; color: #1E3A8A; margin-bottom: 5px; }
     .stButton > button { width: 100%; border-radius: 8px; font-weight: 700; height: 45px; }
     
     /* 신청자 성명 강조 */
@@ -105,9 +105,15 @@ def check_auth_auto():
     if st.session_state.get("auth_p") == "1452":
         st.session_state.active_menu = "📊 진행현황"
 
-# --- 5. 사이드바 ---
+# --- 5. 사이드바 (왼쪽 메뉴) ---
 with st.sidebar:
     st.markdown('<p class="sidebar-title">HISMEDI † Drug Service</p>', unsafe_allow_html=True)
+    
+    # [추가] 새로고침 버튼 배치
+    if st.button("🔄 새로고침", use_container_width=True):
+        st.cache_data.clear() # 캐시 삭제 후
+        st.rerun()           # 재실행
+        
     st.divider()
     app_user = st.text_input("신청자 성명", key="global_user")
     app_date = st.date_input("날짜 선택", datetime.now(), key="global_date").strftime('%Y-%m-%d')
@@ -200,11 +206,7 @@ if st.session_state.active_menu == "📊 진행현황":
         }
         if is_admin: col_cfg["삭제"] = st.column_config.CheckboxColumn("삭제", width="small", disabled=False)
 
-        edited_df = st.data_editor(
-            edit_df_view,
-            column_config=col_cfg,
-            hide_index=True, use_container_width=True, height=520, key="main_editor_v3"
-        )
+        edited_df = st.data_editor(edit_df_view, column_config=col_cfg, hide_index=True, use_container_width=True, height=520, key="main_editor_final")
         
         selected_rows = edited_df[edited_df["상세조회"] == True]
         if not selected_rows.empty:
@@ -239,7 +241,7 @@ if st.session_state.active_menu == "📊 진행현황":
     else:
         st.info("신청 내역이 없습니다.")
 
-# [2-7] 신청서 섹션들
+# [2-7] 신청서 섹션들 (필드 100% 보존)
 elif st.session_state.active_menu in ["사용중지", "신규입고", "대체입고", "삭제코드변경", "단가인하▼", "단가인상▲"]:
     curr = st.session_state.active_menu
     d = {}
@@ -291,29 +293,13 @@ elif st.session_state.active_menu == "🔍 약가조회":
     if s_edi:
         m = get_drug_info(s_edi)
         if m:
-            # 조회할 항목 리스트 정의
-            disp_fields = [
-                "연번", "제품코드", "제품명", "업체명", "규격", "단위", 
-                "상한금액", "전일", "투여", "분류", "식약분류", 
-                "주성분코드_동일제형", "주성분코드", "주성분갯수", "주성분명"
-            ]
-            
-            # 4열 레이아웃으로 데이터 출력
+            disp_fields = ["연번", "제품코드", "제품명", "업체명", "규격", "단위", "상한금액", "전일", "투여", "분류", "식약분류", "주성분코드_동일제형", "주성분코드", "주성분갯수", "주성분명"]
             cols = st.columns(4)
             for idx, field in enumerate(disp_fields):
                 with cols[idx % 4]:
                     val = m.get(field, "-")
-                    # 상한금액 쉼표 처리 (필요시)
                     if field == "상한금액" and val != "-":
                         try: val = "{:,} 원".format(int(str(val).replace(',', '')))
                         except: pass
-                    
-                    st.markdown(f"""
-                        <div class="detail-card">
-                            <div class="detail-label">{field}</div>
-                            <div class="detail-value">{val}</div>
-                        </div>
-                    """, unsafe_allow_html=True)
-            st.success("조회 완료")
-        else:
-            st.error("해당 제품코드를 마스터 DB에서 찾을 수 없습니다.")
+                    st.markdown(f'<div class="detail-card"><div class="detail-label">{field}</div><div class="detail-value">{val}</div></div>', unsafe_allow_html=True)
+        else: st.error("해당 제품코드를 찾을 수 없습니다.")
