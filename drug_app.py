@@ -7,6 +7,7 @@ from datetime import datetime
 # --- 1. 페이지 설정 및 디자인 ---
 st.set_page_config(page_title="HISMEDI Drug Service", layout="wide")
 
+# CSS: 신청자 성명(사이드바) 및 제품코드(메인) 노란색 강조 스타일
 st.markdown("""
     <style>
     .block-container { padding-top: 1.5rem !important; background-color: #ffffff !important; }
@@ -14,13 +15,13 @@ st.markdown("""
     .sidebar-title { font-size: 1.4rem; font-weight: 800; color: #1E3A8A; margin-bottom: 20px; }
     .stButton > button { width: 100%; border-radius: 8px; font-weight: 700; height: 45px; }
     
-    /* [디자인] 신청자 성명 강조 (노란색 배경) */
-    div[data-testid="stSidebar"] div[data-testid="stTextInput"] input {
+    /* 신청자 성명 노란색 강조 */
+    section[data-testid="stSidebar"] div[data-testid="stTextInput"] input {
         background-color: #fff9c4 !important; border: 2px solid #fbc02d !important; font-weight: 800 !important; color: #000000 !important;
     }
     
-    /* [디자인] 제품코드 입력창 강조 (노란색 배경) */
-    div[data-testid="stVerticalBlock"] div[data-testid="stTextInput"]:has(label:contains("제품코드")) input {
+    /* 제품코드 입력창 노란색 강조 */
+    div[data-testid="stVerticalBlock"] div:has(label:contains("제품코드")) input {
         background-color: #fffdec !important; border: 2px solid #fbbf24 !important; font-weight: 700 !important; color: #000000 !important;
     }
 
@@ -31,7 +32,7 @@ st.markdown("""
     .red-cell { color: #dc2626 !important; font-weight: 800 !important; }
     .section-header { font-size: 1rem; font-weight: 800; color: #1E3A8A; margin: 15px 0 10px 0; padding-bottom: 5px; border-bottom: 2px solid #1E3A8A; }
     
-    /* 상세조회 카드 디자인 */
+    /* 상세조회용 카드 스타일 */
     .detail-card { background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 10px; border-radius: 6px; margin-bottom: 5px; }
     .detail-label { font-size: 0.75rem; color: #64748b; font-weight: 400; margin-bottom: 2px; }
     .detail-value { font-size: 0.9rem; color: #1e293b; font-weight: 700; word-break: break-all; }
@@ -69,10 +70,10 @@ def load_db_data():
             data = ws.get_all_records()
             if not data: return pd.DataFrame()
             df = pd.DataFrame(data)
-            df = df.astype(str).replace(['nan', 'None', 'None', ''], '')
+            # 데이터 타입 안정화
+            df = df.astype(str).replace(['nan', 'None', ''], '')
             return df
     except Exception as e:
-        st.error(f"신청 데이터를 불러오는 중 오류 발생: {e}")
         return pd.DataFrame()
 
 master_df = load_master_data()
@@ -89,7 +90,7 @@ OP_USE_PERIOD = ["한시적 사용", "지속적 사용"]
 OP_YN = ["Y", "N"]
 OP_POSSIBLE = ["가능", "불가"]
 
-# --- 4. 세션 상태 관리 및 함수 ---
+# --- 4. 세션 상태 관리 및 초기화 함수 ---
 if 'active_menu' not in st.session_state:
     st.session_state.active_menu = "📊 진행현황"
 
@@ -102,12 +103,12 @@ def set_menu(menu_name):
     st.session_state.active_menu = menu_name
     clear_form_data()
 
-# [자동 실행] 권한코드 1452 입력 시 자동 실행 콜백
+# [기능] 권한코드 1452 입력 시 즉시 실행
 def check_auth_auto():
     if st.session_state.get("auth_p") == "1452":
         st.session_state.active_menu = "📊 진행현황"
 
-# --- 5. 사이드바 ---
+# --- 5. 사이드바 (왼쪽 메뉴) ---
 with st.sidebar:
     st.markdown('<p class="sidebar-title">HISMEDI † Drug Service</p>', unsafe_allow_html=True)
     st.divider()
@@ -166,7 +167,6 @@ t_col1, t_col2, t_col3 = st.columns([1.2, 0.6, 1.2])
 with t_col1:
     if st.button("📊 진행현황", key="top_status", use_container_width=True): set_menu("📊 진행현황")
 with t_col2:
-    # [자동 실행] 권한코드 입력 즉시 이동
     st.text_input("권한코드", type="password", placeholder="****", label_visibility="collapsed", key="auth_p", on_change=check_auth_auto)
     is_admin = (st.session_state.get("auth_p") == "1452")
 with t_col3:
@@ -183,14 +183,15 @@ if st.session_state.active_menu == "📊 진행현황":
         search = st.text_input("🔍 검색 (제품명, 신청자 등)", key="dash_search")
         if search: db_df = db_df[db_df.apply(lambda r: r.astype(str).str.contains(search).any(), axis=1)]
         
-        # 행 번호 기록 (업데이트용)
-        db_df['sheet_row'] = range(2, len(db_df) + 2)
-        edit_df_view = db_df.copy().iloc[::-1] # 최신순
+        # 에러 방지를 위한 데이터 전처리 (날짜 형식 변환 필수)
+        edit_df_view = db_df.copy()
+        edit_df_view['완료일'] = pd.to_datetime(edit_df_view['완료일'], errors='coerce').dt.date
+        edit_df_view['sheet_row'] = range(2, len(edit_df_view) + 2) # 원본 행 번호 보존
         
+        edit_df_view = edit_df_view.iloc[::-1] # 최신순
         edit_df_view.insert(0, "상세조회", False)
         if is_admin: edit_df_view.insert(1, "삭제", False)
         
-        # [완료일 달력] column_config 설정
         col_cfg = {
             "상세조회": st.column_config.CheckboxColumn("조회", width="small"),
             "진행상황": st.column_config.SelectboxColumn("진행상황", options=OP_STATUS, width="medium"),
@@ -198,7 +199,7 @@ if st.session_state.active_menu == "📊 진행현황":
             "완료일": st.column_config.DateColumn("완료일", format="YYYY-MM-DD", width="medium"),
             "제품코드1": st.column_config.TextColumn("제품코드1", disabled=True),
             "제품명1": st.column_config.TextColumn("제품명1", disabled=True),
-            "sheet_row": None # 숨김
+            "sheet_row": None # 사용자에게 안보이게 숨김
         }
         if is_admin: col_cfg["삭제"] = st.column_config.CheckboxColumn("삭제", width="small")
 
@@ -206,67 +207,63 @@ if st.session_state.active_menu == "📊 진행현황":
             edit_df_view,
             column_config=col_cfg,
             hide_index=True, use_container_width=True, height=520, disabled=not is_admin,
-            key="status_editor"
+            key="main_status_editor"
         )
         
-        # [4열 상세조회] 조회 체크박스 선택 시 아래에 항목별 4열 배치
+        # [기능] 4열 상세조회 구현
         selected_rows = edited_df[edited_df["상세조회"] == True]
         if not selected_rows.empty:
-            st.markdown('<div class="section-header">🔍 상세 정보 확인</div>', unsafe_allow_html=True)
+            st.markdown('<div class="section-header">🔍 상세 내역 (4열 보기)</div>', unsafe_allow_html=True)
             for _, row in selected_rows.iterrows():
-                # 데이터가 있는 항목만 필터링
-                valid_items = [(k, v) for k, v in row.items() if str(v).strip() and k not in ["상세조회", "삭제", "sheet_row"]]
+                # 값이 있는 항목만 추출 (필요없는 열 제외)
+                items = [(k, v) for k, v in row.items() if str(v).strip() and k not in ["상세조회", "삭제", "sheet_row"]]
                 cols = st.columns(4)
-                for idx, (lbl, val) in enumerate(valid_items):
-                    with cols[idx % 4]:
-                        st.markdown(f"""<div class="detail-card"><div class="detail-label">{lbl}</div><div class="detail-value">{val}</div></div>""", unsafe_allow_html=True)
+                for i, (k, v) in enumerate(items):
+                    with cols[i % 4]:
+                        st.markdown(f'<div class="detail-card"><div class="detail-label">{k}</div><div class="detail-value">{v}</div></div>', unsafe_allow_html=True)
                 st.divider()
 
-        # [안정적 데이터 저장 및 삭제]
         if is_admin:
             if st.button("💾 변경사항 최종 반영하기", use_container_width=True):
                 try:
                     ss = get_spreadsheet(); ws = ss.worksheet("New_stop")
                     headers = ws.row_values(1)
+                    idx_status = headers.index("진행상황") + 1
+                    idx_worker = headers.index("완료자") + 1
+                    idx_date = headers.index("완료일") + 1
                     
-                    # 1. 삭제 처리 (역순 삭제로 행 밀림 방지)
+                    # 1. 삭제 처리 (행 번호가 큰 순서대로 삭제하여 인덱스 꼬임 방지)
                     rows_to_delete = edited_df[edited_df["삭제"] == True]
                     if not rows_to_delete.empty:
                         target_rows = sorted(rows_to_delete['sheet_row'].tolist(), reverse=True)
                         for r in target_rows:
                             ws.delete_rows(int(r))
-                        st.warning(f"{len(target_rows)}개의 데이터가 영구 삭제되었습니다.")
+                        st.warning(f"{len(target_rows)}건 삭제됨")
                     
                     # 2. 업데이트 처리 (진행상황, 완료자, 완료일)
                     remaining_df = edited_df[edited_df["삭제"] == False]
-                    st_col = headers.index("진행상황") + 1
-                    ed_col = headers.index("완료자") + 1
-                    dt_col = headers.index("완료일") + 1
-                    
-                    # 삭제 후 행 번호가 변하므로, 전체 데이터를 다시 쓰는 대신 개별 업데이트 시 행 번호 재계산 불필요(이미 시트에서 해당 행을 삭제했으므로)
-                    # 단, 이전에 삭제된 행 수만큼 현재 remaining_df의 sheet_row를 조정해야 함
                     for _, row in remaining_df.iterrows():
-                        # 현재 행보다 숫자가 작은 삭제된 행의 개수를 뺀다
-                        deleted_below = sum(1 for r in rows_to_delete['sheet_row'] if int(r) < int(row['sheet_row']))
-                        actual_row = int(row['sheet_row']) - deleted_below
+                        # 현재 행보다 숫자가 작은 삭제된 행의 개수를 파악하여 실제 행 계산
+                        deleted_count = sum(1 for r in rows_to_delete['sheet_row'] if int(r) < int(row['sheet_row']))
+                        actual_r = int(row['sheet_row']) - deleted_count
                         
-                        ws.update_cell(actual_row, st_col, row["진행상황"])
-                        ws.update_cell(actual_row, ed_col, row["완료자"])
-                        ws.update_cell(actual_row, dt_col, str(row["완료일"]) if row["완료일"] else "")
+                        ws.update_cell(actual_r, idx_status, row["진행상황"])
+                        ws.update_cell(actual_r, idx_worker, row["완료자"])
+                        ws.update_cell(actual_r, idx_date, str(row["완료일"]) if row["완료일"] else "")
                         
-                    st.success("데이터 동기화 완료!"); st.cache_data.clear(); st.rerun()
+                    st.success("동기화 완료!"); st.cache_data.clear(); st.rerun()
                 except Exception as e: st.error(f"오류: {e}")
     else:
-        st.info("현재 신청된 내역이 없습니다.")
+        st.info("신청 내역이 없습니다.")
 
-# [2-7] 신청서 섹션들 (이전 버전의 모든 입력창 그대로 유지)
+# [2-7] 신청서 섹션들 (사용자 제공 "이전 버전"의 필드를 100% 복구)
 elif st.session_state.active_menu in ["사용중지", "신규입고", "대체입고", "삭제코드변경", "단가인하▼", "단가인상▲"]:
     curr = st.session_state.active_menu
     d = {}
     st.markdown(f'<div class="section-header">{curr} 신청</div>', unsafe_allow_html=True)
     
-    # [자동 실행] 제품코드 9자리 입력 시 자동 반영 유도 (on_change 사용)
-    edi1 = st.text_input(f"대상 제품코드 입력", key=f"t_edi1", on_change=None)
+    # [기능] 제품코드 9자리 입력 시 자동 로딩 (Enter 입력 시 반영)
+    edi1 = st.text_input(f"대상 제품코드 입력 (9자리)", key=f"t_edi1")
     d.update(render_drug_table(edi1, 1))
     
     if curr == "사용중지":
@@ -309,7 +306,7 @@ elif st.session_state.active_menu in ["사용중지", "신규입고", "대체입
 # [8] 약가조회
 elif st.session_state.active_menu == "🔍 약가조회":
     st.markdown('<div class="section-header">🔍 Master DB 통합 조회</div>', unsafe_allow_html=True)
-    s_edi = st.text_input("조회할 제품코드 입력", key="search_edi")
+    s_edi = st.text_input("조회할 제품코드 입력 (9자리)", key="search_edi")
     if s_edi:
         render_drug_table(s_edi, 1, "검색 결과")
         m = get_drug_info(s_edi)
