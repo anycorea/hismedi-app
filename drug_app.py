@@ -14,12 +14,12 @@ st.markdown("""
     .sidebar-title { font-size: 1.4rem; font-weight: 800; color: #1E3A8A; margin-bottom: 5px; }
     .stButton > button { width: 100%; border-radius: 8px; font-weight: 700; height: 45px; }
     
-    /* 신청자 성명 강조 */
+    /* 신청자 성명 강조 (사이드바) */
     section[data-testid="stSidebar"] div[data-testid="stTextInput"] input {
         background-color: #fff9c4 !important; border: 2px solid #fbc02d !important; font-weight: 800 !important; color: #000000 !important;
     }
     
-    /* 제품코드 입력창 강조 */
+    /* 제품코드 입력창 강조 (메인창) */
     div[data-testid="stVerticalBlock"] div:has(label:contains("제품코드")) input {
         background-color: #fffdec !important; border: 2px solid #fbbf24 !important; font-weight: 700 !important; color: #000000 !important;
     }
@@ -105,15 +105,12 @@ def check_auth_auto():
     if st.session_state.get("auth_p") == "1452":
         st.session_state.active_menu = "📊 진행현황"
 
-# --- 5. 사이드바 (왼쪽 메뉴) ---
+# --- 5. 사이드바 ---
 with st.sidebar:
     st.markdown('<p class="sidebar-title">HISMEDI † Drug Service</p>', unsafe_allow_html=True)
-    
-    # [추가] 새로고침 버튼 배치
     if st.button("🔄 새로고침", use_container_width=True):
-        st.cache_data.clear() # 캐시 삭제 후
-        st.rerun()           # 재실행
-        
+        st.cache_data.clear()
+        st.rerun()
     st.divider()
     app_user = st.text_input("신청자 성명", key="global_user")
     app_date = st.date_input("날짜 선택", datetime.now(), key="global_date").strftime('%Y-%m-%d')
@@ -194,9 +191,11 @@ if st.session_state.active_menu == "📊 진행현황":
         edit_df_view.insert(0, "상세조회", False)
         if is_admin: edit_df_view.insert(1, "삭제", False)
         
+        # 컬럼 순서 및 구성 설정 (거래명세표 추가)
         col_cfg = {
             "상세조회": st.column_config.CheckboxColumn("조회", width="small", disabled=False),
             "진행상황": st.column_config.SelectboxColumn("진행상황", options=OP_STATUS, width="small", disabled=not is_admin),
+            "거래명세표": st.column_config.LinkColumn("거래명세표🔗", width="small", display_text="보기"), # 링크로 표시
             "완료자": st.column_config.SelectboxColumn("완료자", options=OP_PROCESSORS, width="small", disabled=not is_admin),
             "완료일": st.column_config.DateColumn("완료일", format="YYYY-MM-DD", width="small", disabled=not is_admin),
             "신청구분": st.column_config.TextColumn("신청구분", width="small", disabled=True),
@@ -206,7 +205,7 @@ if st.session_state.active_menu == "📊 진행현황":
         }
         if is_admin: col_cfg["삭제"] = st.column_config.CheckboxColumn("삭제", width="small", disabled=False)
 
-        edited_df = st.data_editor(edit_df_view, column_config=col_cfg, hide_index=True, use_container_width=True, height=520, key="main_editor_final")
+        edited_df = st.data_editor(edit_df_view, column_config=col_cfg, hide_index=True, use_container_width=True, height=520, key="main_editor_final_v4")
         
         selected_rows = edited_df[edited_df["상세조회"] == True]
         if not selected_rows.empty:
@@ -225,10 +224,13 @@ if st.session_state.active_menu == "📊 진행현황":
                     ss = get_spreadsheet(); ws = ss.worksheet("New_stop")
                     headers = ws.row_values(1)
                     idx_status, idx_worker, idx_date = headers.index("진행상황")+1, headers.index("완료자")+1, headers.index("완료일")+1
+                    idx_file = headers.index("거래명세표")+1 # 거래명세표 열 번호
+                    
                     rows_to_delete = edited_df[edited_df["삭제"] == True]
                     if not rows_to_delete.empty:
                         target_rows = sorted(rows_to_delete['sheet_row'].tolist(), reverse=True)
                         for r in target_rows: ws.delete_rows(int(r))
+                    
                     remaining_df = edited_df[edited_df["삭제"] == False]
                     for _, row in remaining_df.iterrows():
                         deleted_count = sum(1 for r in rows_to_delete['sheet_row'] if int(r) < int(row['sheet_row']))
@@ -236,12 +238,13 @@ if st.session_state.active_menu == "📊 진행현황":
                         ws.update_cell(actual_r, idx_status, row["진행상황"])
                         ws.update_cell(actual_r, idx_worker, row["완료자"])
                         ws.update_cell(actual_r, idx_date, str(row["완료일"]) if row["완료일"] else "")
+                        ws.update_cell(actual_r, idx_file, row["거래명세표"]) # 수정된 URL 반영
                     st.success("동기화 완료!"); st.cache_data.clear(); st.rerun()
                 except Exception as e: st.error(f"오류: {e}")
     else:
         st.info("신청 내역이 없습니다.")
 
-# [2-7] 신청서 섹션들 (필드 100% 보존)
+# [2-7] 신청서 섹션들
 elif st.session_state.active_menu in ["사용중지", "신규입고", "대체입고", "삭제코드변경", "단가인하▼", "단가인상▲"]:
     curr = st.session_state.active_menu
     d = {}
@@ -282,9 +285,13 @@ elif st.session_state.active_menu in ["사용중지", "신규입고", "대체입
         c5, c6, c7, c8 = st.columns(4); d["변경내용1"] = c5.selectbox("변경내용1", OP_CHANGE_CONTENT, key="t6_cn1"); d["사용중지일1"] = c6.date_input("품절일1", key="t6_sd1").strftime('%Y-%m-%d'); d["입고일1"] = c7.date_input("재입고일자1", key="t6_id1").strftime('%Y-%m-%d'); d["인상전입고가1"] = c8.text_input("인상전입고가1", key="t6_pre_pr")
         c9 = st.columns(1)[0]; d["코드사용시작일1"] = c9.date_input("코드사용시작일1", key="t6_ss1").strftime('%Y-%m-%d')
     
-    if curr != "약가조회":
-        d["비고(기타 요청사항)"] = st.text_area("비고(기타 요청사항)", key="final_memo")
-        if st.button(f"🚀 {curr} 제출", key="final_btn", use_container_width=True): handle_safe_submit(curr, d)
+    # [추가] 비고란 및 거래명세표 URL 입력 영역
+    st.divider()
+    col_memo, col_file = st.columns([2, 1])
+    with col_memo: d["비고(기타 요청사항)"] = st.text_area("비고(기타 요청사항)", key="final_memo")
+    with col_file: d["거래명세표"] = st.text_input("거래명세표 URL (구글/네이버 등)", placeholder="http://...", key="final_file")
+    
+    if st.button(f"🚀 {curr} 제출", key="final_btn", use_container_width=True): handle_safe_submit(curr, d)
 
 # [8] 약가조회
 elif st.session_state.active_menu == "🔍 약가조회":
