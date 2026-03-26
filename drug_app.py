@@ -188,7 +188,7 @@ if st.session_state.active_menu == "📊 진행현황":
         edit_df_view['sheet_row'] = range(2, len(edit_df_view) + 2)
         edit_df_view = edit_df_view.iloc[::-1]
         
-        # [위치 조정] 진행상황 - 거래명세표 - 제품코드1 순서로 데이터프레임 컬럼 재배치
+        # 컬럼 순서 재배치: 진행상황 - 거래명세표 - 제품코드1
         all_cols = edit_df_view.columns.tolist()
         if "진행상황" in all_cols and "거래명세표" in all_cols and "제품코드1" in all_cols:
             all_cols.remove("거래명세표")
@@ -199,22 +199,22 @@ if st.session_state.active_menu == "📊 진행현황":
         edit_df_view.insert(0, "상세조회", False)
         if is_admin: edit_df_view.insert(1, "삭제", False)
         
-        # 컬럼 구성 설정
+        # [수정] 컬럼 너비 조정: 신청구분, 거래명세표, 제품명1 너비 확대
         col_cfg = {
             "상세조회": st.column_config.CheckboxColumn("조회", width="small", disabled=False),
             "진행상황": st.column_config.SelectboxColumn("진행상황", options=OP_STATUS, width="small", disabled=not is_admin),
-            "거래명세표": st.column_config.LinkColumn("거래명세표🔗", width="small", display_text="보기"),
+            "거래명세표": st.column_config.LinkColumn("거래명세표🔗", width="medium", display_text="보기"), # 늘림
             "제품코드1": st.column_config.TextColumn("제품코드1", width="small", disabled=True),
             "완료자": st.column_config.SelectboxColumn("완료자", options=OP_PROCESSORS, width="small", disabled=not is_admin),
             "완료일": st.column_config.DateColumn("완료일", format="YYYY-MM-DD", width="small", disabled=not is_admin),
-            "신청구분": st.column_config.TextColumn("신청구분", width="small", disabled=True),
+            "신청구분": st.column_config.TextColumn("신청구분", width="medium", disabled=True), # 늘림
             "신청자": st.column_config.TextColumn("신청자", width="small", disabled=True),
-            "제품명1": st.column_config.TextColumn("제품명1", width="medium", disabled=True),
+            "제품명1": st.column_config.TextColumn("제품명1", width="large", disabled=True), # 늘림
             "sheet_row": None
         }
         if is_admin: col_cfg["삭제"] = st.column_config.CheckboxColumn("삭제", width="small", disabled=False)
 
-        edited_df = st.data_editor(edit_df_view, column_config=col_cfg, hide_index=True, use_container_width=True, height=520, key="main_editor_final_v5")
+        edited_df = st.data_editor(edit_df_view, column_config=col_cfg, hide_index=True, use_container_width=True, height=520, key="main_editor_final_v6")
         
         selected_rows = edited_df[edited_df["상세조회"] == True]
         if not selected_rows.empty:
@@ -253,7 +253,7 @@ if st.session_state.active_menu == "📊 진행현황":
     else:
         st.info("신청 내역이 없습니다.")
 
-# [2-7] 신청서 섹션들
+# [2-7] 신청서 섹션들 (이전 버전의 상세 입력 필드 100% 보존)
 elif st.session_state.active_menu in ["사용중지", "신규입고", "대체입고", "삭제코드변경", "단가인하▼", "단가인상▲"]:
     curr = st.session_state.active_menu
     d = {}
