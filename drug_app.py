@@ -32,7 +32,7 @@ st.markdown("""
     .section-header { font-size: 1rem; font-weight: 800; color: #1E3A8A; margin: 15px 0 10px 0; padding-bottom: 5px; border-bottom: 2px solid #1E3A8A; }
     
     /* 상세조회용 카드 스타일 */
-    .detail-card { background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 10px; border-radius: 6px; margin-bottom: 5px; }
+    .detail-card { background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 10px; border-radius: 6px; margin-bottom: 5px; min-height: 65px; }
     .detail-label { font-size: 0.75rem; color: #64748b; font-weight: 400; margin-bottom: 2px; }
     .detail-value { font-size: 0.9rem; color: #1e293b; font-weight: 700; word-break: break-all; }
     </style>
@@ -101,7 +101,6 @@ def set_menu(menu_name):
     st.session_state.active_menu = menu_name
     clear_form_data()
 
-# 권한 코드 체크 (자동 이동 기능 유지)
 def check_auth_auto():
     if st.session_state.get("auth_p") == "1452":
         st.session_state.active_menu = "📊 진행현황"
@@ -181,24 +180,21 @@ if st.session_state.active_menu == "📊 진행현황":
         search = st.text_input("🔍 검색 (제품명, 신청자 등)", key="dash_search")
         if search: db_df = db_df[db_df.apply(lambda r: r.astype(str).str.contains(search).any(), axis=1)]
         
-        # 데이터 전처리
         edit_df_view = db_df.copy()
         edit_df_view['완료일'] = pd.to_datetime(edit_df_view['완료일'], errors='coerce').dt.date
         edit_df_view['sheet_row'] = range(2, len(edit_df_view) + 2)
-        edit_df_view = edit_df_view.iloc[::-1] # 최신순
+        edit_df_view = edit_df_view.iloc[::-1]
         
         edit_df_view.insert(0, "상세조회", False)
         if is_admin: edit_df_view.insert(1, "삭제", False)
         
-        # 컬럼 너비 최소화 및 비활성화 설정
         col_cfg = {
-            "상세조회": st.column_config.CheckboxColumn("조회", width="small", disabled=False), # 누구나 사용 가능
+            "상세조회": st.column_config.CheckboxColumn("조회", width="small", disabled=False),
             "진행상황": st.column_config.SelectboxColumn("진행상황", options=OP_STATUS, width="small", disabled=not is_admin),
             "완료자": st.column_config.SelectboxColumn("완료자", options=OP_PROCESSORS, width="small", disabled=not is_admin),
             "완료일": st.column_config.DateColumn("완료일", format="YYYY-MM-DD", width="small", disabled=not is_admin),
             "신청구분": st.column_config.TextColumn("신청구분", width="small", disabled=True),
             "신청자": st.column_config.TextColumn("신청자", width="small", disabled=True),
-            "제품코드1": st.column_config.TextColumn("제품코드1", width="small", disabled=True),
             "제품명1": st.column_config.TextColumn("제품명1", width="medium", disabled=True),
             "sheet_row": None
         }
@@ -207,11 +203,9 @@ if st.session_state.active_menu == "📊 진행현황":
         edited_df = st.data_editor(
             edit_df_view,
             column_config=col_cfg,
-            hide_index=True, use_container_width=True, height=520,
-            key="status_editor_v2"
+            hide_index=True, use_container_width=True, height=520, key="main_editor_v3"
         )
         
-        # 4열 상세조회 (조회 체크박스 누를 때만 보임)
         selected_rows = edited_df[edited_df["상세조회"] == True]
         if not selected_rows.empty:
             st.markdown('<div class="section-header">🔍 선택 항목 상세 정보 (4열 보기)</div>', unsafe_allow_html=True)
@@ -229,15 +223,10 @@ if st.session_state.active_menu == "📊 진행현황":
                     ss = get_spreadsheet(); ws = ss.worksheet("New_stop")
                     headers = ws.row_values(1)
                     idx_status, idx_worker, idx_date = headers.index("진행상황")+1, headers.index("완료자")+1, headers.index("완료일")+1
-                    
-                    # 삭제 처리
                     rows_to_delete = edited_df[edited_df["삭제"] == True]
                     if not rows_to_delete.empty:
                         target_rows = sorted(rows_to_delete['sheet_row'].tolist(), reverse=True)
                         for r in target_rows: ws.delete_rows(int(r))
-                        st.warning(f"{len(target_rows)}건 삭제 완료")
-                    
-                    # 업데이트 처리
                     remaining_df = edited_df[edited_df["삭제"] == False]
                     for _, row in remaining_df.iterrows():
                         deleted_count = sum(1 for r in rows_to_delete['sheet_row'] if int(r) < int(row['sheet_row']))
@@ -245,8 +234,7 @@ if st.session_state.active_menu == "📊 진행현황":
                         ws.update_cell(actual_r, idx_status, row["진행상황"])
                         ws.update_cell(actual_r, idx_worker, row["완료자"])
                         ws.update_cell(actual_r, idx_date, str(row["완료일"]) if row["완료일"] else "")
-                        
-                    st.success("데이터 동기화 완료!"); st.cache_data.clear(); st.rerun()
+                    st.success("동기화 완료!"); st.cache_data.clear(); st.rerun()
                 except Exception as e: st.error(f"오류: {e}")
     else:
         st.info("신청 내역이 없습니다.")
@@ -256,7 +244,7 @@ elif st.session_state.active_menu in ["사용중지", "신규입고", "대체입
     curr = st.session_state.active_menu
     d = {}
     st.markdown(f'<div class="section-header">{curr} 신청</div>', unsafe_allow_html=True)
-    edi1 = st.text_input(f"대상 제품코드 입력 (9자리)", key=f"t_edi1")
+    edi1 = st.text_input(f"대상 제품코드 입력", key=f"t_edi1")
     d.update(render_drug_table(edi1, 1))
     
     if curr == "사용중지":
@@ -298,9 +286,34 @@ elif st.session_state.active_menu in ["사용중지", "신규입고", "대체입
 
 # [8] 약가조회
 elif st.session_state.active_menu == "🔍 약가조회":
-    st.markdown('<div class="section-header">🔍 Master DB 통합 조회</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header">🔍 약가 상세 정보 조회</div>', unsafe_allow_html=True)
     s_edi = st.text_input("조회할 제품코드 입력 (9자리)", key="search_edi")
     if s_edi:
-        render_drug_table(s_edi, 1, "검색 결과")
         m = get_drug_info(s_edi)
-        if m: st.info(f"투여: {m.get('투여','-')} | 분류: {m.get('분류','-')} | 비고: {m.get('비고','-')}")
+        if m:
+            # 조회할 항목 리스트 정의
+            disp_fields = [
+                "연번", "제품코드", "제품명", "업체명", "규격", "단위", 
+                "상한금액", "전일", "투여", "분류", "식약분류", 
+                "주성분코드_동일제형", "주성분코드", "주성분갯수", "주성분명"
+            ]
+            
+            # 4열 레이아웃으로 데이터 출력
+            cols = st.columns(4)
+            for idx, field in enumerate(disp_fields):
+                with cols[idx % 4]:
+                    val = m.get(field, "-")
+                    # 상한금액 쉼표 처리 (필요시)
+                    if field == "상한금액" and val != "-":
+                        try: val = "{:,} 원".format(int(str(val).replace(',', '')))
+                        except: pass
+                    
+                    st.markdown(f"""
+                        <div class="detail-card">
+                            <div class="detail-label">{field}</div>
+                            <div class="detail-value">{val}</div>
+                        </div>
+                    """, unsafe_allow_html=True)
+            st.success("조회 완료")
+        else:
+            st.error("해당 제품코드를 마스터 DB에서 찾을 수 없습니다.")
