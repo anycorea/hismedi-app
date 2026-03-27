@@ -14,50 +14,50 @@ st.markdown("""
     .sidebar-title { font-size: 1.4rem; font-weight: 800; color: #1E3A8A; margin-bottom: 5px; }
     .stButton > button { width: 100%; border-radius: 8px; font-weight: 700; height: 45px; }
     
-    /* --- 상단 네비게이션 권한 입력창 디자인 (정밀 복구본) --- */
+    /* --- 상단 네비게이션 권한 입력창 디자인 (글자 강제 삽입형) --- */
     
-    /* 1. 신청부서/완료부서 공통 박스 스타일 */
-    div:has(label:contains("req_auth")) [data-testid="stTextInput"] > div,
-    div:has(label:contains("admin_auth")) [data-testid="stTextInput"] > div {
+    /* 상단 첫 번째 줄의 2번째(신청부서), 3번째(완료부서) 컬럼 타겟팅 */
+    [data-testid="stHorizontalBlock"]:first-of-type > div:nth-child(2) [data-testid="stTextInput"] > div,
+    [data-testid="stHorizontalBlock"]:first-of-type > div:nth-child(3) [data-testid="stTextInput"] > div {
         background-color: #f1f5f9 !important; 
         border: none !important; 
         border-radius: 10px !important; 
         height: 45px !important;
         position: relative !important;
-        padding-left: 0px !important;
     }
 
-    /* 2. 신청부서 글자 강제 삽입 */
-    div:has(label:contains("req_auth")) [data-testid="stTextInput"] > div::before {
+    /* '신청부서' 글자 삽입 */
+    [data-testid="stHorizontalBlock"]:first-of-type > div:nth-child(2) [data-testid="stTextInput"] > div::before {
         content: "신청부서";
-        position: absolute; left: 15px; top: 12px; z-index: 99;
+        position: absolute; left: 15px; top: 12px; z-index: 10;
         font-size: 0.85rem; font-weight: 800; color: #1E3A8A;
         pointer-events: none;
     }
 
-    /* 3. 완료부서 글자 강제 삽입 */
-    div:has(label:contains("admin_auth")) [data-testid="stTextInput"] > div::before {
+    /* '완료부서' 글자 삽입 */
+    [data-testid="stHorizontalBlock"]:first-of-type > div:nth-child(3) [data-testid="stTextInput"] > div::before {
         content: "완료부서";
-        position: absolute; left: 15px; top: 12px; z-index: 99;
+        position: absolute; left: 15px; top: 12px; z-index: 10;
         font-size: 0.85rem; font-weight: 800; color: #1E3A8A;
         pointer-events: none;
     }
 
-    /* 4. 별표(****) 위치 밀기 */
-    div:has(label:contains("req_auth")) input,
-    div:has(label:contains("admin_auth")) input {
+    /* 입력창 텍스트 위치 밀기 (글자 '신청부서' 뒤에서 **** 가 나오도록) */
+    [data-testid="stHorizontalBlock"]:first-of-type > div:nth-child(2) input,
+    [data-testid="stHorizontalBlock"]:first-of-type > div:nth-child(3) input {
         padding-left: 80px !important; 
         background-color: transparent !important;
         font-weight: 700 !important;
         border: none !important;
-        box-shadow: none !important;
+        height: 45px !important;
     }
 
-    /* 5. collapsed된 라벨 숨기기 */
-    div:has(label:contains("req_auth")) label, 
-    div:has(label:contains("admin_auth")) label { display: none !important; }
+    /* 불필요한 라벨 공간 제거 */
+    [data-testid="stHorizontalBlock"]:first-of-type label {
+        display: none !important;
+    }
     
-    /* --- 나머지 스타일 유지 --- */
+    /* --- 나머지 디자인 유지 --- */
     section[data-testid="stSidebar"] div[data-testid="stTextInput"] input {
         background-color: #fff9c4 !important; border: 2px solid #fbc02d !important; font-weight: 800 !important; color: #000000 !important;
     }
@@ -221,6 +221,7 @@ def handle_safe_submit(category, data_dict):
 is_requester = (st.session_state.get("auth_req") == "7410")
 is_admin = (st.session_state.get("auth_admin") == "1452")
 
+# 이 st.columns 가 코드상 상단 네비게이션의 '첫 번째' 가로줄이어야 합니다.
 t_col1, t_col2, t_col3, t_col4 = st.columns([1.2, 1.0, 1.0, 1.2])
 
 with t_col1:
@@ -228,12 +229,11 @@ with t_col1:
         set_menu("📊 진행현황")
 
 with t_col2:
-    # "hidden" 대신 "collapsed"를 사용합니다.
-    st.text_input("req_auth", type="password", placeholder="****", 
+    st.text_input("신청부서", type="password", placeholder="****", 
                   label_visibility="collapsed", key="auth_req", on_change=check_auth_auto)
 
 with t_col3:
-    st.text_input("admin_auth", type="password", placeholder="****", 
+    st.text_input("완료부서", type="password", placeholder="****", 
                   label_visibility="collapsed", key="auth_admin", on_change=check_auth_auto)
 
 with t_col4:
