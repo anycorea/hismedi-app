@@ -14,9 +14,9 @@ st.markdown("""
     .sidebar-title { font-size: 1.4rem; font-weight: 800; color: #1E3A8A; margin-bottom: 5px; }
     .stButton > button { width: 100%; border-radius: 8px; font-weight: 700; height: 45px; }
     
-    /* --- 상단 네비게이션 권한 입력창 정밀 디자인 (이미지 완벽 재현) --- */
+    /* --- 상단 네비게이션 권한 입력창 디자인 (정밀 복구본) --- */
     
-    /* 1. 회색 박스 전체 스타일 (배경색, 높이, 테두리 제거) */
+    /* 1. 신청부서/완료부서 공통 박스 스타일 */
     div:has(label:contains("req_auth")) [data-testid="stTextInput"] > div,
     div:has(label:contains("admin_auth")) [data-testid="stTextInput"] > div {
         background-color: #f1f5f9 !important; 
@@ -24,70 +24,52 @@ st.markdown("""
         border-radius: 10px !important; 
         height: 45px !important;
         position: relative !important;
-        display: flex !important;
-        align-items: center !important;
+        padding-left: 0px !important;
     }
 
-    /* 2. '신청부서' 글자를 박스 왼쪽 안에 고정 */
+    /* 2. 신청부서 글자 강제 삽입 */
     div:has(label:contains("req_auth")) [data-testid="stTextInput"] > div::before {
         content: "신청부서";
-        position: absolute;
-        left: 15px;
-        z-index: 10;
-        font-size: 0.85rem;
-        font-weight: 800;
-        color: #1E3A8A;
+        position: absolute; left: 15px; top: 12px; z-index: 99;
+        font-size: 0.85rem; font-weight: 800; color: #1E3A8A;
         pointer-events: none;
     }
 
-    /* 3. '완료부서' 글자를 박스 왼쪽 안에 고정 */
+    /* 3. 완료부서 글자 강제 삽입 */
     div:has(label:contains("admin_auth")) [data-testid="stTextInput"] > div::before {
         content: "완료부서";
-        position: absolute;
-        left: 15px;
-        z-index: 10;
-        font-size: 0.85rem;
-        font-weight: 800;
-        color: #1E3A8A;
+        position: absolute; left: 15px; top: 12px; z-index: 99;
+        font-size: 0.85rem; font-weight: 800; color: #1E3A8A;
         pointer-events: none;
     }
 
-    /* 4. 입력되는 별표(****) 위치를 글자 뒤로 밀기 */
+    /* 4. 별표(****) 위치 밀기 */
     div:has(label:contains("req_auth")) input,
     div:has(label:contains("admin_auth")) input {
-        padding-left: 80px !important; /* 글자 너비만큼 여백 확보 */
+        padding-left: 80px !important; 
         background-color: transparent !important;
+        font-weight: 700 !important;
         border: none !important;
         box-shadow: none !important;
-        font-weight: 700 !important;
-        height: 45px !important;
     }
 
-    /* 5. 원래 있던 위쪽의 숨겨진 라벨 공간 제거 */
+    /* 5. collapsed된 라벨 숨기기 */
     div:has(label:contains("req_auth")) label, 
-    div:has(label:contains("admin_auth")) label {
-        display: none !important;
-    }
-
-    /* --- 상단 디자인 끝 --- */
-
-    /* 신청자 성명 강조 (사이드바) */
+    div:has(label:contains("admin_auth")) label { display: none !important; }
+    
+    /* --- 나머지 스타일 유지 --- */
     section[data-testid="stSidebar"] div[data-testid="stTextInput"] input {
         background-color: #fff9c4 !important; border: 2px solid #fbc02d !important; font-weight: 800 !important; color: #000000 !important;
     }
-    
-    /* 제품코드 입력창 강조 (메인창) */
     div[data-testid="stVerticalBlock"] div:has(label:contains("제품코드")) input {
         background-color: #fffdec !important; border: 2px solid #fbbf24 !important; font-weight: 700 !important; color: #000000 !important;
     }
-
     .drug-table { width: 100%; border-collapse: collapse; margin-bottom: 15px; border: 1px solid #e2e8f0; font-size: 0.85rem; }
     .drug-table th { background-color: #f1f5f9; color: #475569; font-weight: 700; padding: 6px; border: 1px solid #e2e8f0; text-align: center; }
     .drug-table td { background-color: #ffffff; color: #000000; font-weight: 600; padding: 8px; border: 1px solid #e2e8f0; text-align: center; }
     .blue-cell { background-color: #f0f7ff !important; color: #1E40AF !important; font-weight: 800 !important; }
     .red-cell { color: #dc2626 !important; font-weight: 800 !important; }
     .section-header { font-size: 1rem; font-weight: 800; color: #1E3A8A; margin: 15px 0 10px 0; padding-bottom: 5px; border-bottom: 2px solid #1E3A8A; }
-    
     .detail-card { background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 10px; border-radius: 6px; margin-bottom: 5px; min-height: 65px; }
     .detail-label { font-size: 0.75rem; color: #64748b; font-weight: 400; margin-bottom: 2px; }
     .detail-value { font-size: 0.9rem; color: #1e293b; font-weight: 700; word-break: break-all; }
@@ -236,7 +218,6 @@ def handle_safe_submit(category, data_dict):
     except Exception as e: st.error(f"저장 중 오류 발생: {e}")
 
 # --- 7. 상단 네비게이션 ---
-# 권한 변수 정의
 is_requester = (st.session_state.get("auth_req") == "7410")
 is_admin = (st.session_state.get("auth_admin") == "1452")
 
@@ -247,14 +228,13 @@ with t_col1:
         set_menu("📊 진행현황")
 
 with t_col2:
-    # label_visibility="hidden"으로 설정하여 기본 라벨을 숨기지만, 
-    # CSS는 이 "req_auth"라는 텍스트를 찾아 회색 박스 안에 "신청부서"를 그려줍니다.
+    # "hidden" 대신 "collapsed"를 사용합니다.
     st.text_input("req_auth", type="password", placeholder="****", 
-                  label_visibility="hidden", key="auth_req", on_change=check_auth_auto)
+                  label_visibility="collapsed", key="auth_req", on_change=check_auth_auto)
 
 with t_col3:
     st.text_input("admin_auth", type="password", placeholder="****", 
-                  label_visibility="hidden", key="auth_admin", on_change=check_auth_auto)
+                  label_visibility="collapsed", key="auth_admin", on_change=check_auth_auto)
 
 with t_col4:
     if st.button("🔍 약가조회", key="top_search", use_container_width=True): 
