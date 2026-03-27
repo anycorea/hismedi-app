@@ -9,64 +9,44 @@ st.set_page_config(page_title="HISMEDI Drug Service", layout="wide")
 
 st.markdown("""
     <style>
+    /* 기본 여백 설정 */
     .block-container { padding-top: 1.5rem !important; background-color: #ffffff !important; }
     [data-testid="stHeader"] { display: none; }
     .sidebar-title { font-size: 1.4rem; font-weight: 800; color: #1E3A8A; margin-bottom: 5px; }
     
-    /* --- 모던 대시보드 네비게이션 스타일 --- */
-    /* 모든 버튼 공통: 세련된 그림자와 둥근 모서리 */
+    /* --- 모든 버튼 공통 스타일 --- */
     .stButton > button { 
-        width: 100%; border-radius: 12px; font-weight: 700; height: 48px; 
+        width: 100%; border-radius: 12px; font-weight: 700; height: 45px; 
         transition: all 0.3s; border: 1px solid #e2e8f0; background-color: #ffffff;
         box-shadow: 0 2px 4px rgba(0,0,0,0.05);
     }
     .stButton > button:hover { border-color: #1E3A8A; color: #1E3A8A; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
 
-    /* 입력창 라벨을 작고 세련된 '배지' 형태로 변경 */
+    /* --- 메인 화면 입력창 라벨 (배지 형태) --- */
     div[data-testid="column"] label {
-        font-size: 0.75rem !important;
-        font-weight: 800 !important;
-        color: #ffffff !important;
-        background-color: #1E3A8A; /* 진한 파란색 배지 */
-        padding: 2px 10px !important;
-        border-radius: 6px !important;
-        margin-bottom: 6px !important;
-        display: inline-block !important;
-        letter-spacing: 0.5px;
+        font-size: 0.75rem !important; font-weight: 800 !important; color: #ffffff !important;
+        background-color: #1E3A8A; padding: 2px 10px !important; border-radius: 6px !important;
+        margin-bottom: 6px !important; display: inline-block !important; letter-spacing: 0.5px;
+    }
+    div[data-testid="column"] [data-testid="stTextInput"] > div,
+    div[data-testid="column"] [data-testid="stNumberInput"] > div,
+    div[data-testid="column"] [data-testid="stSelectbox"] > div {
+        border-radius: 12px !important; height: 45px !important; background-color: #f8fafc !important; border: 1px solid #e2e8f0 !important;
     }
 
-    /* 입력창 자체 스타일: 버튼과 높이를 맞추고 깔끔하게 처리 */
-    div[data-testid="column"] [data-testid="stTextInput"] > div {
-        border-radius: 12px !important;
-        height: 48px !important;
-        background-color: #f8fafc !important;
-        border: 1px solid #e2e8f0 !important;
-    }
-    div[data-testid="column"] input {
-        height: 48px !important;
-        font-weight: 600 !important;
-        font-size: 1rem !important;
-    }
-
-    /* 하단 여백 및 정렬 맞춤 */
-    div[data-testid="column"] {
-        display: flex;
-        flex-direction: column;
-        justify-content: flex-end; /* 버튼과 높이 정렬을 위해 하단 정렬 */
-    }
-
-    /* --- 기존 스타일 유지 (약제 테이블 등) --- */
+    /* --- 사이드바 전용 스타일 (노란색 강조) --- */
     section[data-testid="stSidebar"] div[data-testid="stTextInput"] input {
         background-color: #fff9c4 !important; border: 2px solid #fbc02d !important; font-weight: 800 !important; color: #000000 !important;
     }
-    div[data-testid="stVerticalBlock"] div:has(label:contains("제품코드")) input {
-        background-color: #fffdec !important; border: 2px solid #fbbf24 !important; font-weight: 700 !important; color: #000000 !important;
-    }
+
+    /* --- 약제 정보 테이블 --- */
     .drug-table { width: 100%; border-collapse: collapse; margin-bottom: 15px; border: 1px solid #e2e8f0; font-size: 0.85rem; }
     .drug-table th { background-color: #f1f5f9; color: #475569; font-weight: 700; padding: 6px; border: 1px solid #e2e8f0; text-align: center; }
     .drug-table td { background-color: #ffffff; color: #000000; font-weight: 600; padding: 8px; border: 1px solid #e2e8f0; text-align: center; }
     .blue-cell { background-color: #f0f7ff !important; color: #1E40AF !important; font-weight: 800 !important; }
     .red-cell { color: #dc2626 !important; font-weight: 800 !important; }
+    
+    /* 섹션 헤더 및 상세 카드 */
     .section-header { font-size: 1rem; font-weight: 800; color: #1E3A8A; margin: 15px 0 10px 0; padding-bottom: 5px; border-bottom: 2px solid #1E3A8A; }
     .detail-card { background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 10px; border-radius: 6px; margin-bottom: 5px; min-height: 65px; }
     .detail-label { font-size: 0.75rem; color: #64748b; font-weight: 400; margin-bottom: 2px; }
@@ -158,26 +138,53 @@ def check_auth_auto():
     if st.session_state.get("auth_p") == "1452":
         st.session_state.active_menu = "📊 진행현황"
 
-# --- 5. 사이드바 ---
+# --- 5. 사이드바 (기능 통합 및 배치 최적화) ---
 with st.sidebar:
     st.markdown('<p class="sidebar-title">HISMEDI † Drug Service</p>', unsafe_allow_html=True)
-    if st.button("🔄 새로고침", use_container_width=True):
+    
+    # 1. 기본 정보 및 새로고침
+    if st.button("🔄 새로고침 / 데이터 동기화", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
-    st.divider()
-    app_user = st.text_input("신청자 성명", key="global_user")
-    app_date = st.date_input("날짜 선택", datetime.now(), key="global_date").strftime('%Y-%m-%d')
-    st.divider()
     
+    st.divider()
+    app_user = st.text_input("👤 신청자 성명", key="global_user")
+    app_date = st.date_input("📅 날짜 선택", datetime.now(), key="global_date").strftime('%Y-%m-%d')
+    
+    st.divider()
+
+    # 2. 메인 신청 메뉴 (6개 항목)
+    st.markdown('<p style="font-size:0.9rem; font-weight:800; color:#1E3A8A; margin-bottom:10px;">📋 약제 신청 메뉴</p>', unsafe_allow_html=True)
     col1, col2 = st.columns(2)
     if col1.button("사용중지"): set_menu("사용중지")
     if col2.button("신규입고"): set_menu("신규입고")
+    
     col3, col4 = st.columns(2)
     if col3.button("대체입고"): set_menu("대체입고")
     if col4.button("삭제코드변경"): set_menu("삭제코드변경")
+    
     col5, col6 = st.columns(2)
     if col5.button("단가인하▼"): set_menu("단가인하▼")
     if col6.button("단가인상▲"): set_menu("단가인상▲")
+
+    st.divider()
+
+    # 3. 조회 및 현황 메뉴 (기존 상단 메뉴 이동)
+    st.markdown('<p style="font-size:0.9rem; font-weight:800; color:#1E3A8A; margin-bottom:10px;">🔍 조회 및 관리</p>', unsafe_allow_html=True)
+    c_nav1, c_nav2 = st.columns(2)
+    if c_nav1.button("📊 진행현황", key="side_status", use_container_width=True): 
+        set_menu("📊 진행현황")
+    if c_nav2.button("🔍 약가조회", key="side_search", use_container_width=True): 
+        set_menu("🔍 약가조회")
+
+    st.divider()
+
+    # 4. 권한 관리 (비밀번호 입력창)
+    st.markdown('<p style="font-size:0.8rem; font-weight:800; color:#64748b; margin-bottom:5px;">🔐 시스템 권한</p>', unsafe_allow_html=True)
+    st.text_input("신청부서 🔒", type="password", placeholder="****", 
+                  key="auth_req", on_change=check_auth_auto)
+    st.text_input("완료부서 🔑", type="password", placeholder="****", 
+                  key="auth_admin", on_change=check_auth_auto)
 
 # --- 6. 헬퍼 함수 ---
 def get_drug_info(edi_code):
@@ -215,63 +222,12 @@ def handle_safe_submit(category, data_dict):
         st.cache_data.clear(); st.rerun()
     except Exception as e: st.error(f"저장 중 오류 발생: {e}")
 
-# --- 7. 상단 네비게이션 (Fixed 고정 방식 - 절대 안 움직임) ---
+# --- 7. 사용자 권한 식별 (UI 없음) ---
 
-# CSS 수정: 화면 상단에 박스를 박아버리는 방식입니다.
-st.markdown("""
-    <style>
-    /* 1. 상단 네비게이션 바 전체를 화면 상단에 고정 */
-    div:has(> div > div > button[key="top_status"]) {
-        position: fixed;
-        top: 0;
-        right: 0;
-        left: 21rem; /* 사이드바 너비를 고려한 왼쪽 여백 (기본 사이드바 너비 대응) */
-        background-color: white;
-        z-index: 1000;
-        padding: 10px 2rem 10px 2rem;
-        border-bottom: 2px solid #1E3A8A;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-    }
-
-    /* 2. 네비게이션 바가 고정되면서 가려지는 본문 내용을 아래로 밀어줌 */
-    .main .block-container {
-        padding-top: 100px !important; /* 메뉴 높이만큼 본문을 아래로 내림 */
-    }
-
-    /* 사이드바가 접혔을 때를 대비한 처리 (반응형 대응이 어려울 경우 아래 여백으로 조정) */
-    @media (max-width: 991px) {
-        div:has(> div > div > button[key="top_status"]) {
-            left: 0;
-        }
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
+# 사이드바에서 입력된 세션 상태를 바탕으로 권한 여부 확인
+# 이 변수들은 8번 본문 영역(진행현황 테이블 수정/삭제 등)에서 사용됩니다.
 is_requester = (st.session_state.get("auth_req") == "7410")
 is_admin = (st.session_state.get("auth_admin") == "1452")
-
-# 상단 네비게이션 컨테이너
-t_container = st.container()
-with t_container:
-    t_col1, t_col2, t_col3, t_col4 = st.columns([1.2, 1.0, 1.0, 1.2])
-
-    with t_col1:
-        st.markdown("<div style='margin-top:28px;'></div>", unsafe_allow_html=True)
-        if st.button("📊 진행현황", key="top_status", use_container_width=True): 
-            set_menu("📊 진행현황")
-
-    with t_col2:
-        st.text_input("신청부서 권한 🔒", type="password", placeholder="****", 
-                      key="auth_req", on_change=check_auth_auto)
-
-    with t_col3:
-        st.text_input("완료부서 권한 🔑", type="password", placeholder="****", 
-                      key="auth_admin", on_change=check_auth_auto)
-
-    with t_col4:
-        st.markdown("<div style='margin-top:28px;'></div>", unsafe_allow_html=True)
-        if st.button("🔍 약가조회", key="top_search", use_container_width=True): 
-            set_menu("🔍 약가조회")
 
 # --- 8. 메인 컨텐츠 영역 ---
 
