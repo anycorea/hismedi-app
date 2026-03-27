@@ -14,6 +14,17 @@ st.markdown("""
     .sidebar-title { font-size: 1.4rem; font-weight: 800; color: #1E3A8A; margin-bottom: 5px; }
     .stButton > button { width: 100%; border-radius: 8px; font-weight: 700; height: 45px; }
     
+    /* 상단 네비게이션용 레이블 스타일 */
+    .nav-label {
+        font-size: 0.8rem !important;
+        font-weight: 700 !important;
+        color: #1E3A8A !important;
+        margin-bottom: -35px !important; /* 레이블을 입력창 쪽으로 바짝 붙임 */
+        text-align: center;
+        position: relative;
+        z-index: 1;
+    }
+
     /* 신청자 성명 강조 (사이드바) */
     section[data-testid="stSidebar"] div[data-testid="stTextInput"] input {
         background-color: #fff9c4 !important; border: 2px solid #fbc02d !important; font-weight: 800 !important; color: #000000 !important;
@@ -184,7 +195,12 @@ def handle_safe_submit(category, data_dict):
     except Exception as e: st.error(f"저장 중 오류 발생: {e}")
 
 # --- 7. 상단 네비게이션 ---
-# 컬럼 비율 조정 (진행현황, 신청부서, 완료부서, 약가조회)
+
+# [먼저 권한 상태를 정의합니다]
+is_requester = (st.session_state.get("auth_req") == "7410")
+is_admin = (st.session_state.get("auth_admin") == "1452")
+
+# 컬럼 비율 조정 (버튼과 입력창의 너비 밸런스)
 t_col1, t_col2, t_col3, t_col4 = st.columns([1.2, 1.0, 1.0, 1.2])
 
 with t_col1:
@@ -192,15 +208,15 @@ with t_col1:
         set_menu("📊 진행현황")
 
 with t_col2:
+    # 1번 섹션에서 추가한 .nav-label CSS가 적용됩니다.
     st.markdown('<p class="nav-label">신청부서 권한</p>', unsafe_allow_html=True)
-    # type="password"로 설정하고 placeholder를 비워서 보안 강화
-    st.text_input("신청부서코드", type="password", placeholder="**** ", label_visibility="hidden", key="auth_req", on_change=check_auth_auto)
-    is_requester = (st.session_state.get("auth_req") == "7410")
+    st.text_input("신청부서코드", type="password", placeholder="**** ", 
+                  label_visibility="hidden", key="auth_req", on_change=check_auth_auto)
 
 with t_col3:
     st.markdown('<p class="nav-label">완료부서 권한</p>', unsafe_allow_html=True)
-    st.text_input("완료부서코드", type="password", placeholder="**** ", label_visibility="hidden", key="auth_admin", on_change=check_auth_auto)
-    is_admin = (st.session_state.get("auth_admin") == "1452")
+    st.text_input("완료부서코드", type="password", placeholder="**** ", 
+                  label_visibility="hidden", key="auth_admin", on_change=check_auth_auto)
 
 with t_col4:
     if st.button("🔍 약가조회", key="top_search", use_container_width=True): 
