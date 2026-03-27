@@ -219,10 +219,10 @@ if st.session_state.active_menu == "📊 진행현황":
         # [수정] 컬럼 너비 조정: 신청구분, 거래명세표, 제품명1 너비 확대
         col_cfg = {
             "상세조회": st.column_config.CheckboxColumn("조회", width="small", disabled=False),
-            "진행상황": st.column_config.SelectboxColumn("진행상황", options=OP_STATUS, width="small", disabled=not is_admin),
+            "진행상황": st.column_config.SelectboxColumn("진행상황", options=OP_STATUS, width="100", disabled=not is_admin),
             "거래명세표": st.column_config.LinkColumn("거래명세표🔗", width="100", display_text="파일 열기"),
             "제품코드1": st.column_config.TextColumn("제품코드1", width="small", disabled=True),
-            "완료자": st.column_config.SelectboxColumn("완료자", options=OP_PROCESSORS, width="small", disabled=not is_admin),
+            "완료자": st.column_config.SelectboxColumn("완료자", options=OP_PROCESSORS, width="100", disabled=not is_admin),
             "완료일": st.column_config.DateColumn("완료일", format="YYYY-MM-DD", width="small", disabled=not is_admin),
             "신청구분": st.column_config.TextColumn("신청구분", width="100", disabled=True),
             "신청자": st.column_config.TextColumn("신청자", width="small", disabled=True),
