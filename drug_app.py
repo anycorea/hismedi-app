@@ -362,7 +362,7 @@ if st.session_state.active_menu == "📊 진행현황":
     else:
         st.info("신청 내역이 없습니다.")
 
-# [2-7] 신청서 섹션들 (이전 버전의 상세 입력 필드 100% 보존)
+# [2-7] 신청서 섹션들 (사용중지 로직 정밀 제어 버전)
 elif st.session_state.active_menu in ["사용중지", "신규입고", "대체입고", "삭제코드변경", "단가인하▼", "단가인상▲"]:
     curr = st.session_state.active_menu
     d = {}
@@ -371,10 +371,43 @@ elif st.session_state.active_menu in ["사용중지", "신규입고", "대체입
     d.update(render_drug_table(edi1, 1))
     
     if curr == "사용중지":
-        c1, c2, c3, c4 = st.columns(4); d["원내구분1"], d["급여구분1"], d["구입처1"], d["개당입고가1"] = c1.selectbox("원내구분1", OP_INSIDE_OUT, key="t1_io"), c2.selectbox("급여구분1", ["급여", "비급여"], key="t1_pay"), c3.text_input("구입처1", key="t1_vd"), c4.text_input("개당입고가1", key="t1_pr")
-        c5, c6, c7, c8 = st.columns(4); d["사용중지일1"], d["사용중지사유1"], d["사용중지사유_기타1"], d["재고여부1"] = c5.date_input("사용중지일1", key="t1_sd").strftime('%Y-%m-%d'), c6.selectbox("사용중지사유1", OP_STOP_REASON, key="t1_rs"), c7.text_input("사용중지사유_기타1", key="t1_ers"), c8.selectbox("재고여부1", ["유", "무"], key="t1_syn")
-        c9, c10, c11, c12 = st.columns(4); d["재고처리방법1"], d["재고량1"], d["반품가능여부1"], d["반품예정일1"] = c9.selectbox("재고처리방법1", OP_STOCK_METHOD, key="t1_mth"), c10.number_input("재고량1", 0, key="t1_vol"), c11.selectbox("반품가능여부1", OP_POSSIBLE, key="t1_pyn"), c12.date_input("반품예정일1", key="t1_rd").strftime('%Y-%m-%d')
-        d["반품량1"] = st.number_input("반품량1", 0, key="t1_rv")
+        # 행 1: 기본 정보
+        c1, c2, c3, c4 = st.columns(4)
+        d["원내구분1"] = c1.selectbox("원내구분1", OP_INSIDE_OUT, key="t1_io")
+        d["급여구분1"] = c2.selectbox("급여구분1", ["급여", "비급여"], key="t1_pay")
+        d["구입처1"] = c3.text_input("구입처1", key="t1_vd")
+        d["개당입고가1"] = c4.text_input("개당입고가1", key="t1_pr")
+        
+        # 행 2: 중지 사유 및 재고 여부
+        c5, c6, c7, c8 = st.columns(4)
+        d["사용중지일1"] = c5.date_input("사용중지일1", key="t1_sd").strftime('%Y-%m-%d')
+        d["사용중지사유1"] = c6.selectbox("사용중지사유1", OP_STOP_REASON, key="t1_rs")
+        
+        # [조건 1] 사용중지사유가 '기타'일 때만 '기타 사유' 입력창 활성화
+        is_other_reason = (d["사용중지사유1"] == "기타")
+        d["사용중지사유_기타1"] = c7.text_input("사용중지사유_기타1", key="t1_ers", disabled=not is_other_reason)
+        
+        d["재고여부1"] = c8.selectbox("재고여부1", ["유", "무"], key="t1_syn")
+        
+        # [조건 2] 재고여부가 '유'일 때만 재고 관련 항목 활성화
+        has_stock = (d["재고여부1"] == "유")
+        
+        # 행 3: 재고 상세 정보 (재고 '무' 선택 시 모두 잠김)
+        c9, c10, c11, c12 = st.columns(4)
+        d["재고처리방법1"] = c9.selectbox("재고처리방법1", OP_STOCK_METHOD, key="t1_mth", disabled=not has_stock)
+        d["재고량1"] = c10.number_input("재고량1", 0, key="t1_vol", disabled=not has_stock)
+        d["반품가능여부1"] = c11.selectbox("반품가능여부1", OP_POSSIBLE, key="t1_pyn", disabled=not has_stock)
+        d["반품예정일1"] = c12.date_input("반품예정일1", key="t1_rd", disabled=not has_stock).strftime('%Y-%m-%d')
+        
+        # 행 4: 반품량
+        d["반품량1"] = st.number_input("반품량1", 0, key="t1_rv", disabled=not has_stock)
+
+        # [데이터 정제] 비활성화된 항목은 제출 시 공란/0으로 처리하여 전송
+        if not is_other_reason:
+            d["사용중지사유_기타1"] = ""
+        if not has_stock:
+            d["재고처리방법1"] = ""; d["재고량1"] = 0; d["반품가능여부1"] = ""; d["반품예정일1"] = ""; d["반품량1"] = 0
+
     elif curr == "신규입고":
         c1, c2, c3, c4 = st.columns(4); d["원내구분1"], d["급여구분1"], d["구입처1"], d["개당입고가1"] = c1.selectbox("원내구분1", OP_INSIDE_OUT, key="t2_io"), c2.selectbox("급여구분1", ["급여", "비급여"], key="t2_pay"), c3.text_input("구입처1", key="t2_vd"), c4.text_input("개당입고가1", key="t2_pr")
         c5, c6, c7, c8 = st.columns(4); d["입고요청진료과1"], d["원내유무(동일성분)1"], d["입고요청사유1"], d["사용기간1"] = c5.selectbox("입고요청진료과1", OP_DEPT, key="t2_dp"), c6.selectbox("원내유무(동일성분)1", ["유", "무"], key="t2_sm"), c7.selectbox("입고요청사유1", OP_STOP_REASON, key="t2_rs"), c8.selectbox("사용기간1", OP_USE_PERIOD, key="t2_pd")
