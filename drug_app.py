@@ -215,25 +215,32 @@ def handle_safe_submit(category, data_dict):
         st.cache_data.clear(); st.rerun()
     except Exception as e: st.error(f"저장 중 오류 발생: {e}")
 
-# --- 7. 상단 네비게이션 (행 고정 적용 버전) ---
+# --- 7. 상단 네비게이션 (행 고정 정밀 수정 버전) ---
 
-# CSS 추가: 상단 메뉴를 고정하고 배경을 흰색으로 설정하여 스크롤 시 내용이 겹쳐 보이지 않게 합니다.
+# CSS 수정: 브라우저 상단에 완전히 밀착되도록 위치를 조정하고 배경을 채웁니다.
 st.markdown("""
     <style>
-    /* 상단 네비게이션 바 고정 (Sticky Header) */
-    div[data-testid="stHorizontalBlock"]:has(button[key="top_status"]) {
-        position: -webkit-sticky;
+    /* 7번 섹션 행(Horizontal Block)을 강제로 고정 */
+    /* stVerticalBlock의 자식 요소 중 top_status 버튼을 포함한 div를 타겟팅 */
+    div[data-testid="stVerticalBlock"] > div:has(button[key="top_status"]) {
         position: sticky;
-        top: 0;
-        background-color: #ffffff; /* 배경을 흰색으로 하여 뒤의 내용과 겹침 방지 */
-        z-index: 1000;
-        padding-top: 5px;
-        padding-bottom: 15px;
-        border-bottom: 1px solid #e2e8f0; /* 하단 경계선 추가로 구분감 부여 */
+        top: -1.5rem; /* 페이지 상단 padding-top(-1.5rem)을 상쇄하여 최상단에 고정 */
+        z-index: 999;
+        background-color: white; /* 스크롤 시 뒤의 내용이 보이지 않게 흰색 배경 */
+        padding-top: 1rem;
+        padding-bottom: 1rem;
+        margin-bottom: 1rem;
+        border-bottom: 2px solid #1E3A8A; /* 하단 경계선을 조금 더 진하게 하여 구분 */
+    }
+    
+    /* 고정된 메뉴 내의 버튼들이 더 잘 보이도록 조정 */
+    div[data-testid="stVerticalBlock"] > div:has(button[key="top_status"]) button {
+        background-color: #ffffff !important;
     }
     </style>
     """, unsafe_allow_html=True)
 
+# 권한 확인 변수 (이전 섹션에서 가져옴)
 is_requester = (st.session_state.get("auth_req") == "7410")
 is_admin = (st.session_state.get("auth_admin") == "1452")
 
