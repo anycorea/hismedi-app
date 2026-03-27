@@ -119,9 +119,12 @@ def set_menu(menu_name):
     clear_form_data()
 
 def check_auth_auto():
-    # 신청부서(7410)나 완료부서(1452) 코드가 입력되면 진행현황으로 이동
-    if st.session_state.get("auth_req") == "7410" or st.session_state.get("auth_admin") == "1452":
-        st.session_state.active_menu = "📊 진행현황"
+    # 부서 코드가 하나라도 맞으면 진행현황 탭을 강제 활성화 (필요 시)
+    req_code = st.session_state.get("auth_req", "")
+    admin_code = st.session_state.get("auth_admin", "")
+    if req_code == "7410" or admin_code == "1452":
+        # 현재 메뉴가 신청서 작성 중인 경우를 제외하고 진행현황으로 이동하고 싶을 때 사용
+        pass
 
 # --- 5. 사이드바 ---
 with st.sidebar:
@@ -182,22 +185,21 @@ def handle_safe_submit(category, data_dict):
 
 # --- 7. 상단 네비게이션 ---
 # 컬럼 비율 조정 (진행현황, 신청부서, 완료부서, 약가조회)
-t_col1, t_col2, t_col3, t_col4 = st.columns([1, 0.8, 0.8, 1])
+t_col1, t_col2, t_col3, t_col4 = st.columns([1.2, 1.0, 1.0, 1.2])
 
 with t_col1:
     if st.button("📊 진행현황", key="top_status", use_container_width=True): 
         set_menu("📊 진행현황")
 
 with t_col2:
-    st.markdown("<p style='font-size:0.8rem; margin-bottom:-10px; text-align:center;'>신청부서</p>", unsafe_allow_html=True)
-    st.text_input("신청부서코드", type="password", placeholder="7410", label_visibility="collapsed", key="auth_req", on_change=check_auth_auto)
-    # 신청부서 권한 정의 (7410 입력 시)
+    st.markdown('<p class="nav-label">신청부서 권한</p>', unsafe_allow_html=True)
+    # type="password"로 설정하고 placeholder를 비워서 보안 강화
+    st.text_input("신청부서코드", type="password", placeholder="**** ", label_visibility="hidden", key="auth_req", on_change=check_auth_auto)
     is_requester = (st.session_state.get("auth_req") == "7410")
 
 with t_col3:
-    st.markdown("<p style='font-size:0.8rem; margin-bottom:-10px; text-align:center;'>완료부서</p>", unsafe_allow_html=True)
-    st.text_input("완료부서코드", type="password", placeholder="1452", label_visibility="collapsed", key="auth_admin", on_change=check_auth_auto)
-    # 관리자(완료부서) 권한 정의 (1452 입력 시)
+    st.markdown('<p class="nav-label">완료부서 권한</p>', unsafe_allow_html=True)
+    st.text_input("완료부서코드", type="password", placeholder="**** ", label_visibility="hidden", key="auth_admin", on_change=check_auth_auto)
     is_admin = (st.session_state.get("auth_admin") == "1452")
 
 with t_col4:
