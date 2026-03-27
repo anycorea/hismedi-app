@@ -374,7 +374,7 @@ if st.session_state.active_menu == "📊 진행현황":
     else:
         st.info("신청 내역이 없습니다.")
 
-# [2-7] 신청서 섹션들 (이전 버전의 상세 입력 필드 100% 보존)
+# [2-7] 신청서 섹션들 (필드 100% 보존)
 elif st.session_state.active_menu in ["사용중지", "신규입고", "대체입고", "삭제코드변경", "단가인하▼", "단가인상▲"]:
     curr = st.session_state.active_menu
     d = {}
@@ -415,14 +415,9 @@ elif st.session_state.active_menu in ["사용중지", "신규입고", "대체입
         c5, c6, c7, c8 = st.columns(4); d["변경내용1"] = c5.selectbox("변경내용1", OP_CHANGE_CONTENT, key="t6_cn1"); d["사용중지일1"] = c6.date_input("품절일1", key="t6_sd1").strftime('%Y-%m-%d'); d["입고일1"] = c7.date_input("재입고일자1", key="t6_id1").strftime('%Y-%m-%d'); d["인상전입고가1"] = c8.text_input("인상전입고가1", key="t6_pre_pr")
         c9 = st.columns(1)[0]; d["코드사용시작일1"] = c9.date_input("코드사용시작일1", key="t6_ss1").strftime('%Y-%m-%d')
     
-    # 비고란 및 거래명세표 URL 영역
-    st.divider()
-    col_memo, col_file = st.columns([2, 1])
-    with col_memo: d["비고(기타 요청사항)"] = st.text_area("비고(기타 요청사항)", key="final_memo")
-    with col_file: d["거래명세표"] = st.text_input("거래명세표 URL (구글/네이버 등)", placeholder="http://...", key="final_file")
-    
-    if st.button(f"🚀 {curr} 제출", key="final_btn", use_container_width=True): handle_safe_submit(curr, d)
-
+    if curr != "약가조회":
+        d["비고(기타 요청사항)"] = st.text_area("비고(기타 요청사항)", key="final_memo")
+        if st.button(f"🚀 {curr} 제출", key="final_btn", use_container_width=True): handle_safe_submit(curr, d)
 
 # [8] 약가조회
 elif st.session_state.active_menu == "🔍 약가조회":
