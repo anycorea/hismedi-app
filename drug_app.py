@@ -215,56 +215,63 @@ def handle_safe_submit(category, data_dict):
         st.cache_data.clear(); st.rerun()
     except Exception as e: st.error(f"저장 중 오류 발생: {e}")
 
-# --- 7. 상단 네비게이션 (행 고정 정밀 수정 버전) ---
+# --- 7. 상단 네비게이션 (Fixed 고정 방식 - 절대 안 움직임) ---
 
-# CSS 수정: 브라우저 상단에 완전히 밀착되도록 위치를 조정하고 배경을 채웁니다.
+# CSS 수정: 화면 상단에 박스를 박아버리는 방식입니다.
 st.markdown("""
     <style>
-    /* 7번 섹션 행(Horizontal Block)을 강제로 고정 */
-    /* stVerticalBlock의 자식 요소 중 top_status 버튼을 포함한 div를 타겟팅 */
-    div[data-testid="stVerticalBlock"] > div:has(button[key="top_status"]) {
-        position: sticky;
-        top: -1.5rem; /* 페이지 상단 padding-top(-1.5rem)을 상쇄하여 최상단에 고정 */
-        z-index: 999;
-        background-color: white; /* 스크롤 시 뒤의 내용이 보이지 않게 흰색 배경 */
-        padding-top: 1rem;
-        padding-bottom: 1rem;
-        margin-bottom: 1rem;
-        border-bottom: 2px solid #1E3A8A; /* 하단 경계선을 조금 더 진하게 하여 구분 */
+    /* 1. 상단 네비게이션 바 전체를 화면 상단에 고정 */
+    div:has(> div > div > button[key="top_status"]) {
+        position: fixed;
+        top: 0;
+        right: 0;
+        left: 21rem; /* 사이드바 너비를 고려한 왼쪽 여백 (기본 사이드바 너비 대응) */
+        background-color: white;
+        z-index: 1000;
+        padding: 10px 2rem 10px 2rem;
+        border-bottom: 2px solid #1E3A8A;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.1);
     }
-    
-    /* 고정된 메뉴 내의 버튼들이 더 잘 보이도록 조정 */
-    div[data-testid="stVerticalBlock"] > div:has(button[key="top_status"]) button {
-        background-color: #ffffff !important;
+
+    /* 2. 네비게이션 바가 고정되면서 가려지는 본문 내용을 아래로 밀어줌 */
+    .main .block-container {
+        padding-top: 100px !important; /* 메뉴 높이만큼 본문을 아래로 내림 */
+    }
+
+    /* 사이드바가 접혔을 때를 대비한 처리 (반응형 대응이 어려울 경우 아래 여백으로 조정) */
+    @media (max-width: 991px) {
+        div:has(> div > div > button[key="top_status"]) {
+            left: 0;
+        }
     }
     </style>
     """, unsafe_allow_html=True)
 
-# 권한 확인 변수 (이전 섹션에서 가져옴)
 is_requester = (st.session_state.get("auth_req") == "7410")
 is_admin = (st.session_state.get("auth_admin") == "1452")
 
-# 버튼과 입력창의 높이 균형을 위해 columns 설정
-t_col1, t_col2, t_col3, t_col4 = st.columns([1.2, 1.0, 1.0, 1.2])
+# 상단 네비게이션 컨테이너
+t_container = st.container()
+with t_container:
+    t_col1, t_col2, t_col3, t_col4 = st.columns([1.2, 1.0, 1.0, 1.2])
 
-with t_col1:
-    # 버튼 위에 여백을 주어 입력창 배지와 높이를 맞춤
-    st.markdown("<div style='margin-top:28px;'></div>", unsafe_allow_html=True)
-    if st.button("📊 진행현황", key="top_status", use_container_width=True): 
-        set_menu("📊 진행현황")
+    with t_col1:
+        st.markdown("<div style='margin-top:28px;'></div>", unsafe_allow_html=True)
+        if st.button("📊 진행현황", key="top_status", use_container_width=True): 
+            set_menu("📊 진행현황")
 
-with t_col2:
-    st.text_input("신청부서 권한 🔒", type="password", placeholder="****", 
-                  key="auth_req", on_change=check_auth_auto)
+    with t_col2:
+        st.text_input("신청부서 권한 🔒", type="password", placeholder="****", 
+                      key="auth_req", on_change=check_auth_auto)
 
-with t_col3:
-    st.text_input("완료부서 권한 🔑", type="password", placeholder="****", 
-                  key="auth_admin", on_change=check_auth_auto)
+    with t_col3:
+        st.text_input("완료부서 권한 🔑", type="password", placeholder="****", 
+                      key="auth_admin", on_change=check_auth_auto)
 
-with t_col4:
-    st.markdown("<div style='margin-top:28px;'></div>", unsafe_allow_html=True)
-    if st.button("🔍 약가조회", key="top_search", use_container_width=True): 
-        set_menu("🔍 약가조회")
+    with t_col4:
+        st.markdown("<div style='margin-top:28px;'></div>", unsafe_allow_html=True)
+        if st.button("🔍 약가조회", key="top_search", use_container_width=True): 
+            set_menu("🔍 약가조회")
 
 # --- 8. 메인 컨텐츠 영역 ---
 
