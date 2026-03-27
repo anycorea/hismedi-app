@@ -14,35 +14,42 @@ st.markdown("""
     .sidebar-title { font-size: 1.4rem; font-weight: 800; color: #1E3A8A; margin-bottom: 5px; }
     .stButton > button { width: 100%; border-radius: 8px; font-weight: 700; height: 45px; }
     
-    /* --- 상단 네비게이션 권한 입력창 전용 스타일 (이미지 아래쪽 디자인) --- */
-    /* 1. 박스 전체 배경색 및 테두리 (신청/완료 공통) */
+    /* --- 상단 네비게이션 권한 입력창 정밀 디자인 (이미지 완벽 재현) --- */
+    /* 1. 입력창 전체 컨테이너 높이 및 배경 설정 */
     div:has(> label:contains("req_auth")) [data-testid="stTextInput"] > div,
     div:has(> label:contains("admin_auth")) [data-testid="stTextInput"] > div {
-        background-color: #f1f5f9 !important; border: none !important; border-radius: 10px !important; height: 45px !important;
+        background-color: #f1f5f9 !important; 
+        border: none !important; 
+        border-radius: 10px !important; 
+        height: 45px !important;
+        padding-left: 10px !important;
     }
 
-    /* 2. 입력되는 텍스트(****)를 오른쪽으로 밀기 */
+    /* 2. 입력창 내부 '신청부서/완료부서' 글자 강제 삽입 */
+    div:has(> label:contains("req_auth")) [data-testid="stFieldLabelWrapper"]::after {
+        content: "신청부서";
+        position: absolute; left: 18px; top: 12px; z-index: 20;
+        font-size: 0.85rem; font-weight: 800; color: #1E3A8A;
+    }
+    div:has(> label:contains("admin_auth")) [data-testid="stFieldLabelWrapper"]::after {
+        content: "완료부서";
+        position: absolute; left: 18px; top: 12px; z-index: 20;
+        font-size: 0.85rem; font-weight: 800; color: #1E3A8A;
+    }
+
+    /* 3. 실제 별표(****)가 입력되는 input 영역 위치 조정 */
     div:has(> label:contains("req_auth")) input,
     div:has(> label:contains("admin_auth")) input {
-        padding-left: 85px !important; font-weight: 700 !important; color: #1e293b !important;
+        padding-left: 75px !important; /* 글자 뒤에서부터 별표가 나오도록 여백 확보 */
+        background-color: transparent !important;
+        height: 45px !important;
+        font-weight: 700 !important;
     }
 
-    /* 3. 박스 내부 왼쪽에 '신청부서' 글자 삽입 */
-    div:has(> label:contains("req_auth")) [data-testid="stTextInput"]::before {
-        content: "신청부서"; position: absolute; left: 15px; top: 12px; z-index: 10;
-        font-size: 0.85rem; font-weight: 800; color: #1E3A8A;
-    }
-
-    /* 4. 박스 내부 왼쪽에 '완료부서' 글자 삽입 */
-    div:has(> label:contains("admin_auth")) [data-testid="stTextInput"]::before {
-        content: "완료부서"; position: absolute; left: 15px; top: 12px; z-index: 10;
-        font-size: 0.85rem; font-weight: 800; color: #1E3A8A;
-    }
-
-    /* 5. 상단 권한창의 기본 라벨(req_auth 등)은 숨김 */
+    /* 4. 불필요한 기본 요소 제거 */
     div:has(> label:contains("req_auth")) label, 
     div:has(> label:contains("admin_auth")) label { display: none !important; }
-    /* --- 상단 네비게이션 스타일 끝 --- */
+    /* --- 상단 네비게이션 디자인 끝 --- */
 
     /* 신청자 성명 강조 (사이드바) */
     section[data-testid="stSidebar"] div[data-testid="stTextInput"] input {
@@ -220,19 +227,17 @@ with t_col1:
         set_menu("📊 진행현황")
 
 with t_col2:
-    # 텍스트 레이블을 "req_auth"로 지정해야 위 CSS가 박스를 찾아 스타일을 입힙니다.
+    # label_visibility="hidden"을 주더라도 내부적으로는 "req_auth"라는 이름을 가집니다.
     st.text_input("req_auth", type="password", placeholder="****", 
                   label_visibility="hidden", key="auth_req", on_change=check_auth_auto)
 
 with t_col3:
-    # 텍스트 레이블을 "admin_auth"로 지정해야 위 CSS가 박스를 찾아 스타일을 입힙니다.
     st.text_input("admin_auth", type="password", placeholder="****", 
                   label_visibility="hidden", key="auth_admin", on_change=check_auth_auto)
 
 with t_col4:
     if st.button("🔍 약가조회", key="top_search", use_container_width=True): 
         set_menu("🔍 약가조회")
-
 # --- 8. 메인 컨텐츠 영역 ---
 
 # [1] 진행현황
