@@ -215,7 +215,25 @@ def handle_safe_submit(category, data_dict):
         st.cache_data.clear(); st.rerun()
     except Exception as e: st.error(f"저장 중 오류 발생: {e}")
 
-# --- 7. 상단 네비게이션 ---
+# --- 7. 상단 네비게이션 (행 고정 적용 버전) ---
+
+# CSS 추가: 상단 메뉴를 고정하고 배경을 흰색으로 설정하여 스크롤 시 내용이 겹쳐 보이지 않게 합니다.
+st.markdown("""
+    <style>
+    /* 상단 네비게이션 바 고정 (Sticky Header) */
+    div[data-testid="stHorizontalBlock"]:has(button[key="top_status"]) {
+        position: -webkit-sticky;
+        position: sticky;
+        top: 0;
+        background-color: #ffffff; /* 배경을 흰색으로 하여 뒤의 내용과 겹침 방지 */
+        z-index: 1000;
+        padding-top: 5px;
+        padding-bottom: 15px;
+        border-bottom: 1px solid #e2e8f0; /* 하단 경계선 추가로 구분감 부여 */
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
 is_requester = (st.session_state.get("auth_req") == "7410")
 is_admin = (st.session_state.get("auth_admin") == "1452")
 
@@ -229,11 +247,11 @@ with t_col1:
         set_menu("📊 진행현황")
 
 with t_col2:
-    st.text_input("신청부서 권한 🔒 수정 가능", type="password", placeholder="****", 
+    st.text_input("신청부서 권한 🔒", type="password", placeholder="****", 
                   key="auth_req", on_change=check_auth_auto)
 
 with t_col3:
-    st.text_input("처리부서 권한 🔑", type="password", placeholder="****", 
+    st.text_input("완료부서 권한 🔑", type="password", placeholder="****", 
                   key="auth_admin", on_change=check_auth_auto)
 
 with t_col4:
