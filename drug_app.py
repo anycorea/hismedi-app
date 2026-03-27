@@ -14,6 +14,44 @@ st.markdown("""
     .sidebar-title { font-size: 1.4rem; font-weight: 800; color: #1E3A8A; margin-bottom: 5px; }
     .stButton > button { width: 100%; border-radius: 8px; font-weight: 700; height: 45px; }
     
+    /* --- 상단 네비게이션 전용 스타일 (추가된 부분) --- */
+    /* 2번째, 3번째 컬럼(입력창)의 배경색과 테두리 설정 */
+    div[data-testid="stHorizontalBlock"] > div:nth-child(2) [data-testid="stTextInput"] > div,
+    div[data-testid="stHorizontalBlock"] > div:nth-child(3) [data-testid="stTextInput"] > div {
+        background-color: #f1f5f9 !important; 
+        border: none !important;
+        border-radius: 10px !important;
+        height: 45px !important;
+    }
+
+    /* 입력창 내부 왼쪽 공간 확보 및 텍스트 위치 */
+    div[data-testid="stHorizontalBlock"] > div:nth-child(2) input,
+    div[data-testid="stHorizontalBlock"] > div:nth-child(3) input {
+        padding-left: 85px !important; 
+        font-weight: 700 !important;
+        color: #1e293b !important;
+    }
+
+    /* 가짜 레이블 삽입 (신청부서) */
+    div[data-testid="stHorizontalBlock"] > div:nth-child(2) [data-testid="stTextInput"]::before {
+        content: "신청부서";
+        position: absolute; left: 15px; top: 12px; z-index: 10;
+        font-size: 0.85rem; font-weight: 800; color: #1E3A8A;
+    }
+
+    /* 가짜 레이블 삽입 (완료부서) */
+    div[data-testid="stHorizontalBlock"] > div:nth-child(3) [data-testid="stTextInput"]::before {
+        content: "완료부서";
+        position: absolute; left: 15px; top: 12px; z-index: 10;
+        font-size: 0.85rem; font-weight: 800; color: #1E3A8A;
+    }
+
+    /* 상단 네비게이션 내의 기본 라벨은 숨김 */
+    div[data-testid="stHorizontalBlock"] label {
+        display: none !important;
+    }
+    /* --- 상단 네비게이션 스타일 끝 --- */
+
     /* 신청자 성명 강조 (사이드바) */
     section[data-testid="stSidebar"] div[data-testid="stTextInput"] input {
         background-color: #fff9c4 !important; border: 2px solid #fbc02d !important; font-weight: 800 !important; color: #000000 !important;
