@@ -14,6 +14,36 @@ st.markdown("""
     .sidebar-title { font-size: 1.4rem; font-weight: 800; color: #1E3A8A; margin-bottom: 5px; }
     .stButton > button { width: 100%; border-radius: 8px; font-weight: 700; height: 45px; }
     
+    /* --- 상단 네비게이션 권한 입력창 전용 스타일 (정밀 타겟팅) --- */
+    /* 신청부서 권한창 스타일 */
+    div:has(> label:contains("req_auth")) [data-testid="stTextInput"] > div {
+        background-color: #f1f5f9 !important; border: none !important; border-radius: 10px !important; height: 45px !important;
+    }
+    div:has(> label:contains("req_auth")) input {
+        padding-left: 85px !important; font-weight: 700 !important; color: #1e293b !important;
+    }
+    div:has(> label:contains("req_auth")) [data-testid="stTextInput"]::before {
+        content: "신청부서"; position: absolute; left: 15px; top: 12px; z-index: 10;
+        font-size: 0.85rem; font-weight: 800; color: #1E3A8A;
+    }
+
+    /* 완료부서 권한창 스타일 */
+    div:has(> label:contains("admin_auth")) [data-testid="stTextInput"] > div {
+        background-color: #f1f5f9 !important; border: none !important; border-radius: 10px !important; height: 45px !important;
+    }
+    div:has(> label:contains("admin_auth")) input {
+        padding-left: 85px !important; font-weight: 700 !important; color: #1e293b !important;
+    }
+    div:has(> label:contains("admin_auth")) [data-testid="stTextInput"]::before {
+        content: "완료부서"; position: absolute; left: 15px; top: 12px; z-index: 10;
+        font-size: 0.85rem; font-weight: 800; color: #1E3A8A;
+    }
+
+    /* 권한창의 기본 라벨은 숨김 */
+    div:has(> label:contains("req_auth")) label, 
+    div:has(> label:contains("admin_auth")) label { display: none !important; }
+    /* --- 상단 네비게이션 스타일 끝 --- */
+
     /* 신청자 성명 강조 (사이드바) */
     section[data-testid="stSidebar"] div[data-testid="stTextInput"] input {
         background-color: #fff9c4 !important; border: 2px solid #fbc02d !important; font-weight: 800 !important; color: #000000 !important;
@@ -31,7 +61,6 @@ st.markdown("""
     .red-cell { color: #dc2626 !important; font-weight: 800 !important; }
     .section-header { font-size: 1rem; font-weight: 800; color: #1E3A8A; margin: 15px 0 10px 0; padding-bottom: 5px; border-bottom: 2px solid #1E3A8A; }
     
-    /* 상세조회용 카드 스타일 */
     .detail-card { background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 10px; border-radius: 6px; margin-bottom: 5px; min-height: 65px; }
     .detail-label { font-size: 0.75rem; color: #64748b; font-weight: 400; margin-bottom: 2px; }
     .detail-value { font-size: 0.9rem; color: #1e293b; font-weight: 700; word-break: break-all; }
@@ -180,14 +209,29 @@ def handle_safe_submit(category, data_dict):
     except Exception as e: st.error(f"저장 중 오류 발생: {e}")
 
 # --- 7. 상단 네비게이션 ---
-t_col1, t_col2, t_col3 = st.columns([1.2, 0.6, 1.2])
+# 권한 변수 정의
+is_requester = (st.session_state.get("auth_req") == "7410")
+is_admin = (st.session_state.get("auth_admin") == "1452")
+
+t_col1, t_col2, t_col3, t_col4 = st.columns([1.2, 1.0, 1.0, 1.2])
+
 with t_col1:
-    if st.button("📊 진행현황", key="top_status", use_container_width=True): set_menu("📊 진행현황")
+    if st.button("📊 진행현황", key="top_status", use_container_width=True): 
+        set_menu("📊 진행현황")
+
 with t_col2:
-    st.text_input("권한코드", type="password", placeholder="****", label_visibility="collapsed", key="auth_p", on_change=check_auth_auto)
-    is_admin = (st.session_state.get("auth_p") == "1452")
+    # label을 "req_auth"로 지정하여 CSS 스타일과 매칭시킵니다.
+    st.text_input("req_auth", type="password", placeholder="****", 
+                  label_visibility="hidden", key="auth_req", on_change=check_auth_auto)
+
 with t_col3:
-    if st.button("🔍 약가조회", key="top_search", use_container_width=True): set_menu("🔍 약가조회")
+    # label을 "admin_auth"로 지정하여 CSS 스타일과 매칭시킵니다.
+    st.text_input("admin_auth", type="password", placeholder="****", 
+                  label_visibility="hidden", key="auth_admin", on_change=check_auth_auto)
+
+with t_col4:
+    if st.button("🔍 약가조회", key="top_search", use_container_width=True): 
+        set_menu("🔍 약가조회")
 
 # --- 8. 메인 컨텐츠 영역 ---
 
