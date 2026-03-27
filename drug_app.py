@@ -14,53 +14,47 @@ st.markdown("""
     .sidebar-title { font-size: 1.4rem; font-weight: 800; color: #1E3A8A; margin-bottom: 5px; }
     .stButton > button { width: 100%; border-radius: 8px; font-weight: 700; height: 45px; }
     
-    /* --- 상단 네비게이션 권한 입력창 정밀 디자인 (이미지 완벽 재현 최종본) --- */
+    /* --- 상단 네비게이션 권한 입력창 디자인 (이미지 완벽 복구본) --- */
     
-    /* [신청부서 박스 설정] */
-    div:has(> label:contains("req_auth")) [data-testid="stTextInput"] > div {
-        background-color: #f1f5f9 !important;
-        border: none !important;
-        border-radius: 10px !important;
+    /* 1. 신청부서/완료부서 공통 박스 스타일 */
+    div:has(label:contains("req_auth")) [data-testid="stTextInput"] > div,
+    div:has(label:contains("admin_auth")) [data-testid="stTextInput"] > div {
+        background-color: #f1f5f9 !important; 
+        border: none !important; 
+        border-radius: 10px !important; 
         height: 45px !important;
         position: relative !important;
     }
-    /* 신청부서 글자 강제 삽입 */
-    div:has(> label:contains("req_auth")) [data-testid="stTextInput"] > div::before {
+
+    /* 2. 신청부서 글자 강제 고정 */
+    div:has(label:contains("req_auth")) [data-testid="stTextInput"] > div::before {
         content: "신청부서";
         position: absolute; left: 15px; top: 12px; z-index: 99;
         font-size: 0.85rem; font-weight: 800; color: #1E3A8A;
-        pointer-events: none;
+        pointer-events: none; /* 클릭 방해 금지 */
     }
 
-    /* [완료부서 박스 설정] */
-    div:has(> label:contains("admin_auth")) [data-testid="stTextInput"] > div {
-        background-color: #f1f5f9 !important;
-        border: none !important;
-        border-radius: 10px !important;
-        height: 45px !important;
-        position: relative !important;
-    }
-    /* 완료부서 글자 강제 삽입 */
-    div:has(> label:contains("admin_auth")) [data-testid="stTextInput"] > div::before {
+    /* 3. 완료부서 글자 강제 고정 */
+    div:has(label:contains("admin_auth")) [data-testid="stTextInput"] > div::before {
         content: "완료부서";
         position: absolute; left: 15px; top: 12px; z-index: 99;
         font-size: 0.85rem; font-weight: 800; color: #1E3A8A;
-        pointer-events: none;
+        pointer-events: none; /* 클릭 방해 금지 */
     }
 
-    /* [공통] 입력창 텍스트 위치 밀기 (별표가 글자 뒤에 나오도록) */
-    div:has(> label:contains("req_auth")) input,
-    div:has(> label:contains("admin_auth")) input {
-        padding-left: 85px !important; 
+    /* 4. 별표(****) 위치 조정 (글자 뒤에서 시작하도록) */
+    div:has(label:contains("req_auth")) input,
+    div:has(label:contains("admin_auth")) input {
+        padding-left: 80px !important; 
         background-color: transparent !important;
-        height: 45px !important;
         font-weight: 700 !important;
         border: none !important;
+        box-shadow: none !important;
     }
 
-    /* 불필요한 기본 라벨 숨김 */
-    div:has(> label:contains("req_auth")) label, 
-    div:has(> label:contains("admin_auth")) label { display: none !important; }
+    /* 5. 불필요한 기본 라벨 숨기기 */
+    div:has(label:contains("req_auth")) label, 
+    div:has(label:contains("admin_auth")) label { display: none !important; }
     
     /* --- 상단 디자인 끝 --- */
 
@@ -240,6 +234,7 @@ with t_col1:
         set_menu("📊 진행현황")
 
 with t_col2:
+    # label_visibility를 "hidden"으로 해도 CSS가 "req_auth"라는 텍스트를 찾아 디자인을 적용합니다.
     st.text_input("req_auth", type="password", placeholder="****", 
                   label_visibility="hidden", key="auth_req", on_change=check_auth_auto)
 
@@ -250,6 +245,7 @@ with t_col3:
 with t_col4:
     if st.button("🔍 약가조회", key="top_search", use_container_width=True): 
         set_menu("🔍 약가조회")
+
 # --- 8. 메인 컨텐츠 영역 ---
 
 # [1] 진행현황
