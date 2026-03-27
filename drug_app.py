@@ -138,23 +138,31 @@ def check_auth_auto():
     if st.session_state.get("auth_p") == "1452":
         st.session_state.active_menu = "📊 진행현황"
 
-# --- 5. 사이드바 (기능 통합 및 배치 최적화) ---
+# --- 5. 사이드바 (최종 배치 조정 버전) ---
 with st.sidebar:
     st.markdown('<p class="sidebar-title">HISMEDI † Drug Service</p>', unsafe_allow_html=True)
+    st.divider()
     
-    # 1. 기본 정보 및 새로고침
+    # 1. 새로고침 버튼
     if st.button("🔄 새로고침 / 데이터 동기화", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
     
-    st.divider()
-    app_user = st.text_input("👤 신청자 성명", key="global_user")
-    app_date = st.date_input("📅 날짜 선택", datetime.now(), key="global_date").strftime('%Y-%m-%d')
+    # 2. 진행현황 및 약가조회 (2열 배치)
+    c_nav1, c_nav2 = st.columns(2)
+    if c_nav1.button("📊 진행현황", key="side_status", use_container_width=True): 
+        set_menu("📊 진행현황")
+    if c_nav2.button("🔍 약가조회", key="side_search", use_container_width=True): 
+        set_menu("🔍 약가조회")
+
+    # 3. 시스템 권한 입력창
+    st.markdown('<p style="font-size:0.85rem; font-weight:800; color:#1E3A8A; margin-top:15px; margin-bottom:5px;">🔐 시스템 권한</p>', unsafe_allow_html=True)
+    st.text_input("신청부서 🔒", type="password", placeholder="****", key="auth_req", on_change=check_auth_auto)
+    st.text_input("완료부서 🔑", type="password", placeholder="****", key="auth_admin", on_change=check_auth_auto)
     
     st.divider()
 
-    # 2. 메인 신청 메뉴 (6개 항목)
-    st.markdown('<p style="font-size:0.9rem; font-weight:800; color:#1E3A8A; margin-bottom:10px;">📋 약제 신청 메뉴</p>', unsafe_allow_html=True)
+    # 4. 약제 신청 메뉴 (2열씩 3줄 배치)
     col1, col2 = st.columns(2)
     if col1.button("사용중지"): set_menu("사용중지")
     if col2.button("신규입고"): set_menu("신규입고")
@@ -166,25 +174,6 @@ with st.sidebar:
     col5, col6 = st.columns(2)
     if col5.button("단가인하▼"): set_menu("단가인하▼")
     if col6.button("단가인상▲"): set_menu("단가인상▲")
-
-    st.divider()
-
-    # 3. 조회 및 현황 메뉴 (기존 상단 메뉴 이동)
-    st.markdown('<p style="font-size:0.9rem; font-weight:800; color:#1E3A8A; margin-bottom:10px;">🔍 조회 및 관리</p>', unsafe_allow_html=True)
-    c_nav1, c_nav2 = st.columns(2)
-    if c_nav1.button("📊 진행현황", key="side_status", use_container_width=True): 
-        set_menu("📊 진행현황")
-    if c_nav2.button("🔍 약가조회", key="side_search", use_container_width=True): 
-        set_menu("🔍 약가조회")
-
-    st.divider()
-
-    # 4. 권한 관리 (비밀번호 입력창)
-    st.markdown('<p style="font-size:0.8rem; font-weight:800; color:#64748b; margin-bottom:5px;">🔐 시스템 권한</p>', unsafe_allow_html=True)
-    st.text_input("신청부서 🔒", type="password", placeholder="****", 
-                  key="auth_req", on_change=check_auth_auto)
-    st.text_input("완료부서 🔑", type="password", placeholder="****", 
-                  key="auth_admin", on_change=check_auth_auto)
 
 # --- 6. 헬퍼 함수 ---
 def get_drug_info(edi_code):
@@ -222,12 +211,23 @@ def handle_safe_submit(category, data_dict):
         st.cache_data.clear(); st.rerun()
     except Exception as e: st.error(f"저장 중 오류 발생: {e}")
 
-# --- 7. 사용자 권한 식별 (UI 없음) ---
+# --- 7. 메인 상단 정보 바 (신청자, 날짜) ---
+# 본문 최상단에 신청자 정보와 날짜를 1줄로 배치하여 공간 효율을 높임
+u_col1, u_col2 = st.columns(2)
 
-# 사이드바에서 입력된 세션 상태를 바탕으로 권한 여부 확인
-# 이 변수들은 8번 본문 영역(진행현황 테이블 수정/삭제 등)에서 사용됩니다.
+with u_col1:
+    app_user = st.text_input("👤 신청자 성명", key="global_user", placeholder="성명을 입력하세요")
+
+with u_col2:
+    # date_input의 값을 문자열 포맷으로 변환하여 app_date 변수에 할당
+    raw_date = st.date_input("📅 날짜 선택", datetime.now(), key="global_date")
+    app_date = raw_date.strftime('%Y-%m-%d')
+
+# 권한 식별 변수 (본문 로직용)
 is_requester = (st.session_state.get("auth_req") == "7410")
 is_admin = (st.session_state.get("auth_admin") == "1452")
+
+st.markdown('<div style="margin-bottom: 20px;"></div>', unsafe_allow_html=True) # 하단 여백 추가
 
 # --- 8. 메인 컨텐츠 영역 ---
 
