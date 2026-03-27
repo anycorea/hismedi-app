@@ -134,11 +134,12 @@ OP_USE_PERIOD = ["한시적 사용", "지속적 사용"]
 OP_YN = ["Y", "N"]
 OP_POSSIBLE = ["가능", "불가"]
 
-# --- 4. 세션 상태 관리 ---
+# --- 4. 세션 상태 관리 및 권한 자동 체크 ---
 if 'active_menu' not in st.session_state:
     st.session_state.active_menu = "📊 진행현황"
 
 def clear_form_data():
+    # 폼 입력 데이터 초기화
     keys_to_reset = [k for k in st.session_state.keys() if k.startswith(('t1_', 't2_', 't3_', 't_', 't6_', 't_edi', 'final_', 'search_edi', 't_edi1'))]
     for key in keys_to_reset:
         del st.session_state[key]
@@ -148,10 +149,15 @@ def set_menu(menu_name):
     clear_form_data()
 
 def check_auth_auto():
-    if st.session_state.get("auth_p") == "1452":
+    # 신청부서(7410) 또는 완료부서(1452) 번호가 입력되면 즉시 진행현황으로 이동
+    req_code = st.session_state.get("auth_req", "")
+    admin_code = st.session_state.get("auth_admin", "")
+    
+    if req_code == "7410" or admin_code == "1452":
         st.session_state.active_menu = "📊 진행현황"
+        # 입력 후 화면 갱신을 위해 필요한 경우 여기에 추가 로직 가능
 
-# --- 5. 사이드바 (최종 배치 조정 버전) ---
+# --- 5. 사이드바 (최종 배치 및 자동 이동 적용) ---
 with st.sidebar:
     st.markdown('<p class="sidebar-title">HISMEDI † Drug Service</p>', unsafe_allow_html=True)
     st.divider()
@@ -168,10 +174,14 @@ with st.sidebar:
     if c_nav2.button("🔍 약가조회", key="side_search", use_container_width=True): 
         set_menu("🔍 약가조회")
 
-    # 3. 시스템 권한 입력창
+    # 3. 시스템 권한 입력창 (엔터 시 진행현황으로 자동 이동)
     st.markdown('<p style="font-size:0.85rem; font-weight:800; color:#1E3A8A; margin-top:15px; margin-bottom:5px;">🔐 시스템 권한</p>', unsafe_allow_html=True)
-    st.text_input("신청부서 🔒", type="password", placeholder="****", key="auth_req", on_change=check_auth_auto)
-    st.text_input("완료부서 🔑", type="password", placeholder="****", key="auth_admin", on_change=check_auth_auto)
+    
+    st.text_input("신청부서 🔒", type="password", placeholder="****", 
+                  key="auth_req", on_change=check_auth_auto)
+    
+    st.text_input("완료부서 🔑", type="password", placeholder="****", 
+                  key="auth_admin", on_change=check_auth_auto)
     
     st.divider()
 
