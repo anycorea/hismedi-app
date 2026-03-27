@@ -236,7 +236,7 @@ if st.session_state.active_menu == "📊 진행현황":
     st.markdown('<div class="section-header">📊 통합 신청 및 처리 현황</div>', unsafe_allow_html=True)
     db_df = load_db_data()
     
-    # 상단 네비게이션(7번 섹션)에서 정의된 권한 변수 확인
+    # 권한 변수 확인
     is_requester = (st.session_state.get("auth_req") == "7410")
     is_admin = (st.session_state.get("auth_admin") == "1452")
     
@@ -246,16 +246,12 @@ if st.session_state.active_menu == "📊 진행현황":
             db_df = db_df[db_df.apply(lambda r: r.astype(str).str.contains(search).any(), axis=1)]
         
         edit_df_view = db_df.copy()
-        
-        # 날짜 타입 변환
         edit_df_view['완료일'] = pd.to_datetime(edit_df_view['완료일'], errors='coerce').dt.date
         edit_df_view['신청일'] = pd.to_datetime(edit_df_view['신청일'], errors='coerce').dt.date
-        
-        # 원본 시트 행 번호 기록 (헤더가 1번이므로 데이터는 2번부터 시작)
         edit_df_view['sheet_row'] = range(2, len(edit_df_view) + 2)
-        edit_df_view = edit_df_view.iloc[::-1] # 최신순 정렬
+        edit_df_view = edit_df_view.iloc[::-1] # 최신순
         
-        # [순서유지]
+        # 컬럼 순서 조정
         all_cols = edit_df_view.columns.tolist()
         if "진행상황" in all_cols and "거래명세표" in all_cols and "제품코드1" in all_cols:
             all_cols.remove("거래명세표")
@@ -264,11 +260,10 @@ if st.session_state.active_menu == "📊 진행현황":
             edit_df_view = edit_df_view[all_cols]
         
         edit_df_view.insert(0, "상세조회", False)
-        if is_admin: 
-            edit_df_view.insert(1, "삭제", False)
+        if is_admin: edit_df_view.insert(1, "삭제", False)
         
         col_cfg = {
-            "상세조회": st.column_config.CheckboxColumn("조회", width="small", disabled=False),
+            "상세조회": st.column_config.CheckboxColumn("조회", width="small"),
             "진행상황": st.column_config.SelectboxColumn("진행상황", options=OP_STATUS, width="100", disabled=not is_admin),
             "완료자": st.column_config.SelectboxColumn("완료자", options=OP_PROCESSORS, width="100", disabled=not is_admin),
             "완료일": st.column_config.DateColumn("완료일", format="YYYY-MM-DD", width="small", disabled=not is_admin),
@@ -280,22 +275,22 @@ if st.session_state.active_menu == "📊 진행현황":
             "제품명1": st.column_config.TextColumn("제품명1", width="250", disabled=not is_requester),
             "sheet_row": None
         }
-        if is_admin: 
-            col_cfg["삭제"] = st.column_config.CheckboxColumn("삭제", width="small", disabled=False)
+        if is_admin: col_cfg["삭제"] = st.column_config.CheckboxColumn("삭제", width="small")
 
+        # [핵심] 에디터의 변경사항을 즉시 감지할 수 있도록 key 설정
         edited_df = st.data_editor(
             edit_df_view, 
             column_config=col_cfg, 
             hide_index=True, 
             use_container_width=True, 
             height=520, 
-            key="main_editor_v10"
+            key="main_editor_v11" # 키를 버전업하여 고유하게 유지
         )
         
-        # 상세 조회 (4열 보기)
+        # 상세 조회 (기존 로직 동일)
         selected_rows = edited_df[edited_df["상세조회"] == True]
         if not selected_rows.empty:
-            st.markdown('<div class="section-header">🔍 선택 항목 상세 정보 (4열 보기)</div>', unsafe_allow_html=True)
+            st.markdown('<div class="section-header">🔍 선택 항목 상세 정보</div>', unsafe_allow_html=True)
             for _, row in selected_rows.iterrows():
                 valid_items = [(k, v) for k, v in row.items() if str(v).strip() and k not in ["상세조회", "삭제", "sheet_row"]]
                 cols = st.columns(4)
@@ -304,40 +299,45 @@ if st.session_state.active_menu == "📊 진행현황":
                         st.markdown(f'<div class="detail-card"><div class="detail-label">{lbl}</div><div class="detail-value">{val}</div></div>', unsafe_allow_html=True)
                 st.divider()
 
-        # [저장 로직 - API 최적화 방식]
+        # [저장 로직 - 더블클릭 방지 및 API 최적화]
         if is_admin or is_requester:
-            if st.button("💾 변경사항 최종 반영하기", use_container_width=True):
+            # 버튼 클릭 시점에 에디터의 최신 상태(edited_df)가 이미 변수에 담겨있음
+            save_btn = st.button("💾 변경사항 최종 반영하기", use_container_width=True, type="primary")
+            
+            if save_btn:
                 try:
-                    with st.spinner("구글 시트에 데이터를 동기화 중입니다..."):
+                    with st.status("데이터 저장 중...", expanded=True) as status:
                         ss = get_spreadsheet()
                         ws = ss.worksheet("New_stop")
                         
-                        # 1. 시트 전체 데이터를 한 번에 가져옴 (API 요청 1회)
+                        # 1. 최신 시트 데이터 로드
+                        st.write("원본 데이터 불러오는 중...")
                         all_data = ws.get_all_values()
                         headers = all_data[0]
                         
-                        # 2. 삭제 처리 (Admin인 경우)
+                        # 2. 삭제 및 수정 반영
                         rows_to_delete = []
-                        if is_admin:
-                            rows_to_delete = edited_df[edited_df["삭제"] == True]['sheet_row'].tolist()
+                        update_count = 0
                         
-                        # 3. 업데이트 처리 (메모리 내 all_data 리스트 수정)
+                        st.write("변경사항 분석 중...")
                         for _, row in edited_df.iterrows():
-                            if is_admin and row["삭제"]:
-                                continue # 삭제될 행은 업데이트 생략
-                            
-                            # 시트 행 번호를 리스트 인덱스로 변환 (2번 행 -> index 1)
+                            # 인덱스 계산 (sheet_row는 1부터 시작하므로 리스트 인덱스는 -1)
                             list_idx = int(row['sheet_row']) - 1
                             
-                            # 처리부서 권한이 있는 경우
+                            # 삭제 처리
+                            if is_admin and row.get("삭제", False):
+                                rows_to_delete.append(int(row['sheet_row']))
+                                continue
+                            
+                            # 관리자 수정분 반영
                             if is_admin:
-                                # 이모지가 포함된 텍스트를 시트 저장용으로 정제 (필요시)
                                 status_val = row["진행상황"].replace("🔴", "").replace("🟡", "").replace("🟢", "")
                                 all_data[list_idx][headers.index("진행상황")] = status_val
                                 all_data[list_idx][headers.index("완료자")] = str(row["완료자"])
                                 all_data[list_idx][headers.index("완료일")] = str(row["완료일"]) if row["완료일"] and str(row["완료일"]) != 'NaT' else ""
+                                update_count += 1
 
-                            # 신청부서 권한이 있는 경우
+                            # 신청자 수정분 반영
                             if is_requester:
                                 all_data[list_idx][headers.index("신청구분")] = str(row["신청구분"])
                                 all_data[list_idx][headers.index("신청일")] = str(row["신청일"]) if row["신청일"] and str(row["신청일"]) != 'NaT' else ""
@@ -345,21 +345,26 @@ if st.session_state.active_menu == "📊 진행현황":
                                 all_data[list_idx][headers.index("제품코드1")] = str(row["제품코드1"])
                                 all_data[list_idx][headers.index("제품명1")] = str(row["제품명1"])
                                 all_data[list_idx][headers.index("거래명세표")] = str(row["거래명세표"])
+                                update_count += 1
 
-                        # 4. 삭제 대상 행을 리스트에서 제거 (역순으로 제거해야 인덱스가 안 꼬임)
+                        # 3. 리스트에서 삭제 행 제거
                         if rows_to_delete:
+                            st.write(f"{len(rows_to_delete)}건 삭제 중...")
                             for r_num in sorted(rows_to_delete, reverse=True):
                                 del all_data[r_num - 1]
 
-                        # 5. 시트 전체를 한 번에 업데이트 (API 요청 1~2회)
-                        ws.clear() # 기존 내용 비우기
+                        # 4. 일괄 업데이트 (Batch Update)
+                        st.write("구글 시트 최종 업데이트 중...")
+                        ws.clear()
                         ws.update('A1', all_data, value_input_option='RAW')
                         
-                        st.success("변경사항이 성공적으로 저장되었습니다!")
+                        status.update(label="저장 완료!", state="complete", expanded=False)
+                        st.success(f"성공적으로 반영되었습니다. (수정: {update_count}건, 삭제: {len(rows_to_delete)}건)")
+                        
                         st.cache_data.clear()
                         st.rerun()
                 except Exception as e:
-                    st.error(f"저장 중 오류 발생: {e}")
+                    st.error(f"저장 실패: {e}")
     else:
         st.info("신청 내역이 없습니다.")
 
