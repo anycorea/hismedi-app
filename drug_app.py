@@ -229,11 +229,11 @@ with t_col1:
         set_menu("📊 진행현황")
 
 with t_col2:
-    st.text_input("신청부서 권한 🔒", type="password", placeholder="****", 
+    st.text_input("신청부서 권한 🔒 수정 가능", type="password", placeholder="****", 
                   key="auth_req", on_change=check_auth_auto)
 
 with t_col3:
-    st.text_input("완료부서 권한 🔑", type="password", placeholder="****", 
+    st.text_input("처리부서 권한 🔑", type="password", placeholder="****", 
                   key="auth_admin", on_change=check_auth_auto)
 
 with t_col4:
@@ -282,7 +282,7 @@ if st.session_state.active_menu == "📊 진행현황":
         # --- [부서별 권한 설정] ---
         col_cfg = {
             "상세조회": st.column_config.CheckboxColumn("조회", width="small", disabled=False),
-            # 완료부서(1452) 전용 편집 항목
+            # 처리부서(1452) 전용 편집 항목
             "진행상황": st.column_config.SelectboxColumn("진행상황", options=OP_STATUS, width="100", disabled=not is_admin),
             "완료자": st.column_config.SelectboxColumn("완료자", options=OP_PROCESSORS, width="100", disabled=not is_admin),
             "완료일": st.column_config.DateColumn("완료일", format="YYYY-MM-DD", width="small", disabled=not is_admin),
@@ -342,7 +342,7 @@ if st.session_state.active_menu == "📊 진행현황":
                         deleted_count = sum(1 for r in (rows_to_delete['sheet_row'] if not rows_to_delete.empty else []) if int(r) < int(row['sheet_row']))
                         actual_r = int(row['sheet_row']) - deleted_count
                         
-                        # 완료부서(1452) 수정 항목 반영
+                        # 처리부서(1452) 수정 항목 반영
                         if is_admin:
                             ws.update_cell(actual_r, headers.index("진행상황")+1, row["진행상황"])
                             ws.update_cell(actual_r, headers.index("완료자")+1, row["완료자"])
