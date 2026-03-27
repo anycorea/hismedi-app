@@ -119,7 +119,8 @@ def set_menu(menu_name):
     clear_form_data()
 
 def check_auth_auto():
-    if st.session_state.get("auth_p") == "1452":
+    # 신청부서(7410)나 완료부서(1452) 코드가 입력되면 진행현황으로 이동
+    if st.session_state.get("auth_req") == "7410" or st.session_state.get("auth_admin") == "1452":
         st.session_state.active_menu = "📊 진행현황"
 
 # --- 5. 사이드바 ---
@@ -180,14 +181,28 @@ def handle_safe_submit(category, data_dict):
     except Exception as e: st.error(f"저장 중 오류 발생: {e}")
 
 # --- 7. 상단 네비게이션 ---
-t_col1, t_col2, t_col3 = st.columns([1.2, 0.6, 1.2])
+# 컬럼 비율 조정 (진행현황, 신청부서, 완료부서, 약가조회)
+t_col1, t_col2, t_col3, t_col4 = st.columns([1, 0.8, 0.8, 1])
+
 with t_col1:
-    if st.button("📊 진행현황", key="top_status", use_container_width=True): set_menu("📊 진행현황")
+    if st.button("📊 진행현황", key="top_status", use_container_width=True): 
+        set_menu("📊 진행현황")
+
 with t_col2:
-    st.text_input("권한코드", type="password", placeholder="****", label_visibility="collapsed", key="auth_p", on_change=check_auth_auto)
-    is_admin = (st.session_state.get("auth_p") == "1452")
+    st.markdown("<p style='font-size:0.8rem; margin-bottom:-10px; text-align:center;'>신청부서</p>", unsafe_allow_html=True)
+    st.text_input("신청부서코드", type="password", placeholder="7410", label_visibility="collapsed", key="auth_req", on_change=check_auth_auto)
+    # 신청부서 권한 정의 (7410 입력 시)
+    is_requester = (st.session_state.get("auth_req") == "7410")
+
 with t_col3:
-    if st.button("🔍 약가조회", key="top_search", use_container_width=True): set_menu("🔍 약가조회")
+    st.markdown("<p style='font-size:0.8rem; margin-bottom:-10px; text-align:center;'>완료부서</p>", unsafe_allow_html=True)
+    st.text_input("완료부서코드", type="password", placeholder="1452", label_visibility="collapsed", key="auth_admin", on_change=check_auth_auto)
+    # 관리자(완료부서) 권한 정의 (1452 입력 시)
+    is_admin = (st.session_state.get("auth_admin") == "1452")
+
+with t_col4:
+    if st.button("🔍 약가조회", key="top_search", use_container_width=True): 
+        set_menu("🔍 약가조회")
 
 # --- 8. 메인 컨텐츠 영역 ---
 
