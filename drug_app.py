@@ -263,75 +263,59 @@ with t_col4:
 
 # --- 8. 메인 컨텐츠 영역 ---
 
-# [1] 진행현황 섹션 전체
+# [1] 진행현황
 if st.session_state.active_menu == "📊 진행현황":
     st.markdown('<div class="section-header">📊 통합 신청 및 처리 현황</div>', unsafe_allow_html=True)
     db_df = load_db_data()
     
-    # 권한 상태 재정의 (상단 네비게이션과 동기화)
+    # 상단에서 정의된 권한 변수 확인
     is_admin = (st.session_state.get("auth_admin") == "1452")
     is_requester = (st.session_state.get("auth_req") == "7410")
     
     if not db_df.empty:
         search = st.text_input("🔍 검색 (제품명, 신청자 등)", key="dash_search")
-        if search: 
-            db_df = db_df[db_df.apply(lambda r: r.astype(str).str.contains(search).any(), axis=1)]
+        if search: db_df = db_df[db_df.apply(lambda r: r.astype(str).str.contains(search).any(), axis=1)]
         
         edit_df_view = db_df.copy()
-        # 날짜 형식 변환
-        edit_df_view['신청일'] = pd.to_datetime(edit_df_view['신청일'], errors='coerce').dt.date
+        # 날짜 타입 변환 (에디터 달력 기능을 위해)
         edit_df_view['완료일'] = pd.to_datetime(edit_df_view['완료일'], errors='coerce').dt.date
+        edit_df_view['신청일'] = pd.to_datetime(edit_df_view['신청일'], errors='coerce').dt.date
         
-        # 행 번호 추적용 (G-Sheet 업데이트용)
         edit_df_view['sheet_row'] = range(2, len(edit_df_view) + 2)
-        edit_df_view = edit_df_view.iloc[::-1] # 최신순 정렬
+        edit_df_view = edit_df_view.iloc[::-1]
         
-        # 컬럼 순서 재배치
+        # 컬럼 순서 유지 로직: 진행상황 - 거래명세표 - 제품코드1
         all_cols = edit_df_view.columns.tolist()
-        main_order = ["진행상황", "거래명세표", "신청구분", "신청자", "제품명1", "제품코드1", "신청일"]
-        remaining = [c for c in all_cols if c not in main_order and c != "sheet_row"]
-        edit_df_view = edit_df_view[main_order + remaining + ["sheet_row"]]
+        if "진행상황" in all_cols and "거래명세표" in all_cols and "제품코드1" in all_cols:
+            all_cols.remove("거래명세표")
+            idx_status = all_cols.index("진행상황")
+            all_cols.insert(idx_status + 1, "거래명세표")
+            edit_df_view = edit_df_view[all_cols]
         
-        # 기본 체크박스 추가
         edit_df_view.insert(0, "상세조회", False)
-        edit_df_view.insert(1, "삭제", False)
+        if is_admin: edit_df_view.insert(1, "삭제", False)
         
-        # --- 동적 컬럼 설정 (권한별 편집 제어) ---
+        # [권한별 컬럼 설정]
         col_cfg = {
             "상세조회": st.column_config.CheckboxColumn("조회", width="small", disabled=False),
-            "삭제": st.column_config.CheckboxColumn("삭제", width="small", disabled=not is_admin),
             "진행상황": st.column_config.SelectboxColumn("진행상황", options=OP_STATUS, width="100", disabled=not is_admin),
+            "거래명세표": st.column_config.LinkColumn("거래명세표🔗", width="100", display_text="파일 열기", disabled=not is_requester),
+            "제품코드1": st.column_config.TextColumn("제품코드1", width="small", disabled=not is_requester),
             "완료자": st.column_config.SelectboxColumn("완료자", options=OP_PROCESSORS, width="100", disabled=not is_admin),
             "완료일": st.column_config.DateColumn("완료일", format="YYYY-MM-DD", width="small", disabled=not is_admin),
-            
-            # 신청부서 편집 항목 (is_requester가 True일 때만 편집 가능)
-            "신청구분": st.column_config.SelectboxColumn("신청구분", 
-                        options=["사용중지", "신규입고", "대체입고", "삭제코드변경", "단가인하▼", "단가인상▲"], 
-                        width="110", disabled=not is_requester),
-            "신청일": st.column_config.DateColumn("신청일", format="YYYY-MM-DD", width="small", disabled=not is_requester),
+            "신청구분": st.column_config.SelectboxColumn("신청구분", options=["사용중지", "신규입고", "대체입고", "삭제코드변경", "단가인하▼", "단가인상▲"], width="100", disabled=not is_requester),
             "신청자": st.column_config.TextColumn("신청자", width="small", disabled=not is_requester),
-            "제품코드1": st.column_config.TextColumn("제품코드1", width="small", disabled=not is_requester),
-            "제품명1": st.column_config.TextColumn("제품명1", width="200", disabled=not is_requester),
-            "거래명세표": st.column_config.TextColumn("거래명세표 URL", width="150", disabled=not is_requester),
-            "비고(기타 요청사항)": st.column_config.TextColumn("비고", width="200", disabled=not is_requester),
-            
-            "sheet_row": None # 숨김
+            "신청일": st.column_config.DateColumn("신청일", format="YYYY-MM-DD", width="small", disabled=not is_requester),
+            "제품명1": st.column_config.TextColumn("제품명1", width="250", disabled=not is_requester),
+            "sheet_row": None
         }
+        if is_admin: col_cfg["삭제"] = st.column_config.CheckboxColumn("삭제", width="small", disabled=False)
 
-        # 데이터 에디터 실행
-        edited_df = st.data_editor(
-            edit_df_view, 
-            column_config=col_cfg, 
-            hide_index=True, 
-            use_container_width=True, 
-            height=520, 
-            key="main_editor_v7"
-        )
+        edited_df = st.data_editor(edit_df_view, column_config=col_cfg, hide_index=True, use_container_width=True, height=520, key="main_editor_final_v7")
         
-        # 상세 조회 영역 (4열 보기)
         selected_rows = edited_df[edited_df["상세조회"] == True]
         if not selected_rows.empty:
-            st.markdown('<div class="section-header">🔍 선택 항목 상세 정보</div>', unsafe_allow_html=True)
+            st.markdown('<div class="section-header">🔍 선택 항목 상세 정보 (4열 보기)</div>', unsafe_allow_html=True)
             for _, row in selected_rows.iterrows():
                 valid_items = [(k, v) for k, v in row.items() if str(v).strip() and k not in ["상세조회", "삭제", "sheet_row"]]
                 cols = st.columns(4)
@@ -340,49 +324,53 @@ if st.session_state.active_menu == "📊 진행현황":
                         st.markdown(f'<div class="detail-card"><div class="detail-label">{lbl}</div><div class="detail-value">{val}</div></div>', unsafe_allow_html=True)
                 st.divider()
 
-        # 저장 버튼 (권한이 있는 경우만 표시)
+        # [저장 로직]
         if is_admin or is_requester:
-            if st.button("💾 변경사항 최종 반영하기 (Google 시트 동기화)", use_container_width=True):
+            btn_label = "💾 변경사항 최종 반영하기"
+            if st.button(btn_label, use_container_width=True):
                 try:
-                    ss = get_spreadsheet()
-                    ws = ss.worksheet("New_stop")
+                    ss = get_spreadsheet(); ws = ss.worksheet("New_stop")
                     headers = ws.row_values(1)
                     
-                    # 1. 삭제 처리 (Admin 전용)
-                    rows_to_delete = edited_df[edited_df["삭제"] == True]
-                    if not rows_to_delete.empty and is_admin:
-                        target_rows = sorted(rows_to_delete['sheet_row'].tolist(), reverse=True)
-                        for r in target_rows: 
-                            ws.delete_rows(int(r))
-                        st.success(f"{len(target_rows)}건의 데이터가 삭제되었습니다.")
+                    # 인덱스 확보
+                    idx_status, idx_worker, idx_date = headers.index("진행상황")+1, headers.index("완료자")+1, headers.index("완료일")+1
+                    idx_file = headers.index("거래명세표")+1
+                    idx_req_type = headers.index("신청구분")+1
+                    idx_req_date = headers.index("신청일")+1
+                    idx_req_user = headers.index("신청자")+1
+                    idx_req_code = headers.index("제품코드1")+1
+                    idx_req_name = headers.index("제품명1")+1
                     
-                    # 2. 수정 데이터 업데이트
-                    remaining_df = edited_df[edited_df["삭제"] == False]
-                    # 실제로 변경된 셀만 업데이트하거나 행 전체를 업데이트
-                    # 여기서는 안전하게 편집 가능한 모든 열을 루프 돌며 업데이트합니다.
+                    # 삭제 처리 (어드민만)
+                    rows_to_delete = edited_df[edited_df["삭제"] == True] if is_admin else pd.DataFrame()
+                    if not rows_to_delete.empty:
+                        target_rows = sorted(rows_to_delete['sheet_row'].tolist(), reverse=True)
+                        for r in target_rows: ws.delete_rows(int(r))
+                    
+                    # 업데이트 처리
+                    remaining_df = edited_df[edited_df["삭제"] == False] if is_admin else edited_df
                     for _, row in remaining_df.iterrows():
-                        # 삭제된 행만큼 index 보정
-                        deleted_below = sum(1 for r in rows_to_delete['sheet_row'] if int(r) < int(row['sheet_row']))
-                        actual_r = int(row['sheet_row']) - deleted_below
+                        deleted_count = sum(1 for r in (rows_to_delete['sheet_row'] if not rows_to_delete.empty else []) if int(r) < int(row['sheet_row']))
+                        actual_r = int(row['sheet_row']) - deleted_count
                         
-                        # 완료부서 권한 업데이트
+                        # 완료부서(Admin) 업데이트 항목
                         if is_admin:
-                            ws.update_cell(actual_r, headers.index("진행상황")+1, row["진행상황"])
-                            ws.update_cell(actual_r, headers.index("완료자")+1, row["완료자"])
-                            ws.update_cell(actual_r, headers.index("완료일")+1, str(row["완료일"]) if row["완료일"] else "")
+                            ws.update_cell(actual_r, idx_status, row["진행상황"])
+                            ws.update_cell(actual_r, idx_worker, row["완료자"])
+                            ws.update_cell(actual_r, idx_date, str(row["완료일"]) if row["완료일"] else "")
+                            ws.update_cell(actual_r, idx_file, row["거래명세표"])
                         
-                        # 신청부서 권한 업데이트
+                        # 신청부서(Requester) 업데이트 항목
                         if is_requester:
-                            # 주요 수정 가능 항목 리스트
-                            req_fields = ["신청구분", "신청일", "신청자", "제품코드1", "제품명1", "거래명세표", "비고(기타 요청사항)"]
-                            for field in req_fields:
-                                if field in headers:
-                                    val = str(row[field]) if row[field] else ""
-                                    ws.update_cell(actual_r, headers.index(field)+1, val)
-                                    
-                    st.success("모든 변경사항이 구글 시트에 저장되었습니다!"); st.cache_data.clear(); st.rerun()
-                except Exception as e: 
-                    st.error(f"저장 중 오류 발생: {e}")
+                            ws.update_cell(actual_r, idx_req_type, row["신청구분"])
+                            ws.update_cell(actual_r, idx_req_date, str(row["신청일"]) if row["신청일"] else "")
+                            ws.update_cell(actual_r, idx_req_user, row["신청자"])
+                            ws.update_cell(actual_r, idx_req_code, row["제품코드1"])
+                            ws.update_cell(actual_r, idx_req_name, row["제품명1"])
+                            ws.update_cell(actual_r, idx_file, row["거래명세표"]) # 신청부서도 URL 수정 가능
+                            
+                    st.success("데이터가 성공적으로 동기화되었습니다!"); st.cache_data.clear(); st.rerun()
+                except Exception as e: st.error(f"오류: {e}")
     else:
         st.info("신청 내역이 없습니다.")
 
