@@ -9,32 +9,73 @@ st.set_page_config(page_title="HISMEDI Drug Service", layout="wide")
 
 st.markdown("""
     <style>
+    /* 기본 레이아웃 및 배경 */
     .block-container { padding-top: 1.5rem !important; background-color: #ffffff !important; }
     [data-testid="stHeader"] { display: none; }
     .sidebar-title { font-size: 1.4rem; font-weight: 800; color: #1E3A8A; margin-bottom: 5px; }
-    .stButton > button { width: 100%; border-radius: 8px; font-weight: 700; height: 45px; }
     
-    /* 상단 네비게이션용 레이블 스타일 */
-    .nav-label {
-        font-size: 0.8rem !important;
-        font-weight: 700 !important;
-        color: #1E3A8A !important;
-        margin-bottom: -35px !important; /* 레이블을 입력창 쪽으로 바짝 붙임 */
-        text-align: center;
-        position: relative;
-        z-index: 1;
+    /* 공통 버튼 스타일 */
+    .stButton > button { 
+        width: 100%; border-radius: 10px; font-weight: 700; height: 45px; 
+        border: 1px solid #e2e8f0; background-color: #ffffff;
+    }
+    
+    /* [상단 네비게이션 전용 스타일] */
+    /* 2번째, 3번째 컬럼(입력창)의 배경색과 테두리 설정 */
+    div[data-testid="stHorizontalBlock"] > div:nth-child(2) [data-testid="stTextInput"] > div,
+    div[data-testid="stHorizontalBlock"] > div:nth-child(3) [data-testid="stTextInput"] > div {
+        background-color: #f1f5f9 !important; /* 연한 회색 배경 */
+        border: none !important;
+        border-radius: 10px !important;
+        height: 45px !important;
     }
 
-    /* 신청자 성명 강조 (사이드바) */
+    /* 입력창 내부 왼쪽 공간 확보 */
+    div[data-testid="stHorizontalBlock"] > div:nth-child(2) input,
+    div[data-testid="stHorizontalBlock"] > div:nth-child(3) input {
+        padding-left: 85px !important; /* 레이블이 들어갈 자리 확보 */
+        font-weight: 700 !important;
+        color: #1e293b !important;
+    }
+
+    /* 가짜 레이블 삽입 (신청부서) */
+    div[data-testid="stHorizontalBlock"] > div:nth-child(2) [data-testid="stTextInput"]::before {
+        content: "신청부서";
+        position: absolute;
+        left: 15px;
+        top: 12px;
+        z-index: 10;
+        font-size: 0.85rem;
+        font-weight: 800;
+        color: #1E3A8A;
+    }
+
+    /* 가짜 레이블 삽입 (완료부서) */
+    div[data-testid="stHorizontalBlock"] > div:nth-child(3) [data-testid="stTextInput"]::before {
+        content: "완료부서";
+        position: absolute;
+        left: 15px;
+        top: 12px;
+        z-index: 10;
+        font-size: 0.85rem;
+        font-weight: 800;
+        color: #1E3A8A;
+    }
+
+    /* 기존 Streamlit 기본 라벨 제거 */
+    div[data-testid="stHorizontalBlock"] label {
+        display: none !important;
+    }
+
+    /* 사이드바/메인창 강조 스타일 유지 */
     section[data-testid="stSidebar"] div[data-testid="stTextInput"] input {
         background-color: #fff9c4 !important; border: 2px solid #fbc02d !important; font-weight: 800 !important; color: #000000 !important;
     }
-    
-    /* 제품코드 입력창 강조 (메인창) */
     div[data-testid="stVerticalBlock"] div:has(label:contains("제품코드")) input {
         background-color: #fffdec !important; border: 2px solid #fbbf24 !important; font-weight: 700 !important; color: #000000 !important;
     }
 
+    /* 약제 정보 테이블 및 섹션 헤더 */
     .drug-table { width: 100%; border-collapse: collapse; margin-bottom: 15px; border: 1px solid #e2e8f0; font-size: 0.85rem; }
     .drug-table th { background-color: #f1f5f9; color: #475569; font-weight: 700; padding: 6px; border: 1px solid #e2e8f0; text-align: center; }
     .drug-table td { background-color: #ffffff; color: #000000; font-weight: 600; padding: 8px; border: 1px solid #e2e8f0; text-align: center; }
@@ -42,7 +83,6 @@ st.markdown("""
     .red-cell { color: #dc2626 !important; font-weight: 800 !important; }
     .section-header { font-size: 1rem; font-weight: 800; color: #1E3A8A; margin: 15px 0 10px 0; padding-bottom: 5px; border-bottom: 2px solid #1E3A8A; }
     
-    /* 상세조회용 카드 스타일 */
     .detail-card { background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 10px; border-radius: 6px; margin-bottom: 5px; min-height: 65px; }
     .detail-label { font-size: 0.75rem; color: #64748b; font-weight: 400; margin-bottom: 2px; }
     .detail-value { font-size: 0.9rem; color: #1e293b; font-weight: 700; word-break: break-all; }
@@ -196,11 +236,11 @@ def handle_safe_submit(category, data_dict):
 
 # --- 7. 상단 네비게이션 ---
 
-# [먼저 권한 상태를 정의합니다]
+# 권한 변수 정의
 is_requester = (st.session_state.get("auth_req") == "7410")
 is_admin = (st.session_state.get("auth_admin") == "1452")
 
-# 컬럼 비율 조정 (버튼과 입력창의 너비 밸런스)
+# 컬럼 비율 조정
 t_col1, t_col2, t_col3, t_col4 = st.columns([1.2, 1.0, 1.0, 1.2])
 
 with t_col1:
@@ -208,14 +248,13 @@ with t_col1:
         set_menu("📊 진행현황")
 
 with t_col2:
-    # 1번 섹션에서 추가한 .nav-label CSS가 적용됩니다.
-    st.markdown('<p class="nav-label">신청부서 권한</p>', unsafe_allow_html=True)
-    st.text_input("신청부서코드", type="password", placeholder="**** ", 
+    # CSS에서 자동으로 "신청부서"라는 글자를 넣어줍니다.
+    st.text_input("req_auth", type="password", placeholder="****", 
                   label_visibility="hidden", key="auth_req", on_change=check_auth_auto)
 
 with t_col3:
-    st.markdown('<p class="nav-label">완료부서 권한</p>', unsafe_allow_html=True)
-    st.text_input("완료부서코드", type="password", placeholder="**** ", 
+    # CSS에서 자동으로 "완료부서"라는 글자를 넣어줍니다.
+    st.text_input("admin_auth", type="password", placeholder="****", 
                   label_visibility="hidden", key="auth_admin", on_change=check_auth_auto)
 
 with t_col4:
