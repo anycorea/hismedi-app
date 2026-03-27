@@ -12,52 +12,50 @@ st.markdown("""
     .block-container { padding-top: 1.5rem !important; background-color: #ffffff !important; }
     [data-testid="stHeader"] { display: none; }
     .sidebar-title { font-size: 1.4rem; font-weight: 800; color: #1E3A8A; margin-bottom: 5px; }
-    .stButton > button { width: 100%; border-radius: 8px; font-weight: 700; height: 45px; }
     
-    /* --- 상단 네비게이션 권한 입력창 디자인 (글자 강제 삽입형) --- */
-    
-    /* 상단 첫 번째 줄의 2번째(신청부서), 3번째(완료부서) 컬럼 타겟팅 */
-    [data-testid="stHorizontalBlock"]:first-of-type > div:nth-child(2) [data-testid="stTextInput"] > div,
-    [data-testid="stHorizontalBlock"]:first-of-type > div:nth-child(3) [data-testid="stTextInput"] > div {
-        background-color: #f1f5f9 !important; 
-        border: none !important; 
-        border-radius: 10px !important; 
-        height: 45px !important;
-        position: relative !important;
+    /* --- 모던 대시보드 네비게이션 스타일 --- */
+    /* 모든 버튼 공통: 세련된 그림자와 둥근 모서리 */
+    .stButton > button { 
+        width: 100%; border-radius: 12px; font-weight: 700; height: 48px; 
+        transition: all 0.3s; border: 1px solid #e2e8f0; background-color: #ffffff;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
+    .stButton > button:hover { border-color: #1E3A8A; color: #1E3A8A; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+
+    /* 입력창 라벨을 작고 세련된 '배지' 형태로 변경 */
+    div[data-testid="column"] label {
+        font-size: 0.75rem !important;
+        font-weight: 800 !important;
+        color: #ffffff !important;
+        background-color: #1E3A8A; /* 진한 파란색 배지 */
+        padding: 2px 10px !important;
+        border-radius: 6px !important;
+        margin-bottom: 6px !important;
+        display: inline-block !important;
+        letter-spacing: 0.5px;
     }
 
-    /* '신청부서' 글자 삽입 */
-    [data-testid="stHorizontalBlock"]:first-of-type > div:nth-child(2) [data-testid="stTextInput"] > div::before {
-        content: "신청부서";
-        position: absolute; left: 15px; top: 12px; z-index: 10;
-        font-size: 0.85rem; font-weight: 800; color: #1E3A8A;
-        pointer-events: none;
+    /* 입력창 자체 스타일: 버튼과 높이를 맞추고 깔끔하게 처리 */
+    div[data-testid="column"] [data-testid="stTextInput"] > div {
+        border-radius: 12px !important;
+        height: 48px !important;
+        background-color: #f8fafc !important;
+        border: 1px solid #e2e8f0 !important;
+    }
+    div[data-testid="column"] input {
+        height: 48px !important;
+        font-weight: 600 !important;
+        font-size: 1rem !important;
     }
 
-    /* '완료부서' 글자 삽입 */
-    [data-testid="stHorizontalBlock"]:first-of-type > div:nth-child(3) [data-testid="stTextInput"] > div::before {
-        content: "완료부서";
-        position: absolute; left: 15px; top: 12px; z-index: 10;
-        font-size: 0.85rem; font-weight: 800; color: #1E3A8A;
-        pointer-events: none;
+    /* 하단 여백 및 정렬 맞춤 */
+    div[data-testid="column"] {
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end; /* 버튼과 높이 정렬을 위해 하단 정렬 */
     }
 
-    /* 입력창 텍스트 위치 밀기 (글자 '신청부서' 뒤에서 **** 가 나오도록) */
-    [data-testid="stHorizontalBlock"]:first-of-type > div:nth-child(2) input,
-    [data-testid="stHorizontalBlock"]:first-of-type > div:nth-child(3) input {
-        padding-left: 80px !important; 
-        background-color: transparent !important;
-        font-weight: 700 !important;
-        border: none !important;
-        height: 45px !important;
-    }
-
-    /* 불필요한 라벨 공간 제거 */
-    [data-testid="stHorizontalBlock"]:first-of-type label {
-        display: none !important;
-    }
-    
-    /* --- 나머지 디자인 유지 --- */
+    /* --- 기존 스타일 유지 (약제 테이블 등) --- */
     section[data-testid="stSidebar"] div[data-testid="stTextInput"] input {
         background-color: #fff9c4 !important; border: 2px solid #fbc02d !important; font-weight: 800 !important; color: #000000 !important;
     }
@@ -221,22 +219,25 @@ def handle_safe_submit(category, data_dict):
 is_requester = (st.session_state.get("auth_req") == "7410")
 is_admin = (st.session_state.get("auth_admin") == "1452")
 
-# 이 st.columns 가 코드상 상단 네비게이션의 '첫 번째' 가로줄이어야 합니다.
+# 버튼과 입력창의 높이 균형을 위해 columns 설정
 t_col1, t_col2, t_col3, t_col4 = st.columns([1.2, 1.0, 1.0, 1.2])
 
 with t_col1:
+    # 버튼 위에 여백을 주어 입력창 배지와 높이를 맞춤
+    st.markdown("<div style='margin-top:28px;'></div>", unsafe_allow_html=True)
     if st.button("📊 진행현황", key="top_status", use_container_width=True): 
         set_menu("📊 진행현황")
 
 with t_col2:
-    st.text_input("신청부서", type="password", placeholder="****", 
-                  label_visibility="collapsed", key="auth_req", on_change=check_auth_auto)
+    st.text_input("신청부서 권한 🔒", type="password", placeholder="****", 
+                  key="auth_req", on_change=check_auth_auto)
 
 with t_col3:
-    st.text_input("완료부서", type="password", placeholder="****", 
-                  label_visibility="collapsed", key="auth_admin", on_change=check_auth_auto)
+    st.text_input("완료부서 권한 🔑", type="password", placeholder="****", 
+                  key="auth_admin", on_change=check_auth_auto)
 
 with t_col4:
+    st.markdown("<div style='margin-top:28px;'></div>", unsafe_allow_html=True)
     if st.button("🔍 약가조회", key="top_search", use_container_width=True): 
         set_menu("🔍 약가조회")
 
