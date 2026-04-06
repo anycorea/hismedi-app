@@ -527,7 +527,7 @@ elif st.session_state.active_menu in ["사용중지", "신규입고", "대체입
     # 하단 공통: 비고란 및 제출 버튼
     st.divider()
     col_memo, col_file = st.columns([2, 1])
-    with col_memo: d["비고(기타 요청사항)"] = st.text_area("비고(기타 요청사항)", key="final_memo")
+    with col_memo: d["요청사항(신청부서)"] = st.text_area("요청사항(신청부서)", key="final_memo")
     with col_file: d["거래명세표"] = st.text_input("거래명세표 URL (구글/네이버 등)", placeholder="http://...", key="final_file")
     
     if st.button(f"🚀 {curr} 제출", key="final_btn", use_container_width=True):
