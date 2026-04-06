@@ -233,7 +233,7 @@ with t_col2:
                   key="auth_req", on_change=check_auth_auto)
 
 with t_col3:
-    st.text_input("완료부서 권한 🔑", type="password", placeholder="****", 
+    st.text_input("처리부서 권한 🔑", type="password", placeholder="****", 
                   key="auth_admin", on_change=check_auth_auto)
 
 with t_col4:
@@ -282,7 +282,7 @@ if st.session_state.active_menu == "📊 진행현황":
         # --- [부서별 권한 설정] ---
         col_cfg = {
             "상세조회": st.column_config.CheckboxColumn("조회", width="small", disabled=False),
-            # 완료부서(1452) 전용 편집 항목
+            # 처리부서(1452) 전용 편집 항목
             "진행상황": st.column_config.SelectboxColumn("진행상황", options=OP_STATUS, width="100", disabled=not is_admin),
             "완료자": st.column_config.SelectboxColumn("완료자", options=OP_PROCESSORS, width="100", disabled=not is_admin),
             "완료일": st.column_config.DateColumn("완료일", format="YYYY-MM-DD", width="small", disabled=not is_admin),
@@ -353,7 +353,7 @@ if st.session_state.active_menu == "📊 진행현황":
                         r_idx = int(row['sheet_row']) - 1 # 리스트 인덱스로 변환
                         
                         if is_admin:
-                            # 관리자(완료부서) 수정 항목 반영
+                            # 관리자(처리부서) 수정 항목 반영
                             if "진행상황" in headers: all_data[r_idx][headers.index("진행상황")] = str(row["진행상황"])
                             if "완료자" in headers: all_data[r_idx][headers.index("완료자")] = str(row["완료자"])
                             if "완료일" in headers: all_data[r_idx][headers.index("완료일")] = str(row["완료일"]) if row["완료일"] else ""
