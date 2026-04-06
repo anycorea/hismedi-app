@@ -268,7 +268,7 @@ if st.session_state.active_menu == "📊 진행현황":
                 # 데이터를 날짜 타입으로 변환, 변환 실패 시 None(null)으로 처리
                 edit_df_view[col] = pd.to_datetime(edit_df_view[col], errors='coerce').dt.date
 
-        # 드롭다운 컬럼 리스트 (기존 데이터에 옵션 외의 값이 있으면 에러가 나므로 스트립 처리)
+        # 드롭다운 컬럼 리스트 (기존 데이터 스트립 처리)
         for col in edit_df_view.columns:
             if col in ["진행상황", "신청구분", "처리자", "원내구분1", "재고여부1", "급여구분1"]:
                 edit_df_view[col] = edit_df_view[col].astype(str).str.strip()
@@ -300,16 +300,16 @@ if st.session_state.active_menu == "📊 진행현황":
         edit_df_view.insert(0, "상세조회", False)
         if is_admin: edit_df_view.insert(1, "삭제", False)
         
-        # --- [3. 컬럼 설정 (권한 제어 및 에러 방지용)] ---
+        # --- [3. 컬럼 설정 (권한 제어 및 너비 설정)] ---
         c_cfg = {"상세조회": st.column_config.CheckboxColumn("조회", width="small"), "sheet_row": None}
         
-        # (A) 처리부서 권한 필드 (1452)
+        # 처리부서 권한 필드 정의
         admin_fields = ["진행상황", "처리자", "처리일", "전달사항(처리부서)"]
         
-        # (B) 전체 컬럼 순회하며 권한 및 위젯 설정
+        # 전체 컬럼 순회하며 설정 적용
         for f in [c for c in edit_df_view.columns if c not in ["상세조회", "삭제", "sheet_row"]]:
             is_admin_col = f in admin_fields
-            # 공통 disabled 설정: 처리부서 컬럼은 admin만, 그 외는 requester만 수정 가능
+            # 권한 체크: 처리부서 컬럼은 1452만, 그 외 컬럼은 7410만 수정 가능
             can_edit = (is_admin and is_admin_col) or (is_requester and not is_admin_col)
             
             if f == "진행상황": 
@@ -320,10 +320,20 @@ if st.session_state.active_menu == "📊 진행현황":
                 c_cfg[f] = st.column_config.SelectboxColumn(f, options=["사용중지", "신규입고", "대체입고", "삭제코드변경", "단가인하▼", "단가인상▲"], disabled=not can_edit)
             elif f in date_cols: 
                 c_cfg[f] = st.column_config.DateColumn(f, format="YYYY-MM-DD", disabled=not can_edit)
+            
+            # --- [특정 컬럼 중간 너비 설정] ---
+            elif f == "요청사항(신청부서)":
+                c_cfg[f] = st.column_config.TextColumn(f, width="medium", disabled=not can_edit)
+            elif f == "전달사항(처리부서)":
+                c_cfg[f] = st.column_config.TextColumn(f, width="medium", disabled=not can_edit)
+            # -------------------------------
+            
             elif f in ["원내구분1", "원내구분2"]:
                 c_cfg[f] = st.column_config.SelectboxColumn(f, options=OP_INSIDE_OUT, disabled=not can_edit)
             elif f in ["재고여부1", "급여구분1", "급여구분2"]:
                 c_cfg[f] = st.column_config.SelectboxColumn(f, options=["유", "무"] if "재고" in f else ["급여", "비급여"], disabled=not can_edit)
+            elif f == "거래명세표":
+                c_cfg[f] = st.column_config.LinkColumn(f, display_text="파일 열기", disabled=not can_edit)
             else:
                 # 그 외 모든 필드는 텍스트 컬럼으로 설정하여 에러 최소화
                 c_cfg[f] = st.column_config.TextColumn(f, disabled=not can_edit)
@@ -337,10 +347,10 @@ if st.session_state.active_menu == "📊 진행현황":
             hide_index=True, 
             use_container_width=True, 
             height=600, 
-            key="main_editor_v13"
+            key="main_editor_v14"
         )
         
-        # 상세 조회
+        # 상세 조회 처리
         selected_rows = edited_df[edited_df["상세조회"] == True]
         if not selected_rows.empty:
             st.markdown('<div class="section-header">🔍 선택 항목 상세 정보</div>', unsafe_allow_html=True)
@@ -382,9 +392,9 @@ if st.session_state.active_menu == "📊 진행현황":
                     
                     ws.clear()
                     ws.update('A1', all_data)
-                    st.success("저장 완료!"); st.cache_data.clear(); st.rerun()
+                    st.success("변경사항이 성공적으로 저장되었습니다!"); st.cache_data.clear(); st.rerun()
                 except Exception as e:
-                    st.error(f"저장 중 오류: {e}")
+                    st.error(f"저장 중 오류 발생: {e}")
 
 # [2-7] 신청서 섹션들 (사용중지 및 재고 로직 정밀 제어 버전)
 elif st.session_state.active_menu in ["사용중지", "신규입고", "대체입고", "삭제코드변경", "단가인하▼", "단가인상▲"]:
