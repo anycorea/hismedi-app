@@ -205,15 +205,32 @@ def render_drug_table(edi_val, drug_num=1, label="약제 정보"):
 def handle_safe_submit(category, data_dict):
     if not app_user: 
         st.error("신청자 성명을 입력해주세요."); return
-    try:
-        ss = get_spreadsheet(); ws = ss.worksheet("New_stop")
-        headers = ws.row_values(1)
-        data_dict.update({"신청구분": category, "신청일": app_date, "신청자": app_user, "진행상황": "신청완료"})
-        row_to_append = [str(data_dict.get(h, "")) for h in headers]
-        ws.append_row(row_to_append, value_input_option='RAW')
-        st.success(f"[{category}] 접수 완료!"); st.balloons()
-        st.cache_data.clear(); st.rerun()
-    except Exception as e: st.error(f"저장 중 오류 발생: {e}")
+    
+    # 처리 중 상태 표시 시작
+    with st.status(f"🚀 [{category}] 신청서를 접수 중입니다...", expanded=True) as status:
+        try:
+            ss = get_spreadsheet()
+            ws = ss.worksheet("New_stop")
+            headers = ws.row_values(1)
+            
+            data_dict.update({
+                "신청구분": category, 
+                "신청일": app_date, 
+                "신청자": app_user, 
+                "진행상황": "신청완료"
+            })
+            
+            row_to_append = [str(data_dict.get(h, "")) for h in headers]
+            ws.append_row(row_to_append, value_input_option='RAW')
+            
+            # 완료 상태로 업데이트
+            status.update(label=f"✅ [{category}] 접수가 완료되었습니다!", state="complete", expanded=False)
+            st.success(f"[{category}] 접수 완료!"); st.balloons()
+            st.cache_data.clear()
+            st.rerun()
+        except Exception as e:
+            status.update(label="❌ 저장 중 오류가 발생했습니다.", state="error")
+            st.error(f"저장 중 오류 발생: {e}")
 
 # --- 7. 상단 네비게이션 ---
 is_requester = (st.session_state.get("auth_req") == "7410")
@@ -261,23 +278,19 @@ if st.session_state.active_menu == "📊 진행현황":
         edit_df_view = db_df.copy()
 
         # --- [1. 타입 호환성 에러 해결을 위한 데이터 전처리] ---
-        # 날짜 컬럼 리스트
         date_cols = ['처리일', '신청일', '사용중지일1', '반품예정일1', '입고일1', '코드사용시작일1', '입고일2', '코드사용시작일2']
         for col in date_cols:
             if col in edit_df_view.columns:
-                # 데이터를 날짜 타입으로 변환, 변환 실패 시 None(null)으로 처리
                 edit_df_view[col] = pd.to_datetime(edit_df_view[col], errors='coerce').dt.date
 
-        # 드롭다운 컬럼 리스트 (기존 데이터 스트립 처리)
         for col in edit_df_view.columns:
             if col in ["진행상황", "신청구분", "처리자", "원내구분1", "재고여부1", "급여구분1"]:
                 edit_df_view[col] = edit_df_view[col].astype(str).str.strip()
 
-        # 행 번호 생성 및 최신순 정렬
         edit_df_view['sheet_row'] = range(2, len(edit_df_view) + 2)
         edit_df_view = edit_df_view.iloc[::-1] 
         
-        # --- [2. 컬럼 순서 재배치 (요청사항 반영)] ---
+        # --- [2. 컬럼 순서 재배치] ---
         core_fields = ["신청구분", "신청일", "신청자", "처리일", "처리자", "진행상황", "요청사항(신청부서)", "전달사항(처리부서)", "제품코드1", "제품명1"]
         extra_fields = [
             "업체명1", "규격1", "단위1", "상한금액1", "주성분명1", "전일1", "원내구분1", "급여구분1", "구입처1", "개당입고가1", 
@@ -292,24 +305,18 @@ if st.session_state.active_menu == "📊 진행현황":
         final_order = [c for c in core_fields if c in all_existing] + \
                       [c for c in extra_fields if c in all_existing and c not in core_fields]
         
-        # 기타 컬럼 및 sheet_row 정리
         remains = [c for c in all_existing if c not in final_order and c != 'sheet_row']
         edit_df_view = edit_df_view[final_order + remains + ['sheet_row']]
         
-        # 기능 컬럼(조회, 삭제) 삽입
         edit_df_view.insert(0, "상세조회", False)
         if is_admin: edit_df_view.insert(1, "삭제", False)
         
-        # --- [3. 컬럼 설정 (권한 제어 및 너비 설정)] ---
+        # --- [3. 컬럼 설정 및 너비 설정] ---
         c_cfg = {"상세조회": st.column_config.CheckboxColumn("조회", width="small"), "sheet_row": None}
-        
-        # 처리부서 권한 필드 정의
         admin_fields = ["진행상황", "처리자", "처리일", "전달사항(처리부서)"]
         
-        # 전체 컬럼 순회하며 설정 적용
         for f in [c for c in edit_df_view.columns if c not in ["상세조회", "삭제", "sheet_row"]]:
             is_admin_col = f in admin_fields
-            # 권한 체크: 처리부서 컬럼은 1452만, 그 외 컬럼은 7410만 수정 가능
             can_edit = (is_admin and is_admin_col) or (is_requester and not is_admin_col)
             
             if f == "진행상황": 
@@ -320,14 +327,10 @@ if st.session_state.active_menu == "📊 진행현황":
                 c_cfg[f] = st.column_config.SelectboxColumn(f, options=["사용중지", "신규입고", "대체입고", "삭제코드변경", "단가인하▼", "단가인상▲"], disabled=not can_edit)
             elif f in date_cols: 
                 c_cfg[f] = st.column_config.DateColumn(f, format="YYYY-MM-DD", disabled=not can_edit)
-            
-            # --- [특정 컬럼 중간 너비 설정] ---
             elif f == "요청사항(신청부서)":
                 c_cfg[f] = st.column_config.TextColumn(f, width="medium", disabled=not can_edit)
             elif f == "전달사항(처리부서)":
                 c_cfg[f] = st.column_config.TextColumn(f, width="medium", disabled=not can_edit)
-            # -------------------------------
-            
             elif f in ["원내구분1", "원내구분2"]:
                 c_cfg[f] = st.column_config.SelectboxColumn(f, options=OP_INSIDE_OUT, disabled=not can_edit)
             elif f in ["재고여부1", "급여구분1", "급여구분2"]:
@@ -335,19 +338,17 @@ if st.session_state.active_menu == "📊 진행현황":
             elif f == "거래명세표":
                 c_cfg[f] = st.column_config.LinkColumn(f, display_text="파일 열기", disabled=not can_edit)
             else:
-                # 그 외 모든 필드는 텍스트 컬럼으로 설정하여 에러 최소화
                 c_cfg[f] = st.column_config.TextColumn(f, disabled=not can_edit)
 
         if is_admin: c_cfg["삭제"] = st.column_config.CheckboxColumn("삭제", width="small")
 
-        # 데이터 에디터 실행
         edited_df = st.data_editor(
             edit_df_view, 
             column_config=c_cfg, 
             hide_index=True, 
             use_container_width=True, 
             height=600, 
-            key="main_editor_v14"
+            key="main_editor_v15"
         )
         
         # 상세 조회 처리
@@ -364,37 +365,41 @@ if st.session_state.active_menu == "📊 진행현황":
 
         # [저장 로직]
         if is_admin or is_requester:
-            if st.button("💾 변경사항 시트에 통합 저장하기", use_container_width=True):
-                try:
-                    ss = get_spreadsheet()
-                    ws = ss.worksheet("New_stop")
-                    all_data = ws.get_all_values()
-                    headers = all_data[0]
-                    
-                    deleted_rows_nums = [int(r) for r in edited_df[edited_df.get("삭제", False) == True]['sheet_row'].tolist()] if is_admin else []
-                    
-                    remaining_df = edited_df.copy()
-                    if is_admin: remaining_df = remaining_df[remaining_df.get("삭제", False) == False]
-                    
-                    for _, row in remaining_df.iterrows():
-                        r_idx = int(row['sheet_row']) - 1
-                        for col_name in headers:
-                            if col_name in row:
-                                # 권한에 맞는 컬럼만 업데이트
-                                is_adm_col = col_name in admin_fields
-                                if (is_admin and is_adm_col) or (is_requester and not is_adm_col):
-                                    val = row[col_name]
-                                    all_data[r_idx][headers.index(col_name)] = str(val) if val is not None else ""
-                    
-                    if deleted_rows_nums:
-                        for r_num in sorted(deleted_rows_nums, reverse=True):
-                            del all_data[r_num - 1]
-                    
-                    ws.clear()
-                    ws.update('A1', all_data)
-                    st.success("변경사항이 성공적으로 저장되었습니다!"); st.cache_data.clear(); st.rerun()
-                except Exception as e:
-                    st.error(f"저장 중 오류 발생: {e}")
+            if st.button("💾 변경사항 DB에 통합 저장하기", use_container_width=True):
+                # 저장 프로세스 상태 표시
+                with st.status("🔄 DB에 변경사항을 저장 중입니다...", expanded=True) as status:
+                    try:
+                        ss = get_spreadsheet()
+                        ws = ss.worksheet("New_stop")
+                        all_data = ws.get_all_values()
+                        headers = all_data[0]
+                        
+                        deleted_rows_nums = [int(r) for r in edited_df[edited_df.get("삭제", False) == True]['sheet_row'].tolist()] if is_admin else []
+                        
+                        remaining_df = edited_df.copy()
+                        if is_admin: remaining_df = remaining_df[remaining_df.get("삭제", False) == False]
+                        
+                        for _, row in remaining_df.iterrows():
+                            r_idx = int(row['sheet_row']) - 1
+                            for col_name in headers:
+                                if col_name in row:
+                                    is_adm_col = col_name in admin_fields
+                                    if (is_admin and is_adm_col) or (is_requester and not is_adm_col):
+                                        val = row[col_name]
+                                        all_data[r_idx][headers.index(col_name)] = str(val) if val is not None else ""
+                        
+                        if deleted_rows_nums:
+                            for r_num in sorted(deleted_rows_nums, reverse=True):
+                                del all_data[r_num - 1]
+                        
+                        ws.clear()
+                        ws.update('A1', all_data)
+                        
+                        status.update(label="✅ 모든 변경사항이 성공적으로 저장되었습니다!", state="complete", expanded=False)
+                        st.success("변경사항 저장 완료!"); st.cache_data.clear(); st.rerun()
+                    except Exception as e:
+                        status.update(label="❌ 저장 실패", state="error")
+                        st.error(f"저장 중 오류 발생: {e}")
 
 # [2-7] 신청서 섹션들 (사용중지 및 재고 로직 정밀 제어 버전)
 elif st.session_state.active_menu in ["사용중지", "신규입고", "대체입고", "삭제코드변경", "단가인하▼", "단가인상▲"]:
