@@ -253,28 +253,32 @@ if st.session_state.active_menu == "📊 진행현황":
     is_admin = (st.session_state.get("auth_admin") == "1452")
     
     if not db_df.empty:
+        # 검색 기능
         search = st.text_input("🔍 검색 (제품명, 신청자 등)", key="dash_search")
         if search: 
             db_df = db_df[db_df.apply(lambda r: r.astype(str).str.contains(search).any(), axis=1)]
         
         edit_df_view = db_df.copy()
-        
-        # --- [1. 데이터 타입 강제 변환] ---
-        # 에러 방지: 날짜 관련 컬럼들을 실제 date 객체로 변환 (문자열 -> 날짜)
+
+        # --- [1. 타입 호환성 에러 해결을 위한 데이터 전처리] ---
+        # 날짜 컬럼 리스트
         date_cols = ['처리일', '신청일', '사용중지일1', '반품예정일1', '입고일1', '코드사용시작일1', '입고일2', '코드사용시작일2']
         for col in date_cols:
             if col in edit_df_view.columns:
+                # 데이터를 날짜 타입으로 변환, 변환 실패 시 None(null)으로 처리
                 edit_df_view[col] = pd.to_datetime(edit_df_view[col], errors='coerce').dt.date
 
-        # 행 번호 및 정렬
+        # 드롭다운 컬럼 리스트 (기존 데이터에 옵션 외의 값이 있으면 에러가 나므로 스트립 처리)
+        for col in edit_df_view.columns:
+            if col in ["진행상황", "신청구분", "처리자", "원내구분1", "재고여부1", "급여구분1"]:
+                edit_df_view[col] = edit_df_view[col].astype(str).str.strip()
+
+        # 행 번호 생성 및 최신순 정렬
         edit_df_view['sheet_row'] = range(2, len(edit_df_view) + 2)
         edit_df_view = edit_df_view.iloc[::-1] 
         
-        # --- [2. 컬럼 순서 재배치] ---
-        # 요청하신 순서: 조회 - 신청구분 - 신청일 - 신청자 - 처리일 - 처리자 - 진행상황 - 요청사항(신청부서) - 전달사항(처리부서) - 제품코드1 - 제품명1...
+        # --- [2. 컬럼 순서 재배치 (요청사항 반영)] ---
         core_fields = ["신청구분", "신청일", "신청자", "처리일", "처리자", "진행상황", "요청사항(신청부서)", "전달사항(처리부서)", "제품코드1", "제품명1"]
-        
-        # 나머지 신청부서 수정 가능 항목들 (구글 시트의 방대한 필드들)
         extra_fields = [
             "업체명1", "규격1", "단위1", "상한금액1", "주성분명1", "전일1", "원내구분1", "급여구분1", "구입처1", "개당입고가1", 
             "사용중지일1", "사용중지사유1", "사용중지사유_기타1", "변경내용1", "재고여부1", "재고처리방법1", "재고량1", "반품가능여부1", 
@@ -288,41 +292,41 @@ if st.session_state.active_menu == "📊 진행현황":
         final_order = [c for c in core_fields if c in all_existing] + \
                       [c for c in extra_fields if c in all_existing and c not in core_fields]
         
-        # 순서 정의되지 않은 나머지 컬럼
+        # 기타 컬럼 및 sheet_row 정리
         remains = [c for c in all_existing if c not in final_order and c != 'sheet_row']
         edit_df_view = edit_df_view[final_order + remains + ['sheet_row']]
         
-        # 기능 컬럼 삽입 (조회, 삭제)
+        # 기능 컬럼(조회, 삭제) 삽입
         edit_df_view.insert(0, "상세조회", False)
         if is_admin: edit_df_view.insert(1, "삭제", False)
         
-        # --- [3. 컬럼 설정 (권한 제어)] ---
-        c_cfg = {}
-        c_cfg["상세조회"] = st.column_config.CheckboxColumn("조회", width="small")
-        c_cfg["sheet_row"] = None # 사용자에게 숨김
+        # --- [3. 컬럼 설정 (권한 제어 및 에러 방지용)] ---
+        c_cfg = {"상세조회": st.column_config.CheckboxColumn("조회", width="small"), "sheet_row": None}
         
-        # (A) 처리부서 권한 필드 (1452 전용)
+        # (A) 처리부서 권한 필드 (1452)
         admin_fields = ["진행상황", "처리자", "처리일", "전달사항(처리부서)"]
-        for f in admin_fields:
-            if f in all_existing:
-                if f == "진행상황": c_cfg[f] = st.column_config.SelectboxColumn(f, options=OP_STATUS, disabled=not is_admin)
-                elif f == "처리자": c_cfg[f] = st.column_config.SelectboxColumn(f, options=OP_PROCESSORS, disabled=not is_admin)
-                elif f == "처리일": c_cfg[f] = st.column_config.DateColumn(f, format="YYYY-MM-DD", disabled=not is_admin)
-                else: c_cfg[f] = st.column_config.TextColumn(f, disabled=not is_admin)
-
-        # (B) 신청부서 권한 필드 (7410 전용 - extra_fields 포함 모든 나머지)
-        req_fields = core_fields + extra_fields
-        # 관리자 필드 제외하고 모두 신청자 권한으로 설정
-        for f in [c for c in all_existing if c not in admin_fields and c != "상세조회" and c != "삭제"]:
-            if f == "신청구분": c_cfg[f] = st.column_config.SelectboxColumn(f, options=["사용중지", "신규입고", "대체입고", "삭제코드변경", "단가인하▼", "단가인상▲"], disabled=not is_requester)
-            elif f in date_cols: c_cfg[f] = st.column_config.DateColumn(f, format="YYYY-MM-DD", disabled=not is_requester)
-            elif f == "거래명세표": c_cfg[f] = st.column_config.LinkColumn(f, display_text="파일 열기", disabled=not is_requester)
-            elif f in ["원내구분1", "원내구분2"]: c_cfg[f] = st.column_config.SelectboxColumn(f, options=OP_INSIDE_OUT, disabled=not is_requester)
-            elif f in ["급여구분1", "급여구분2"]: c_cfg[f] = st.column_config.SelectboxColumn(f, options=["급여", "비급여"], disabled=not is_requester)
-            elif f == "재고여부1": c_cfg[f] = st.column_config.SelectboxColumn(f, options=["유", "무"], disabled=not is_requester)
-            elif f == "반품가능여부1": c_cfg[f] = st.column_config.SelectboxColumn(f, options=OP_POSSIBLE, disabled=not is_requester)
+        
+        # (B) 전체 컬럼 순회하며 권한 및 위젯 설정
+        for f in [c for c in edit_df_view.columns if c not in ["상세조회", "삭제", "sheet_row"]]:
+            is_admin_col = f in admin_fields
+            # 공통 disabled 설정: 처리부서 컬럼은 admin만, 그 외는 requester만 수정 가능
+            can_edit = (is_admin and is_admin_col) or (is_requester and not is_admin_col)
+            
+            if f == "진행상황": 
+                c_cfg[f] = st.column_config.SelectboxColumn(f, options=OP_STATUS, disabled=not can_edit)
+            elif f == "처리자": 
+                c_cfg[f] = st.column_config.SelectboxColumn(f, options=OP_PROCESSORS, disabled=not can_edit)
+            elif f == "신청구분": 
+                c_cfg[f] = st.column_config.SelectboxColumn(f, options=["사용중지", "신규입고", "대체입고", "삭제코드변경", "단가인하▼", "단가인상▲"], disabled=not can_edit)
+            elif f in date_cols: 
+                c_cfg[f] = st.column_config.DateColumn(f, format="YYYY-MM-DD", disabled=not can_edit)
+            elif f in ["원내구분1", "원내구분2"]:
+                c_cfg[f] = st.column_config.SelectboxColumn(f, options=OP_INSIDE_OUT, disabled=not can_edit)
+            elif f in ["재고여부1", "급여구분1", "급여구분2"]:
+                c_cfg[f] = st.column_config.SelectboxColumn(f, options=["유", "무"] if "재고" in f else ["급여", "비급여"], disabled=not can_edit)
             else:
-                c_cfg[f] = st.column_config.TextColumn(f, disabled=not is_requester)
+                # 그 외 모든 필드는 텍스트 컬럼으로 설정하여 에러 최소화
+                c_cfg[f] = st.column_config.TextColumn(f, disabled=not can_edit)
 
         if is_admin: c_cfg["삭제"] = st.column_config.CheckboxColumn("삭제", width="small")
 
@@ -333,15 +337,14 @@ if st.session_state.active_menu == "📊 진행현황":
             hide_index=True, 
             use_container_width=True, 
             height=600, 
-            key="main_editor_v12"
+            key="main_editor_v13"
         )
         
-        # 상세 조회 처리
+        # 상세 조회
         selected_rows = edited_df[edited_df["상세조회"] == True]
         if not selected_rows.empty:
             st.markdown('<div class="section-header">🔍 선택 항목 상세 정보</div>', unsafe_allow_html=True)
             for _, row in selected_rows.iterrows():
-                # 값이 있는 항목만 4열로 표시
                 valid_items = [(k, v) for k, v in row.items() if str(v).strip() and k not in ["상세조회", "삭제", "sheet_row"]]
                 cols = st.columns(4)
                 for idx, (lbl, val) in enumerate(valid_items):
@@ -358,43 +361,30 @@ if st.session_state.active_menu == "📊 진행현황":
                     all_data = ws.get_all_values()
                     headers = all_data[0]
                     
-                    # 삭제 행 번호 (관리자 전용)
-                    deleted_rows_nums = []
-                    if is_admin and "삭제" in edited_df.columns:
-                        deleted_rows_nums = edited_df[edited_df["삭제"] == True]['sheet_row'].tolist()
+                    deleted_rows_nums = [int(r) for r in edited_df[edited_df.get("삭제", False) == True]['sheet_row'].tolist()] if is_admin else []
                     
-                    # 수정 대상 업데이트
                     remaining_df = edited_df.copy()
-                    if "삭제" in remaining_df.columns:
-                        remaining_df = remaining_df[remaining_df["삭제"] == False]
+                    if is_admin: remaining_df = remaining_df[remaining_df.get("삭제", False) == False]
                     
                     for _, row in remaining_df.iterrows():
                         r_idx = int(row['sheet_row']) - 1
-                        
-                        # (1) 처리부서 수정
-                        if is_admin:
-                            for col in admin_fields:
-                                if col in headers:
-                                    all_data[r_idx][headers.index(col)] = str(row[col]) if row[col] is not None else ""
-                        
-                        # (2) 신청부서 수정 (방대한 전체 필드)
-                        if is_requester:
-                            # headers에 있는 모든 컬럼 중 admin_fields가 아닌 것들을 업데이트
-                            for col in headers:
-                                if col not in admin_fields and col in row:
-                                    all_data[r_idx][headers.index(col)] = str(row[col]) if row[col] is not None else ""
+                        for col_name in headers:
+                            if col_name in row:
+                                # 권한에 맞는 컬럼만 업데이트
+                                is_adm_col = col_name in admin_fields
+                                if (is_admin and is_adm_col) or (is_requester and not is_adm_col):
+                                    val = row[col_name]
+                                    all_data[r_idx][headers.index(col_name)] = str(val) if val is not None else ""
                     
-                    # 삭제 처리 (역순)
                     if deleted_rows_nums:
-                        for r_num in sorted([int(n) for n in deleted_rows_nums], reverse=True):
+                        for r_num in sorted(deleted_rows_nums, reverse=True):
                             del all_data[r_num - 1]
                     
-                    # 시트 업데이트
                     ws.clear()
                     ws.update('A1', all_data)
-                    st.success("데이터가 성공적으로 저장되었습니다."); st.cache_data.clear(); st.rerun()
+                    st.success("저장 완료!"); st.cache_data.clear(); st.rerun()
                 except Exception as e:
-                    st.error(f"저장 중 오류 발생: {e}")
+                    st.error(f"저장 중 오류: {e}")
 
 # [2-7] 신청서 섹션들 (사용중지 및 재고 로직 정밀 제어 버전)
 elif st.session_state.active_menu in ["사용중지", "신규입고", "대체입고", "삭제코드변경", "단가인하▼", "단가인상▲"]:
