@@ -259,43 +259,51 @@ if st.session_state.active_menu == "📊 진행현황":
         
         edit_df_view = db_df.copy()
         
-        # 날짜 타입 변환 (에디터 내에서 달력 기능을 쓰기 위함)
+        # 날짜 타입 변환
         edit_df_view['처리일'] = pd.to_datetime(edit_df_view['처리일'], errors='coerce').dt.date
         edit_df_view['신청일'] = pd.to_datetime(edit_df_view['신청일'], errors='coerce').dt.date
         
         edit_df_view['sheet_row'] = range(2, len(edit_df_view) + 2)
         edit_df_view = edit_df_view.iloc[::-1] # 최신순 정렬
         
-        # [순서유지] 진행상황 - 거래명세표 - 제품코드1 순서 고정
-        all_cols = edit_df_view.columns.tolist()
-        if "진행상황" in all_cols and "거래명세표" in all_cols and "제품코드1" in all_cols:
-            all_cols.remove("거래명세표")
-            idx_status = all_cols.index("진행상황")
-            all_cols.insert(idx_status + 1, "거래명세표")
-            edit_df_view = edit_df_view[all_cols]
+        # --- [순서 재배치 로직] ---
+        # 사용자 요청 순서: 신청구분 - 신청일 - 신청자 - 처리일 - 처리자 - 진행상황 - 요청사항(신청부서) - 전달사항(처리부서) - 제품코드1 - 제품명1
+        base_cols = ["신청구분", "신청일", "신청자", "처리일", "처리자", "진행상황", "요청사항(신청부서)", "전달사항(처리부서)", "제품코드1", "제품명1"]
+        existing_cols = edit_df_view.columns.tolist()
+        
+        # 정의된 순서대로 컬럼 구성 (존재하는 컬럼만)
+        ordered_cols = [c for c in base_cols if c in existing_cols]
+        # 나머지 컬럼들 추가 (중복 제거)
+        remaining_cols = [c for c in existing_cols if c not in ordered_cols and c != 'sheet_row']
+        final_col_order = ordered_cols + remaining_cols + ['sheet_row']
+        
+        edit_df_view = edit_df_view[final_col_order]
         
         # 체크박스 및 삭제 컬럼 삽입
         edit_df_view.insert(0, "상세조회", False)
         if is_admin: 
             edit_df_view.insert(1, "삭제", False)
         
-        # --- [부서별 권한 설정] ---
+        # --- [부서별 권한 및 컬럼 설정] ---
         col_cfg = {
             "상세조회": st.column_config.CheckboxColumn("조회", width="small", disabled=False),
-            # 처리부서(1452) 전용 편집 항목
-            "진행상황": st.column_config.SelectboxColumn("진행상황", options=OP_STATUS, width="100", disabled=not is_admin),
-            "처리자": st.column_config.SelectboxColumn("처리자", options=OP_PROCESSORS, width="100", disabled=not is_admin),
-            "처리일": st.column_config.DateColumn("처리일", format="YYYY-MM-DD", width="small", disabled=not is_admin),
-            
-            # 신청부서(7410) 전용 편집 항목 (기존 순서 및 링크 유지)
-            "거래명세표": st.column_config.LinkColumn("거래명세표🔗", width="100", display_text="파일 열기", disabled=not is_requester),
+            # 신청부서(7410) 권한 항목
             "신청구분": st.column_config.SelectboxColumn("신청구분", 
                         options=["사용중지", "신규입고", "대체입고", "삭제코드변경", "단가인하▼", "단가인상▲"], 
                         width="100", disabled=not is_requester),
             "신청일": st.column_config.DateColumn("신청일", format="YYYY-MM-DD", width="small", disabled=not is_requester),
             "신청자": st.column_config.TextColumn("신청자", width="small", disabled=not is_requester),
+            "요청사항(신청부서)": st.column_config.TextColumn("요청사항(신청부서)", width="200", disabled=not is_requester),
+            "거래명세표": st.column_config.LinkColumn("거래명세표🔗", width="100", display_text="파일 열기", disabled=not is_requester),
             "제품코드1": st.column_config.TextColumn("제품코드1", width="small", disabled=not is_requester),
             "제품명1": st.column_config.TextColumn("제품명1", width="250", disabled=not is_requester),
+            
+            # 처리부서(1452) 권한 항목
+            "진행상황": st.column_config.SelectboxColumn("진행상황", options=OP_STATUS, width="100", disabled=not is_admin),
+            "처리자": st.column_config.SelectboxColumn("처리자", options=OP_PROCESSORS, width="100", disabled=not is_admin),
+            "처리일": st.column_config.DateColumn("처리일", format="YYYY-MM-DD", width="small", disabled=not is_admin),
+            "전달사항(처리부서)": st.column_config.TextColumn("전달사항(처리부서)", width="200", disabled=not is_admin),
+            
             "sheet_row": None
         }
         if is_admin: 
@@ -308,7 +316,7 @@ if st.session_state.active_menu == "📊 진행현황":
             hide_index=True, 
             use_container_width=True, 
             height=520, 
-            key="main_editor_v8"
+            key="main_editor_v9"
         )
         
         # 상세 조회 (4열 보기)
@@ -323,14 +331,12 @@ if st.session_state.active_menu == "📊 진행현황":
                         st.markdown(f'<div class="detail-card"><div class="detail-label">{lbl}</div><div class="detail-value">{val}</div></div>', unsafe_allow_html=True)
                 st.divider()
 
-        # [저장 로직] - 429 에러 방지용 배치 업데이트 버전
+        # [저장 로직]
         if is_admin or is_requester:
             if st.button("💾 변경사항 최종 반영하기", use_container_width=True):
                 try:
                     ss = get_spreadsheet()
                     ws = ss.worksheet("New_stop")
-                    
-                    # 1. 시트 전체 데이터를 한 번에 가져옴 (API 호출 최소화)
                     all_data = ws.get_all_values()
                     if not all_data:
                         st.error("데이터를 불러올 수 없습니다.")
@@ -338,39 +344,39 @@ if st.session_state.active_menu == "📊 진행현황":
                     
                     headers = all_data[0]
                     
-                    # 2. 삭제 대상 행 번호 추출 (관리자 전용)
+                    # 삭제 대상 행 번호 추출 (관리자 전용)
                     deleted_rows_nums = []
                     if is_admin and "삭제" in edited_df.columns:
                         deleted_rows_nums = edited_df[edited_df["삭제"] == True]['sheet_row'].tolist()
                         deleted_rows_nums = [int(r) for r in deleted_rows_nums]
                     
-                    # 3. 업데이트 처리 (메모리 상의 리스트를 수정 - API 호출 없음)
+                    # 업데이트 처리
                     remaining_df = edited_df.copy()
                     if "삭제" in remaining_df.columns:
                         remaining_df = remaining_df[remaining_df["삭제"] == False]
                     
                     for _, row in remaining_df.iterrows():
-                        r_idx = int(row['sheet_row']) - 1 # 리스트 인덱스로 변환
+                        r_idx = int(row['sheet_row']) - 1
                         
                         if is_admin:
                             # 관리자(처리부서) 수정 항목 반영
                             if "진행상황" in headers: all_data[r_idx][headers.index("진행상황")] = str(row["진행상황"])
                             if "처리자" in headers: all_data[r_idx][headers.index("처리자")] = str(row["처리자"])
                             if "처리일" in headers: all_data[r_idx][headers.index("처리일")] = str(row["처리일"]) if row["처리일"] else ""
+                            if "전달사항(처리부서)" in headers: all_data[r_idx][headers.index("전달사항(처리부서)")] = str(row["전달사항(처리부서)"])
                         
                         if is_requester:
                             # 신청부서 수정 항목 반영
-                            update_cols = ["신청구분", "신청일", "신청자", "제품코드1", "제품명1", "거래명세표"]
-                            for col_name in update_cols:
+                            req_update_cols = ["신청구분", "신청일", "신청자", "요청사항(신청부서)", "제품코드1", "제품명1", "거래명세표"]
+                            for col_name in req_update_cols:
                                 if col_name in headers:
                                     all_data[r_idx][headers.index(col_name)] = str(row[col_name]) if row[col_name] else ""
                     
-                    # 4. 삭제 대상 행을 리스트에서 제거 (인덱스 꼬임 방지를 위해 큰 번호부터 삭제)
+                    # 삭제 실행
                     if deleted_rows_nums:
                         for r_num in sorted(deleted_rows_nums, reverse=True):
                             del all_data[r_num - 1]
                     
-                    # 5. 시트 전체를 한 번에 업데이트 (API 호출 1회 - 할당량 에러 해결 포인트)
                     ws.clear()
                     ws.update('A1', all_data)
                     
