@@ -260,7 +260,7 @@ if st.session_state.active_menu == "📊 진행현황":
         edit_df_view = db_df.copy()
         
         # 날짜 타입 변환 (에디터 내에서 달력 기능을 쓰기 위함)
-        edit_df_view['완료일'] = pd.to_datetime(edit_df_view['완료일'], errors='coerce').dt.date
+        edit_df_view['처리일'] = pd.to_datetime(edit_df_view['처리일'], errors='coerce').dt.date
         edit_df_view['신청일'] = pd.to_datetime(edit_df_view['신청일'], errors='coerce').dt.date
         
         edit_df_view['sheet_row'] = range(2, len(edit_df_view) + 2)
@@ -284,8 +284,8 @@ if st.session_state.active_menu == "📊 진행현황":
             "상세조회": st.column_config.CheckboxColumn("조회", width="small", disabled=False),
             # 처리부서(1452) 전용 편집 항목
             "진행상황": st.column_config.SelectboxColumn("진행상황", options=OP_STATUS, width="100", disabled=not is_admin),
-            "완료자": st.column_config.SelectboxColumn("완료자", options=OP_PROCESSORS, width="100", disabled=not is_admin),
-            "완료일": st.column_config.DateColumn("완료일", format="YYYY-MM-DD", width="small", disabled=not is_admin),
+            "처리자": st.column_config.SelectboxColumn("처리자", options=OP_PROCESSORS, width="100", disabled=not is_admin),
+            "처리일": st.column_config.DateColumn("처리일", format="YYYY-MM-DD", width="small", disabled=not is_admin),
             
             # 신청부서(7410) 전용 편집 항목 (기존 순서 및 링크 유지)
             "거래명세표": st.column_config.LinkColumn("거래명세표🔗", width="100", display_text="파일 열기", disabled=not is_requester),
@@ -355,8 +355,8 @@ if st.session_state.active_menu == "📊 진행현황":
                         if is_admin:
                             # 관리자(처리부서) 수정 항목 반영
                             if "진행상황" in headers: all_data[r_idx][headers.index("진행상황")] = str(row["진행상황"])
-                            if "완료자" in headers: all_data[r_idx][headers.index("완료자")] = str(row["완료자"])
-                            if "완료일" in headers: all_data[r_idx][headers.index("완료일")] = str(row["완료일"]) if row["완료일"] else ""
+                            if "처리자" in headers: all_data[r_idx][headers.index("처리자")] = str(row["처리자"])
+                            if "처리일" in headers: all_data[r_idx][headers.index("처리일")] = str(row["처리일"]) if row["처리일"] else ""
                         
                         if is_requester:
                             # 신청부서 수정 항목 반영
