@@ -165,7 +165,16 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
     st.divider()
-    app_user = st.text_input("신청자 성명", key="global_user")
+    
+    # [수정된 부분] 신청자 성명 드롭다운 및 직접입력 로직
+    user_options = ["", "김영국", "허은아", "한승주", "이소영", "변혜진", "직접입력"]
+    selected_user = st.selectbox("신청자 성명 선택", user_options, key="sel_user")
+    
+    if selected_user == "직접입력":
+        app_user = st.text_input("성명 직접 입력", key="global_user")
+    else:
+        app_user = selected_user
+        
     app_date = st.date_input("날짜 선택", datetime.now(), key="global_date").strftime('%Y-%m-%d')
     st.divider()
     
@@ -180,34 +189,31 @@ with st.sidebar:
     if col6.button("단가인상▲"): set_menu("단가인상▲")
     if st.button("📝 거래명세표요청", use_container_width=True): set_menu("거래명세표요청")
 
-# --- 6. 헬퍼 함수 ---
-def get_drug_info(edi_code):
-    if not edi_code or master_df.empty: return {}
-    target = master_df[master_df['제품코드'] == str(edi_code).strip().zfill(9)]
-    return target.iloc[0].to_dict() if not target.empty else {}
+# --- 6. 헬퍼 함수 (SMS 로직 추가) ---
 
-def render_drug_table(edi_val, drug_num=1, label="약제 정보"):
-    m = get_drug_info(edi_val)
-    st.markdown(f"**{label}**")
-    price = str(m.get("상한금액", "-")).replace(',', '')
-    table_html = f"""<table class="drug-table">
-        <tr><th>제품코드{drug_num}</th><th>제품명{drug_num}</th><th>업체명{drug_num}</th><th>규격{drug_num}</th></tr>
-        <tr><td>{str(edi_val) if edi_val else "-"}</td><td class="blue-cell">{m.get("제품명", "-")}</td><td>{m.get("업체명", "-")}</td><td>{m.get("규격", "-")}</td></tr>
-        <tr><th>단위{drug_num}</th><th>상한금액{drug_num}</th><th>주성분명{drug_num}</th><th>의약품 구분{drug_num}</th></tr>
-        <tr><td>{m.get("단위", "-")}</td><td class="red-cell">{price} 원</td><td>{m.get("주성분명", "-")}</td><td>{m.get("전일", "-")}</td></tr>
-    </table>"""
-    st.markdown(table_html, unsafe_allow_html=True)
-    return {
-        f"제품코드{drug_num}": str(edi_val), f"제품명{drug_num}": m.get("제품명", ""), f"업체명{drug_num}": m.get("업체명", ""),
-        f"규격{drug_num}": m.get("규격", ""), f"단위{drug_num}": m.get("단위", ""), f"상한금액{drug_num}": price,
-        f"주성분명{drug_num}": m.get("주성분명", ""), f"전일{drug_num}": m.get("전일", "")
-    }
+# 직원별 연락처 매핑 (실제 번호로 수정 필요)
+STAFF_PHONES = {
+    "변혜진": "010-4526-9569",
+    "이소영": "010-4526-9569",
+    "한승주": "010-4526-9569",
+    "김영국": "010-4526-9569",
+    "허은아": "010-4526-9569"
+}
+
+def send_sms_notification(target_name, message):
+    """
+    실제 SMS 발송 서비스(예: 알리고, CoolSMS)의 API를 호출하는 영역입니다.
+    지금은 시스템 로그(st.info)에만 표시됩니다.
+    """
+    phone = STAFF_PHONES.get(target_name, "000-0000-0000")
+    # [API 연동 지점] 여기에 API 호출 코드를 넣으세요.
+    print(f"SMS 발송 대상: {target_name}({phone}), 메시지: {message}")
+    # st.toast(f"📱 {target_name}님께 문자 발송: {message}") # 사용자에게 알림 시 주석 해제
 
 def handle_safe_submit(category, data_dict):
     if not app_user: 
         st.error("신청자 성명을 입력해주세요."); return
     
-    # 처리 중 상태 표시 시작
     with st.status(f"🚀 [{category}] 신청서를 접수 중입니다...", expanded=True) as status:
         try:
             ss = get_spreadsheet()
@@ -224,7 +230,11 @@ def handle_safe_submit(category, data_dict):
             row_to_append = [str(data_dict.get(h, "")) for h in headers]
             ws.append_row(row_to_append, value_input_option='RAW')
             
-            # 완료 상태로 업데이트
+            # [추가된 기능] 신규 신청 시 관리자(변혜진, 이소영)에게 알림
+            sms_msg = f"[약제신청] {app_user}님이 {category}를 신청했습니다."
+            send_sms_notification("변혜진", sms_msg)
+            send_sms_notification("이소영", sms_msg)
+            
             status.update(label=f"✅ [{category}] 접수가 완료되었습니다!", state="complete", expanded=False)
             st.success(f"[{category}] 접수 완료!"); st.balloons()
             st.cache_data.clear()
@@ -261,24 +271,21 @@ with t_col4:
 
 # --- 8. 메인 컨텐츠 영역 ---
 
-# [1] 진행현황 (위에서 수정된 내용 유지)
+# [1] 진행현황
 if st.session_state.active_menu == "📊 진행현황":
     st.markdown('<div class="section-header">📊 통합 신청 및 처리 현황</div>', unsafe_allow_html=True)
     db_df = load_db_data()
     
-    # 권한 설정 확인
     is_requester = (st.session_state.get("auth_req") == "7410")
     is_admin = (st.session_state.get("auth_admin") == "1452")
     
     if not db_df.empty:
-        # 검색 기능
         search = st.text_input("🔍 검색 (제품명, 신청자 등)", key="dash_search")
         if search: 
             db_df = db_df[db_df.apply(lambda r: r.astype(str).str.contains(search).any(), axis=1)]
         
         edit_df_view = db_df.copy()
 
-        # --- [1. 타입 호환성 에러 해결을 위한 데이터 전처리] ---
         date_cols = ['처리일', '신청일', '사용중지일1', '반품예정일1', '입고일1', '코드사용시작일1', '입고일2', '코드사용시작일2']
         for col in date_cols:
             if col in edit_df_view.columns:
@@ -291,7 +298,7 @@ if st.session_state.active_menu == "📊 진행현황":
         edit_df_view['sheet_row'] = range(2, len(edit_df_view) + 2)
         edit_df_view = edit_df_view.iloc[::-1] 
         
-        # --- [2. 컬럼 순서 재배치] ---
+        # 컬럼 순서 재배치 (요청사항-전달사항-거래명세표-제품코드1 순서 유지)
         core_fields = ["신청구분", "신청일", "신청자", "처리일", "처리자", "진행상황", "요청사항(신청부서)", "전달사항(처리부서)", "거래명세표", "제품코드1", "제품명1"]
         extra_fields = [
             "업체명1", "규격1", "단위1", "상한금액1", "주성분명1", "전일1", "원내구분1", "급여구분1", "구입처1", "개당입고가1", 
@@ -312,7 +319,6 @@ if st.session_state.active_menu == "📊 진행현황":
         edit_df_view.insert(0, "상세조회", False)
         if is_admin: edit_df_view.insert(1, "삭제", False)
         
-        # --- [3. 컬럼 설정 및 너비 설정] ---
         c_cfg = {"상세조회": st.column_config.CheckboxColumn("조회", width="small"), "sheet_row": None}
         admin_fields = ["진행상황", "처리자", "처리일", "전달사항(처리부서)"]
         
@@ -328,14 +334,6 @@ if st.session_state.active_menu == "📊 진행현황":
                 c_cfg[f] = st.column_config.SelectboxColumn(f, options=["사용중지", "신규입고", "대체입고", "삭제코드변경", "단가인하▼", "단가인상▲", "거래명세표요청"], disabled=not can_edit)
             elif f in date_cols: 
                 c_cfg[f] = st.column_config.DateColumn(f, format="YYYY-MM-DD", disabled=not can_edit)
-            elif f == "요청사항(신청부서)":
-                c_cfg[f] = st.column_config.TextColumn(f, width="medium", disabled=not can_edit)
-            elif f == "전달사항(처리부서)":
-                c_cfg[f] = st.column_config.TextColumn(f, width="medium", disabled=not can_edit)
-            elif f in ["원내구분1", "원내구분2"]:
-                c_cfg[f] = st.column_config.SelectboxColumn(f, options=OP_INSIDE_OUT, disabled=not can_edit)
-            elif f in ["재고여부1", "급여구분1", "급여구분2"]:
-                c_cfg[f] = st.column_config.SelectboxColumn(f, options=["유", "무"] if "재고" in f else ["급여", "비급여"], disabled=not can_edit)
             elif f == "거래명세표":
                 c_cfg[f] = st.column_config.LinkColumn(f, display_text="파일 열기", disabled=not can_edit)
             else:
@@ -343,31 +341,10 @@ if st.session_state.active_menu == "📊 진행현황":
 
         if is_admin: c_cfg["삭제"] = st.column_config.CheckboxColumn("삭제", width="small")
 
-        edited_df = st.data_editor(
-            edit_df_view, 
-            column_config=c_cfg, 
-            hide_index=True, 
-            use_container_width=True, 
-            height=600, 
-            key="main_editor_v15"
-        )
+        edited_df = st.data_editor(edit_df_view, column_config=c_cfg, hide_index=True, use_container_width=True, height=600, key="main_editor_v15")
         
-        # 상세 조회 처리
-        selected_rows = edited_df[edited_df["상세조회"] == True]
-        if not selected_rows.empty:
-            st.markdown('<div class="section-header">🔍 선택 항목 상세 정보</div>', unsafe_allow_html=True)
-            for _, row in selected_rows.iterrows():
-                valid_items = [(k, v) for k, v in row.items() if str(v).strip() and k not in ["상세조회", "삭제", "sheet_row"]]
-                cols = st.columns(4)
-                for idx, (lbl, val) in enumerate(valid_items):
-                    with cols[idx % 4]:
-                        st.markdown(f'<div class="detail-card"><div class="detail-label">{lbl}</div><div class="detail-value">{val}</div></div>', unsafe_allow_html=True)
-                st.divider()
-
-        # [저장 로직]
         if is_admin or is_requester:
             if st.button("💾 변경사항 DB에 통합 저장하기", use_container_width=True):
-                # 저장 프로세스 상태 표시
                 with st.status("🔄 DB에 변경사항을 저장 중입니다...", expanded=True) as status:
                     try:
                         ss = get_spreadsheet()
@@ -375,23 +352,39 @@ if st.session_state.active_menu == "📊 진행현황":
                         all_data = ws.get_all_values()
                         headers = all_data[0]
                         
-                        deleted_rows_nums = [int(r) for r in edited_df[edited_df.get("삭제", False) == True]['sheet_row'].tolist()] if is_admin else []
+                        # [알림 로직] 변경 전 데이터를 가져와서 진행상황이 '처리완료'로 바뀌었는지 확인
+                        old_data_map = {str(row['sheet_row']): row for _, row in edit_df_view.iterrows()}
                         
                         remaining_df = edited_df.copy()
                         if is_admin: remaining_df = remaining_df[remaining_df.get("삭제", False) == False]
                         
                         for _, row in remaining_df.iterrows():
+                            row_id = str(row['sheet_row'])
+                            new_status = row.get("진행상황", "")
+                            old_status = old_data_map.get(row_id, {}).get("진행상황", "")
+                            applicant = row.get("신청자", "")
+                            
+                            # [추가된 기능] '처리완료'로 변경 시 신청자에게 알림
+                            if "🟢처리완료" in str(new_status) and "🟢처리완료" not in str(old_status):
+                                drug_name = row.get("제품명1", "약제")
+                                sms_msg = f"[처리완료] {applicant}님, 요청하신 {drug_name} 처리가 완료되었습니다."
+                                send_sms_notification(applicant, sms_msg)
+
+                            # DB 데이터 업데이트
                             r_idx = int(row['sheet_row']) - 1
                             for col_name in headers:
                                 if col_name in row:
                                     is_adm_col = col_name in admin_fields
-                                    if (is_admin and is_adm_col) or (is_requester and not is_adm_col):
+                                    if (is_admin and is_adm_col) or (is_requester and not is_admin_col):
                                         val = row[col_name]
                                         all_data[r_idx][headers.index(col_name)] = str(val) if val is not None else ""
                         
-                        if deleted_rows_nums:
-                            for r_num in sorted(deleted_rows_nums, reverse=True):
-                                del all_data[r_num - 1]
+                        # 삭제 처리
+                        if is_admin:
+                            deleted_rows_nums = [int(r) for r in edited_df[edited_df.get("삭제", False) == True]['sheet_row'].tolist()]
+                            if deleted_rows_nums:
+                                for r_num in sorted(deleted_rows_nums, reverse=True):
+                                    del all_data[r_num - 1]
                         
                         ws.clear()
                         ws.update('A1', all_data)
