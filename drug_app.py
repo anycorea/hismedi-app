@@ -130,6 +130,7 @@ def load_db_data():
 master_df = load_master_data()
 
 # --- 3. 옵션 리스트 ---
+OP_USERS = ["", "김영국", "허은아", "한승주", "이소영", "변혜진", "직접 입력"] # 신청자 리스트 추가
 OP_INSIDE_OUT = ["원내", "원외", "원내/외"]
 OP_STATUS = ["🔴신청완료", "🟡처리중", "🟢처리완료"]
 OP_PROCESSORS = ["", "한승주 팀장", "이소영 대리", "변혜진 주임"]
@@ -165,7 +166,14 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
     st.divider()
-    app_user = st.text_input("신청자 성명", key="global_user")
+
+    # 신청자 성명 선택/입력 로직
+    user_sel = st.selectbox("신청자 성명", options=OP_USERS, key="user_dropdown")
+    if user_sel == "직접 입력":
+        app_user = st.text_input("성명을 입력하세요", key="manual_user")
+    else:
+        app_user = user_sel # 드롭다운에서 선택한 값이 그대로 app_user가 됨
+
     app_date = st.date_input("날짜 선택", datetime.now(), key="global_date").strftime('%Y-%m-%d')
     st.divider()
     
