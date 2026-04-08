@@ -245,34 +245,25 @@ if st.session_state.active_menu == "📊 진행현황":
     db_df = load_db_data()
     is_requester = (st.session_state.get("auth_req") == "7410")
     is_admin = (st.session_state.get("auth_admin") == "1452")
-    
     if not db_df.empty:
         search = st.text_input("🔍 검색 (제품명, 신청자 등)", key="dash_search")
-        if search: 
-            db_df = db_df[db_df.apply(lambda r: r.astype(str).str.contains(search).any(), axis=1)]
-        
+        if search: db_df = db_df[db_df.apply(lambda r: r.astype(str).str.contains(search).any(), axis=1)]
         edit_df_view = db_df.copy()
         date_cols = ['처리일', '신청일', '사용중지일1', '반품예정일1', '입고일1', '코드사용시작일1', '입고일2', '코드사용시작일2']
         for col in date_cols:
             if col in edit_df_view.columns: edit_df_view[col] = pd.to_datetime(edit_df_view[col], errors='coerce').dt.date
-
         for col in edit_df_view.columns:
-            if col in ["진행상황", "신청구분", "처리자", "원내구분1", "재고여부1", "급여구분1"]:
-                edit_df_view[col] = edit_df_view[col].astype(str).str.strip()
-
+            if col in ["진행상황", "신청구분", "처리자", "원내구분1", "재고여부1", "급여구분1"]: edit_df_view[col] = edit_df_view[col].astype(str).str.strip()
         edit_df_view['sheet_row'] = range(2, len(edit_df_view) + 2)
         edit_df_view = edit_df_view.iloc[::-1] 
-        
         core_fields = ["신청구분", "신청일", "신청자", "처리일", "처리자", "진행상황", "요청사항(신청부서)", "전달사항(처리부서)", "거래명세표", "제품코드1", "제품명1"]
         extra_fields = ["업체명1", "규격1", "단위1", "상한금액1", "주성분명1", "전일1", "원내구분1", "급여구분1", "구입처1", "개당입고가1", "사용중지일1", "사용중지사유1", "사용중지사유_기타1", "변경내용1", "재고여부1", "재고처리방법1", "재고량1", "반품가능여부1", "반품불가사유1", "반품예정일1", "반품량1", "코드중지기준1", "신규약제와병용사용1", "입고요청진료과1", "원내유무(동일성분)1", "입고요청사유1", "사용기간1", "입고일1", "인상전입고가1", "코드사용시작일1", "상한가외입고사유1", "제품코드2", "제품명2", "업체명2", "규격2", "단위2", "상한금액2", "주성분명2", "전일2", "원내구분2", "급여구분2", "구입처2", "개당입고가2", "입고요청사유2", "코드사용시작일2", "상한가외입고사유2", "기존약제와병용사용2", "사용기간2", "입고일2"]
         all_ex = edit_df_view.columns.tolist()
         f_order = [c for c in core_fields if c in all_ex] + [c for c in extra_fields if c in all_ex and c not in core_fields]
         rem = [c for c in all_ex if c not in f_order and c != 'sheet_row']
         edit_df_view = edit_df_view[f_order + rem + ['sheet_row']]
-        
         edit_df_view.insert(0, "상세조회", False)
         if is_admin: edit_df_view.insert(1, "삭제", False)
-        
         c_cfg = {"상세조회": st.column_config.CheckboxColumn("조회", width="small"), "sheet_row": None}
         admin_fields = ["진행상황", "처리자", "처리일", "전달사항(처리부서)"]
         for f in [c for c in edit_df_view.columns if c not in ["상세조회", "삭제", "sheet_row"]]:
@@ -283,10 +274,23 @@ if st.session_state.active_menu == "📊 진행현황":
             elif f in date_cols: c_cfg[f] = st.column_config.DateColumn(f, format="YYYY-MM-DD", disabled=not can_ed)
             elif f == "거래명세표": c_cfg[f] = st.column_config.LinkColumn(f, display_text="파일 열기", disabled=not can_ed)
             else: c_cfg[f] = st.column_config.TextColumn(f, disabled=not can_ed)
-        
         if is_admin: c_cfg["삭제"] = st.column_config.CheckboxColumn("삭제", width="small")
+        
         edited_df = st.data_editor(edit_df_view, column_config=c_cfg, hide_index=True, use_container_width=True, height=600, key="main_editor_v15")
         
+        # --- [추가된 상세 조회 로직] ---
+        selected_rows = edited_df[edited_df["상세조회"] == True]
+        if not selected_rows.empty:
+            st.markdown('<div class="section-header">🔍 선택 항목 상세 정보</div>', unsafe_allow_html=True)
+            for _, row in selected_rows.iterrows():
+                valid_items = [(k, v) for k, v in row.items() if str(v).strip() and k not in ["상세조회", "삭제", "sheet_row"]]
+                cols = st.columns(4)
+                for idx, (lbl, val) in enumerate(valid_items):
+                    with cols[idx % 4]:
+                        st.markdown(f'<div class="detail-card"><div class="detail-label">{lbl}</div><div class="detail-value">{val}</div></div>', unsafe_allow_html=True)
+                st.divider()
+        # -----------------------------
+
         if is_admin or is_requester:
             if st.button("💾 변경사항 DB에 통합 저장하기", use_container_width=True):
                 with st.status("🔄 DB에 저장 중...", expanded=True) as status:
@@ -294,18 +298,15 @@ if st.session_state.active_menu == "📊 진행현황":
                         ss = get_spreadsheet(); ws = ss.worksheet("New_stop"); all_data = ws.get_all_values(); headers = all_data[0]
                         remaining_df = edited_df.copy()
                         if is_admin: remaining_df = remaining_df[remaining_df.get("삭제", False) == False]
-                        
                         for _, row in remaining_df.iterrows():
                             r_idx = int(row['sheet_row']) - 1
                             for col_n in headers:
                                 if col_n in row:
                                     if (is_admin and col_n in admin_fields) or (is_requester and col_n not in admin_fields):
                                         all_data[r_idx][headers.index(col_n)] = str(row[col_n]) if row[col_n] is not None else ""
-                        
                         if is_admin:
                             del_rows = [int(r) for r in edited_df[edited_df.get("삭제", False) == True]['sheet_row'].tolist()]
                             for r_num in sorted(del_rows, reverse=True): del all_data[r_num - 1]
-                        
                         ws.clear(); ws.update(values=all_data, range_name='A1')
                         status.update(label="✅ 저장 완료!", state="complete", expanded=False)
                         st.success("저장 완료!"); st.cache_data.clear(); st.rerun()
