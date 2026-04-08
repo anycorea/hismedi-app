@@ -9,14 +9,14 @@ from datetime import datetime
 # --- [지메일 알림 설정] ---
 # 직원별 이메일 주소 매핑
 STAFF_EMAILS = {
-    "변혜진": "hismedi681@gmail.com",
-    "이소영": "hismedi681@gmail.com",
-    "한승주": "hismedi681@gmail.com",
-    "김영국": "hismedi681@gmail.com",
-    "허은아": "hismedi681@gmail.com"
+    "변혜진": "hismedi11@gmail.com",
+    "이소영": "hismedi11@gmail.com",
+    "한승주": "hismedi11@gmail.com",
+    "김영국": "hismedi11@gmail.com",
+    "허은아": "hismedi11@gmail.com"
 }
 # 신규 신청 시 알림을 받을 관리자 메일 리스트
-ADMIN_EMAILS = ["hismedi681@gmail.com"]
+ADMIN_EMAILS = ["hismedi11@gmail.com"]
 
 def send_gmail_notification(target_email, subject, body):
     """
