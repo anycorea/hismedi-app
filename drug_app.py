@@ -1,8 +1,41 @@
 import streamlit as st
 import gspread
 import pandas as pd
+import smtplib
+from email.mime.text import MIMEText
 from google.oauth2.service_account import Credentials
 from datetime import datetime
+
+# --- [지메일 알림 설정] ---
+# 직원별 이메일 주소 매핑 (실제 주소로 수정 필수)
+STAFF_EMAILS = {
+    "변혜진": "hismedi681@gmail.com",
+    "이소영": "hismedi681@gmail.com",
+    "한승주": "hismedi681@gmail.com",
+    "김영국": "hismedi681@gmail.com",
+    "허은아": "hismedi681@gmail.com"
+}
+# 신규 신청 시 알림을 받을 관리자 메일 리스트
+ADMIN_EMAILS = ["hismedi681@gmail.com", "hismedi681@gmail.com"]
+
+def send_gmail_notification(target_email, subject, body):
+    """
+    Gmail SMTP를 이용해 푸시 알림 메일을 보냅니다.
+    """
+    sender_email = "hismedi681@gmail.com"  # 발신용 지메일 주소
+    sender_password = "qqkfnuvqouxegjbj"  # 구글에서 발급받은 16자리 앱 비밀번호
+
+    try:
+        msg = MIMEText(body)
+        msg['Subject'] = subject
+        msg['From'] = sender_email
+        msg['To'] = target_email
+
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(sender_email, sender_password)
+            server.sendmail(sender_email, target_email, msg.as_string())
+    except Exception as e:
+        print(f"메일 발송 실패: {e}")
 
 # --- 1. 페이지 설정 및 디자인 ---
 st.set_page_config(page_title="HISMEDI Drug Service", layout="wide")
@@ -191,25 +224,6 @@ with st.sidebar:
 
 # --- 6. 헬퍼 함수 (SMS 로직 추가) ---
 
-# 직원별 연락처 매핑 (실제 번호로 수정 필요)
-STAFF_PHONES = {
-    "변혜진": "010-4526-9569",
-    "이소영": "010-4526-9569",
-    "한승주": "010-4526-9569",
-    "김영국": "010-4526-9569",
-    "허은아": "010-4526-9569"
-}
-
-def send_sms_notification(target_name, message):
-    """
-    실제 SMS 발송 서비스(예: 알리고, CoolSMS)의 API를 호출하는 영역입니다.
-    지금은 시스템 로그(st.info)에만 표시됩니다.
-    """
-    phone = STAFF_PHONES.get(target_name, "000-0000-0000")
-    # [API 연동 지점] 여기에 API 호출 코드를 넣으세요.
-    print(f"SMS 발송 대상: {target_name}({phone}), 메시지: {message}")
-    # st.toast(f"📱 {target_name}님께 문자 발송: {message}") # 사용자에게 알림 시 주석 해제
-
 def handle_safe_submit(category, data_dict):
     if not app_user: 
         st.error("신청자 성명을 입력해주세요."); return
@@ -230,10 +244,11 @@ def handle_safe_submit(category, data_dict):
             row_to_append = [str(data_dict.get(h, "")) for h in headers]
             ws.append_row(row_to_append, value_input_option='RAW')
             
-            # [추가된 기능] 신규 신청 시 관리자(변혜진, 이소영)에게 알림
-            sms_msg = f"[약제신청] {app_user}님이 {category}를 신청했습니다."
-            send_sms_notification("변혜진", sms_msg)
-            send_sms_notification("이소영", sms_msg)
+            # [알림 추가] 신규 신청 시 관리자(변혜진, 이소영)에게 메일 발송
+            email_subject = f"[약제신청] {app_user}님의 신규 접수 ({category})"
+            email_body = f"신청자: {app_user}\n구분: {category}\n날짜: {app_date}\n\n시스템에 접속하여 확인해 주세요."
+            for admin_mail in ADMIN_EMAILS:
+                send_gmail_notification(admin_mail, email_subject, email_body)
             
             status.update(label=f"✅ [{category}] 접수가 완료되었습니다!", state="complete", expanded=False)
             st.success(f"[{category}] 접수 완료!"); st.balloons()
@@ -286,6 +301,7 @@ if st.session_state.active_menu == "📊 진행현황":
         
         edit_df_view = db_df.copy()
 
+        # (전처리/컬럼배치 로직 동일... 중략)
         date_cols = ['처리일', '신청일', '사용중지일1', '반품예정일1', '입고일1', '코드사용시작일1', '입고일2', '코드사용시작일2']
         for col in date_cols:
             if col in edit_df_view.columns:
@@ -298,7 +314,6 @@ if st.session_state.active_menu == "📊 진행현황":
         edit_df_view['sheet_row'] = range(2, len(edit_df_view) + 2)
         edit_df_view = edit_df_view.iloc[::-1] 
         
-        # 컬럼 순서 재배치 (요청사항-전달사항-거래명세표-제품코드1 순서 유지)
         core_fields = ["신청구분", "신청일", "신청자", "처리일", "처리자", "진행상황", "요청사항(신청부서)", "전달사항(처리부서)", "거래명세표", "제품코드1", "제품명1"]
         extra_fields = [
             "업체명1", "규격1", "단위1", "상한금액1", "주성분명1", "전일1", "원내구분1", "급여구분1", "구입처1", "개당입고가1", 
@@ -325,19 +340,12 @@ if st.session_state.active_menu == "📊 진행현황":
         for f in [c for c in edit_df_view.columns if c not in ["상세조회", "삭제", "sheet_row"]]:
             is_admin_col = f in admin_fields
             can_edit = (is_admin and is_admin_col) or (is_requester and not is_admin_col)
-            
-            if f == "진행상황": 
-                c_cfg[f] = st.column_config.SelectboxColumn(f, options=OP_STATUS, disabled=not can_edit)
-            elif f == "처리자": 
-                c_cfg[f] = st.column_config.SelectboxColumn(f, options=OP_PROCESSORS, disabled=not can_edit)
-            elif f == "신청구분": 
-                c_cfg[f] = st.column_config.SelectboxColumn(f, options=["사용중지", "신규입고", "대체입고", "삭제코드변경", "단가인하▼", "단가인상▲", "거래명세표요청"], disabled=not can_edit)
-            elif f in date_cols: 
-                c_cfg[f] = st.column_config.DateColumn(f, format="YYYY-MM-DD", disabled=not can_edit)
-            elif f == "거래명세표":
-                c_cfg[f] = st.column_config.LinkColumn(f, display_text="파일 열기", disabled=not can_edit)
-            else:
-                c_cfg[f] = st.column_config.TextColumn(f, disabled=not can_edit)
+            if f == "진행상황": c_cfg[f] = st.column_config.SelectboxColumn(f, options=OP_STATUS, disabled=not can_edit)
+            elif f == "처리자": c_cfg[f] = st.column_config.SelectboxColumn(f, options=OP_PROCESSORS, disabled=not can_edit)
+            elif f == "신청구분": c_cfg[f] = st.column_config.SelectboxColumn(f, options=["사용중지", "신규입고", "대체입고", "삭제코드변경", "단가인하▼", "단가인상▲", "거래명세표요청"], disabled=not can_edit)
+            elif f in date_cols: c_cfg[f] = st.column_config.DateColumn(f, format="YYYY-MM-DD", disabled=not can_edit)
+            elif f == "거래명세표": c_cfg[f] = st.column_config.LinkColumn(f, display_text="파일 열기", disabled=not can_edit)
+            else: c_cfg[f] = st.column_config.TextColumn(f, disabled=not can_edit)
 
         if is_admin: c_cfg["삭제"] = st.column_config.CheckboxColumn("삭제", width="small")
 
@@ -352,7 +360,7 @@ if st.session_state.active_menu == "📊 진행현황":
                         all_data = ws.get_all_values()
                         headers = all_data[0]
                         
-                        # [알림 로직] 변경 전 데이터를 가져와서 진행상황이 '처리완료'로 바뀌었는지 확인
+                        # [알림용 데이터 확보] 변경 전 데이터를 저장해둡니다.
                         old_data_map = {str(row['sheet_row']): row for _, row in edit_df_view.iterrows()}
                         
                         remaining_df = edited_df.copy()
@@ -364,32 +372,33 @@ if st.session_state.active_menu == "📊 진행현황":
                             old_status = old_data_map.get(row_id, {}).get("진행상황", "")
                             applicant = row.get("신청자", "")
                             
-                            # [추가된 기능] '처리완료'로 변경 시 신청자에게 알림
+                            # [알림 로직] 상태가 '🟢처리완료'로 바뀌었을 때만 해당 신청자에게 메일 발송
                             if "🟢처리완료" in str(new_status) and "🟢처리완료" not in str(old_status):
-                                drug_name = row.get("제품명1", "약제")
-                                sms_msg = f"[처리완료] {applicant}님, 요청하신 {drug_name} 처리가 완료되었습니다."
-                                send_sms_notification(applicant, sms_msg)
+                                target_email = STAFF_EMAILS.get(applicant)
+                                if target_email:
+                                    drug_name = row.get("제품명1", "약제")
+                                    mail_subj = f"[처리완료] 요청하신 {drug_name} 신청이 완료되었습니다."
+                                    mail_body = f"{applicant}님, 요청하신 {drug_name} 관련 신청 건의 처리가 완료되었습니다.\n앱에서 상세 내용을 확인해 주세요."
+                                    send_gmail_notification(target_email, mail_subj, mail_body)
 
                             # DB 데이터 업데이트
                             r_idx = int(row['sheet_row']) - 1
                             for col_name in headers:
                                 if col_name in row:
                                     is_adm_col = col_name in admin_fields
-                                    if (is_admin and is_adm_col) or (is_requester and not is_admin_col):
+                                    if (is_admin and is_adm_col) or (is_requester and not is_adm_col):
                                         val = row[col_name]
                                         all_data[r_idx][headers.index(col_name)] = str(val) if val is not None else ""
                         
-                        # 삭제 처리
                         if is_admin:
                             deleted_rows_nums = [int(r) for r in edited_df[edited_df.get("삭제", False) == True]['sheet_row'].tolist()]
                             if deleted_rows_nums:
-                                for r_num in sorted(deleted_rows_nums, reverse=True):
-                                    del all_data[r_num - 1]
+                                for r_num in sorted(deleted_rows_nums, reverse=True): del all_data[r_num - 1]
                         
                         ws.clear()
                         ws.update('A1', all_data)
                         
-                        status.update(label="✅ 모든 변경사항이 성공적으로 저장되었습니다!", state="complete", expanded=False)
+                        status.update(label="✅ 모든 변경사항 및 알림 발송이 완료되었습니다!", state="complete", expanded=False)
                         st.success("변경사항 저장 완료!"); st.cache_data.clear(); st.rerun()
                     except Exception as e:
                         status.update(label="❌ 저장 실패", state="error")
