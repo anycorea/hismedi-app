@@ -4,12 +4,12 @@ import streamlit as st
 
 # 모바일 UI 최적화
 st.set_page_config(
-    page_title="허즈메디병원 주차등록 시스템",
+    page_title="히즈메디병원 주차등록 시스템",
     page_icon="🚗",
     layout="centered",
 )
 
-st.title("🚗 허즈메디병원 주차등록")
+st.title("🚗 히즈메디병원 주차등록")
 st.caption("진료 및 검진 방문객 전용 셀프 주차등록 시스템")
 
 # 세션 상태 초기화
