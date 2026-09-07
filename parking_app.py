@@ -138,17 +138,16 @@ if submitted:
       except Exception as e:
         st.error(f"주차 시스템 통신 오류: {e}")
 
-# 4. 차량 선택 및 3시간 자동 할인 등록
+# 4. 차량 선택 및 3시간 자동 할인 등록 (응답 디버깅 강화)
 if st.session_state.search_results:
   st.write("---")
   st.subheader("📋 본인 차량 선택 (3시간 할인 적용)")
 
   for item in st.session_state.search_results:
     car_full_no = item.get("carNo", "차량번호 없음")
-
-    # 정확한 입차시간 Key (`entryDateToString`) 적용
     in_time = item.get("entryDateToString") or "입차시간 없음"
     pe_id = item.get("id")
+    lot_area = item.get("iLotArea", "621")
 
     btn_label = f"🚘 {car_full_no} (입차: {in_time}) ➔ 3시간 할인 등록"
 
@@ -156,12 +155,15 @@ if st.session_state.search_results:
       session = get_authenticated_session()
 
       save_url = "http://115.21.205.117/discount/registration/save"
+
+      # 주차 서버 저장 요청 데이터
       save_payload = {
           "peId": pe_id,
-          "discountType": "2",  # 3시간 할인 코드
+          "discountType": "2",  # 3시간 할인 코드 (서버 설정값 확인 필요)
           "saveCnt": "1",
           "iCardType": "0",
           "carNo": car_full_no,
+          "iLotArea": lot_area,
           "acPlate2": "",
           "memo": "",
       }
@@ -169,14 +171,47 @@ if st.session_state.search_results:
       try:
         save_res = session.post(save_url, data=save_payload, timeout=5)
 
-        # 성공 처리 판단
-        if save_res.status_code == 200:
-          st.success(
-              f"🎉 [{car_full_no}] 차량에 3시간 주차 할인이 정상"
-              " 적용되었습니다!"
+        # 1) 서버 실제 Response JSON 확인
+        try:
+          res_json = save_res.json()
+
+          # 디버깅용: 서버가 반환한 실제 응답 전체 출력
+          st.warning(f"🔍 [서버 반환 데이터]: {res_json}")
+
+          # 서버의 성공/실패 여부 판단
+          # 보통 res_json 내부의 result, success, code, msg 등을 확인합니다.
+          is_success = (
+              res_json.get("result") == True
+              or res_json.get("code") == 0
+              or res_json.get("code") == "200"
+              or res_json.get("success") == True
           )
-          st.session_state.search_results = None
-        else:
-          st.error("❌ 주차 할인 처리에 실패했습니다. 카운터에 문의해 주세요.")
+
+          if is_success:
+            st.success(
+                f"🎉 [{car_full_no}] 차량에 3시간 주차 할인이 정상"
+                " 적용되었습니다!"
+            )
+            st.session_state.search_results = None
+          else:
+            err_msg = (
+                res_json.get("msg")
+                or res_json.get("message")
+                or "원인 미상 (서버 응답 참고)"
+            )
+            st.error(f"❌ 주차 할인 등록 실패: {err_msg}")
+
+        except Exception:
+          # JSON 형태가 아닌 텍스트 응답일 경우
+          st.warning(f"🔍 [서버 반환 텍스트]: {save_res.text}")
+          if "성공" in save_res.text or "ok" in save_res.text.lower():
+            st.success(
+                f"🎉 [{car_full_no}] 차량에 3시간 주차 할인이 정상"
+                " 적용되었습니다!"
+            )
+            st.session_state.search_results = None
+          else:
+            st.error("❌ 주차 할인 처리 실패 (서버 텍스트 응답 확인 필요)")
+
       except Exception as e:
         st.error(f"할인 적용 통신 오류: {e}")
