@@ -1,5 +1,6 @@
 import datetime
 import hashlib
+import json
 import requests
 import streamlit as st
 
@@ -97,7 +98,7 @@ with st.form("parking_form"):
       "내 차량 조회하기", use_container_width=True
   )
 
-# 3. 차량 조회 로직 (기존 할인 여부 검사 추가)
+# 3. 차량 조회 로직 (강력한 할인 중복 검증)
 if submitted:
   raw_input = receipt_no.strip()
 
@@ -130,20 +131,47 @@ if submitted:
         items = res.json()
 
         if items:
-          # 이미 할인이 적용된 차량인지 체크
           has_discount = False
-          for item in items:
-            # 주차 서버 응답의 할인 내역 필드(dcDetailList, discountCnt 등) 체크
-            dc_list = item.get("dcDetailList") or []
-            dc_cnt = item.get("discountCnt", 0)
-            dc_name = item.get("discountName", "")
 
-            if dc_list or dc_cnt > 0 or dc_name:
+          for item in items:
+            # 1) 다양한 형태의 기존 할인 관련 필드 조사
+            dc_list = (
+                item.get("dcDetailList")
+                or item.get("dscntList")
+                or item.get("discountList")
+                or []
+            )
+            dc_cnt = (
+                item.get("discountCnt")
+                or item.get("dscntCnt")
+                or item.get("dcCnt")
+                or 0
+            )
+            dc_name = (
+                item.get("discountName")
+                or item.get("dscntName")
+                or item.get("dcName")
+                or ""
+            )
+
+            # 2) 문자열 전체에서 "할인" 단어나 수치 존재 여부 정밀 탐색
+            item_str = json.dumps(item, ensure_ascii=False)
+
+            if (
+                dc_list
+                or int(dc_cnt) > 0
+                or bool(dc_name)
+                or "할인" in item_str
+                or "3시간" in item_str
+            ):
               has_discount = True
               break
 
           if has_discount:
-            st.warning("⚠️ 이미 주차할인 등록이 되어 있습니다.")
+            st.warning(
+                "⚠️ 이미 주차할인 등록이 되어 있습니다. 추가 등록이"
+                " 불가능합니다."
+            )
             st.session_state.search_results = None
           else:
             st.session_state.search_results = items
@@ -193,7 +221,7 @@ if st.session_state.search_results:
               f"🎉 [{car_full_no}] 차량에 3시간 주차 할인이 정상"
               " 적용되었습니다!"
           )
-          st.session_state.search_results = None  # 초기 화면으로 리셋
+          st.session_state.search_results = None  # 화면 즉시 초기화
         elif "<title>히즈메디병원</title>" in save_res.text:
           st.error("❌ 로그인 세션이 유효하지 않습니다. 계정을 확인해 주세요.")
         else:
