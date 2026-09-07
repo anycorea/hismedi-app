@@ -4,7 +4,9 @@ import requests
 import streamlit as st
 import streamlit.components.v1 as components
 
+# ----------------------------------------------------
 # 1. UI 및 스타일 설정
+# ----------------------------------------------------
 st.set_page_config(
     page_title="히즈메디병원 주차등록", page_icon="🚗", layout="centered"
 )
@@ -71,7 +73,9 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# ----------------------------------------------------
 # 2. 계정 및 서버 설정
+# ----------------------------------------------------
 USER_ID = "001"
 USER_PW = "1588"
 BASE_URL = "http://115.21.205.117"
@@ -102,7 +106,10 @@ def get_session():
 # 🔍 getForDiscount API로 할인 상세 내역 정밀 조회 (수정됨)
 # ----------------------------------------------------
 def check_existing_discount(session, pe_id, car_no="", entry_date=""):
-    """getForDiscount API를 통해 해당 차량의 parkVisitCar 목록에서 기존 할인명을 추출합니다."""
+    """
+    getForDiscount API를 호출하여 해당 차량의 parkVisitCar 목록 내 기존 할인명을 확인합니다.
+    (이미지 상의 하단 '할인내역' 영역인 '5시간할인' 등 감지)
+    """
     try:
         url = f"{BASE_URL}/discount/registration/getForDiscount"
         payload = {
@@ -119,7 +126,7 @@ def check_existing_discount(session, pe_id, car_no="", entry_date=""):
             park_visit_car = data.get("parkVisitCar", [])
             if isinstance(park_visit_car, list) and len(park_visit_car) > 0:
                 first_dc = park_visit_car[0]
-                dc_name = first_dc.get("discount_name") # 예: "5시간할인", "3시간할인" 등
+                dc_name = first_dc.get("discount_name") # 예: "5시간할인", "3시간할인"
                 if dc_name:
                     return dc_name
                     
@@ -139,7 +146,7 @@ if "selected_car" not in st.session_state:
 car_no = st.text_input(
     "🔹 차량번호 (뒤 4자리)",
     max_chars=4,
-    placeholder="예: 5661",
+    placeholder="예: 2684",
     key="input_car_no",
 )
 
@@ -187,21 +194,21 @@ if st.session_state.searched_cars:
     car_full_no = target_car.get("carNo", "")
     entry_date = target_car.get("entryDate", "")
 
-    # 🔍 getForDiscount API 호출하여 기존 할인 존재 여부 정밀 확인
+    # 🔍 getForDiscount API 호출하여 기존 할인 존재 여부 확인
     session = get_session()
     existing_dc_name = check_existing_discount(session, pe_id, car_no=car_full_no, entry_date=entry_date)
 
-    # 🛑 이미 할인이 적용된 경우 (등록 차단)
+    # 🛑 이미 할인이 적용된 경우 (차단 안내 표시)
     if existing_dc_name:
         st.warning(
-            f"⚠️ [{target_car.get('carNo')}] 차량은 이미"
+            f"⚠️ [{car_full_no}] 차량은 이미"
             f" **[{existing_dc_name}]**이(가) 등록되어 있습니다."
         )
 
-    # ✅ 기존 할인이 없는 경우만 등록 진행
+    # ✅ 기존 할인이 없는 경우에만 입력 필드 및 등록 버튼 노출
     else:
         st.success(
-            f"🚘 **조회 차량:** {target_car.get('carNo')} (입차시간:"
+            f"🚘 **조회 차량:** {car_full_no} (입차시간:"
             f" {target_car.get('entryDateToString')})"
         )
 
