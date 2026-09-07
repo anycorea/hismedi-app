@@ -4,7 +4,7 @@ import requests
 import streamlit as st
 import streamlit.components.v1 as components
 
-# 1. UI 설정
+# 1. UI 및 커스텀 스타일 설정
 st.set_page_config(
     page_title="히즈메디병원 주차등록", page_icon="🚗", layout="centered"
 )
@@ -12,7 +12,10 @@ st.set_page_config(
 st.markdown(
     """
     <style>
+    /* 기본 헤더/메뉴 숨김 */
     #MainMenu, header, footer, .stAppHeader, [data-testid="stHeader"] { display: none !important; }
+    
+    /* 컴팩트한 타이틀 스타일 */
     .custom-title {
         font-size: 1.3rem !important;
         font-weight: 700;
@@ -27,14 +30,33 @@ st.markdown(
         text-align: center;
         margin-bottom: 20px;
     }
+    
+    /* 주차 등록 버튼 강조 (파란색 메인 버튼) */
+    div.stButton > button {
+        background-color: #2563EB !important;
+        color: white !important;
+        font-weight: 700 !important;
+        font-size: 1rem !important;
+        border-radius: 8px !important;
+        border: none !important;
+        padding: 12px 0px !important;
+        margin-top: 5px !important;
+    }
+    div.stButton > button:hover {
+        background-color: #1D4ED8 !important;
+        color: white !important;
+    }
+    
+    /* 하단 안내문구 스타일 (한 줄에 쏙 들어오도록 컴팩트화) */
     .info-notice {
         background-color: #FEF3C7;
         color: #92400E;
-        padding: 10px 14px;
+        padding: 10px 12px;
         border-radius: 8px;
         font-size: 0.82rem;
         font-weight: 600;
         text-align: center;
+        white-space: nowrap;
         margin-top: 15px;
     }
     </style>
@@ -42,6 +64,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# 헤더 타이틀
 st.markdown(
     '<div class="custom-title">🚗 히즈메디병원 주차등록</div>',
     unsafe_allow_html=True,
@@ -51,7 +74,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# 2. 주차 시스템 로그인 설정
+# 2. 계정 및 서버 설정
 USER_ID = "001"
 USER_PW = "1588"
 BASE_URL = "http://115.21.205.117"
@@ -84,10 +107,10 @@ if "selected_car" not in st.session_state:
   st.session_state.selected_car = None
 
 # ----------------------------------------------------
-# [1단계] 차량번호 뒤 4자리 입력
+# 🔹 차량번호 (뒤 4자리)
 # ----------------------------------------------------
 car_no = st.text_input(
-    "1️⃣ 차량번호 (뒤 4자리)",
+    "🔹 차량번호 (뒤 4자리)",
     max_chars=4,
     placeholder="예: 5661",
     key="input_car_no",
@@ -116,12 +139,11 @@ else:
   st.session_state.searched_cars = None
 
 # ----------------------------------------------------
-# [2단계] 입차 차량 확인 및 중복 할인 상태 검사
+# 입차 차량 확인 및 환자 확인번호 입력
 # ----------------------------------------------------
 if st.session_state.searched_cars:
   cars = st.session_state.searched_cars
 
-  # 1대만 조회된 경우
   if len(cars) == 1:
     car = cars[0]
     st.session_state.selected_car = car
@@ -129,13 +151,12 @@ if st.session_state.searched_cars:
     options = {
         f"{c.get('carNo')} (입차: {c.get('entryDateToString')})": c for c in cars
     }
-    selected_label = st.selectbox("2️⃣ 주차 차량 선택", list(options.keys()))
+    selected_label = st.selectbox("주차 차량 선택", list(options.keys()))
     st.session_state.selected_car = options[selected_label]
 
   target_car = st.session_state.selected_car
 
-  # 🔍 서버 응답 데이터에서 기존 할인 등록 여부 필드 확인
-  # (주차 서버 API마다 필드명이 다를 수 있으나 보통 discountYn, isDiscount, totalDiscountAmt 등을 사용)
+  # 서버 응답 내 중복 할인 여부 확인
   is_already_discounted = (
       target_car.get("discountYn") == "Y"
       or target_car.get("isDiscount") == True
@@ -154,16 +175,16 @@ if st.session_state.searched_cars:
     )
 
     # ----------------------------------------------------
-    # [3단계] 환자 확인번호 입력
+    # 🔹 환자 확인번호 (접수증 참조)
     # ----------------------------------------------------
     receipt_no = st.text_input(
-        "3️⃣ 환자 확인번호 (접수증 참조)",
+        "🔹 환자 확인번호 (접수증 참조)",
         placeholder=f"예: {today_day} + 환자번호 (오늘 일자 {today_day}로 시작)",
         key="input_receipt_no",
     )
 
     # ----------------------------------------------------
-    # [4단계] 주차 등록 버튼
+    # 주차 등록 버튼
     # ----------------------------------------------------
     if st.button("주차 등록하기 (3시간 할인)", use_container_width=True):
       raw_input = receipt_no.strip()
@@ -202,12 +223,14 @@ if st.session_state.searched_cars:
         except Exception as e:
           st.error(f"등록 통신 오류: {e}")
 
+# 하단 안내 문구 (한 줄에 맞춰 밀림 현상 방지)
 st.markdown(
-    '<div class="info-notice">※ 3시간 이상이 필요한 경우 접수창구에 말씀해'
-    " 주십시오.</div>",
+    '<div class="info-notice">※ 3시간 이상 주차 시 원무팀에 문의해'
+    " 주세요.</div>",
     unsafe_allow_html=True,
 )
 
+# Enter 키 입력 시 순차 이동 자바스크립트
 components.html(
     """
 <script>
