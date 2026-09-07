@@ -70,8 +70,8 @@ st.markdown(
 )
 
 # 2. 계정 및 서버 설정
-USER_ID = "YOUR_ID"
-USER_PW = "YOUR_PASSWORD"
+USER_ID = "001"
+USER_PW = "1588"
 BASE_URL = "http://115.21.205.117"
 
 today = datetime.datetime.now()
