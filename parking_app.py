@@ -203,7 +203,7 @@ if st.session_state.search_results:
       save_url = f"{BASE_URL}/discount/registration/save"
       save_payload = {
           "peId": pe_id,
-          "discountType": "2",
+          "discountType": "2",  # 3시간 할인 코드
           "saveCnt": "1",
           "iCardType": "0",
           "carNo": car_full_no,
@@ -214,18 +214,36 @@ if st.session_state.search_results:
 
       try:
         save_res = session.post(save_url, data=save_payload, timeout=5)
-        res_text = save_res.text.strip().lower()
+        res_text = save_res.text.strip()
 
-        if "true" in res_text or "ok" in res_text or "성공" in res_text:
+        # 서버 응답 분석
+        # 1. 이미 등록되어 있거나 중복 관련 텍스트가 포함된 경우
+        if any(
+            msg in res_text
+            for msg in [
+                "이미",
+                "중복",
+                "exist",
+                "already",
+                "dup",
+                "초과",
+                "제한",
+            ]
+        ):
+          st.warning("⚠️ 이미 주차할인이 등록되어 있는 차량입니다.")
+          st.session_state.search_results = None  # 초기 화면으로 이동
+
+        # 2. 정상 성공 응답 ("true", "1", "ok" 등)
+        elif res_text.lower() in ["true", "1", "ok", "success"]:
           st.success(
               f"🎉 [{car_full_no}] 차량에 3시간 주차 할인이 정상"
               " 적용되었습니다!"
           )
-          st.session_state.search_results = None  # 화면 즉시 초기화
-        elif "<title>히즈메디병원</title>" in save_res.text:
-          st.error("❌ 로그인 세션이 유효하지 않습니다. 계정을 확인해 주세요.")
+          st.session_state.search_results = None  # 성공 후 초기화
+
+        # 3. 그 외 예상치 못한 응답
         else:
-          st.error(f"❌ 주차 할인 등록 실패: {save_res.text}")
+          st.error(f"❌ 할인 등록 실패 (응답: {res_text})")
 
       except Exception as e:
         st.error(f"할인 적용 통신 오류: {e}")
