@@ -65,7 +65,22 @@ today = datetime.datetime.now()
 today_day = today.strftime("%d")
 today_yyyymmdd = today.strftime("%Y%m%d")
 
-def init_session():
+
+def do_login(session):
+    """서버에 로그인하여 세션 쿠키를 획득합니다."""
+    if USER_ID != "***":
+        hashed_pw = hashlib.sha256(USER_PW.encode()).hexdigest()
+        try:
+            session.post(
+                f"{BASE_URL}/login",
+                data={"userId": USER_ID, "userPwd": hashed_pw},
+                timeout=5,
+            )
+        except Exception as e:
+            st.error(f"로그인 처리 중 오류: {e}")
+
+
+def get_session():
     if "http_session" not in st.session_state:
         s = requests.Session()
         s.headers.update({
@@ -73,20 +88,12 @@ def init_session():
             "Referer": f"{BASE_URL}/login",
             "X-Requested-With": "XMLHttpRequest",
         })
-        if USER_ID != "***":
-            hashed_pw = hashlib.sha256(USER_PW.encode()).hexdigest()
-            try:
-                s.post(
-                    f"{BASE_URL}/login",
-                    data={"userId": USER_ID, "userPwd": hashed_pw},
-                    timeout=5,
-                )
-            except Exception as e:
-                st.error(f"로그인 처리 중 오류: {e}")
+        do_login(s)
         st.session_state.http_session = s
     return st.session_state.http_session
 
-session = init_session()
+
+session = get_session()
 
 # 3. 화면 및 등록 로직
 car_no_input = st.text_input(
@@ -98,6 +105,7 @@ car_no_input = st.text_input(
 
 if len(car_no_input) == 4 and car_no_input.isdigit():
     try:
+        # 차량 검색 요청
         list_res = session.post(
             f"{BASE_URL}/discount/registration/listForDiscount",
             data={
@@ -111,19 +119,25 @@ if len(car_no_input) == 4 and car_no_input.isdigit():
 
         if items and isinstance(items, list) and len(items) > 0:
             target = items[0]
-            
+
             pe_id = target.get("id")
             car_full = target.get("carNo", "")
             entry_str = target.get("entryDateToString", "")
-            
+            entry_date_raw = target.get("entryDate", "")
+
             # dscnt_cnt 체크
             dscnt_cnt_val = str(target.get("dscnt_cnt", "0"))
 
             if dscnt_cnt_val not in ["0", "None", ""]:
-                st.warning(f"⚠️ [{car_full}] 차량은 이미 **주차 할인이 등록되어 있습니다.** ({dscnt_cnt_val}건 적용됨)")
+                st.warning(
+                    f"⚠️ [{car_full}] 차량은 이미 **주차 할인이 등록되어 있습니다.** ({dscnt_cnt_val}건 적용됨)"
+                )
                 st.info("※ 추가 할인이 필요한 경우 원무팀에 문의해 주세요.")
+
             else:
-                st.success(f"🚘 **조회 차량:** {car_full} (입차시간: {entry_str})")
+                st.success(
+                    f"🚘 **조회 차량:** {car_full} (입차시간: {entry_str})"
+                )
 
                 receipt_no = st.text_input(
                     "🔹 환자 확인번호 (접수증 참조)",
@@ -134,36 +148,49 @@ if len(car_no_input) == 4 and car_no_input.isdigit():
                 if st.button("주차 등록하기 (3시간 할인)", use_container_width=True):
                     raw_input = receipt_no.strip()
                     if not raw_input.startswith(today_day):
-                        st.error(f"❌ 환자 확인번호가 올바르지 않습니다. (오늘 일자 [{today_day}]로 시작)")
+                        st.error(
+                            f"❌ 환자 확인번호가 올바르지 않습니다. (오늘 일자 [{today_day}]로 시작)"
+                        )
                     else:
-                        # ⚠️ 모든 파라미터 값을 안전하게 문자열(str) 형태의 Form-Data로 매핑
+                        # 저장 전 세션 안전 보장 (재로그인)
+                        do_login(session)
+
+                        # 필수 및 보완 파라미터 구성
                         payload = {
                             "peId": str(pe_id),
                             "discountType": "2",
                             "saveCnt": "1",
                             "iCardType": "0",
                             "carNo": str(car_full),
+                            "entryDate": str(entry_date_raw),
                             "iLotArea": str(target.get("iLotArea", "621")),
                         }
-                        
+
                         save_res = session.post(
                             f"{BASE_URL}/discount/registration/save",
                             data=payload,
                             timeout=5,
                         )
-                        
+
                         if save_res.status_code == 200:
                             st.balloons()
-                            st.success(f"🎉 [{car_full}] 차량에 3시간 주차 할인이 정상 적용되었습니다!")
+                            st.success(
+                                f"🎉 [{car_full}] 차량에 3시간 주차 할인이 정상 적용되었습니다!"
+                            )
                         else:
-                            st.error(f"등록 실패 (서버 응답: {save_res.status_code} - {save_res.text})")
+                            st.error(
+                                f"등록 실패 (서버 응답: {save_res.status_code} - {save_res.text})"
+                            )
         else:
             st.error("❌ 입차된 차량이 없습니다. 번호를 다시 확인해 주세요.")
 
     except Exception as e:
         st.error(f"처리 중 오류 발생: {e}")
 
-st.markdown('<div class="info-notice">※ 3시간 이상 주차 시 원무팀에 문의해 주세요.</div>', unsafe_allow_html=True)
+st.markdown(
+    '<div class="info-notice">※ 3시간 이상 주차 시 원무팀에 문의해 주세요.</div>',
+    unsafe_allow_html=True,
+)
 
 # Enter 키 이동 스크립트
 components.html(
