@@ -43,7 +43,6 @@ st.markdown(
         background-color: #1D4ED8 !important;
     }
     
-    /* 하단 안내문구 */
     .info-notice {
         background-color: #FEF3C7;
         color: #92400E;
@@ -96,6 +95,54 @@ def get_session():
   return s
 
 
+# ----------------------------------------------------
+# 🔍 할인 내역 상세 조회 함수 (서버 API 호출)
+# ----------------------------------------------------
+def get_existing_discount(session, pe_id):
+  """peId(입차ID)를 기반으로 해당 차량에 등록된 기존 할인 내역을 조회합니다."""
+  endpoints = [
+      f"{BASE_URL}/discount/registration/discountList",
+      f"{BASE_URL}/discount/registration/detail",
+      f"{BASE_URL}/discount/registration/selectDiscountList",
+  ]
+
+  for url in endpoints:
+    try:
+      res = session.post(url, data={"peId": pe_id, "id": pe_id}, timeout=3)
+      if res.status_code == 200:
+        data = res.json()
+
+        # 데이터가 리스트 형태인 경우
+        if isinstance(data, list) and len(data) > 0:
+          first_dc = data[0]
+          return (
+              first_dc.get("discountVal")
+              or first_dc.get("discountName")
+              or first_dc.get("dcName")
+              or "기존 주차할인"
+          )
+
+        # 데이터가 딕셔너리 형태인 경우
+        elif isinstance(data, dict):
+          dc_list = data.get("list") or data.get("discountList") or []
+          if dc_list and len(dc_list) > 0:
+            return (
+                dc_list[0].get("discountVal")
+                or dc_list[0].get("discountName")
+                or dc_list[0].get("dcName")
+                or "기존 주차할인"
+            )
+          elif data.get("discountVal") or data.get("discountName"):
+            return (
+                data.get("discountVal")
+                or data.get("discountName")
+                or "기존 주차할인"
+            )
+    except Exception:
+      continue
+  return None
+
+
 if "searched_cars" not in st.session_state:
   st.session_state.searched_cars = None
 if "selected_car" not in st.session_state:
@@ -112,8 +159,9 @@ car_no = st.text_input(
 )
 
 if len(car_no) == 4 and car_no.isdigit():
+  session = get_session()
   try:
-    res = get_session().post(
+    res = session.post(
         f"{BASE_URL}/discount/registration/listForDiscount",
         data={
             "iLotArea": "621",
@@ -134,7 +182,7 @@ else:
   st.session_state.searched_cars = None
 
 # ----------------------------------------------------
-# 차량 조회 결과 및 기존 할인 여부 검사
+# 차량 선택 및 기존 할인 내역 상세 검사
 # ----------------------------------------------------
 if st.session_state.searched_cars:
   cars = st.session_state.searched_cars
@@ -150,34 +198,30 @@ if st.session_state.searched_cars:
     st.session_state.selected_car = options[selected_label]
 
   target_car = st.session_state.selected_car
+  pe_id = target_car.get("id")
 
-  # 🔍 서버 응답 데이터에서 기존 등록된 할인 내역 확인
-  # (API JSON 구조에 맞춰 discountName, dcName, discountType 등을 참조)
-  applied_discount_name = (
+  # 1) 차량 기본 정보에서 1차 확인
+  existing_dc_name = (
       target_car.get("discountName")
       or target_car.get("dcName")
-      or target_car.get("discountTypeStr")
+      or target_car.get("discountVal")
   )
 
-  # discountYn이 'Y'이거나 기존 할인 명칭이 존재하는 경우
-  is_already_discounted = (
-      target_car.get("discountYn") == "Y"
-      or bool(applied_discount_name)
-      or int(target_car.get("iDiscountAmt", 0)) > 0
-  )
+  # 2) 기본 정보에 없으면 상세 할인 내역 API 호출해서 2차 확인
+  session = get_session()
+  if not existing_dc_name and pe_id:
+    existing_dc_name = get_existing_discount(session, pe_id)
 
-  if is_already_discounted:
-    # 이미 등록된 할인명이 있으면 해당 명칭을 보여주고 차단
-    discount_text = (
-        f"[{applied_discount_name}]" if applied_discount_name else "주차할인"
-    )
+  # 기존 할인이 존재하는 경우 🛑 (등록 완전 차단)
+  if existing_dc_name:
     st.warning(
-        f"⚠️ [{target_car.get('carNo')}] 차량은 이미 {discount_text}이(가)"
-        " 등록되어 있습니다."
+        f"⚠️ [{target_car.get('carNo')}] 차량은 이미"
+        f" **[{existing_dc_name}]**이(가) 등록되어 있습니다."
     )
+    st.info("💡 추가 할인이 필요한 경우 원무팀에 문의해 주세요.")
 
+  # 기존 할인이 없는 경우만 등록 절차 진행 ✅
   else:
-    # 할인이 안 되어 있는 경우에만 등록 절차 진행
     st.success(
         f"🚘 **조회 차량:** {target_car.get('carNo')} (입차시간:"
         f" {target_car.get('entryDateToString')})"
@@ -207,11 +251,11 @@ if st.session_state.searched_cars:
         car_full_no = target_car.get("carNo")
 
         try:
-          save_res = get_session().post(
+          save_res = session.post(
               f"{BASE_URL}/discount/registration/save",
               data={
-                  "peId": target_car.get("id"),
-                  "discountType": "2",  # 3시간 할인 코드
+                  "peId": pe_id,
+                  "discountType": "2",
                   "saveCnt": "1",
                   "iCardType": "0",
                   "carNo": car_full_no,
@@ -239,7 +283,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# Enter 키 입력 시 순차 이동 자바스크립트
+# Enter 키 입력 이동 JS
 components.html(
     """
 <script>
