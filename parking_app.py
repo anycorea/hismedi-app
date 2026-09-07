@@ -44,7 +44,7 @@ st.title("🚗 히즈메디병원 주차등록")
 st.caption("진료 및 검진 방문객 전용 셀프 주차등록 시스템")
 
 # ==========================================
-# 🔑 계정 정보 (실제 계정 정보 입력)
+# 🔑 계정 정보 (실제 아이디/비밀번호 입력)
 # ==========================================
 USER_ID = "001"
 USER_PW = "1588"
@@ -97,7 +97,7 @@ with st.form("parking_form"):
       "내 차량 조회하기", use_container_width=True
   )
 
-# 3. 차량 조회 로직
+# 3. 차량 조회 로직 (기존 할인 여부 검사 추가)
 if submitted:
   raw_input = receipt_no.strip()
 
@@ -130,7 +130,23 @@ if submitted:
         items = res.json()
 
         if items:
-          st.session_state.search_results = items
+          # 이미 할인이 적용된 차량인지 체크
+          has_discount = False
+          for item in items:
+            # 주차 서버 응답의 할인 내역 필드(dcDetailList, discountCnt 등) 체크
+            dc_list = item.get("dcDetailList") or []
+            dc_cnt = item.get("discountCnt", 0)
+            dc_name = item.get("discountName", "")
+
+            if dc_list or dc_cnt > 0 or dc_name:
+              has_discount = True
+              break
+
+          if has_discount:
+            st.warning("⚠️ 이미 주차할인 등록이 되어 있습니다.")
+            st.session_state.search_results = None
+          else:
+            st.session_state.search_results = items
         else:
           st.warning(
               "⚠️ 입차된 차량을 찾을 수 없습니다. 입차 여부 및 번호를 확인해"
@@ -170,19 +186,18 @@ if st.session_state.search_results:
 
       try:
         save_res = session.post(save_url, data=save_payload, timeout=5)
-        res_text = save_res.text.strip()
+        res_text = save_res.text.strip().lower()
 
-        # 로그인창 튕김 여부 확인
-        if "<title>히즈메디병원</title>" in res_text:
-          st.error("❌ 로그인 세션이 유효하지 않습니다.")
-        else:
-          # 실제로 이미 여러 번 들어가는 현상이 확인되었으므로 성공 메시지 처리 후 세션 초기화
+        if "true" in res_text or "ok" in res_text or "성공" in res_text:
           st.success(
               f"🎉 [{car_full_no}] 차량에 3시간 주차 할인이 정상"
               " 적용되었습니다!"
           )
-          st.info(f"ℹ️ [서버 응답 기록]: {res_text[:100]}")
-          st.session_state.search_results = None
+          st.session_state.search_results = None  # 초기 화면으로 리셋
+        elif "<title>히즈메디병원</title>" in save_res.text:
+          st.error("❌ 로그인 세션이 유효하지 않습니다. 계정을 확인해 주세요.")
+        else:
+          st.error(f"❌ 주차 할인 등록 실패: {save_res.text}")
 
       except Exception as e:
         st.error(f"할인 적용 통신 오류: {e}")
