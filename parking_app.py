@@ -9,7 +9,7 @@ st.set_page_config(
     layout="centered",
 )
 
-# UI 요소 숨김 CSS
+# UI 요소 및 관리자 툴바 숨김 CSS
 hide_ui_style = """
     <style>
     #MainMenu {visibility: hidden;}
@@ -42,12 +42,43 @@ st.markdown(hide_ui_style, unsafe_allow_html=True)
 st.title("🚗 히즈메디병원 주차등록")
 st.caption("진료 및 검진 방문객 전용 셀프 주차등록 시스템")
 
+# 계정 정보 설정 (필요 시 수정)
+LOGIN_URL = "http://115.21.205.117/login/loginProc"  # 업체 로그인 URL
+USER_ID = "YOUR_ID"  # 사용 중이신 아이디 입력
+USER_PW = "YOUR_PASSWORD"  # 사용 중이신 비밀번호 입력
+
 if "search_results" not in st.session_state:
   st.session_state.search_results = None
 
 today = datetime.datetime.now()
 today_day = today.strftime("%d")
 today_yyyymmdd = today.strftime("%Y%m%d")
+
+
+# 공통 세션 및 로그인 함수
+def get_authenticated_session():
+  session = requests.Session()
+  headers = {
+      "User-Agent": (
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+      ),
+      "Referer": "http://115.21.205.117/login/index",
+  }
+  session.headers.update(headers)
+
+  # 로그인 시도 (계정 정보가 설정되어 있는 경우)
+  if USER_ID != "YOUR_ID":
+    login_payload = {
+        "userId": USER_ID,
+        "userPw": USER_PW,
+    }
+    try:
+      session.post(LOGIN_URL, data=login_payload, timeout=5)
+    except Exception:
+      pass
+
+  return session
+
 
 # 2. 입력 폼
 with st.form("parking_form"):
@@ -63,7 +94,7 @@ with st.form("parking_form"):
       "내 차량 조회하기", use_container_width=True
   )
 
-# 3. 차량 조회 로직 (응답 데이터 구조 확인용 디버깅 포함)
+# 3. 차량 조회 로직
 if submitted:
   raw_input = receipt_no.strip()
 
@@ -83,13 +114,7 @@ if submitted:
       st.error("❌ 환자 확인번호는 숫자만 입력 가능합니다.")
       st.session_state.search_results = None
     else:
-      session = requests.Session()
-      headers = {
-          "User-Agent": (
-              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-          ),
-          "Referer": "http://115.21.205.117/discount/registration/index",
-      }
+      session = get_authenticated_session()
 
       list_url = "http://115.21.205.117/discount/registration/listForDiscount"
       list_payload = {
@@ -99,9 +124,7 @@ if submitted:
       }
 
       try:
-        res = session.post(
-            list_url, data=list_payload, headers=headers, timeout=5
-        )
+        res = session.post(list_url, data=list_payload, timeout=5)
         items = res.json()
 
         if items:
@@ -115,44 +138,27 @@ if submitted:
       except Exception as e:
         st.error(f"주차 시스템 통신 오류: {e}")
 
-# 4. 차량 선택 및 자동 할인 등록
+# 4. 차량 선택 및 3시간 자동 할인 등록
 if st.session_state.search_results:
   st.write("---")
   st.subheader("📋 본인 차량 선택 (3시간 할인 적용)")
 
-  # [디버깅] 서버에서 넘어온 전체 데이터 구조 확인용 (파악 후 제거 예정)
-  with st.expander("🔍 [디버깅] 조회된 서버 원본 데이터 확인"):
-    st.write(st.session_state.search_results)
-
   for item in st.session_state.search_results:
     car_full_no = item.get("carNo", "차량번호 없음")
 
-    # 다양한 가능성의 입차시간 Key 확인
-    in_time = (
-        item.get("inTime")
-        or item.get("inDate")
-        or item.get("entryTime")
-        or item.get("inDtm")
-        or "시간 정보 없음"
-    )
-
-    pe_id = item.get("id") or item.get("peId")
+    # 정확한 입차시간 Key (`entryDateToString`) 적용
+    in_time = item.get("entryDateToString") or "입차시간 없음"
+    pe_id = item.get("id")
 
     btn_label = f"🚘 {car_full_no} (입차: {in_time}) ➔ 3시간 할인 등록"
 
     if st.button(btn_label, key=f"btn_{pe_id}", use_container_width=True):
-      session = requests.Session()
-      headers = {
-          "User-Agent": (
-              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-          ),
-          "Referer": "http://115.21.205.117/discount/registration/index",
-      }
+      session = get_authenticated_session()
 
       save_url = "http://115.21.205.117/discount/registration/save"
       save_payload = {
           "peId": pe_id,
-          "discountType": "2",
+          "discountType": "2",  # 3시간 할인 코드
           "saveCnt": "1",
           "iCardType": "0",
           "carNo": car_full_no,
@@ -161,38 +167,16 @@ if st.session_state.search_results:
       }
 
       try:
-        save_res = session.post(
-            save_url, data=save_payload, headers=headers, timeout=5
-        )
+        save_res = session.post(save_url, data=save_payload, timeout=5)
 
-        try:
-          res_json = save_res.json()
-          st.info(f"🔍 [서버 처리 결과]: {res_json}")
-
-          if (
-              res_json.get("result") == True
-              or res_json.get("code") == "200"
-              or res_json.get("status") == "SUCCESS"
-          ):
-            st.success(
-                f"🎉 [{car_full_no}] 차량에 3시간 주차 할인이 정상"
-                " 적용되었습니다!"
-            )
-            st.session_state.search_results = None
-          else:
-            st.error(
-                f"❌ 할인 등록 거부 사유: {res_json.get('msg', res_json)}"
-            )
-        except Exception:
-          st.info(f"🔍 [서버 텍스트 응답]: {save_res.text}")
-          if "성공" in save_res.text or "ok" in save_res.text.lower():
-            st.success(
-                f"🎉 [{car_full_no}] 차량에 3시간 주차 할인이 정상"
-                " 적용되었습니다!"
-            )
-            st.session_state.search_results = None
-          else:
-            st.error("❌ 주차 할인 처리에 실패했습니다.")
-
+        # 성공 처리 판단
+        if save_res.status_code == 200:
+          st.success(
+              f"🎉 [{car_full_no}] 차량에 3시간 주차 할인이 정상"
+              " 적용되었습니다!"
+          )
+          st.session_state.search_results = None
+        else:
+          st.error("❌ 주차 할인 처리에 실패했습니다. 카운터에 문의해 주세요.")
       except Exception as e:
         st.error(f"할인 적용 통신 오류: {e}")
