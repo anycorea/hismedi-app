@@ -9,10 +9,10 @@ st.set_page_config(
     layout="centered",
 )
 
-# 상단 헤더, 메뉴, 하단 프로필/왕관(Community Badge) 아이콘 전체 숨김 CSS
+# 상단 헤더, 메뉴, 하단 Built with Streamlit / Fullscreen / 배지 전체 숨김 CSS
 hide_ui_style = """
     <style>
-    /* 상단 메뉴 및 헤더 숨기기 */
+    /* 상단 메뉴 및 헤더 완전 숨김 */
     #MainMenu {visibility: hidden;}
     header {visibility: hidden;}
     footer {visibility: hidden;}
@@ -20,9 +20,8 @@ hide_ui_style = """
     [data-testid="stHeader"] {display: none !important;}
     [data-testid="stToolbar"] {display: none !important;}
     [data-testid="stDecoration"] {display: none !important;}
-    [data-testid="stStatusWidget"] {display: none !important;}
     
-    /* 하단 우측 Floating 아이콘 및 왕관/프로필 배지 전체 숨기기 */
+    /* 하단 Floating 버튼, 프로필, Community 배지 완전 숨김 */
     .stActionButton {display: none !important;}
     [data-testid="stActionButton"] {display: none !important;}
     .viewerBadge_container__1S-is {display: none !important;}
@@ -30,8 +29,17 @@ hide_ui_style = """
     div[class*="profile"] {display: none !important;}
     [data-testid="stAppViewBlockContainer"] ~ div {display: none !important;}
     
-    /* 스크롤바 우측 하단 여백 레이어 제거 */
-    div[data-testid="stStatusWidget"] {display: none !important;}
+    /* embed 모드 하단 툴바 (Built with Streamlit / Fullscreen) 강제 차단 */
+    [data-testid="stStatusWidget"],
+    .stAppToolbar,
+    div[class*="StyledEmbedToolbar"],
+    div[class*="EmbedToolbar"],
+    div[data-testid="stEmbedToolbar"] {
+        display: none !important;
+        visibility: hidden !important;
+        height: 0px !important;
+    }
+    
     #root > div:nth-child(2) {display: none !important;}
     </style>
 """
