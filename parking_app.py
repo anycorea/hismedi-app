@@ -45,7 +45,7 @@ st.markdown(
         background-color: #1D4ED8 !important;
     }
     
-    /* 하단 안내문구 (한 줄 처리) */
+    /* 하단 안내문구 */
     .info-notice {
         background-color: #FEF3C7;
         color: #92400E;
@@ -98,144 +98,122 @@ def get_session():
     return s
 
 
-# ----------------------------------------------------
-# 🔍 getForDiscount API로 할인 상세 내역 조회 (안정성 강화)
-# ----------------------------------------------------
-def check_existing_discount(session, pe_id, car_no="", entry_date=""):
+def fetch_car_details(session, pe_id, car_no, entry_date):
+    """
+    getForDiscount API를 직접 호출하여 차량 입차 상세 및 이미 적용된 할인 내역(parkVisitCar)을 추출합니다.
+    """
     try:
         url = f"{BASE_URL}/discount/registration/getForDiscount"
         payload = {
-            "peId": pe_id,
+            "peId": str(pe_id),
             "carNo": car_no,
             "entryDate": entry_date,
             "iLotArea": "621"
         }
         res = session.post(url, data=payload, timeout=5)
         if res.status_code == 200:
-            data = res.json()
-
-            # 1. parkVisitCar 배열 검사
-            park_visit_car = data.get("parkVisitCar", [])
-            if isinstance(park_visit_car, list) and len(park_visit_car) > 0:
-                first_dc = park_visit_car[0]
-                dc_name = first_dc.get("discount_name") or first_dc.get("discountName")
-                if dc_name:
-                    return dc_name
-
-            # 2. 다른 필드에 들어오는 경우 대비 (보완 코드)
-            discount_items = data.get("discountList") or data.get("list") or []
-            if discount_items and isinstance(discount_items, list):
-                return discount_items[0].get("discountName", "주차할인")
-
+            return res.json()
     except Exception as e:
-        st.error(f"⚠️ 기존 할인 조회 오류: {e}")
+        st.error(f"상세 조회 네트워크 오류: {e}")
     return None
 
 
 # 세션 상태 초기화
-if "searched_cars" not in st.session_state:
-    st.session_state.searched_cars = None
-if "selected_car" not in st.session_state:
-    st.session_state.selected_car = None
+if "target_car" not in st.session_state:
+    st.session_state.target_car = None
+if "existing_dc" not in st.session_state:
+    st.session_state.existing_dc = None
 
 # ----------------------------------------------------
-# 🔹 차량번호 (뒤 4자리) 입력 및 조회 버튼
+# 🔹 차량번호 (뒤 4자리) 입력
 # ----------------------------------------------------
-col1, col2 = st.columns([3, 1])
+car_no_input = st.text_input(
+    "🔹 차량번호 (뒤 4자리)",
+    max_chars=4,
+    placeholder="예: 2684",
+    key="input_car_no",
+)
 
-with col1:
-    car_no = st.text_input(
-        "🔹 차량번호 (뒤 4자리)",
-        max_chars=4,
-        placeholder="예: 2684",
-        key="input_car_no",
-    )
-
-# 번호가 4자리 입력되었을 때 자동으로 조회 수행
-if len(car_no) == 4 and car_no.isdigit():
+# 4자리 숫자 입력 시 조회 수행
+if len(car_no_input) == 4 and car_no_input.isdigit():
     session = get_session()
     try:
-        res = session.post(
+        # 1차: 차량 목록 조회
+        list_res = session.post(
             f"{BASE_URL}/discount/registration/listForDiscount",
             data={
                 "iLotArea": "621",
                 "entryDate": today_yyyymmdd,
-                "carNo": car_no,
+                "carNo": car_no_input,
             },
             timeout=5,
         )
-        if res.status_code == 200:
-            items = res.json()
-            if items:
-                st.session_state.searched_cars = items
-            else:
-                st.error("❌ 입차된 차량이 없습니다. 번호를 다시 확인해 주세요.")
-                st.session_state.searched_cars = None
+        items = list_res.json()
+
+        if items and isinstance(items, list) and len(items) > 0:
+            # 기본적으로 첫 번째 검색된 차량 선택
+            selected = items[0]
+            pe_id = selected.get("id") or selected.get("iID")
+            car_full = selected.get("carNo") or selected.get("acPlate1")
+            entry_dt = selected.get("entryDate") or selected.get("dtInDateStr")
+            
+            # 2차: getForDiscount 호출로 parkVisitCar (기존 할인내역) 정밀 확인
+            detail_data = fetch_car_details(session, pe_id, car_full, entry_dt)
+            
+            existing_discount_name = None
+            if detail_data:
+                park_visit_car = detail_data.get("parkVisitCar", [])
+                if isinstance(park_visit_car, list) and len(park_visit_car) > 0:
+                    # 첫 번째 등록된 할인 이름 추출 (예: "5시간할인")
+                    existing_discount_name = park_visit_car[0].get("discount_name") or park_visit_car[0].get("discountName")
+
+            # 상태 저장
+            st.session_state.target_car = {
+                "peId": pe_id,
+                "carNo": car_full,
+                "entryDate": entry_dt,
+                "entryStr": selected.get("entryDateToString", ""),
+                "iLotArea": selected.get("iLotArea", "621")
+            }
+            st.session_state.existing_dc = existing_discount_name
+
         else:
-            st.error(f"❌ 차량 조회 실패 (응답 코드: {res.status_code})")
-            st.session_state.searched_cars = None
+            st.error("❌ 입차된 차량이 없습니다. 번호를 다시 확인해 주세요.")
+            st.session_state.target_car = None
+            st.session_state.existing_dc = None
+
     except Exception as e:
         st.error(f"주차 서버 통신 오류: {e}")
-        st.session_state.searched_cars = None
+        st.session_state.target_car = None
+        st.session_state.existing_dc = None
 else:
-    st.session_state.searched_cars = None
+    st.session_state.target_car = None
+    st.session_state.existing_dc = None
 
 # ----------------------------------------------------
-# 차량 조회 결과 및 기존 할인 여부 검사
+# 결과 화면 표시
 # ----------------------------------------------------
-if st.session_state.searched_cars:
-    cars = st.session_state.searched_cars
+if st.session_state.target_car:
+    target = st.session_state.target_car
+    existing_dc = st.session_state.existing_dc
 
-    if len(cars) == 1:
-        car = cars[0]
-        st.session_state.selected_car = car
-    else:
-        options = {
-            f"{c.get('carNo')} (입차: {c.get('entryDateToString')})": c for c in cars
-        }
-        selected_label = st.selectbox("주차 차량 선택", list(options.keys()))
-        st.session_state.selected_car = options[selected_label]
-
-    target_car = st.session_state.selected_car
-    
-    # 안전하게 키 값 가져오기
-    pe_id = target_car.get("id") or target_car.get("iID")
-    car_full_no = target_car.get("carNo") or target_car.get("acPlate1", "")
-    entry_date = target_car.get("entryDate") or target_car.get("dtInDateStr", "")
-    entry_str = target_car.get("entryDateToString", "")
-
-    session = get_session()
-    
-    # 기존 할인 여부 확인
-    with st.spinner("기존 할인 정보를 확인 중입니다..."):
-        existing_dc_name = check_existing_discount(session, pe_id, car_no=car_full_no, entry_date=entry_date)
-
-    # 🛑 이미 할인이 적용된 경우 (등록 차단)
-    if existing_dc_name:
+    # 🛑 이미 할인이 적용된 경우 (차단)
+    if existing_dc:
         st.warning(
-            f"⚠️ [{car_full_no}] 차량은 이미"
-            f" **[{existing_dc_name}]**이(가) 등록되어 있습니다."
+            f"⚠️ [{target['carNo']}] 차량은 이미 **[{existing_dc}]**이(가) 등록되어 있습니다."
         )
-        st.info("※ 추가 할인이 필요한 경우 원무팀에 문의해 주세요.")
-
-    # ✅ 기존 할인이 없는 경우만 입력 및 버튼 노출
+    # ✅ 할인이 없는 경우 (등록 절차 진행)
     else:
         st.success(
-            f"🚘 **조회 차량:** {car_full_no} (입차시간: {entry_str})"
+            f"🚘 **조회 차량:** {target['carNo']} (입차시간: {target['entryStr']})"
         )
 
-        # ----------------------------------------------------
-        # 🔹 환자 확인번호 (접수증 참조)
-        # ----------------------------------------------------
         receipt_no = st.text_input(
             "🔹 환자 확인번호 (접수증 참조)",
             placeholder=f"예: {today_day} + 환자번호 (오늘 일자 {today_day}로 시작)",
             key="input_receipt_no",
         )
 
-        # ----------------------------------------------------
-        # 주차 등록 버튼
-        # ----------------------------------------------------
         if st.button("주차 등록하기 (3시간 할인)", use_container_width=True):
             raw_input = receipt_no.strip()
 
@@ -244,16 +222,17 @@ if st.session_state.searched_cars:
                     f"❌ 환자 확인번호가 올바르지 않습니다. (오늘 일자 [{today_day}]로 시작)"
                 )
             else:
+                session = get_session()
                 try:
                     save_res = session.post(
                         f"{BASE_URL}/discount/registration/save",
                         data={
-                            "peId": pe_id,
+                            "peId": target["peId"],
                             "discountType": "2",
                             "saveCnt": "1",
                             "iCardType": "0",
-                            "carNo": car_full_no,
-                            "iLotArea": target_car.get("iLotArea", "621"),
+                            "carNo": target["carNo"],
+                            "iLotArea": target["iLotArea"],
                         },
                         timeout=5,
                     )
@@ -261,12 +240,12 @@ if st.session_state.searched_cars:
                     if save_res.status_code == 200:
                         st.balloons()
                         st.success(
-                            f"🎉 [{car_full_no}] 차량에 3시간 주차 할인이 정상 적용되었습니다!"
+                            f"🎉 [{target['carNo']}] 차량에 3시간 주차 할인이 정상 적용되었습니다!"
                         )
-                        st.session_state.searched_cars = None
-                        st.session_state.selected_car = None
+                        st.session_state.target_car = None
+                        st.session_state.existing_dc = None
                     else:
-                        st.error(f"등록 실패 (서버 응답: {save_res.status_code})")
+                        st.error(f"등록 실패 (상태 코드: {save_res.status_code})")
 
                 except Exception as e:
                     st.error(f"등록 통신 오류: {e}")
@@ -277,7 +256,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# Enter 키 입력 순차 이동 JS
+# Enter 키 이동 스크립트
 components.html(
     """
 <script>
