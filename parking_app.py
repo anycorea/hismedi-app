@@ -4,9 +4,7 @@ import requests
 import streamlit as st
 import streamlit.components.v1 as components
 
-# ----------------------------------------------------
 # 1. UI 및 스타일 설정
-# ----------------------------------------------------
 st.set_page_config(
     page_title="히즈메디병원 주차등록", page_icon="🚗", layout="centered"
 )
@@ -58,9 +56,7 @@ st.markdown(
 st.markdown('<div class="custom-title">🚗 히즈메디병원 주차등록</div>', unsafe_allow_html=True)
 st.markdown('<div class="custom-sub">진료 및 검진 방문객 셀프 주차등록</div>', unsafe_allow_html=True)
 
-# ----------------------------------------------------
-# 2. 서버 및 세션 관리
-# ----------------------------------------------------
+# 2. 계정 및 서버 설정
 USER_ID = "001"
 USER_PW = "1588"
 BASE_URL = "http://115.21.205.117"
@@ -92,9 +88,7 @@ def init_session():
 
 session = init_session()
 
-# ----------------------------------------------------
-# 3. 화면 및 등록 로직
-# ----------------------------------------------------
+# 3. 화면 입력 및 동작 로직
 car_no_input = st.text_input(
     "🔹 차량번호 (뒤 4자리)",
     max_chars=4,
@@ -104,7 +98,7 @@ car_no_input = st.text_input(
 
 if len(car_no_input) == 4 and car_no_input.isdigit():
     try:
-        # 1. 차량 검색 (listForDiscount)
+        # 차량 검색
         list_res = session.post(
             f"{BASE_URL}/discount/registration/listForDiscount",
             data={
@@ -123,13 +117,15 @@ if len(car_no_input) == 4 and car_no_input.isdigit():
             car_full = target.get("carNo", "")
             entry_str = target.get("entryDateToString", "")
             
-            # 할인 수량 카운트 (dscnt_cnt) 체크
+            # 할인 수량 체크
             dscnt_cnt_val = str(target.get("dscnt_cnt", "0"))
 
-            # 2. 기존 할인 적용 여부 확인 (dscnt_cnt 가 0이 아니면 이미 할인이 적용됨)
+            # 이미 등록된 차량인 경우
             if dscnt_cnt_val not in ["0", "None", ""]:
                 st.warning(f"⚠️ [{car_full}] 차량은 이미 **주차 할인이 등록되어 있습니다.** ({dscnt_cnt_val}건 적용됨)")
                 st.info("※ 추가 할인이 필요한 경우 원무팀에 문의해 주세요.")
+            
+            # 신규 등록 가능 차량인 경우
             else:
                 st.success(f"🚘 **조회 차량:** {car_full} (입차시간: {entry_str})")
 
@@ -156,11 +152,14 @@ if len(car_no_input) == 4 and car_no_input.isdigit():
                             },
                             timeout=5,
                         )
-                        if save_res.status_code == 200:
+                        
+                        # 응답 성공 조건 완화 (200 OK 또는 성공 응답 텍스트 포함 시)
+                        if save_res.status_code == 200 or "success" in save_res.text.lower() or "ok" in save_res.text.lower():
                             st.balloons()
                             st.success(f"🎉 [{car_full}] 차량에 3시간 주차 할인이 정상 적용되었습니다!")
+                            st.rerun()  # 상태 갱신을 위해 재실행
                         else:
-                            st.error("등록에 실패했습니다.")
+                            st.error(f"등록 실패 (서버 응답: {save_res.status_code} - {save_res.text})")
         else:
             st.error("❌ 입차된 차량이 없습니다. 번호를 다시 확인해 주세요.")
 
