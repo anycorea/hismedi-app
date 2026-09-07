@@ -4,7 +4,7 @@ import requests
 import streamlit as st
 import streamlit.components.v1 as components
 
-# 1. UI 및 커스텀 스타일 설정
+# 1. UI 및 스타일 설정
 st.set_page_config(
     page_title="히즈메디병원 주차등록", page_icon="🚗", layout="centered"
 )
@@ -12,10 +12,7 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-    /* 기본 헤더/메뉴 숨김 */
     #MainMenu, header, footer, .stAppHeader, [data-testid="stHeader"] { display: none !important; }
-    
-    /* 컴팩트한 타이틀 스타일 */
     .custom-title {
         font-size: 1.3rem !important;
         font-weight: 700;
@@ -31,7 +28,7 @@ st.markdown(
         margin-bottom: 20px;
     }
     
-    /* 주차 등록 버튼 강조 (파란색 메인 버튼) */
+    /* 주차 등록 버튼 스타일 */
     div.stButton > button {
         background-color: #2563EB !important;
         color: white !important;
@@ -44,10 +41,9 @@ st.markdown(
     }
     div.stButton > button:hover {
         background-color: #1D4ED8 !important;
-        color: white !important;
     }
     
-    /* 하단 안내문구 스타일 (한 줄에 쏙 들어오도록 컴팩트화) */
+    /* 하단 안내문구 */
     .info-notice {
         background-color: #FEF3C7;
         color: #92400E;
@@ -64,7 +60,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# 헤더 타이틀
 st.markdown(
     '<div class="custom-title">🚗 히즈메디병원 주차등록</div>',
     unsafe_allow_html=True,
@@ -75,8 +70,8 @@ st.markdown(
 )
 
 # 2. 계정 및 서버 설정
-USER_ID = "001"
-USER_PW = "1588"
+USER_ID = "YOUR_ID"
+USER_PW = "YOUR_PASSWORD"
 BASE_URL = "http://115.21.205.117"
 
 today = datetime.datetime.now()
@@ -107,7 +102,7 @@ if "selected_car" not in st.session_state:
   st.session_state.selected_car = None
 
 # ----------------------------------------------------
-# 🔹 차량번호 (뒤 4자리)
+# 🔹 차량번호 (뒤 4자리) 입력
 # ----------------------------------------------------
 car_no = st.text_input(
     "🔹 차량번호 (뒤 4자리)",
@@ -139,7 +134,7 @@ else:
   st.session_state.searched_cars = None
 
 # ----------------------------------------------------
-# 입차 차량 확인 및 환자 확인번호 입력
+# 차량 조회 결과 및 기존 할인 여부 검사
 # ----------------------------------------------------
 if st.session_state.searched_cars:
   cars = st.session_state.searched_cars
@@ -156,26 +151,40 @@ if st.session_state.searched_cars:
 
   target_car = st.session_state.selected_car
 
-  # 서버 응답 내 중복 할인 여부 확인
+  # 🔍 서버 응답 데이터에서 기존 등록된 할인 내역 확인
+  # (API JSON 구조에 맞춰 discountName, dcName, discountType 등을 참조)
+  applied_discount_name = (
+      target_car.get("discountName")
+      or target_car.get("dcName")
+      or target_car.get("discountTypeStr")
+  )
+
+  # discountYn이 'Y'이거나 기존 할인 명칭이 존재하는 경우
   is_already_discounted = (
       target_car.get("discountYn") == "Y"
-      or target_car.get("isDiscount") == True
+      or bool(applied_discount_name)
       or int(target_car.get("iDiscountAmt", 0)) > 0
   )
 
   if is_already_discounted:
-    st.warning(
-        f"⚠️ [{target_car.get('carNo')}] 차량은 이미 주차 할인이 적용되어"
-        " 있습니다."
+    # 이미 등록된 할인명이 있으면 해당 명칭을 보여주고 차단
+    discount_text = (
+        f"[{applied_discount_name}]" if applied_discount_name else "주차할인"
     )
+    st.warning(
+        f"⚠️ [{target_car.get('carNo')}] 차량은 이미 {discount_text}이(가)"
+        " 등록되어 있습니다."
+    )
+
   else:
+    # 할인이 안 되어 있는 경우에만 등록 절차 진행
     st.success(
         f"🚘 **조회 차량:** {target_car.get('carNo')} (입차시간:"
         f" {target_car.get('entryDateToString')})"
     )
 
     # ----------------------------------------------------
-    # 🔹 환자 확인번호 (접수증 참조)
+    # 🔹 환자 확인번호 입력
     # ----------------------------------------------------
     receipt_no = st.text_input(
         "🔹 환자 확인번호 (접수증 참조)",
@@ -202,7 +211,7 @@ if st.session_state.searched_cars:
               f"{BASE_URL}/discount/registration/save",
               data={
                   "peId": target_car.get("id"),
-                  "discountType": "2",
+                  "discountType": "2",  # 3시간 할인 코드
                   "saveCnt": "1",
                   "iCardType": "0",
                   "carNo": car_full_no,
@@ -223,7 +232,7 @@ if st.session_state.searched_cars:
         except Exception as e:
           st.error(f"등록 통신 오류: {e}")
 
-# 하단 안내 문구 (한 줄에 맞춰 밀림 현상 방지)
+# 하단 안내 문구
 st.markdown(
     '<div class="info-notice">※ 3시간 이상 주차 시 원무팀에 문의해'
     " 주세요.</div>",
