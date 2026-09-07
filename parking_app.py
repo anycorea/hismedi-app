@@ -59,7 +59,7 @@ st.markdown('<div class="custom-title">🚗 히즈메디병원 주차등록</div
 st.markdown('<div class="custom-sub">진료 및 검진 방문객 셀프 주차등록</div>', unsafe_allow_html=True)
 
 # ----------------------------------------------------
-# 2. 서버 및 세션 관리 (세션 지속 유지)
+# 2. 서버 및 세션 관리
 # ----------------------------------------------------
 USER_ID = "001"
 USER_PW = "1588"
@@ -70,7 +70,6 @@ today_day = today.strftime("%d")
 today_yyyymmdd = today.strftime("%Y%m%d")
 
 def init_session():
-    """Streamlit 세션 상태에 Requests Session을 생성하고 로그인 쿠키를 유지시킵니다."""
     if "http_session" not in st.session_state:
         s = requests.Session()
         s.headers.update({
@@ -94,27 +93,7 @@ def init_session():
 session = init_session()
 
 # ----------------------------------------------------
-# 3. API 호출 함수 (상세 로그 디버깅 지원)
-# ----------------------------------------------------
-def get_car_discount_info(pe_id, car_no, entry_date):
-    """getForDiscount를 호출하여 parkVisitCar 및 전체 데이터를 받아옵니다."""
-    url = f"{BASE_URL}/discount/registration/getForDiscount"
-    payload = {
-        "peId": str(pe_id),
-        "carNo": str(car_no),
-        "entryDate": str(entry_date),
-        "iLotArea": "621"
-    }
-    try:
-        res = session.post(url, data=payload, timeout=5)
-        if res.status_code == 200:
-            return res.json()
-    except Exception as e:
-        st.error(f"getForDiscount 통신 오류: {e}")
-    return None
-
-# ----------------------------------------------------
-# 4. 화면 로직
+# 3. 화면 및 등록 로직
 # ----------------------------------------------------
 car_no_input = st.text_input(
     "🔹 차량번호 (뒤 4자리)",
@@ -140,31 +119,17 @@ if len(car_no_input) == 4 and car_no_input.isdigit():
         if items and isinstance(items, list) and len(items) > 0:
             target = items[0]
             
-            # 파라미터 값 추출 (키 명칭 다각도 대응)
-            pe_id = target.get("id") or target.get("iID") or target.get("peId")
-            car_full = target.get("carNo") or target.get("acPlate1")
-            entry_date = target.get("entryDate") or target.get("dtInDateStr")
+            pe_id = target.get("id")
+            car_full = target.get("carNo", "")
             entry_str = target.get("entryDateToString", "")
-
-            # 2. 할인 내역 상세 조회 (getForDiscount)
-            discount_data = get_car_discount_info(pe_id, car_full, entry_date)
             
-            # 🔍 [디버깅용 로그] 서버 응답 데이터를 직접 확인 (확인 후 삭제 가능)
-            with st.expander("🛠️ 서버 응답 데이터 확인 (디버그)"):
-                st.write("listForDiscount 데이터:", target)
-                st.write("getForDiscount 데이터:", discount_data)
+            # 할인 수량 카운트 (dscnt_cnt) 체크
+            dscnt_cnt_val = str(target.get("dscnt_cnt", "0"))
 
-            # 3. 기존 할인 존재 여부 체크
-            existing_dc_name = None
-            if discount_data:
-                park_visit_car = discount_data.get("parkVisitCar", [])
-                if isinstance(park_visit_car, list) and len(park_visit_car) > 0:
-                    first_item = park_visit_car[0]
-                    existing_dc_name = first_item.get("discount_name") or first_item.get("discountName") or first_item.get("dc_name")
-
-            # 4. 결과에 따른 UI 분기
-            if existing_dc_name:
-                st.warning(f"⚠️ [{car_full}] 차량은 이미 **[{existing_dc_name}]**이(가) 등록되어 있습니다.")
+            # 2. 기존 할인 적용 여부 확인 (dscnt_cnt 가 0이 아니면 이미 할인이 적용됨)
+            if dscnt_cnt_val not in ["0", "None", ""]:
+                st.warning(f"⚠️ [{car_full}] 차량은 이미 **주차 할인이 등록되어 있습니다.** ({dscnt_cnt_val}건 적용됨)")
+                st.info("※ 추가 할인이 필요한 경우 원무팀에 문의해 주세요.")
             else:
                 st.success(f"🚘 **조회 차량:** {car_full} (입차시간: {entry_str})")
 
@@ -187,7 +152,7 @@ if len(car_no_input) == 4 and car_no_input.isdigit():
                                 "saveCnt": "1",
                                 "iCardType": "0",
                                 "carNo": car_full,
-                                "iLotArea": target.get("iLotArea", "621"),
+                                "iLotArea": target.get("iLotArea", 621),
                             },
                             timeout=5,
                         )
