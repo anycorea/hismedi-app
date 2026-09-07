@@ -12,7 +12,9 @@ st.set_page_config(
 st.markdown(
     """
     <style>
+    /* 기본 헤더/메뉴 숨김 */
     #MainMenu, header, footer, .stAppHeader, [data-testid="stHeader"] { display: none !important; }
+    
     .custom-title {
         font-size: 1.3rem !important;
         font-weight: 700;
@@ -43,6 +45,7 @@ st.markdown(
         background-color: #1D4ED8 !important;
     }
     
+    /* 하단 안내문구 (한 줄 처리) */
     .info-notice {
         background-color: #FEF3C7;
         color: #92400E;
@@ -96,50 +99,47 @@ def get_session():
 
 
 # ----------------------------------------------------
-# 🔍 할인 내역 상세 조회 함수 (서버 API 호출)
+# 🔍 getForDiscount API로 할인 상세 내역 조회
 # ----------------------------------------------------
-def get_existing_discount(session, pe_id):
-  """peId(입차ID)를 기반으로 해당 차량에 등록된 기존 할인 내역을 조회합니다."""
-  endpoints = [
-      f"{BASE_URL}/discount/registration/discountList",
-      f"{BASE_URL}/discount/registration/detail",
-      f"{BASE_URL}/discount/registration/selectDiscountList",
-  ]
+def check_existing_discount(session, pe_id):
+  """getForDiscount API를 통해 해당 차량에 이미 등록된 할인 내역이 있는지 조회합니다."""
+  try:
+    url = f"{BASE_URL}/discount/registration/getForDiscount"
+    res = session.post(url, data={"peId": pe_id}, timeout=3)
+    if res.status_code == 200:
+      data = res.json()
 
-  for url in endpoints:
-    try:
-      res = session.post(url, data={"peId": pe_id, "id": pe_id}, timeout=3)
-      if res.status_code == 200:
-        data = res.json()
+      # 응답 JSON 데이터 내 할인 목록/내역 탐색
+      # 보통 discountList, list, discountVo, 또는 root 객체 내에 할인명이 들어옵니다.
+      discount_items = []
+      if isinstance(data, dict):
+        discount_items = (
+            data.get("discountList")
+            or data.get("list")
+            or data.get("discountHistory")
+            or []
+        )
+        # 단일 객체 구조인 경우
+        if not discount_items and (
+            data.get("discountVal") or data.get("dcName")
+        ):
+          discount_items = [data]
 
-        # 데이터가 리스트 형태인 경우
-        if isinstance(data, list) and len(data) > 0:
-          first_dc = data[0]
-          return (
-              first_dc.get("discountVal")
-              or first_dc.get("discountName")
-              or first_dc.get("dcName")
-              or "기존 주차할인"
-          )
+      elif isinstance(data, list):
+        discount_items = data
 
-        # 데이터가 딕셔너리 형태인 경우
-        elif isinstance(data, dict):
-          dc_list = data.get("list") or data.get("discountList") or []
-          if dc_list and len(dc_list) > 0:
-            return (
-                dc_list[0].get("discountVal")
-                or dc_list[0].get("discountName")
-                or dc_list[0].get("dcName")
-                or "기존 주차할인"
-            )
-          elif data.get("discountVal") or data.get("discountName"):
-            return (
-                data.get("discountVal")
-                or data.get("discountName")
-                or "기존 주차할인"
-            )
-    except Exception:
-      continue
+      if discount_items:
+        first_dc = discount_items[0]
+        dc_name = (
+            first_dc.get("discountVal")
+            or first_dc.get("dcName")
+            or first_dc.get("discountName")
+            or first_dc.get("vName")
+            or "주차할인"
+        )
+        return dc_name
+  except Exception as e:
+    pass
   return None
 
 
@@ -182,7 +182,7 @@ else:
   st.session_state.searched_cars = None
 
 # ----------------------------------------------------
-# 차량 선택 및 기존 할인 내역 상세 검사
+# 차량 조회 결과 및 기존 할인 여부 상세 검사
 # ----------------------------------------------------
 if st.session_state.searched_cars:
   cars = st.session_state.searched_cars
@@ -200,27 +200,18 @@ if st.session_state.searched_cars:
   target_car = st.session_state.selected_car
   pe_id = target_car.get("id")
 
-  # 1) 차량 기본 정보에서 1차 확인
-  existing_dc_name = (
-      target_car.get("discountName")
-      or target_car.get("dcName")
-      or target_car.get("discountVal")
-  )
-
-  # 2) 기본 정보에 없으면 상세 할인 내역 API 호출해서 2차 확인
+  # 🔍 getForDiscount API 호출하여 기존 할인 존재 여부 정밀 확인
   session = get_session()
-  if not existing_dc_name and pe_id:
-    existing_dc_name = get_existing_discount(session, pe_id)
+  existing_dc_name = check_existing_discount(session, pe_id)
 
-  # 기존 할인이 존재하는 경우 🛑 (등록 완전 차단)
+  # 🛑 이미 할인이 적용된 경우 (등록 차단)
   if existing_dc_name:
     st.warning(
         f"⚠️ [{target_car.get('carNo')}] 차량은 이미"
         f" **[{existing_dc_name}]**이(가) 등록되어 있습니다."
     )
-    st.info("💡 추가 할인이 필요한 경우 원무팀에 문의해 주세요.")
 
-  # 기존 할인이 없는 경우만 등록 절차 진행 ✅
+  # ✅ 기존 할인이 없는 경우만 등록 진행
   else:
     st.success(
         f"🚘 **조회 차량:** {target_car.get('carNo')} (입차시간:"
@@ -228,7 +219,7 @@ if st.session_state.searched_cars:
     )
 
     # ----------------------------------------------------
-    # 🔹 환자 확인번호 입력
+    # 🔹 환자 확인번호 (접수증 참조)
     # ----------------------------------------------------
     receipt_no = st.text_input(
         "🔹 환자 확인번호 (접수증 참조)",
@@ -283,7 +274,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# Enter 키 입력 이동 JS
+# Enter 키 입력 순차 이동 JS
 components.html(
     """
 <script>
