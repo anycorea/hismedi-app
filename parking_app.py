@@ -9,18 +9,30 @@ st.set_page_config(
     layout="centered",
 )
 
-# 상단 메뉴/GitHub 아이콘/하단 Streamlit 로고 숨김 CSS
+# 상단 헤더, 메뉴, 하단 프로필/왕관(Community Badge) 아이콘 전체 숨김 CSS
 hide_ui_style = """
     <style>
+    /* 상단 메뉴 및 헤더 숨기기 */
     #MainMenu {visibility: hidden;}
     header {visibility: hidden;}
     footer {visibility: hidden;}
-    .stAppHeader {display: none;}
-    button[title="View source"] {display: none;}
-    [data-testid="stToolbar"] {display: none;}
-    [data-testid="stDecoration"] {display: none;}
-    [data-testid="stStatusWidget"] {display: none;}
+    .stAppHeader {display: none !important;}
+    [data-testid="stHeader"] {display: none !important;}
+    [data-testid="stToolbar"] {display: none !important;}
+    [data-testid="stDecoration"] {display: none !important;}
+    [data-testid="stStatusWidget"] {display: none !important;}
+    
+    /* 하단 우측 Floating 아이콘 및 왕관/프로필 배지 전체 숨기기 */
+    .stActionButton {display: none !important;}
+    [data-testid="stActionButton"] {display: none !important;}
     .viewerBadge_container__1S-is {display: none !important;}
+    div[class*="viewerBadge"] {display: none !important;}
+    div[class*="profile"] {display: none !important;}
+    [data-testid="stAppViewBlockContainer"] ~ div {display: none !important;}
+    
+    /* 스크롤바 우측 하단 여백 레이어 제거 */
+    div[data-testid="stStatusWidget"] {display: none !important;}
+    #root > div:nth-child(2) {display: none !important;}
     </style>
 """
 st.markdown(hide_ui_style, unsafe_allow_html=True)
