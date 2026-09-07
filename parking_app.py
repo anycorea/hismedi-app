@@ -2,12 +2,28 @@ import datetime
 import requests
 import streamlit as st
 
-# 1. 페이지 및 UI 설정
+# 1. 페이지 및 UI 기본 설정
 st.set_page_config(
     page_title="히즈메디병원 주차등록 시스템",
     page_icon="🚗",
     layout="centered",
 )
+
+# 상단 메뉴/GitHub 아이콘/하단 Streamlit 로고 숨김 CSS
+hide_ui_style = """
+    <style>
+    #MainMenu {visibility: hidden;}
+    header {visibility: hidden;}
+    footer {visibility: hidden;}
+    .stAppHeader {display: none;}
+    button[title="View source"] {display: none;}
+    [data-testid="stToolbar"] {display: none;}
+    [data-testid="stDecoration"] {display: none;}
+    [data-testid="stStatusWidget"] {display: none;}
+    .viewerBadge_container__1S-is {display: none !important;}
+    </style>
+"""
+st.markdown(hide_ui_style, unsafe_allow_html=True)
 
 st.title("🚗 히즈메디병원 주차등록")
 st.caption("진료 및 검진 방문객 전용 셀프 주차등록 시스템")
@@ -38,7 +54,6 @@ with st.form("parking_form"):
 if submitted:
   raw_input = receipt_no.strip()
 
-  # A. 입력값 검증 (오늘 일자 2자리로 시작하는지 체크)
   if not raw_input.startswith(today_day):
     st.error(
         f"❌ 올바른 확인번호가 아닙니다. (오늘 일자 [{today_day}]로"
@@ -49,14 +64,12 @@ if submitted:
     st.error("❌ 차량번호 4자리를 정확히 입력해 주세요.")
     st.session_state.search_results = None
   else:
-    # 오늘 일자를 제외한 순수 환자번호 추출
     patient_seq = raw_input[2:]
 
     if not patient_seq.isdigit():
       st.error("❌ 환자 확인번호는 숫자만 입력 가능합니다.")
       st.session_state.search_results = None
     else:
-      # 필요 시 규격에 맞춰 10자리 자동 채움 (zfill)
       formatted_patient_id = patient_seq.zfill(10)
 
       session = requests.Session()
