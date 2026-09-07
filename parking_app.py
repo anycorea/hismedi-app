@@ -9,10 +9,9 @@ st.set_page_config(
     layout="centered",
 )
 
-# 상단 헤더, 메뉴, 하단 Built with Streamlit / Fullscreen / 배지 전체 숨김 CSS
+# UI 요소 숨김 CSS
 hide_ui_style = """
     <style>
-    /* 상단 메뉴 및 헤더 완전 숨김 */
     #MainMenu {visibility: hidden;}
     header {visibility: hidden;}
     footer {visibility: hidden;}
@@ -20,16 +19,12 @@ hide_ui_style = """
     [data-testid="stHeader"] {display: none !important;}
     [data-testid="stToolbar"] {display: none !important;}
     [data-testid="stDecoration"] {display: none !important;}
-    
-    /* 하단 Floating 버튼, 프로필, Community 배지 완전 숨김 */
     .stActionButton {display: none !important;}
     [data-testid="stActionButton"] {display: none !important;}
     .viewerBadge_container__1S-is {display: none !important;}
     div[class*="viewerBadge"] {display: none !important;}
     div[class*="profile"] {display: none !important;}
     [data-testid="stAppViewBlockContainer"] ~ div {display: none !important;}
-    
-    /* embed 모드 하단 툴바 (Built with Streamlit / Fullscreen) 강제 차단 */
     [data-testid="stStatusWidget"],
     .stAppToolbar,
     div[class*="StyledEmbedToolbar"],
@@ -39,7 +34,6 @@ hide_ui_style = """
         visibility: hidden !important;
         height: 0px !important;
     }
-    
     #root > div:nth-child(2) {display: none !important;}
     </style>
 """
@@ -51,15 +45,14 @@ st.caption("진료 및 검진 방문객 전용 셀프 주차등록 시스템")
 if "search_results" not in st.session_state:
   st.session_state.search_results = None
 
-# 오늘 일자(DD) 추출 (예: 7일 -> '07')
 today = datetime.datetime.now()
 today_day = today.strftime("%d")
 today_yyyymmdd = today.strftime("%Y%m%d")
 
-# 2. 입력 폼 (오늘 일자 동적 Placeholder 적용)
+# 2. 입력 폼
 with st.form("parking_form"):
   car_no = st.text_input(
-      "차량번호 뒤 4자리", max_chars=4, placeholder="예: 6347"
+      "차량번호 뒤 4자리", max_chars=4, placeholder="예: 5661"
   )
   receipt_no = st.text_input(
       "환자 확인번호 (접수증 참조)",
@@ -70,7 +63,7 @@ with st.form("parking_form"):
       "내 차량 조회하기", use_container_width=True
   )
 
-# 3. 차량 조회 및 검증 로직
+# 3. 차량 조회 로직 (응답 데이터 구조 확인용 디버깅 포함)
 if submitted:
   raw_input = receipt_no.strip()
 
@@ -90,9 +83,14 @@ if submitted:
       st.error("❌ 환자 확인번호는 숫자만 입력 가능합니다.")
       st.session_state.search_results = None
     else:
-      formatted_patient_id = patient_seq.zfill(10)
-
       session = requests.Session()
+      headers = {
+          "User-Agent": (
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+          ),
+          "Referer": "http://115.21.205.117/discount/registration/index",
+      }
+
       list_url = "http://115.21.205.117/discount/registration/listForDiscount"
       list_payload = {
           "iLotArea": "621",
@@ -101,7 +99,9 @@ if submitted:
       }
 
       try:
-        res = session.post(list_url, data=list_payload)
+        res = session.post(
+            list_url, data=list_payload, headers=headers, timeout=5
+        )
         items = res.json()
 
         if items:
@@ -115,22 +115,33 @@ if submitted:
       except Exception as e:
         st.error(f"주차 시스템 통신 오류: {e}")
 
-# 4. 차량 선택 및 3시간 자동 할인 등록 (응답 검증 강화)
+# 4. 차량 선택 및 자동 할인 등록
 if st.session_state.search_results:
   st.write("---")
   st.subheader("📋 본인 차량 선택 (3시간 할인 적용)")
 
+  # [디버깅] 서버에서 넘어온 전체 데이터 구조 확인용 (파악 후 제거 예정)
+  with st.expander("🔍 [디버깅] 조회된 서버 원본 데이터 확인"):
+    st.write(st.session_state.search_results)
+
   for item in st.session_state.search_results:
     car_full_no = item.get("carNo", "차량번호 없음")
-    in_time = item.get("inTime", "시간 정보 없음")
-    pe_id = item.get("id")
+
+    # 다양한 가능성의 입차시간 Key 확인
+    in_time = (
+        item.get("inTime")
+        or item.get("inDate")
+        or item.get("entryTime")
+        or item.get("inDtm")
+        or "시간 정보 없음"
+    )
+
+    pe_id = item.get("id") or item.get("peId")
 
     btn_label = f"🚘 {car_full_no} (입차: {in_time}) ➔ 3시간 할인 등록"
 
     if st.button(btn_label, key=f"btn_{pe_id}", use_container_width=True):
       session = requests.Session()
-
-      # 브라우저 요청처럼 보이도록 Header 추가
       headers = {
           "User-Agent": (
               "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
@@ -141,7 +152,7 @@ if st.session_state.search_results:
       save_url = "http://115.21.205.117/discount/registration/save"
       save_payload = {
           "peId": pe_id,
-          "discountType": "2",  # 3시간 할인 코드
+          "discountType": "2",
           "saveCnt": "1",
           "iCardType": "0",
           "carNo": car_full_no,
@@ -154,12 +165,10 @@ if st.session_state.search_results:
             save_url, data=save_payload, headers=headers, timeout=5
         )
 
-        # 서버 실제 응답 데이터 파싱
         try:
           res_json = save_res.json()
-          st.write("🔍 **서버 실제 응답 데이터:**", res_json)  # 디버깅용 출력
+          st.info(f"🔍 [서버 처리 결과]: {res_json}")
 
-          # 서버의 성공 응답 조건 확인 (보통 result가 true/success이거나 code가 0/200)
           if (
               res_json.get("result") == True
               or res_json.get("code") == "200"
@@ -172,12 +181,10 @@ if st.session_state.search_results:
             st.session_state.search_results = None
           else:
             st.error(
-                f"❌ 서버에서 할인이 거부되었습니다. (사유:"
-                f" {res_json.get('msg', res_json)})"
+                f"❌ 할인 등록 거부 사유: {res_json.get('msg', res_json)}"
             )
         except Exception:
-          # JSON 응답이 아닌 경우 텍스트 확인
-          st.write("🔍 **서버 응답 텍스트:**", save_res.text)
+          st.info(f"🔍 [서버 텍스트 응답]: {save_res.text}")
           if "성공" in save_res.text or "ok" in save_res.text.lower():
             st.success(
                 f"🎉 [{car_full_no}] 차량에 3시간 주차 할인이 정상"
