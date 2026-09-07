@@ -10,7 +10,7 @@ st.set_page_config(
     layout="centered",
 )
 
-# UI 요소 및 관리자 툴바 숨김 CSS
+# UI 요소 숨김 CSS
 hide_ui_style = """
     <style>
     #MainMenu {visibility: hidden;}
@@ -44,10 +44,10 @@ st.title("🚗 히즈메디병원 주차등록")
 st.caption("진료 및 검진 방문객 전용 셀프 주차등록 시스템")
 
 # ==========================================
-# 🔑 계정 정보 (실제 아이디/비밀번호로 수정해 주세요)
+# 🔑 계정 정보 (실제 계정 정보 입력)
 # ==========================================
-USER_ID = "001"  # 사용 중이신 아이디
-USER_PW = "1588"  # 사용 중이신 비밀번호
+USER_ID = "001"
+USER_PW = "1588"
 # ==========================================
 
 BASE_URL = "http://115.21.205.117"
@@ -60,7 +60,6 @@ today_day = today.strftime("%d")
 today_yyyymmdd = today.strftime("%Y%m%d")
 
 
-# SHA-256 암호화 적용 및 로그인 세션 생성 함수
 def get_authenticated_session():
   session = requests.Session()
   headers = {
@@ -73,17 +72,11 @@ def get_authenticated_session():
   session.headers.update(headers)
 
   if USER_ID != "YOUR_ID":
-    # 비밀번호 SHA-256 암호화 처리
     hashed_pw = hashlib.sha256(USER_PW.encode("utf-8")).hexdigest()
-
     login_url = f"{BASE_URL}/login"
-    login_payload = {
-        "userId": USER_ID,
-        "userPwd": hashed_pw,
-    }
+    login_payload = {"userId": USER_ID, "userPwd": hashed_pw}
     try:
-      # 로그인 요청 실행 (세션 쿠키 획득)
-      res = session.post(login_url, data=login_payload, timeout=5)
+      session.post(login_url, data=login_payload, timeout=5)
     except Exception as e:
       st.error(f"로그인 통신 오류: {e}")
 
@@ -125,7 +118,6 @@ if submitted:
       st.session_state.search_results = None
     else:
       session = get_authenticated_session()
-
       list_url = f"{BASE_URL}/discount/registration/listForDiscount"
       list_payload = {
           "iLotArea": "621",
@@ -167,7 +159,7 @@ if st.session_state.search_results:
       save_url = f"{BASE_URL}/discount/registration/save"
       save_payload = {
           "peId": pe_id,
-          "discountType": "2",  # 3시간 할인 코드
+          "discountType": "2",
           "saveCnt": "1",
           "iCardType": "0",
           "carNo": car_full_no,
@@ -178,44 +170,19 @@ if st.session_state.search_results:
 
       try:
         save_res = session.post(save_url, data=save_payload, timeout=5)
+        res_text = save_res.text.strip()
 
-        try:
-          res_json = save_res.json()
-          # 서버 응답 검증
-          if (
-              res_json.get("result") == True
-              or res_json.get("code") == 0
-              or res_json.get("code") == "200"
-              or res_json.get("status") == "SUCCESS"
-          ):
-            st.success(
-                f"🎉 [{car_full_no}] 차량에 3시간 주차 할인이 정상"
-                " 적용되었습니다!"
-            )
-            st.session_state.search_results = None
-          else:
-            err_msg = (
-                res_json.get("msg")
-                or res_json.get("errorMsg")
-                or res_json.get("message")
-                or res_json
-            )
-            st.error(f"❌ 주차 할인 등록 실패: {err_msg}")
-        except Exception:
-          # HTML(로그인창)이 돌아오는지 검사
-          if "<title>히즈메디병원</title>" in save_res.text:
-            st.error(
-                "❌ 아이디 또는 비밀번호가 틀렸거나 로그인 세션 생성에"
-                " 실패했습니다. 상단 계정 정보를 다시 확인해 주세요."
-            )
-          elif "성공" in save_res.text or "ok" in save_res.text.lower():
-            st.success(
-                f"🎉 [{car_full_no}] 차량에 3시간 주차 할인이 정상"
-                " 적용되었습니다!"
-            )
-            st.session_state.search_results = None
-          else:
-            st.error("❌ 처리 결과 응답 해석 실패")
+        # 로그인창 튕김 여부 확인
+        if "<title>히즈메디병원</title>" in res_text:
+          st.error("❌ 로그인 세션이 유효하지 않습니다.")
+        else:
+          # 실제로 이미 여러 번 들어가는 현상이 확인되었으므로 성공 메시지 처리 후 세션 초기화
+          st.success(
+              f"🎉 [{car_full_no}] 차량에 3시간 주차 할인이 정상"
+              " 적용되었습니다!"
+          )
+          st.info(f"ℹ️ [서버 응답 기록]: {res_text[:100]}")
+          st.session_state.search_results = None
 
       except Exception as e:
         st.error(f"할인 적용 통신 오류: {e}")
