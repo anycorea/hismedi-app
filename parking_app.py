@@ -1,16 +1,101 @@
 import datetime, hashlib, json, requests, streamlit as st, streamlit.components.v1 as components
 
-# 1. UI 및 스타일 설정
+# 1. UI 및 페이지 기본 설정
 st.set_page_config(page_title="히즈메디병원 주차등록", page_icon="🚗", layout="centered")
-st.markdown("""<style>
-#MainMenu, header, footer, .stAppHeader, [data-testid="stHeader"] { display: none !important; }
-.custom-title { font-size: 1.3rem !important; font-weight: 700; color: #1E293B; text-align: center; margin-bottom: 2px; }
-.custom-sub { font-size: 0.85rem; color: #64748B; text-align: center; margin-bottom: 20px; }
-div.stButton > button { background-color: #2563EB !important; color: white !important; font-weight: 700 !important; font-size: 1rem !important; border-radius: 8px !important; border: none !important; padding: 12px 0px !important; }
-</style>""", unsafe_allow_html=True)
 
-st.markdown('<div class="custom-title">🚗 히즈메디병원 주차등록</div>', unsafe_allow_html=True)
-st.markdown('<div class="custom-sub">진료 및 검진 방문객 셀프 주차등록</div>', unsafe_allow_html=True)
+# 2. 어르신 배려 & 모바일 최적화 CSS 스타일링
+st.markdown("""
+<style>
+    /* 상단 헤더 및 기본 메뉴 숨기기 */
+    #MainMenu, header, footer, .stAppHeader, [data-testid="stHeader"] { display: none !important; }
+    
+    /* 여백 및 전체 배경 조정 */
+    .block-container { padding-top: 1.5rem !important; padding-bottom: 2rem !important; }
+    
+    /* 타이틀 영역 */
+    .title-box {
+        background-color: #0F172A;
+        color: #FFFFFF;
+        padding: 18px 10px;
+        border-radius: 12px;
+        text-align: center;
+        margin-bottom: 20px;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    }
+    .main-title { font-size: 1.6rem !important; font-weight: 800; margin: 0; color: #FFFFFF; }
+    .sub-title { font-size: 1.05rem; color: #94A3B8; margin-top: 6px; font-weight: 500; }
+    
+    /* 라벨 및 안내 문구 폰트 키우기 */
+    label, div[data-testid="stMarkdownContainer"] p {
+        font-size: 1.15rem !important;
+        font-weight: 700 !important;
+        color: #1E293B !important;
+    }
+    
+    /* 입력창(Text Input) 디자인 키우기 */
+    div[data-baseweb="input"] {
+        border-radius: 10px !important;
+        border: 2px solid #CBD5E1 !important;
+        height: 56px !important;
+    }
+    div[data-baseweb="input"] input {
+        font-size: 1.3rem !important;
+        font-weight: 700 !important;
+        text-align: center !important;
+    }
+    div[data-baseweb="input"]:focus-within {
+        border-color: #2563EB !important;
+        box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2) !important;
+    }
+    
+    /* 제출 버튼 시인성 및 크기 극대화 */
+    div.stButton > button {
+        background-color: #2563EB !important;
+        color: white !important;
+        font-weight: 800 !important;
+        font-size: 1.35rem !important;
+        border-radius: 12px !important;
+        border: none !important;
+        padding: 16px 0px !important;
+        height: 60px !important;
+        margin-top: 10px !important;
+        box-shadow: 0 4px 10px rgba(37, 99, 235, 0.3) !important;
+    }
+    div.stButton > button:hover {
+        background-color: #1D4ED8 !important;
+    }
+
+    /* 경고 및 성공 메시지 박스 텍스트 크기 확대 */
+    .stAlert {
+        border-radius: 10px !important;
+        padding: 15px !important;
+    }
+    .stAlert div[data-testid="stMarkdownContainer"] p {
+        font-size: 1.1rem !important;
+        line-height: 1.5 !important;
+    }
+    
+    /* 정보 요약 카드 스타일 */
+    .info-card {
+        background-color: #F8FAFC;
+        border: 2px solid #E2E8F0;
+        border-radius: 12px;
+        padding: 16px;
+        margin-bottom: 20px;
+        text-align: center;
+    }
+    .info-card .car-num { font-size: 1.5rem; font-weight: 800; color: #1E293B; }
+    .info-card .entry-time { font-size: 1.1rem; color: #475569; margin-top: 4px; }
+</style>
+""", unsafe_allow_html=True)
+
+# 3. 헤더 UI
+st.markdown("""
+<div class="title-box">
+    <div class="main-title">🚗 히즈메디병원 주차등록</div>
+    <div class="sub-title">방문객 셀프 무료 주차등록</div>
+</div>
+""", unsafe_allow_html=True)
 
 USER_ID, USER_PW, BASE_URL = "001", "1588", "http://115.21.205.117"
 today = datetime.datetime.now()
@@ -21,23 +106,35 @@ def get_authenticated_session():
     s.headers.update({"User-Agent": "Mozilla/5.0", "Referer": f"{BASE_URL}/login", "X-Requested-With": "XMLHttpRequest"})
     if USER_ID != "***":
         hashed_pw = hashlib.sha256(USER_PW.encode("utf-8")).hexdigest()
-        try: s.post(f"{BASE_URL}/login", data={"userId": USER_ID, "userPwd": hashed_pw}, timeout=5)
-        except Exception as e: st.error(f"로그인 통신 오류: {e}")
+        try: 
+            s.post(f"{BASE_URL}/login", data={"userId": USER_ID, "userPwd": hashed_pw}, timeout=5)
+        except Exception as e: 
+            st.error(f"로그인 통신 오류: {e}")
     return s
 
-car_no_input = st.text_input("◆ 차량번호 입력", max_chars=4, placeholder="차량번호 (뒤 4자리)", key="input_car_no")
+# 차량 번호 입력부
+car_no_input = st.text_input(
+    "1. 차량 뒷번호 4자리를 입력하세요", 
+    max_chars=4, 
+    placeholder="예: 1234", 
+    key="input_car_no"
+)
 
 if len(car_no_input) == 4 and car_no_input.isdigit():
     try:
         session = get_authenticated_session()
-        list_res = session.post(f"{BASE_URL}/discount/registration/listForDiscount", data={"iLotArea": "621", "entryDate": today_yyyymmdd, "carNo": car_no_input}, timeout=5)
+        list_res = session.post(
+            f"{BASE_URL}/discount/registration/listForDiscount", 
+            data={"iLotArea": "621", "entryDate": today_yyyymmdd, "carNo": car_no_input}, 
+            timeout=5
+        )
         items = list_res.json()
 
         if items and isinstance(items, list) and len(items) > 0:
             target = items[0]
             pe_id, car_full, entry_str, lot_area = target.get("id"), target.get("carNo", ""), target.get("entryDateToString", ""), target.get("iLotArea", "621")
 
-            # 🛑 [할인 중복 검증]
+            # 할인 중복 검증
             dc_cnt_raw = target.get("dscnt_cnt") or target.get("dscntCnt") or target.get("discountCnt") or 0
             try: dc_cnt_num = int(dc_cnt_raw)
             except: dc_cnt_num = 0
@@ -48,18 +145,28 @@ if len(car_no_input) == 4 and car_no_input.isdigit():
             has_discount = (dc_cnt_num > 0) or (len(dc_list) > 0) or bool(dc_name)
 
             if has_discount:
-                st.warning(f"⚠️ [{car_full}] 차량은 이미 주차 할인이 등록되어 있습니다.")
-                st.info("※ 주차시간 조정은 원무팀에 문의해 주세요.")
+                st.warning(f"⚠️ [{car_full}] 차량은 이미 주차 할인이 적용되어 있습니다.\n\n※ 수정/조정이 필요하시면 1층 원무팀에 문의해 주세요.")
             else:
-                st.success(f"🚘 **조회 차량:** {car_full} (입차시간: {entry_str})")
-                receipt_no = st.text_input("🔹 환자등록번호 (접수증 참조)", max_chars=6, placeholder='"환자등록번호"를 정확히 입력해주세요', key="input_receipt_no")
+                # 입차 정보 표시 카드
+                st.markdown(f"""
+                <div class="info-card">
+                    <div class="car-num">🚘 차량번호: {car_full}</div>
+                    <div class="entry-time">⏰ 입차시간: {entry_str}</div>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                receipt_no = st.text_input(
+                    "2. 환자등록번호를 입력하세요", 
+                    max_chars=6, 
+                    placeholder="접수증/영수증의 번호 입력", 
+                    key="input_receipt_no"
+                )
 
-                if st.button("주차 등록하기 (3시간 할인)", use_container_width=True):
+                if st.button("주차 등록하기 (3시간 무료)", use_container_width=True):
                     raw_input = receipt_no.strip()
                     
-                    # 💡 환자등록번호 검증: 숫자로만 5자리 또는 6자리인지 확인
                     if not (raw_input.isdigit() and len(raw_input) in [5, 6]):
-                        st.error("❌ 환자등록번호는 숫자 5자리 또는 6자리로 입력해 주세요.")
+                        st.error("❌ 환자등록번호는 숫자 5자리 또는 6자리로 정확히 입력해 주세요.")
                     else:
                         save_session = get_authenticated_session()
                         save_payload = {"peId": pe_id, "discountType": "2", "saveCnt": "1", "iCardType": "0", "carNo": car_full, "iLotArea": lot_area, "acPlate2": "", "memo": ""}
@@ -68,24 +175,27 @@ if len(car_no_input) == 4 and car_no_input.isdigit():
 
                         if "true" in res_text or "ok" in res_text or "성공" in res_text:
                             st.balloons()
-                            st.success(f"🎉 [{car_full}] 차량에 3시간 주차 할인이 정상 적용되었습니다!")
-                            st.info("※ 주차시간 조정은 원무팀에 문의해 주세요.")
+                            st.success(f"🎉 [{car_full}] 차량에 3시간 주차 할인이 완료되었습니다!\n\n안심히 귀가하십시오.")
                         elif "<title>히즈메디병원</title>" in save_res.text:
-                            st.error("❌ 로그인 세션이 유효하지 않습니다.")
+                            st.error("❌ 로그인 세션이 만료되었습니다. 잠시 후 다시 시도해 주세요.")
                         else:
                             st.error(f"❌ 주차 할인 등록 실패: {save_res.text}")
         else:
-            st.error("❌ 입차된 차량이 없습니다. 번호를 다시 확인해 주세요.")
+            st.error("❌ 입차된 차량이 없습니다. 차량 번호를 다시 확인해 주세요.")
     except Exception as e:
-        st.error(f"처리 중 오류 발생: {e}")
+        st.error(f"처리 중 오류가 발생했습니다: {e}")
 
+# Enter 키 입력 시 다음 Input 포커스 자동 이동
 components.html("""<script>
 const doc = window.parent.document;
 doc.addEventListener('keydown', function(e) {
     if (e.key === 'Enter') {
         const inputs = Array.from(doc.querySelectorAll('input[type="text"]'));
         const index = inputs.indexOf(doc.activeElement);
-        if (index > -1 && index < inputs.length - 1) { e.preventDefault(); inputs[index + 1].focus(); }
+        if (index > -1 && index < inputs.length - 1) { 
+            e.preventDefault(); 
+            inputs[index + 1].focus(); 
+        }
     }
 });
 </script>""", height=0)
