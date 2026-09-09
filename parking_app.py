@@ -1,4 +1,4 @@
-import datetime, hashlib, json, requests, Streamlit as st, Streamlit.components.v1 as components
+import datetime, hashlib, json, requests, streamlit as st, streamlit.components.v1 as components
 
 # 1. UI 및 페이지 기본 설정
 st.set_page_config(page_title="히즈메디병원 주차등록", page_icon="🏥", layout="centered")
@@ -25,7 +25,7 @@ st.markdown("""
     .header-box img {
         max-width: 220px;
         height: auto;
-        margin-bottom: 10px;
+        margin-bottom: 8px;
     }
     .main-title { 
         font-size: 1.5rem !important; 
@@ -96,7 +96,8 @@ st.markdown("""
         border: 2px solid #E2E8F0;
         border-radius: 12px;
         padding: 16px;
-        margin-bottom: 20px;
+        margin-top: 15px;
+        margin-bottom: 15px;
         text-align: center;
     }
     .info-card .car-num { font-size: 1.4rem; font-weight: 800; color: #0F172A; }
@@ -104,10 +105,12 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 3. 로고를 포함한 헤더 UI (가로형 로고 적용)
-st.markdown("""
+# 3. 로고를 포함한 헤더 UI (구글 드라이브 호스팅 이미지 적용)
+LOGO_URL = "https://lh3.googleusercontent.com/d/1O7VZsctdhhpxyRXaORKLJEL6LL738ivs"
+
+st.markdown(f"""
 <div class="header-box">
-    <img src="app/static/Hismedi_logo가로투명.png" alt="히즈메디병원 로고" onerror="this.src='Hismedi_logo가로투명.png';">
+    <img src="{LOGO_URL}" alt="히즈메디병원 로고">
     <div class="main-title">무료 주차 등록</div>
     <div class="sub-title">진료 및 검진 방문객 셀프 서비스</div>
 </div>
@@ -128,62 +131,65 @@ def get_authenticated_session():
             st.error(f"로그인 통신 오류: {e}")
     return s
 
-# 차량 번호 입력부
+# 1. 환자등록번호 입력 (첫 번째 순서)
+receipt_no = st.text_input(
+    "1. 환자등록번호를 입력하세요", 
+    max_chars=6, 
+    placeholder="접수증/영수증의 번호 입력", 
+    key="input_receipt_no"
+)
+
+# 2. 차량 번호 입력 (두 번째 순서)
 car_no_input = st.text_input(
-    "1. 차량 뒷번호 4자리를 입력하세요", 
+    "2. 차량 뒷번호 4자리를 입력하세요", 
     max_chars=4, 
     placeholder="예: 1234", 
     key="input_car_no"
 )
 
+# 차량 번호 입력 시 조회 및 등록 절차 실행
 if len(car_no_input) == 4 and car_no_input.isdigit():
-    try:
-        session = get_authenticated_session()
-        list_res = session.post(
-            f"{BASE_URL}/discount/registration/listForDiscount", 
-            data={"iLotArea": "621", "entryDate": today_yyyymmdd, "carNo": car_no_input}, 
-            timeout=5
-        )
-        items = list_res.json()
+    raw_receipt = receipt_no.strip()
+    
+    # 환자등록번호 유효성 사전 체크
+    if not (raw_receipt.isdigit() and len(raw_receipt) in [5, 6]):
+        st.error("❌ 먼저 '환자등록번호'를 정확히 입력해 주세요 (숫자 5자리 또는 6자리).")
+    else:
+        try:
+            session = get_authenticated_session()
+            list_res = session.post(
+                f"{BASE_URL}/discount/registration/listForDiscount", 
+                data={"iLotArea": "621", "entryDate": today_yyyymmdd, "carNo": car_no_input}, 
+                timeout=5
+            )
+            items = list_res.json()
 
-        if items and isinstance(items, list) and len(items) > 0:
-            target = items[0]
-            pe_id, car_full, entry_str, lot_area = target.get("id"), target.get("carNo", ""), target.get("entryDateToString", ""), target.get("iLotArea", "621")
+            if items and isinstance(items, list) and len(items) > 0:
+                target = items[0]
+                pe_id, car_full, entry_str, lot_area = target.get("id"), target.get("carNo", ""), target.get("entryDateToString", ""), target.get("iLotArea", "621")
 
-            # 할인 중복 검증
-            dc_cnt_raw = target.get("dscnt_cnt") or target.get("dscntCnt") or target.get("discountCnt") or 0
-            try: dc_cnt_num = int(dc_cnt_raw)
-            except: dc_cnt_num = 0
+                # 할인 중복 검증
+                dc_cnt_raw = target.get("dscnt_cnt") or target.get("dscntCnt") or target.get("discountCnt") or 0
+                try: dc_cnt_num = int(dc_cnt_raw)
+                except: dc_cnt_num = 0
 
-            dc_list = target.get("dcDetailList") or target.get("dscntList") or target.get("discountList") or target.get("dcList") or []
-            dc_name = target.get("discountName") or target.get("dscntName") or target.get("dcName") or ""
+                dc_list = target.get("dcDetailList") or target.get("dscntList") or target.get("discountList") or target.get("dcList") or []
+                dc_name = target.get("discountName") or target.get("dscntName") or target.get("dcName") or ""
 
-            has_discount = (dc_cnt_num > 0) or (len(dc_list) > 0) or bool(dc_name)
+                has_discount = (dc_cnt_num > 0) or (len(dc_list) > 0) or bool(dc_name)
 
-            if has_discount:
-                st.warning(f"⚠️ [{car_full}] 차량은 이미 주차 할인이 적용되어 있습니다.\n\n※ 수정/조정이 필요하시면 1층 원무팀에 문의해 주세요.")
-            else:
-                # 입차 정보 표시 카드
-                st.markdown(f"""
-                <div class="info-card">
-                    <div class="car-num">차량번호: {car_full}</div>
-                    <div class="entry-time">입차시간: {entry_str}</div>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                receipt_no = st.text_input(
-                    "2. 환자등록번호를 입력하세요", 
-                    max_chars=6, 
-                    placeholder="접수증/영수증의 번호 입력", 
-                    key="input_receipt_no"
-                )
+                if has_discount:
+                    st.warning(f"⚠️ [{car_full}] 차량은 이미 주차 할인이 적용되어 있습니다.\n\n※ 수정/조정이 필요하시면 1층 원무팀에 문의해 주세요.")
+                else:
+                    # 입차 정보 표시 카드
+                    st.markdown(f"""
+                    <div class="info-card">
+                        <div class="car-num">차량번호: {car_full}</div>
+                        <div class="entry-time">입차시간: {entry_str}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
 
-                if st.button("주차 등록하기 (3시간 무료)", use_container_width=True):
-                    raw_input = receipt_no.strip()
-                    
-                    if not (raw_input.isdigit() and len(raw_input) in [5, 6]):
-                        st.error("❌ 환자등록번호는 숫자 5자리 또는 6자리로 정확히 입력해 주세요.")
-                    else:
+                    if st.button("주차 등록하기 (3시간 무료)", use_container_width=True):
                         save_session = get_authenticated_session()
                         save_payload = {"peId": pe_id, "discountType": "2", "saveCnt": "1", "iCardType": "0", "carNo": car_full, "iLotArea": lot_area, "acPlate2": "", "memo": ""}
                         save_res = save_session.post(f"{BASE_URL}/discount/registration/save", data=save_payload, timeout=5)
@@ -196,10 +202,10 @@ if len(car_no_input) == 4 and car_no_input.isdigit():
                             st.error("❌ 로그인 세션이 만료되었습니다. 잠시 후 다시 시도해 주세요.")
                         else:
                             st.error(f"❌ 주차 할인 등록 실패: {save_res.text}")
-        else:
-            st.error("❌ 입차된 차량이 없습니다. 차량 번호를 다시 확인해 주세요.")
-    except Exception as e:
-        st.error(f"처리 중 오류가 발생했습니다: {e}")
+            else:
+                st.error("❌ 입차된 차량이 없습니다. 차량 번호를 다시 확인해 주세요.")
+        except Exception as e:
+            st.error(f"처리 중 오류가 발생했습니다: {e}")
 
 # Enter 키 입력 시 다음 Input 포커스 자동 이동
 components.html("""<script>
