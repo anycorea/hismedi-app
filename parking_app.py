@@ -57,8 +57,8 @@ st.markdown('<div class="custom-title">🚗 히즈메디병원 주차등록</div
 st.markdown('<div class="custom-sub">진료 및 검진 방문객 셀프 주차등록</div>', unsafe_allow_html=True)
 
 # 2. 계정 및 서버 설정
-USER_ID = "***"
-USER_PW = "****"
+USER_ID = "001"
+USER_PW = "1588"
 BASE_URL = "http://115.21.205.117"
 
 today = datetime.datetime.now()
