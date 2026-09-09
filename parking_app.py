@@ -37,7 +37,7 @@ if len(car_no_input) == 4 and car_no_input.isdigit():
             target = items[0]
             pe_id, car_full, entry_str, lot_area = target.get("id"), target.get("carNo", ""), target.get("entryDateToString", ""), target.get("iLotArea", "621")
 
-            # 🛑 [정확한 할인 여부 검증] 입차시간 문자열("시간") 오탐지 방지
+            # 🛑 [할인 중복 검증]
             dc_cnt_raw = target.get("dscnt_cnt") or target.get("dscntCnt") or target.get("discountCnt") or 0
             try: dc_cnt_num = int(dc_cnt_raw)
             except: dc_cnt_num = 0
@@ -52,14 +52,14 @@ if len(car_no_input) == 4 and car_no_input.isdigit():
                 st.info("※ 주차시간 조정은 원무팀에 문의해 주세요.")
             else:
                 st.success(f"🚘 **조회 차량:** {car_full} (입차시간: {entry_str})")
-                receipt_no = st.text_input("🔹 환자 확인번호 (접수증 참조)", placeholder=f"예: {today_day} + 환자번호 (오늘 일자 {today_day}로 시작)", key="input_receipt_no")
+                receipt_no = st.text_input("🔹 환자등록번호 (접수증 참조)", placeholder='예: "환자등록번호"를 정확히 입력해주세요', key="input_receipt_no")
 
                 if st.button("주차 등록하기 (3시간 할인)", use_container_width=True):
                     raw_input = receipt_no.strip()
                     if not raw_input.startswith(today_day):
-                        st.error(f"❌ 환자 확인번호가 올바르지 않습니다. (오늘 일자 [{today_day}]로 시작)")
+                        st.error(f"❌ 환자등록번호가 올바르지 않습니다. (오늘 일자 [{today_day}]로 시작)")
                     elif not raw_input[2:].isdigit():
-                        st.error("❌ 환자 확인번호는 숫자만 입력 가능합니다.")
+                        st.error("❌ 환자등록번호는 숫자만 입력 가능합니다.")
                     else:
                         save_session = get_authenticated_session()
                         save_payload = {"peId": pe_id, "discountType": "2", "saveCnt": "1", "iCardType": "0", "carNo": car_full, "iLotArea": lot_area, "acPlate2": "", "memo": ""}
