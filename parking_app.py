@@ -25,7 +25,7 @@ def get_authenticated_session():
         except Exception as e: st.error(f"로그인 통신 오류: {e}")
     return s
 
-car_no_input = st.text_input("◆ 차량번호 (뒤 4자리)", max_chars=4, placeholder="예: 2684", key="input_car_no")
+car_no_input = st.text_input("◆ 차량번호 입력", max_chars=4, placeholder="차량번호 (뒤 4자리)", key="input_car_no")
 
 if len(car_no_input) == 4 and car_no_input.isdigit():
     try:
@@ -52,7 +52,7 @@ if len(car_no_input) == 4 and car_no_input.isdigit():
                 st.info("※ 주차시간 조정은 원무팀에 문의해 주세요.")
             else:
                 st.success(f"🚘 **조회 차량:** {car_full} (입차시간: {entry_str})")
-                receipt_no = st.text_input("🔹 환자등록번호 (접수증 참조)", max_chars=6, placeholder='예: "환자등록번호"를 정확히 입력해주세요', key="input_receipt_no")
+                receipt_no = st.text_input("🔹 환자등록번호 (접수증 참조)", max_chars=6, placeholder='"환자등록번호"를 정확히 입력해주세요', key="input_receipt_no")
 
                 if st.button("주차 등록하기 (3시간 할인)", use_container_width=True):
                     raw_input = receipt_no.strip()
