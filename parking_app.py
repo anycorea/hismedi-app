@@ -37,14 +37,18 @@ if len(car_no_input) == 4 and car_no_input.isdigit():
             target = items[0]
             pe_id, car_full, entry_str, lot_area = target.get("id"), target.get("carNo", ""), target.get("entryDateToString", ""), target.get("iLotArea", "621")
 
-            dc_list = target.get("dcDetailList") or target.get("dscntList") or target.get("discountList") or []
-            dc_cnt = target.get("discountCnt") or target.get("dscntCnt") or target.get("dcCnt") or 0
-            dc_name = target.get("discountName") or target.get("dscntName") or target.get("dcName") or ""
+            # 🛑 [정밀 중복 감지 로직] 모든 형태의 기존 할인 내역 탐지
+            dc_cnt_val = str(target.get("dscnt_cnt") or target.get("dscntCnt") or target.get("discountCnt") or "0")
+            dc_list = target.get("dcDetailList") or target.get("dscntList") or target.get("discountList") or target.get("dcList") or []
+            
+            # JSON 텍스트 내에서 할인 관련 키워드 정밀 체크 ("시간" 또는 "할인" 또는 리스트 항목 존재)
             item_str = json.dumps(target, ensure_ascii=False)
+            has_dc_keyword = any(k in item_str for k in ["시간", "할인", "dscnt", "discount"]) and not item_str.endswith('[]')
 
-            if dc_list or int(dc_cnt) > 0 or bool(dc_name) or "할인" in item_str or "3시간" in item_str:
-                cnt_str = f" ({dc_cnt}건 적용됨)" if int(dc_cnt) > 0 else ""
-                st.warning(f"⚠️ [{car_full}] 차량은 이미 주차 할인이 등록되어 있습니다.{cnt_str}")
+            has_discount = (dc_cnt_val not in ["0", "None", "", "null"]) or len(dc_list) > 0 or has_dc_keyword
+
+            if has_discount:
+                st.warning(f"⚠️ [{car_full}] 차량은 이미 주차 할인이 등록되어 있습니다.")
                 st.info("※ 주차시간 조정은 원무팀에 문의해 주세요.")
             else:
                 st.success(f"🚘 **조회 차량:** {car_full} (입차시간: {entry_str})")
