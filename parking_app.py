@@ -14,7 +14,7 @@ st.markdown('<div class="custom-sub">진료 및 검진 방문객 셀프 주차�
 
 USER_ID, USER_PW, BASE_URL = "001", "1588", "http://115.21.205.117"
 today = datetime.datetime.now()
-today_day, today_yyyymmdd = today.strftime("%d"), today.strftime("%Y%m%d")
+today_yyyymmdd = today.strftime("%Y%m%d")
 
 def get_authenticated_session():
     s = requests.Session()
@@ -52,14 +52,14 @@ if len(car_no_input) == 4 and car_no_input.isdigit():
                 st.info("※ 주차시간 조정은 원무팀에 문의해 주세요.")
             else:
                 st.success(f"🚘 **조회 차량:** {car_full} (입차시간: {entry_str})")
-                receipt_no = st.text_input("🔹 환자등록번호 (접수증 참조)", placeholder='예: "환자등록번호"를 정확히 입력해주세요', key="input_receipt_no")
+                receipt_no = st.text_input("🔹 환자등록번호 (접수증 참조)", max_chars=6, placeholder='예: "환자등록번호"를 정확히 입력해주세요', key="input_receipt_no")
 
                 if st.button("주차 등록하기 (3시간 할인)", use_container_width=True):
                     raw_input = receipt_no.strip()
-                    if not raw_input.startswith(today_day):
-                        st.error(f"❌ 환자등록번호가 올바르지 않습니다. (오늘 일자 [{today_day}]로 시작)")
-                    elif not raw_input[2:].isdigit():
-                        st.error("❌ 환자등록번호는 숫자만 입력 가능합니다.")
+                    
+                    # 💡 환자등록번호 검증: 숫자로만 5자리 또는 6자리인지 확인
+                    if not (raw_input.isdigit() and len(raw_input) in [5, 6]):
+                        st.error("❌ 환자등록번호는 숫자 5자리 또는 6자리로 입력해 주세요.")
                     else:
                         save_session = get_authenticated_session()
                         save_payload = {"peId": pe_id, "discountType": "2", "saveCnt": "1", "iCardType": "0", "carNo": car_full, "iLotArea": lot_area, "acPlate2": "", "memo": ""}
