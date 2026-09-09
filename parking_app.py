@@ -1,153 +1,231 @@
 import datetime
 import hashlib
-import sqlite3
+import json
 import requests
 import streamlit as st
 
-# 1. UI 및 기본 설정
+# 1. 페이지 및 UI 기본 설정
 st.set_page_config(
-    page_title="히즈메디병원 주차등록", page_icon="🚗", layout="centered"
+    page_title="히즈메디병원 주차등록 시스템",
+    page_icon="🚗",
+    layout="centered",
 )
-st.markdown(
-    "<style>#MainMenu, header, footer, .stAppHeader,"
-    ' [data-testid="stHeader"] {display: none !important;}</style>',
-    unsafe_allow_html=True,
-)
+
+# UI 요소 숨김 CSS
+hide_ui_style = """
+    <style>
+    #MainMenu {visibility: hidden;}
+    header {visibility: hidden;}
+    footer {visibility: hidden;}
+    .stAppHeader {display: none !important;}
+    [data-testid="stHeader"] {display: none !important;}
+    [data-testid="stToolbar"] {display: none !important;}
+    [data-testid="stDecoration"] {display: none !important;}
+    .stActionButton {display: none !important;}
+    [data-testid="stActionButton"] {display: none !important;}
+    .viewerBadge_container__1S-is {display: none !important;}
+    div[class*="viewerBadge"] {display: none !important;}
+    div[class*="profile"] {display: none !important;}
+    [data-testid="stAppViewBlockContainer"] ~ div {display: none !important;}
+    [data-testid="stStatusWidget"],
+    .stAppToolbar,
+    div[class*="StyledEmbedToolbar"],
+    div[class*="EmbedToolbar"],
+    div[data-testid="stEmbedToolbar"] {
+        display: none !important;
+        visibility: hidden !important;
+        height: 0px !important;
+    }
+    #root > div:nth-child(2) {display: none !important;}
+    </style>
+"""
+st.markdown(hide_ui_style, unsafe_allow_html=True)
 
 st.title("🚗 히즈메디병원 주차등록")
+st.caption("진료 및 검진 방문객 전용 셀프 주차등록 시스템")
 
+# ==========================================
+# 🔑 계정 정보 (실제 아이디/비밀번호 입력)
+# ==========================================
 USER_ID = "001"
 USER_PW = "1588"
+# ==========================================
+
 BASE_URL = "http://115.21.205.117"
 
-
-# 2. SQLite 데이터베이스 관리 (오늘 할인 차량 이력 저장)
-def init_db():
-  conn = sqlite3.connect("parking_log.db")
-  c = conn.cursor()
-  c.execute("""
-        CREATE TABLE IF NOT EXISTS discount_log (
-            car_no TEXT,
-            reg_date TEXT,
-            PRIMARY KEY (car_no, reg_date)
-        )
-    """)
-  conn.commit()
-  conn.close()
-
-
-def is_already_registered(car_no, date_str):
-  conn = sqlite3.connect("parking_log.db")
-  c = conn.cursor()
-  c.execute(
-      "SELECT 1 FROM discount_log WHERE car_no = ? AND reg_date = ?",
-      (car_no, date_str),
-  )
-  row = c.fetchone()
-  conn.close()
-  return row is not None
-
-
-def add_registration(car_no, date_str):
-  conn = sqlite3.connect("parking_log.db")
-  c = conn.cursor()
-  c.execute(
-      "INSERT OR IGNORE INTO discount_log VALUES (?, ?)", (car_no, date_str)
-  )
-  conn.commit()
-  conn.close()
-
-
-init_db()
+if "search_results" not in st.session_state:
+  st.session_state.search_results = None
 
 today = datetime.datetime.now()
 today_day = today.strftime("%d")
 today_yyyymmdd = today.strftime("%Y%m%d")
 
 
-# 3. 로그인 및 세션 관리
-def get_session():
-  s = requests.Session()
-  s.headers.update({
-      "User-Agent": "Mozilla/5.0",
+def get_authenticated_session():
+  session = requests.Session()
+  headers = {
+      "User-Agent": (
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+      ),
       "Referer": f"{BASE_URL}/login",
       "X-Requested-With": "XMLHttpRequest",
-  })
+  }
+  session.headers.update(headers)
+
   if USER_ID != "YOUR_ID":
-    hashed_pw = hashlib.sha256(USER_PW.encode()).hexdigest()
-    s.post(
-        f"{BASE_URL}/login",
-        data={"userId": USER_ID, "userPwd": hashed_pw},
-        timeout=5,
-    )
-  return s
+    hashed_pw = hashlib.sha256(USER_PW.encode("utf-8")).hexdigest()
+    login_url = f"{BASE_URL}/login"
+    login_payload = {"userId": USER_ID, "userPwd": hashed_pw}
+    try:
+      session.post(login_url, data=login_payload, timeout=5)
+    except Exception as e:
+      st.error(f"로그인 통신 오류: {e}")
+
+  return session
 
 
-# 4. 입력 폼
+# 2. 입력 폼
 with st.form("parking_form"):
-  car_no = st.text_input("차량번호 뒤 4자리", max_chars=4, placeholder="5661")
-  receipt_no = st.text_input(
-      "환자 확인번호", placeholder=f"{today_day} + 환자번호"
+  car_no = st.text_input(
+      "차량번호 뒤 4자리", max_chars=4, placeholder="예: 5661"
   )
-  submitted = st.form_submit_button("조회하기", use_container_width=True)
+  receipt_no = st.text_input(
+      "환자 확인번호 (접수증 참조)",
+      placeholder=f"예: {today_day} + 환자번호 (오늘 일자 {today_day}로 시작)",
+  )
 
-# 5. 조회 및 검증
+  submitted = st.form_submit_button(
+      "내 차량 조회하기", use_container_width=True
+  )
+
+# 3. 차량 조회 로직 (강력한 할인 중복 검증)
 if submitted:
   raw_input = receipt_no.strip()
-  if not raw_input.startswith(today_day) or len(car_no) != 4:
-    st.error("❌ 입력 정보를 다시 확인해 주세요.")
-  elif is_already_registered(car_no, today_yyyymmdd):
-    st.warning(
-        f"⚠️ [{car_no}] 차량은 오늘 이미 할인 등록이 완료되었습니다."
+
+  if not raw_input.startswith(today_day):
+    st.error(
+        f"❌ 올바른 확인번호가 아닙니다. (오늘 일자 [{today_day}]로"
+        " 시작해야 합니다)"
     )
+    st.session_state.search_results = None
+  elif len(car_no) != 4 or not car_no.isdigit():
+    st.error("❌ 차량번호 4자리를 정확히 입력해 주세요.")
+    st.session_state.search_results = None
   else:
-    try:
-      res = get_session().post(
-          f"{BASE_URL}/discount/registration/listForDiscount",
-          data={
-              "iLotArea": "621",
-              "entryDate": today_yyyymmdd,
-              "carNo": car_no,
-          },
-          timeout=5,
-      )
-      items = res.json()
-      if items:
-        st.session_state.search_results = items
-      else:
-        st.warning("⚠️ 입차 내역이 없습니다.")
-    except Exception as e:
-        st.error(f"통신 오류: {e}")
+    patient_seq = raw_input[2:]
 
-# 6. 할인 등록 실행
-if st.session_state.get("search_results"):
+    if not patient_seq.isdigit():
+      st.error("❌ 환자 확인번호는 숫자만 입력 가능합니다.")
+      st.session_state.search_results = None
+    else:
+      session = get_authenticated_session()
+      list_url = f"{BASE_URL}/discount/registration/listForDiscount"
+      list_payload = {
+          "iLotArea": "621",
+          "entryDate": today_yyyymmdd,
+          "carNo": car_no,
+      }
+
+      try:
+        res = session.post(list_url, data=list_payload, timeout=5)
+        items = res.json()
+
+        if items:
+          has_discount = False
+
+          for item in items:
+            # 1) 다양한 형태의 기존 할인 관련 필드 조사
+            dc_list = (
+                item.get("dcDetailList")
+                or item.get("dscntList")
+                or item.get("discountList")
+                or []
+            )
+            dc_cnt = (
+                item.get("discountCnt")
+                or item.get("dscntCnt")
+                or item.get("dcCnt")
+                or 0
+            )
+            dc_name = (
+                item.get("discountName")
+                or item.get("dscntName")
+                or item.get("dcName")
+                or ""
+            )
+
+            # 2) 문자열 전체에서 "할인" 단어나 수치 존재 여부 정밀 탐색
+            item_str = json.dumps(item, ensure_ascii=False)
+
+            if (
+                dc_list
+                or int(dc_cnt) > 0
+                or bool(dc_name)
+                or "할인" in item_str
+                or "3시간" in item_str
+            ):
+              has_discount = True
+              break
+
+          if has_discount:
+            st.warning(
+                "⚠️ 이미 주차할인 등록이 되어 있습니다. 추가 등록이"
+                " 불가능합니다."
+            )
+            st.session_state.search_results = None
+          else:
+            st.session_state.search_results = items
+        else:
+          st.warning(
+              "⚠️ 입차된 차량을 찾을 수 없습니다. 입차 여부 및 번호를 확인해"
+              " 주세요."
+          )
+          st.session_state.search_results = None
+      except Exception as e:
+        st.error(f"주차 시스템 통신 오류: {e}")
+
+# 4. 차량 선택 및 3시간 자동 할인 등록
+if st.session_state.search_results:
   st.write("---")
-  for item in st.session_state.search_results:
-    car_full_no = item.get("carNo")
-    in_time = item.get("entryDateToString")
-    pe_id = item.get("id")
+  st.subheader("📋 본인 차량 선택 (3시간 할인 적용)")
 
-    btn_label = f"🚘 {car_full_no} ({in_time}) ➔ 3시간 할인 적용"
+  for item in st.session_state.search_results:
+    car_full_no = item.get("carNo", "차량번호 없음")
+    in_time = item.get("entryDateToString") or "입차시간 없음"
+    pe_id = item.get("id")
+    lot_area = item.get("iLotArea", "621")
+
+    btn_label = f"🚘 {car_full_no} (입차: {in_time}) ➔ 3시간 할인 등록"
 
     if st.button(btn_label, key=f"btn_{pe_id}", use_container_width=True):
-      try:
-        save_res = get_session().post(
-            f"{BASE_URL}/discount/registration/save",
-            data={
-                "peId": pe_id,
-                "discountType": "2",
-                "saveCnt": "1",
-                "iCardType": "0",
-                "carNo": car_full_no,
-                "iLotArea": item.get("iLotArea", "621"),
-            },
-            timeout=5,
-        )
+      session = get_authenticated_session()
 
-        # DB에 등록 처리 후 성공 안내
-        add_registration(car_no, today_yyyymmdd)
-        st.success(f"🎉 [{car_full_no}] 3시간 주차 할인이 완료되었습니다.")
-        st.session_state.search_results = None
-        st.rerun()
+      save_url = f"{BASE_URL}/discount/registration/save"
+      save_payload = {
+          "peId": pe_id,
+          "discountType": "2",
+          "saveCnt": "1",
+          "iCardType": "0",
+          "carNo": car_full_no,
+          "iLotArea": lot_area,
+          "acPlate2": "",
+          "memo": "",
+      }
+
+      try:
+        save_res = session.post(save_url, data=save_payload, timeout=5)
+        res_text = save_res.text.strip().lower()
+
+        if "true" in res_text or "ok" in res_text or "성공" in res_text:
+          st.success(
+              f"🎉 [{car_full_no}] 차량에 3시간 주차 할인이 정상"
+              " 적용되었습니다!"
+          )
+          st.session_state.search_results = None  # 화면 즉시 초기화
+        elif "<title>히즈메디병원</title>" in save_res.text:
+          st.error("❌ 로그인 세션이 유효하지 않습니다. 계정을 확인해 주세요.")
+        else:
+          st.error(f"❌ 주차 할인 등록 실패: {save_res.text}")
+
       except Exception as e:
-        st.error(f"등록 실패: {e}")
+        st.error(f"할인 적용 통신 오류: {e}")
