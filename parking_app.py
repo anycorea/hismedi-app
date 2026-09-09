@@ -1,7 +1,7 @@
-import datetime, hashlib, json, requests, streamlit as st, streamlit.components.v1 as components
+import datetime, hashlib, json, requests, Streamlit as st, Streamlit.components.v1 as components
 
 # 1. UI 및 페이지 기본 설정
-st.set_page_config(page_title="히즈메디병원 주차등록", page_icon="🚗", layout="centered")
+st.set_page_config(page_title="히즈메디병원 주차등록", page_icon="🏥", layout="centered")
 
 # 2. 어르신 배려 & 모바일 최적화 CSS 스타일링
 st.markdown("""
@@ -10,20 +10,35 @@ st.markdown("""
     #MainMenu, header, footer, .stAppHeader, [data-testid="stHeader"] { display: none !important; }
     
     /* 여백 및 전체 배경 조정 */
-    .block-container { padding-top: 1.5rem !important; padding-bottom: 2rem !important; }
+    .block-container { padding-top: 1rem !important; padding-bottom: 2rem !important; }
     
-    /* 타이틀 영역 */
-    .title-box {
-        background-color: #0F172A;
-        color: #FFFFFF;
-        padding: 18px 10px;
-        border-radius: 12px;
+    /* 타이틀 및 로고 상단 영역 */
+    .header-box {
+        background-color: #FFFFFF;
+        border: 2px solid #E2E8F0;
+        border-radius: 16px;
+        padding: 20px 15px 15px 15px;
         text-align: center;
-        margin-bottom: 20px;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        margin-bottom: 24px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
     }
-    .main-title { font-size: 1.6rem !important; font-weight: 800; margin: 0; color: #FFFFFF; }
-    .sub-title { font-size: 1.05rem; color: #94A3B8; margin-top: 6px; font-weight: 500; }
+    .header-box img {
+        max-width: 220px;
+        height: auto;
+        margin-bottom: 10px;
+    }
+    .main-title { 
+        font-size: 1.5rem !important; 
+        font-weight: 800; 
+        color: #1E293B; 
+        margin-top: 5px; 
+    }
+    .sub-title { 
+        font-size: 1rem; 
+        color: #64748B; 
+        margin-top: 4px; 
+        font-weight: 600; 
+    }
     
     /* 라벨 및 안내 문구 폰트 키우기 */
     label, div[data-testid="stMarkdownContainer"] p {
@@ -34,7 +49,7 @@ st.markdown("""
     
     /* 입력창(Text Input) 디자인 키우기 */
     div[data-baseweb="input"] {
-        border-radius: 10px !important;
+        border-radius: 12px !important;
         border: 2px solid #CBD5E1 !important;
         height: 56px !important;
     }
@@ -45,7 +60,7 @@ st.markdown("""
     }
     div[data-baseweb="input"]:focus-within {
         border-color: #2563EB !important;
-        box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2) !important;
+        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15) !important;
     }
     
     /* 제출 버튼 시인성 및 크기 극대화 */
@@ -59,7 +74,7 @@ st.markdown("""
         padding: 16px 0px !important;
         height: 60px !important;
         margin-top: 10px !important;
-        box-shadow: 0 4px 10px rgba(37, 99, 235, 0.3) !important;
+        box-shadow: 0 4px 10px rgba(37, 99, 235, 0.25) !important;
     }
     div.stButton > button:hover {
         background-color: #1D4ED8 !important;
@@ -67,7 +82,7 @@ st.markdown("""
 
     /* 경고 및 성공 메시지 박스 텍스트 크기 확대 */
     .stAlert {
-        border-radius: 10px !important;
+        border-radius: 12px !important;
         padding: 15px !important;
     }
     .stAlert div[data-testid="stMarkdownContainer"] p {
@@ -75,7 +90,7 @@ st.markdown("""
         line-height: 1.5 !important;
     }
     
-    /* 정보 요약 카드 스타일 */
+    /* 입차 정보 요약 카드 스타일 */
     .info-card {
         background-color: #F8FAFC;
         border: 2px solid #E2E8F0;
@@ -84,16 +99,17 @@ st.markdown("""
         margin-bottom: 20px;
         text-align: center;
     }
-    .info-card .car-num { font-size: 1.5rem; font-weight: 800; color: #1E293B; }
-    .info-card .entry-time { font-size: 1.1rem; color: #475569; margin-top: 4px; }
+    .info-card .car-num { font-size: 1.4rem; font-weight: 800; color: #0F172A; }
+    .info-card .entry-time { font-size: 1.05rem; color: #475569; margin-top: 4px; font-weight: 600; }
 </style>
 """, unsafe_allow_html=True)
 
-# 3. 헤더 UI
+# 3. 로고를 포함한 헤더 UI (가로형 로고 적용)
 st.markdown("""
-<div class="title-box">
-    <div class="main-title">🚗 히즈메디병원 주차등록</div>
-    <div class="sub-title">방문객 셀프 무료 주차등록</div>
+<div class="header-box">
+    <img src="app/static/Hismedi_logo가로투명.png" alt="히즈메디병원 로고" onerror="this.src='Hismedi_logo가로투명.png';">
+    <div class="main-title">무료 주차 등록</div>
+    <div class="sub-title">진료 및 검진 방문객 셀프 서비스</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -150,8 +166,8 @@ if len(car_no_input) == 4 and car_no_input.isdigit():
                 # 입차 정보 표시 카드
                 st.markdown(f"""
                 <div class="info-card">
-                    <div class="car-num">🚘 차량번호: {car_full}</div>
-                    <div class="entry-time">⏰ 입차시간: {entry_str}</div>
+                    <div class="car-num">차량번호: {car_full}</div>
+                    <div class="entry-time">입차시간: {entry_str}</div>
                 </div>
                 """, unsafe_allow_html=True)
                 
