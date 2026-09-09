@@ -179,7 +179,7 @@ if len(car_no_input) == 4 and car_no_input.isdigit():
                 has_discount = (dc_cnt_num > 0) or (len(dc_list) > 0) or bool(dc_name)
 
                 if has_discount:
-                    st.warning(f"⚠️ [{car_full}] 차량은 이미 주차 할인이 적용되어 있습니다.\n\n※ 수정/조정이 필요하시면 1층 원무팀에 문의해 주세요.")
+                    st.warning(f"⚠️ [{car_full}] 차량은 이미 주차 할인이 적용되어 있습니다.\n\n※ 조정이 필요하시면 원무팀에 문의해 주세요.")
                 else:
                     # 입차 정보 표시 카드
                     st.markdown(f"""
@@ -197,7 +197,7 @@ if len(car_no_input) == 4 and car_no_input.isdigit():
 
                         if "true" in res_text or "ok" in res_text or "성공" in res_text:
                             st.balloons()
-                            st.success(f"🎉 [{car_full}] 차량에 3시간 주차 할인이 완료되었습니다!\n\n안심히 귀가하십시오.")
+                            st.success(f"🎉 [{car_full}] 차량에 3시간 주차 할인이 완료되었습니다!\n\n안전운전하십시오.")
                         elif "<title>히즈메디병원</title>" in save_res.text:
                             st.error("❌ 로그인 세션이 만료되었습니다. 잠시 후 다시 시도해 주세요.")
                         else:
