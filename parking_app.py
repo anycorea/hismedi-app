@@ -3,11 +3,11 @@ import datetime, hashlib, json, requests, streamlit as st, streamlit.components.
 # 1. UI 및 페이지 기본 설정
 st.set_page_config(page_title="히즈메디병원 주차등록", page_icon="🏥", layout="centered")
 
-# 세션 상태 초기화 (등록 완료 여부 플래그)
-if "is_completed" not in st.session_state:
-    st.session_state.is_completed = False
-if "completed_car_no" not in st.session_state:
-    st.session_state.completed_car_no = ""
+# 세션 상태 초기화 (결과 화면 전환 플래그 및 메시지 저장)
+if "result_state" not in st.session_state:
+    st.session_state.result_state = None  # None, "success", "already", "not_found"
+if "result_message" not in st.session_state:
+    st.session_state.result_message = ""
 
 # 2. 어르신 배려 & 모바일 최적화 & 다크모드 방지 CSS 스타일링
 st.markdown("""
@@ -23,10 +23,10 @@ st.markdown("""
     /* 상단 헤더 및 기본 메뉴 숨기기 */
     #MainMenu, header, footer, .stAppHeader, [data-testid="stHeader"] { display: none !important; }
     
-    /* 여백 및 전체 배경 조정 (하단 가림막 여백 확보) */
+    /* 여백 및 전체 배경 조정 */
     .block-container { 
         padding-top: 1rem !important; 
-        padding-bottom: 50px !important; 
+        padding-bottom: 2rem !important; 
         background-color: #FFFFFF !important;
     }
     
@@ -123,24 +123,7 @@ st.markdown("""
     }
     .info-card .car-num { font-size: 1.4rem; font-weight: 800; color: #0F172A !important; }
     .info-card .entry-time { font-size: 1.05rem; color: #475569 !important; margin-top: 4px; font-weight: 600; }
-    
-    /* ----------------------------------------------------
-       최하단 Streamlit 바 물리적 차단 가림막 (Overlay)
-    ---------------------------------------------------- */
-    .bottom-overlay {
-        position: fixed;
-        bottom: 0;
-        left: 0;
-        width: 100vw;
-        height: 45px;
-        background-color: #FFFFFF !important;
-        z-index: 999999 !important;
-        border-top: 1px solid #F1F5F9;
-    }
 </style>
-
-<!-- 최하단 가림막 요소 -->
-<div class="bottom-overlay"></div>
 """, unsafe_allow_html=True)
 
 # 3. 로고를 포함한 헤더 UI
@@ -170,11 +153,19 @@ def get_authenticated_session():
     return s
 
 # ----------------------------------------------------
-# 4. 등록 완료 상태 시 화면 처리 (입력폼 완전히 숨김)
+# 4. 결과 화면 처리 (성공/중복/입차없음 상태 시 입력폼 가림)
 # ----------------------------------------------------
-if st.session_state.is_completed:
-    st.success(f"🎉 [{st.session_state.completed_car_no}] 차량에 3시간 주차 할인이 완료되었습니다.")
-    st.info("💡 주차 등록이 정상 처리되었습니다.\n\n이 창을 닫아주시기 바랍니다.")
+if st.session_state.result_state == "success":
+    st.success(st.session_state.result_message)
+    st.info("💡 처리가 완료되었습니다. 이 창을 닫아주시기 바랍니다.")
+
+elif st.session_state.result_state == "already":
+    st.warning(st.session_state.result_message)
+    st.info("💡 처리가 완료되었습니다. 이 창을 닫아주시기 바랍니다.")
+
+elif st.session_state.result_state == "not_found":
+    st.error(st.session_state.result_message)
+    st.info("💡 이 창을 닫고 번호를 다시 확인한 후 재시도해 주세요.")
 
 # ----------------------------------------------------
 # 5. 미완료 상태 시 기존 입력 및 등록 절차 실행
@@ -228,7 +219,10 @@ else:
                     has_discount = (dc_cnt_num > 0) or (len(dc_list) > 0) or bool(dc_name)
 
                     if has_discount:
-                        st.warning(f"⚠️ [{car_full}] 차량은 이미 주차 할인이 적용되어 있습니다.\n\n※ 조정이 필요하시면 원무팀에 문의해 주세요.")
+                        # 이미 할인된 경우 -> 전용 완료 화면으로 전환
+                        st.session_state.result_state = "already"
+                        st.session_state.result_message = f"⚠️ [{car_full}] 차량은 이미 주차 할인이 적용되어 있습니다.\n\n※ 조정이 필요하시면 원무팀에 문의해 주세요."
+                        st.rerun()
                     else:
                         # 입차 정보 표시 카드
                         st.markdown(f"""
@@ -245,16 +239,19 @@ else:
                             res_text = save_res.text.strip().lower()
 
                             if "true" in res_text or "ok" in res_text or "성공" in res_text:
-                                # 완료 화면 세션 저장 후 화면 갱신
-                                st.session_state.is_completed = True
-                                st.session_state.completed_car_no = car_full
+                                # 성공 등록 완료 -> 전용 완료 화면으로 전환
+                                st.session_state.result_state = "success"
+                                st.session_state.result_message = f"🎉 [{car_full}] 차량에 3시간 주차 할인이 완료되었습니다."
                                 st.rerun()
                             elif "<title>히즈메디병원</title>" in save_res.text:
                                 st.error("❌ 로그인 세션이 만료되었습니다. 잠시 후 다시 시도해 주세요.")
                             else:
                                 st.error(f"❌ 주차 할인 등록 실패: {save_res.text}")
                 else:
-                    st.error("❌ 입차된 차량이 없습니다. 차량 번호를 다시 확인해 주세요.")
+                    # 입차 차량 없음 -> 전용 완료 화면으로 전환
+                    st.session_state.result_state = "not_found"
+                    st.session_state.result_message = "❌ 입차된 차량이 없습니다. 차량 번호를 다시 확인해 주세요."
+                    st.rerun()
             except Exception as e:
                 st.error(f"처리 중 오류가 발생했습니다: {e}")
 
