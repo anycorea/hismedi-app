@@ -20,9 +20,11 @@ st.markdown("""
         color: #1E293B !important;
     }
     
-    /* 상단 헤더 및 기본 메뉴 숨기기 */
-    #MainMenu, header, footer, .stAppHeader, [data-testid="stHeader"] { display: none !important; }
-    
+    /* Streamlit 기본 UI 완전 숨기기 */
+    #MainMenu, header, footer, .stAppHeader, [data-testid="stHeader"], [data-testid="stToolbar"], [data-testid="stDecoration"], [data-testid="stStatusWidget"], .stDeployButton {
+        display: none !important; visibility: hidden !important; height: 0 !important;
+    }
+
     /* 여백 및 전체 배경 조정 */
     .block-container { 
         padding-top: 1rem !important; 
