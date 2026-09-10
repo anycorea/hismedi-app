@@ -120,17 +120,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 3. 자동 이동 스크립트 함수 정의
-def redirect_to_hismedi_after_3s():
-    components.html("""
-    <script>
-        setTimeout(function() {
-            window.top.location.href = "http://hismedi.kr";
-        }, 3000);
-    </script>
-    """, height=0)
-
-# 4. 로고를 포함한 헤더 UI
+# 3. 로고를 포함한 헤더 UI
 LOGO_URL = "https://lh3.googleusercontent.com/d/1O7VZsctdhhpxyRXaORKLJEL6LL738ivs"
 
 st.markdown(f"""
@@ -204,8 +194,7 @@ if len(car_no_input) == 4 and car_no_input.isdigit():
                 has_discount = (dc_cnt_num > 0) or (len(dc_list) > 0) or bool(dc_name)
 
                 if has_discount:
-                    st.warning(f"⚠️ [{car_full}] 차량은 이미 주차 할인이 적용되어 있습니다.\n\n※ 조정이 필요하시면 원무팀에 문의해 주세요.\n\n⏱️ 3초 후 병원 홈페이지로 이동합니다.")
-                    redirect_to_hismedi_after_3s()
+                    st.warning(f"⚠️ [{car_full}] 차량은 이미 주차 할인이 적용되어 있습니다.\n\n※ 조정이 필요하시면 원무팀에 문의해 주세요.")
                 else:
                     # 입차 정보 표시 카드
                     st.markdown(f"""
@@ -222,15 +211,13 @@ if len(car_no_input) == 4 and car_no_input.isdigit():
                         res_text = save_res.text.strip().lower()
 
                         if "true" in res_text or "ok" in res_text or "성공" in res_text:
-                            st.success(f"🎉 [{car_full}] 차량에 3시간 주차 할인이 완료되었습니다!\n\n안전운전하십시오.\n\n⏱️ 3초 후 병원 홈페이지로 이동합니다.")
-                            redirect_to_hismedi_after_3s()
+                            st.success(f"🎉 [{car_full}] 차량에 3시간 주차 할인이 완료되었습니다!")
                         elif "<title>히즈메디병원</title>" in save_res.text:
                             st.error("❌ 로그인 세션이 만료되었습니다. 잠시 후 다시 시도해 주세요.")
                         else:
                             st.error(f"❌ 주차 할인 등록 실패: {save_res.text}")
             else:
-                st.error("❌ 입차된 차량이 없습니다. 차량 번호를 다시 확인해 주세요.\n\n⏱️ 3초 후 병원 홈페이지로 이동합니다.")
-                redirect_to_hismedi_after_3s()
+                st.error("❌ 입차된 차량이 없습니다. 차량 번호를 다시 확인해 주세요.")
         except Exception as e:
             st.error(f"처리 중 오류가 발생했습니다: {e}")
 
