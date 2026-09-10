@@ -3,7 +3,7 @@ import datetime, hashlib, json, requests, streamlit as st, streamlit.components.
 # 1. UI 및 페이지 기본 설정
 st.set_page_config(page_title="히즈메디병원 주차등록", page_icon="🏥", layout="centered")
 
-# 2. 어르신 배려 & 모바일 최적화 & 다크모드 방지 CSS 스타일링
+# 2. 어르신 배려 & 모바일 최적화 & 다크모드 방지 & 하단바 숨김 CSS
 st.markdown("""
 <style>
     /* ----------------------------------------------------
@@ -14,8 +14,13 @@ st.markdown("""
         color: #1E293B !important;
     }
     
-    /* 상단 헤더 및 기본 메뉴 숨기기 */
-    #MainMenu, header, footer, .stAppHeader, [data-testid="stHeader"] { display: none !important; }
+    /* 상단 헤더, 하단 풋터, Streamlit 빌드 플래그, 툴바 완벽 숨기기 */
+    #MainMenu, header, footer, .stAppHeader, [data-testid="stHeader"],
+    .stAppToolbar, [data-testid="stStatusWidget"], [data-testid="stDecoration"],
+    div[class*="viewerBadge"], .viewerBadge_container__13m32 { 
+        display: none !important; 
+        visibility: hidden !important;
+    }
     
     /* 여백 및 전체 배경 조정 */
     .block-container { 
@@ -120,15 +125,36 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 3. 자동 이동 스크립트 함수 정의
+# 3. 강제 페이지 이동 함수 (모바일 브라우저 및 Streamlit App iframe 호환)
 def redirect_to_hismedi_after_3s():
+    # 자바스크립트 자동 이동 시도
     components.html("""
     <script>
         setTimeout(function() {
-            window.top.location.href = "http://hismedi.kr";
+            try {
+                window.top.location.href = "http://hismedi.kr";
+            } catch (e) {
+                window.location.href = "http://hismedi.kr";
+            }
         }, 3000);
     </script>
     """, height=0)
+    
+    # 팝업/차단 등으로 미이동 시 사용자가 직접 누를 수 있는 안내 링크
+    st.markdown("""
+    <div style="text-align: center; margin-top: 10px;">
+        <a href="http://hismedi.kr" target="_top" style="
+            display: inline-block;
+            padding: 10px 20px;
+            background-color: #64748B;
+            color: white !important;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: bold;
+            font-size: 0.95rem;
+        ">👉 바로 병원 홈페이지로 이동하기</a>
+    </div>
+    """, unsafe_allow_html=True)
 
 # 4. 로고를 포함한 헤더 UI
 LOGO_URL = "https://lh3.googleusercontent.com/d/1O7VZsctdhhpxyRXaORKLJEL6LL738ivs"
