@@ -3,7 +3,7 @@ import datetime, hashlib, json, requests, streamlit as st, streamlit.components.
 # 1. UI 및 페이지 기본 설정
 st.set_page_config(page_title="히즈메디병원 주차등록", page_icon="🏥", layout="centered")
 
-# 2. 어르신 배려 & 모바일 최적화 & 다크모드 방지 & 하단바 숨김 CSS
+# 2. 어르신 배려 & 모바일 최적화 & 다크모드 방지 & 하단바 완전 숨김 CSS
 st.markdown("""
 <style>
     /* ----------------------------------------------------
@@ -17,9 +17,11 @@ st.markdown("""
     /* 상단 헤더, 하단 풋터, Streamlit 빌드 플래그, 툴바 완벽 숨기기 */
     #MainMenu, header, footer, .stAppHeader, [data-testid="stHeader"],
     .stAppToolbar, [data-testid="stStatusWidget"], [data-testid="stDecoration"],
-    div[class*="viewerBadge"], .viewerBadge_container__13m32 { 
+    [data-testid="stFooter"], div[class*="viewerBadge"], div[class*="styles_viewerBadge"],
+    .viewerBadge_container__13m32, iframe[title="st.iframe"] { 
         display: none !important; 
         visibility: hidden !important;
+        height: 0px !important;
     }
     
     /* 여백 및 전체 배경 조정 */
@@ -125,38 +127,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 3. 강제 페이지 이동 함수 (모바일 브라우저 및 Streamlit App iframe 호환)
-def redirect_to_hismedi_after_3s():
-    # 자바스크립트 자동 이동 시도
-    components.html("""
-    <script>
-        setTimeout(function() {
-            try {
-                window.top.location.href = "http://hismedi.kr";
-            } catch (e) {
-                window.location.href = "http://hismedi.kr";
-            }
-        }, 3000);
-    </script>
-    """, height=0)
-    
-    # 팝업/차단 등으로 미이동 시 사용자가 직접 누를 수 있는 안내 링크
-    st.markdown("""
-    <div style="text-align: center; margin-top: 10px;">
-        <a href="http://hismedi.kr" target="_top" style="
-            display: inline-block;
-            padding: 10px 20px;
-            background-color: #64748B;
-            color: white !important;
-            text-decoration: none;
-            border-radius: 8px;
-            font-weight: bold;
-            font-size: 0.95rem;
-        ">👉 바로 병원 홈페이지로 이동하기</a>
-    </div>
-    """, unsafe_allow_html=True)
-
-# 4. 로고를 포함한 헤더 UI
+# 3. 로고를 포함한 헤더 UI
 LOGO_URL = "https://lh3.googleusercontent.com/d/1O7VZsctdhhpxyRXaORKLJEL6LL738ivs"
 
 st.markdown(f"""
@@ -167,7 +138,7 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-USER_ID, USER_PW, BASE_URL = "001", "1588", "http://115.21.205.117"
+USER_ID, USER_PW, BASE_URL = "USER_ID", "USER_PW", "http://115.21.205.117"
 today = datetime.datetime.now()
 today_yyyymmdd = today.strftime("%Y%m%d")
 
@@ -230,8 +201,7 @@ if len(car_no_input) == 4 and car_no_input.isdigit():
                 has_discount = (dc_cnt_num > 0) or (len(dc_list) > 0) or bool(dc_name)
 
                 if has_discount:
-                    st.warning(f"⚠️ [{car_full}] 차량은 이미 주차 할인이 적용되어 있습니다.\n\n※ 조정이 필요하시면 원무팀에 문의해 주세요.\n\n⏱️ 3초 후 병원 홈페이지로 이동합니다.")
-                    redirect_to_hismedi_after_3s()
+                    st.warning(f"⚠️ [{car_full}] 차량은 이미 주차 할인이 적용되어 있습니다.\n\n※ 조정이 필요하시면 원무팀에 문의해 주세요.")
                 else:
                     # 입차 정보 표시 카드
                     st.markdown(f"""
@@ -248,15 +218,13 @@ if len(car_no_input) == 4 and car_no_input.isdigit():
                         res_text = save_res.text.strip().lower()
 
                         if "true" in res_text or "ok" in res_text or "성공" in res_text:
-                            st.success(f"🎉 [{car_full}] 차량에 3시간 주차 할인이 완료되었습니다!\n\n안전운전하십시오.\n\n⏱️ 3초 후 병원 홈페이지로 이동합니다.")
-                            redirect_to_hismedi_after_3s()
+                            st.success(f"🎉 [{car_full}] 차량에 3시간 주차 할인이 완료되었습니다!")
                         elif "<title>히즈메디병원</title>" in save_res.text:
                             st.error("❌ 로그인 세션이 만료되었습니다. 잠시 후 다시 시도해 주세요.")
                         else:
                             st.error(f"❌ 주차 할인 등록 실패: {save_res.text}")
             else:
-                st.error("❌ 입차된 차량이 없습니다. 차량 번호를 다시 확인해 주세요.\n\n⏱️ 3초 후 병원 홈페이지로 이동합니다.")
-                redirect_to_hismedi_after_3s()
+                st.error("❌ 입차된 차량이 없습니다. 차량 번호를 다시 확인해 주세요.")
         except Exception as e:
             st.error(f"처리 중 오류가 발생했습니다: {e}")
 
