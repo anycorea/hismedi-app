@@ -25,14 +25,24 @@ SHEET_HEADERS = [
 # ============================================================
 st.markdown("""
 <style>
-    #MainMenu, header, footer, .stAppHeader, [data-testid="stHeader"] { display: none !important; }
-    .block-container { max-width: 760px; padding-top: 1.2rem; padding-bottom: 4rem; }
+    /* Streamlit 상단 헤더 / 메뉴 / 푸터 최대한 숨기기 */
+    #MainMenu, header, footer, .stAppHeader, [data-testid="stHeader"],
+    [data-testid="stToolbar"], [data-testid="stDecoration"],
+    [data-testid="stStatusWidget"] { display: none !important; }
+
+    .block-container { max-width: 760px; padding-top: 1.2rem !important; padding-bottom: 2rem !important; }
     h1 { text-align: center; font-size: 2rem !important; margin-bottom: 0.3rem !important; }
+
     .form-description { text-align: center; color: #666; margin-bottom: 1.5rem; line-height: 1.6; }
     .section-title { font-size: 1.25rem; font-weight: 700; margin-top: 2rem; margin-bottom: 0.8rem; padding-bottom: 0.45rem; border-bottom: 2px solid #333; }
     .question-text { font-weight: 600; line-height: 1.55; margin-bottom: 0.2rem; }
     .required { color: #d32f2f; font-weight: 700; }
-    .notice-box { padding: 1rem; border: 1px solid #ddd; border-radius: 8px; background: #fafafa; font-size: 0.92rem; line-height: 1.6; margin-bottom: 1rem; }
+
+    .notice-box {
+        padding: 1rem; border: 1px solid #ddd; border-radius: 8px;
+        background: #fafafa; font-size: 0.92rem; line-height: 1.6; margin-bottom: 1rem;
+    }
+
     div[data-testid="stRadio"] { margin-bottom: 0.6rem; }
     div[data-testid="stTextInput"] { margin-bottom: 0.3rem; }
 </style>
@@ -60,6 +70,32 @@ def clean(value):
 
 def digits_only(value):
     return "".join(ch for ch in str(value) if ch.isdigit())
+
+
+def format_registration_number(value):
+    digits = digits_only(value)
+    if len(digits) == 13: return f"{digits[:6]}-{digits[6:]}"
+    return digits
+
+
+def format_phone(value):
+    digits = digits_only(value)
+
+    if not digits: return ""
+
+    # 휴대전화 010-1234-5678 등
+    if len(digits) == 11: return f"{digits[:3]}-{digits[3:7]}-{digits[7:]}"
+
+    # 02-1234-5678
+    if digits.startswith("02") and len(digits) == 10: return f"{digits[:2]}-{digits[2:6]}-{digits[6:]}"
+
+    # 02-123-4567
+    if digits.startswith("02") and len(digits) == 9: return f"{digits[:2]}-{digits[2:5]}-{digits[5:]}"
+
+    # 032-123-4567 등
+    if len(digits) == 10: return f"{digits[:3]}-{digits[3:6]}-{digits[6:]}"
+
+    return digits
 
 
 def question(number, text, detail_text=None):
@@ -126,7 +162,13 @@ if not privacy_confirm:
 st.markdown('<div class="section-title">접종 대상자 인적 사항</div>', unsafe_allow_html=True)
 
 name = st.text_input("성명 *", placeholder="접종 대상자의 성명을 입력해주세요.")
-rrn = st.text_input("주민등록번호", placeholder="예: 900101-1234567", max_chars=14)
+
+rrn = st.text_input(
+    "주민등록번호",
+    placeholder="숫자 13자리 입력 (예: 9001010123456)",
+    max_chars=14
+)
+
 gender = st.radio("성별 *", ["남", "여"], index=None, horizontal=True)
 
 birth_date = st.date_input(
@@ -135,15 +177,19 @@ birth_date = st.date_input(
     format="YYYY-MM-DD"
 )
 
-foreigner_no = st.text_input("외국인 등록번호", placeholder="외국인인 경우 입력해주세요.")
+foreigner_no = st.text_input(
+    "외국인 등록번호",
+    placeholder="외국인인 경우 숫자 13자리 입력",
+    max_chars=14
+)
 
 col1, col2 = st.columns(2)
 
 with col1:
-    home_phone = st.text_input("전화번호 (집)", placeholder="선택 입력")
+    home_phone = st.text_input("전화번호 (집)", placeholder="숫자만 입력")
 
 with col2:
-    mobile_phone = st.text_input("휴대전화 *", placeholder="010-0000-0000")
+    mobile_phone = st.text_input("휴대전화 *", placeholder="예: 01012345678")
 
 weight = st.number_input(
     "체중 (kg)", min_value=0.0, max_value=300.0,
@@ -158,8 +204,7 @@ st.markdown('<div class="section-title">예방접종 업무를 위한 동의 사
 
 st.markdown(
     "**1. 예방접종 내역 사전 확인**  \n"
-    "예방접종을 하기 전에 접종 대상자의 예방접종 내역을 "
-    "예방접종통합관리시스템으로 사전 확인하는 것에 동의합니다."
+    "예방접종을 하기 전에 접종 대상자의 예방접종 내역을 예방접종통합관리시스템으로 사전 확인하는 것에 동의합니다."
 )
 vaccination_consent = st.radio("접종동의", ["예", "아니오"], index=None, horizontal=True, label_visibility="collapsed")
 
@@ -167,8 +212,7 @@ st.divider()
 
 st.markdown(
     "**2. 다음 접종 및 완료 여부 알림**  \n"
-    "예방접종의 다음 접종 및 완료 여부에 관한 정보를 "
-    "문자 및 모바일앱으로 수신하는 것에 동의합니다."
+    "예방접종의 다음 접종 및 완료 여부에 관한 정보를 문자 및 모바일앱으로 수신하는 것에 동의합니다."
 )
 notification_consent = st.radio("알림동의", ["예", "아니오"], index=None, horizontal=True, label_visibility="collapsed")
 
@@ -176,8 +220,7 @@ st.divider()
 
 st.markdown(
     "**3. 예방접종 후 이상반응 알림**  \n"
-    "예방접종 후 이상반응 발생 여부와 관련된 알림을 "
-    "문자 및 모바일앱으로 수신하는 것에 동의합니다."
+    "예방접종 후 이상반응 발생 여부와 관련된 알림을 문자 및 모바일앱으로 수신하는 것에 동의합니다."
 )
 adverse_consent = st.radio("이상동의", ["예", "아니오"], index=None, horizontal=True, label_visibility="collapsed")
 
@@ -196,7 +239,6 @@ q2, q2_detail = question(
 )
 
 q3, q3_detail = question(3, "오늘 아픈 곳이 있습니까?", "그렇다면 아픈 증상을 적어주세요.")
-
 q4, _ = question(4, "(여성) 현재 임신 중이거나 다음 한 달 동안 임신할 가능성이 있습니까?")
 
 q5, _ = question(
@@ -205,9 +247,7 @@ q5, _ = question(
 )
 
 q6, q6_detail = question(6, "암, 백혈병 혹은 면역계 질환이 있습니까?", "그렇다면 병명을 적어주세요.")
-
 q7, _ = question(7, "최근 3개월 이내에 스테로이드제, 항암제, 방사선 치료를 받은 적이 있습니까?")
-
 q8, _ = question(8, "최근 1년 동안 수혈을 받았거나 면역글로불린을 투여받은 적이 있습니까?")
 
 q9, q9_detail = question(
@@ -245,19 +285,31 @@ submitted = st.button("예진표 제출", use_container_width=True, type="primar
 if submitted:
     errors = []
 
+    # 저장용 자동 포맷
+    formatted_rrn = format_registration_number(rrn)
+    formatted_foreigner_no = format_registration_number(foreigner_no)
+    formatted_home_phone = format_phone(home_phone)
+    formatted_mobile_phone = format_phone(mobile_phone)
+
     # 기본정보
     if not clean(name): errors.append("성명을 입력해주세요.")
     if gender is None: errors.append("성별을 선택해주세요.")
     if birth_date is None: errors.append("실제 생년월일을 입력해주세요.")
     if not clean(mobile_phone): errors.append("휴대전화를 입력해주세요.")
-    if clean(rrn) and len(digits_only(rrn)) != 13: errors.append("주민등록번호를 정확히 입력해주세요.")
+
+    # 번호 형식
+    if clean(rrn) and len(digits_only(rrn)) != 13: errors.append("주민등록번호 숫자 13자리를 정확히 입력해주세요.")
+    if clean(foreigner_no) and len(digits_only(foreigner_no)) != 13: errors.append("외국인 등록번호 숫자 13자리를 정확히 입력해주세요.")
+
+    mobile_digits = digits_only(mobile_phone)
+    if mobile_digits and len(mobile_digits) not in (10, 11): errors.append("휴대전화 번호를 정확히 입력해주세요.")
 
     # 동의사항
     if vaccination_consent is None: errors.append("예방접종 내역 사전 확인 동의 여부를 선택해주세요.")
     if notification_consent is None: errors.append("다음 접종 및 완료 여부 알림 동의 여부를 선택해주세요.")
     if adverse_consent is None: errors.append("예방접종 후 이상반응 알림 동의 여부를 선택해주세요.")
 
-    # 1~11번 답변
+    # 문진 1~11
     answers = [q1, q2, q3, q4, q5, q6, q7, q8, q9, q10, q11]
 
     for number, answer in enumerate(answers, 1):
@@ -279,10 +331,10 @@ if submitted:
 
 
     # ========================================================
-    # 오류 또는 저장
+    # 오류 또는 Google Sheets 저장
     # ========================================================
     if errors:
-        st.error("입력하지 않은 항목이 있습니다.\n\n" + "\n\n".join(f"• {error}" for error in errors))
+        st.error("입력하지 않았거나 확인이 필요한 항목이 있습니다.\n\n" + "\n\n".join(f"• {error}" for error in errors))
 
     else:
         try:
@@ -291,9 +343,10 @@ if submitted:
 
             record = {
                 "ID": uuid.uuid4().hex, "DATE": now.strftime("%Y-%m-%d %H:%M:%S"),
-                "성명": clean(name), "주민번호": clean(rrn), "성별": clean(gender),
-                "생년월일": birth_date.strftime("%Y-%m-%d"), "외국인번호": clean(foreigner_no),
-                "집전화": clean(home_phone), "휴대전화": clean(mobile_phone),
+
+                "성명": clean(name), "주민번호": formatted_rrn, "성별": clean(gender),
+                "생년월일": birth_date.strftime("%Y-%m-%d"), "외국인번호": formatted_foreigner_no,
+                "집전화": formatted_home_phone, "휴대전화": formatted_mobile_phone,
                 "체중": "" if weight is None else str(weight),
 
                 "접종동의": clean(vaccination_consent), "알림동의": clean(notification_consent),
@@ -312,7 +365,9 @@ if submitted:
             }
 
             row = [record.get(header, "") for header in SHEET_HEADERS]
-            worksheet.append_row(row, value_input_option="USER_ENTERED")
+
+            # RAW → 전화번호/등록번호의 앞자리 0까지 문자열 그대로 보존
+            worksheet.append_row(row, value_input_option="RAW")
 
             st.session_state.submitted = True
             st.rerun()
