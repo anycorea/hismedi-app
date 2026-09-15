@@ -25,7 +25,6 @@ SHEET_HEADERS = [
 # ============================================================
 st.markdown("""
 <style>
-    /* Streamlit 상단 헤더 / 메뉴 / 푸터 최대한 숨기기 */
     #MainMenu, header, footer, .stAppHeader, [data-testid="stHeader"],
     [data-testid="stToolbar"], [data-testid="stDecoration"],
     [data-testid="stStatusWidget"] { display: none !important; }
@@ -34,13 +33,23 @@ st.markdown("""
     h1 { text-align: center; font-size: 2rem !important; margin-bottom: 0.3rem !important; }
 
     .form-description { text-align: center; color: #666; margin-bottom: 1.5rem; line-height: 1.6; }
-    .section-title { font-size: 1.25rem; font-weight: 700; margin-top: 2rem; margin-bottom: 0.8rem; padding-bottom: 0.45rem; border-bottom: 2px solid #333; }
+
+    .section-title {
+        font-size: 1.25rem; font-weight: 700; margin-top: 2rem; margin-bottom: 0.8rem;
+        padding-bottom: 0.45rem; border-bottom: 2px solid #333;
+    }
+
     .question-text { font-weight: 600; line-height: 1.55; margin-bottom: 0.2rem; }
     .required { color: #d32f2f; font-weight: 700; }
 
     .notice-box {
         padding: 1rem; border: 1px solid #ddd; border-radius: 8px;
         background: #fafafa; font-size: 0.92rem; line-height: 1.6; margin-bottom: 1rem;
+    }
+
+    .admin-card {
+        padding: 1rem; border: 1px solid #ddd; border-radius: 8px;
+        background: #fafafa; margin-bottom: 1rem; line-height: 1.7;
     }
 
     div[data-testid="stRadio"] { margin-bottom: 0.6rem; }
@@ -82,19 +91,10 @@ def format_phone(value):
     digits = digits_only(value)
 
     if not digits: return ""
-
-    # 휴대전화 010-1234-5678 등
     if len(digits) == 11: return f"{digits[:3]}-{digits[3:7]}-{digits[7:]}"
-
-    # 02-1234-5678
     if digits.startswith("02") and len(digits) == 10: return f"{digits[:2]}-{digits[2:6]}-{digits[6:]}"
-
-    # 02-123-4567
     if digits.startswith("02") and len(digits) == 9: return f"{digits[:2]}-{digits[2:5]}-{digits[5:]}"
-
-    # 032-123-4567 등
     if len(digits) == 10: return f"{digits[:3]}-{digits[3:6]}-{digits[6:]}"
-
     return digits
 
 
@@ -114,8 +114,249 @@ def question(number, text, detail_text=None):
     return answer, detail
 
 
+def get_records():
+    worksheet = get_worksheet()
+    values = worksheet.get_all_values()
+
+    if len(values) <= 1:
+        return []
+
+    headers = values[0]
+    records = []
+
+    for sheet_row, row in enumerate(values[1:], start=2):
+        padded = row + [""] * max(0, len(headers) - len(row))
+        record = dict(zip(headers, padded))
+        record["_sheet_row"] = sheet_row
+        records.append(record)
+
+    return records
+
+
+def mask_rrn(value):
+    digits = digits_only(value)
+
+    if len(digits) == 13:
+        return f"{digits[:6]}-{digits[6]}******"
+
+    return clean(value)
+
+
+def answer_text(record, number):
+    answer = clean(record.get(str(number), ""))
+    detail = clean(record.get(f"{number}상세", ""))
+
+    if detail:
+        return f"{answer} / {detail}"
+
+    return answer
+
+
 # ============================================================
-# 제출 완료 화면
+# 관리자 화면
+# ============================================================
+def admin_page():
+    st.title("💉 예방접종 관리자")
+    st.caption("예방접종 예진표 접수 내역 조회")
+
+    # --------------------------------------------------------
+    # 관리자 로그인
+    # --------------------------------------------------------
+    if not st.session_state.get("admin_authenticated", False):
+        st.markdown('<div class="section-title">관리자 로그인</div>', unsafe_allow_html=True)
+
+        password = st.text_input("관리자 비밀번호", type="password", placeholder="비밀번호를 입력해주세요.")
+
+        if st.button("로그인", use_container_width=True, type="primary"):
+            if password == st.secrets["admin"]["password"]:
+                st.session_state.admin_authenticated = True
+                st.rerun()
+            else:
+                st.error("관리자 비밀번호가 올바르지 않습니다.")
+
+        st.stop()
+
+    # --------------------------------------------------------
+    # 로그아웃
+    # --------------------------------------------------------
+    col1, col2 = st.columns([3, 1])
+
+    with col1:
+        st.success("관리자 로그인 상태입니다.")
+
+    with col2:
+        if st.button("로그아웃", use_container_width=True):
+            st.session_state.admin_authenticated = False
+            st.session_state.pop("selected_record_id", None)
+            st.rerun()
+
+    # --------------------------------------------------------
+    # 데이터 불러오기
+    # --------------------------------------------------------
+    try:
+        records = get_records()
+    except Exception as e:
+        st.error("예진표 데이터를 불러오는 중 오류가 발생했습니다.")
+        st.exception(e)
+        st.stop()
+
+    st.markdown('<div class="section-title">접수 내역</div>', unsafe_allow_html=True)
+
+    if not records:
+        st.info("현재 접수된 예진표가 없습니다.")
+        st.stop()
+
+    # 최신 접수순
+    records = list(reversed(records))
+
+    # --------------------------------------------------------
+    # 검색 / 필터
+    # --------------------------------------------------------
+    filter_col1, filter_col2 = st.columns([1, 2])
+
+    with filter_col1:
+        period = st.selectbox("조회 범위", ["오늘", "전체"])
+
+    with filter_col2:
+        search = st.text_input("검색", placeholder="성명 또는 휴대전화")
+
+    today_text = datetime.now(TZ).strftime("%Y-%m-%d")
+    filtered = []
+
+    for record in records:
+        if period == "오늘" and not clean(record.get("DATE", "")).startswith(today_text):
+            continue
+
+        keyword = clean(search).lower()
+
+        if keyword:
+            name_value = clean(record.get("성명", "")).lower()
+            phone_value = clean(record.get("휴대전화", "")).lower()
+            phone_digits = digits_only(record.get("휴대전화", ""))
+            keyword_digits = digits_only(keyword)
+
+            name_match = keyword in name_value
+            phone_match = keyword in phone_value
+            digit_match = bool(keyword_digits) and keyword_digits in phone_digits
+
+            if not (name_match or phone_match or digit_match):
+                continue
+
+        filtered.append(record)
+
+    st.caption(f"조회 결과: {len(filtered)}건")
+
+    if not filtered:
+        st.info("조건에 해당하는 예진표가 없습니다.")
+        st.stop()
+
+    # --------------------------------------------------------
+    # 접수 목록
+    # --------------------------------------------------------
+    options = {}
+
+    for record in filtered:
+        record_id = clean(record.get("ID", ""))
+        date_value = clean(record.get("DATE", ""))
+        name_value = clean(record.get("성명", ""))
+        phone_value = clean(record.get("휴대전화", ""))
+
+        label = f"{date_value} | {name_value} | {phone_value}"
+        options[label] = record_id
+
+    selected_label = st.selectbox("예진표 선택", list(options.keys()), index=None, placeholder="확인할 예진표를 선택해주세요.")
+
+    if selected_label is None:
+        st.info("위 목록에서 확인할 예진표를 선택해주세요.")
+        st.stop()
+
+    selected_id = options[selected_label]
+    selected = next((record for record in filtered if clean(record.get("ID", "")) == selected_id), None)
+
+    if selected is None:
+        st.error("선택한 예진표를 찾을 수 없습니다.")
+        st.stop()
+
+    # --------------------------------------------------------
+    # 선택 환자 상세
+    # --------------------------------------------------------
+    st.markdown('<div class="section-title">접종 대상자 정보</div>', unsafe_allow_html=True)
+
+    st.markdown(
+        f"""
+        <div class="admin-card">
+        <b>접수일시</b>　{clean(selected.get("DATE"))}<br>
+        <b>성명</b>　{clean(selected.get("성명"))}<br>
+        <b>주민등록번호</b>　{mask_rrn(selected.get("주민번호"))}<br>
+        <b>성별</b>　{clean(selected.get("성별"))}<br>
+        <b>생년월일</b>　{clean(selected.get("생년월일"))}<br>
+        <b>외국인 등록번호</b>　{mask_rrn(selected.get("외국인번호"))}<br>
+        <b>전화번호(집)</b>　{clean(selected.get("집전화"))}<br>
+        <b>휴대전화</b>　{clean(selected.get("휴대전화"))}<br>
+        <b>체중</b>　{clean(selected.get("체중"))} kg
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    st.markdown('<div class="section-title">동의 사항</div>', unsafe_allow_html=True)
+
+    st.write(f"예방접종 내역 사전 확인: **{clean(selected.get('접종동의'))}**")
+    st.write(f"다음 접종 및 완료 여부 알림: **{clean(selected.get('알림동의'))}**")
+    st.write(f"예방접종 후 이상반응 알림: **{clean(selected.get('이상동의'))}**")
+
+    st.markdown('<div class="section-title">문진 내용</div>', unsafe_allow_html=True)
+
+    questions = [
+        (1, "최근 1개월 이내에 받은 예방접종"),
+        (2, "과거 예방접종 후 이상반응"),
+        (3, "오늘 아픈 곳"),
+        (4, "현재 임신 중이거나 한 달 내 임신 가능성"),
+        (5, "약·음식물·백신 관련 알레르기"),
+        (6, "암·백혈병·면역계 질환"),
+        (7, "최근 3개월 이내 스테로이드·항암제·방사선 치료"),
+        (8, "최근 1년 이내 수혈·면역글로불린 투여"),
+        (9, "혈액응고장애 또는 항응고제 복용"),
+        (10, "경련 또는 기타 뇌신경계 질환"),
+        (11, "기타 질환 진찰 또는 치료")
+    ]
+
+    for number, text in questions:
+        value = answer_text(selected, number)
+
+        if clean(selected.get(str(number))) == "예":
+            st.warning(f"{number}. {text} → {value}")
+        else:
+            st.write(f"**{number}. {text}** → {value}")
+
+    st.markdown('<div class="section-title">작성자</div>', unsafe_allow_html=True)
+
+    st.markdown(
+        f"""
+        <div class="admin-card">
+        <b>작성자</b>　{clean(selected.get("작성자"))}<br>
+        <b>접종 대상자와의 관계</b>　{clean(selected.get("관계"))}
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    st.info("다음 단계에서 이 선택된 예진표를 원본 예방접종 예진표 PDF에 자동 입력하여 출력하는 기능을 연결합니다.")
+
+    st.stop()
+
+
+# ============================================================
+# 관리자 모드 진입
+# ============================================================
+admin_mode = st.query_params.get("admin") == "1"
+
+if admin_mode:
+    admin_page()
+
+
+# ============================================================
+# 환자 제출 완료 화면
 # ============================================================
 if st.session_state.get("submitted", False):
     st.title("💉 예방접종 예진표")
@@ -130,7 +371,7 @@ if st.session_state.get("submitted", False):
 
 
 # ============================================================
-# 제목 / 개인정보 안내
+# 환자 화면 - 제목 / 개인정보 안내
 # ============================================================
 st.title("💉 예방접종 예진표")
 
@@ -157,18 +398,12 @@ if not privacy_confirm:
 
 
 # ============================================================
-# 접종 대상자 인적 사항
+# 환자 화면 - 접종 대상자 인적 사항
 # ============================================================
 st.markdown('<div class="section-title">접종 대상자 인적 사항</div>', unsafe_allow_html=True)
 
 name = st.text_input("성명 *", placeholder="접종 대상자의 성명을 입력해주세요.")
-
-rrn = st.text_input(
-    "주민등록번호",
-    placeholder="숫자 13자리 입력 (예: 9001010123456)",
-    max_chars=14
-)
-
+rrn = st.text_input("주민등록번호", placeholder="숫자 13자리 입력 (예: 9001010123456)", max_chars=14)
 gender = st.radio("성별 *", ["남", "여"], index=None, horizontal=True)
 
 birth_date = st.date_input(
@@ -177,11 +412,7 @@ birth_date = st.date_input(
     format="YYYY-MM-DD"
 )
 
-foreigner_no = st.text_input(
-    "외국인 등록번호",
-    placeholder="외국인인 경우 숫자 13자리 입력",
-    max_chars=14
-)
+foreigner_no = st.text_input("외국인 등록번호", placeholder="외국인인 경우 숫자 13자리 입력", max_chars=14)
 
 col1, col2 = st.columns(2)
 
@@ -198,7 +429,7 @@ weight = st.number_input(
 
 
 # ============================================================
-# 예방접종 업무를 위한 동의 사항
+# 환자 화면 - 동의 사항
 # ============================================================
 st.markdown('<div class="section-title">예방접종 업무를 위한 동의 사항</div>', unsafe_allow_html=True)
 
@@ -226,7 +457,7 @@ adverse_consent = st.radio("이상동의", ["예", "아니오"], index=None, hor
 
 
 # ============================================================
-# 접종 대상자 확인사항
+# 환자 화면 - 문진
 # ============================================================
 st.markdown('<div class="section-title">접종 대상자에 대한 확인 사항</div>', unsafe_allow_html=True)
 st.caption("각 질문에 반드시 '예' 또는 '아니오'를 선택해주세요.")
@@ -265,7 +496,7 @@ q11, q11_detail = question(
 
 
 # ============================================================
-# 작성자 확인
+# 환자 화면 - 작성자
 # ============================================================
 st.markdown('<div class="section-title">작성자 확인</div>', unsafe_allow_html=True)
 
@@ -273,49 +504,42 @@ st.write("의사의 진찰결과와 이상반응에 대한 설명을 듣고 예�
 
 writer = st.text_input("본인(법정대리인, 보호자) 성명 *", placeholder="작성자의 성명을 입력해주세요.")
 relationship = st.text_input("접종 대상자와의 관계 *", placeholder="예: 본인, 부, 모, 배우자")
-
 final_confirm = st.checkbox("위 내용을 확인하였으며 작성한 내용이 사실과 다름없음을 확인합니다.")
 
 
 # ============================================================
-# 제출
+# 환자 화면 - 제출
 # ============================================================
 submitted = st.button("예진표 제출", use_container_width=True, type="primary")
 
 if submitted:
     errors = []
 
-    # 저장용 자동 포맷
     formatted_rrn = format_registration_number(rrn)
     formatted_foreigner_no = format_registration_number(foreigner_no)
     formatted_home_phone = format_phone(home_phone)
     formatted_mobile_phone = format_phone(mobile_phone)
 
-    # 기본정보
     if not clean(name): errors.append("성명을 입력해주세요.")
     if gender is None: errors.append("성별을 선택해주세요.")
     if birth_date is None: errors.append("실제 생년월일을 입력해주세요.")
     if not clean(mobile_phone): errors.append("휴대전화를 입력해주세요.")
 
-    # 번호 형식
     if clean(rrn) and len(digits_only(rrn)) != 13: errors.append("주민등록번호 숫자 13자리를 정확히 입력해주세요.")
     if clean(foreigner_no) and len(digits_only(foreigner_no)) != 13: errors.append("외국인 등록번호 숫자 13자리를 정확히 입력해주세요.")
 
     mobile_digits = digits_only(mobile_phone)
     if mobile_digits and len(mobile_digits) not in (10, 11): errors.append("휴대전화 번호를 정확히 입력해주세요.")
 
-    # 동의사항
     if vaccination_consent is None: errors.append("예방접종 내역 사전 확인 동의 여부를 선택해주세요.")
     if notification_consent is None: errors.append("다음 접종 및 완료 여부 알림 동의 여부를 선택해주세요.")
     if adverse_consent is None: errors.append("예방접종 후 이상반응 알림 동의 여부를 선택해주세요.")
 
-    # 문진 1~11
     answers = [q1, q2, q3, q4, q5, q6, q7, q8, q9, q10, q11]
 
     for number, answer in enumerate(answers, 1):
         if answer is None: errors.append(f"{number}번 확인사항에 답변해주세요.")
 
-    # '예' 선택 시 상세입력 필수
     details = [
         (1, q1, q1_detail), (2, q2, q2_detail), (3, q3, q3_detail),
         (6, q6, q6_detail), (9, q9, q9_detail), (11, q11, q11_detail)
@@ -324,15 +548,10 @@ if submitted:
     for number, answer, detail in details:
         if answer == "예" and not clean(detail): errors.append(f"{number}번 질문의 상세 내용을 입력해주세요.")
 
-    # 작성자
     if not clean(writer): errors.append("작성자 성명을 입력해주세요.")
     if not clean(relationship): errors.append("접종 대상자와의 관계를 입력해주세요.")
     if not final_confirm: errors.append("최종 확인 항목에 체크해주세요.")
 
-
-    # ========================================================
-    # 오류 또는 Google Sheets 저장
-    # ========================================================
     if errors:
         st.error("입력하지 않았거나 확인이 필요한 항목이 있습니다.\n\n" + "\n\n".join(f"• {error}" for error in errors))
 
@@ -343,7 +562,6 @@ if submitted:
 
             record = {
                 "ID": uuid.uuid4().hex, "DATE": now.strftime("%Y-%m-%d %H:%M:%S"),
-
                 "성명": clean(name), "주민번호": formatted_rrn, "성별": clean(gender),
                 "생년월일": birth_date.strftime("%Y-%m-%d"), "외국인번호": formatted_foreigner_no,
                 "집전화": formatted_home_phone, "휴대전화": formatted_mobile_phone,
@@ -365,8 +583,6 @@ if submitted:
             }
 
             row = [record.get(header, "") for header in SHEET_HEADERS]
-
-            # RAW → 전화번호/등록번호의 앞자리 0까지 문자열 그대로 보존
             worksheet.append_row(row, value_input_option="RAW")
 
             st.session_state.submitted = True
