@@ -1,9 +1,14 @@
 import streamlit as st
 import gspread
 import uuid
+import io
 from datetime import datetime, date
 from zoneinfo import ZoneInfo
 from google.oauth2.service_account import Credentials
+from reportlab.pdfgen import canvas
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+from pypdf import PdfReader, PdfWriter
 
 
 # ============================================================
@@ -12,12 +17,89 @@ from google.oauth2.service_account import Credentials
 st.set_page_config(page_title="예방접종 예진표", page_icon="💉", layout="centered")
 
 TZ = ZoneInfo("Asia/Seoul")
+PDF_TEMPLATE = "vaccination_form.pdf"
 
 SHEET_HEADERS = [
     "ID", "DATE", "성명", "주민번호", "성별", "생년월일", "외국인번호", "집전화", "휴대전화", "체중",
     "접종동의", "알림동의", "이상동의", "1", "1상세", "2", "2상세", "3", "3상세", "4", "5",
     "6", "6상세", "7", "8", "9", "9상세", "10", "11", "11상세", "작성자", "관계"
 ]
+
+# ============================================================
+# PDF 위치 미세조정
+# ============================================================
+# 1pt ≒ 0.353mm
+# 전체 글씨가 오른쪽으로 가야 하면 X를 +, 왼쪽이면 -
+# 전체 글씨가 위로 가야 하면 Y를 +, 아래면 -
+PDF_OFFSET_X = 0
+PDF_OFFSET_Y = 0
+
+# 원본 PDF 기준 좌표
+PDF_COORDS = {
+    "성명": (108, 729),
+    "주민번호": (282, 729),
+    "성별_남": (468, 729),
+    "성별_여": (494, 729),
+
+    "생년월일": (108, 716),
+    "외국인번호": (282, 716),
+
+    "집전화": (122, 702),
+    "휴대전화": (297, 702),
+    "체중": (489, 702),
+
+    "접종동의_예": (462, 610),
+    "접종동의_아니오": (496, 610),
+
+    "알림동의_예": (462, 576),
+    "알림동의_아니오": (496, 576),
+
+    "이상동의_예": (462, 553),
+    "이상동의_아니오": (496, 553),
+
+    "1_예": (432, 504),
+    "1_아니오": (486, 504),
+    "1상세": (306, 495),
+
+    "2_예": (432, 477),
+    "2_아니오": (486, 477),
+    "2상세": (306, 468),
+
+    "3_예": (432, 451),
+    "3_아니오": (486, 451),
+    "3상세": (306, 442),
+
+    "4_예": (432, 424),
+    "4_아니오": (486, 424),
+
+    "5_예": (432, 392),
+    "5_아니오": (486, 392),
+
+    "6_예": (432, 367),
+    "6_아니오": (486, 367),
+    "6상세": (306, 357),
+
+    "7_예": (432, 342),
+    "7_아니오": (486, 342),
+
+    "8_예": (432, 322),
+    "8_아니오": (486, 322),
+
+    "9_예": (432, 299),
+    "9_아니오": (486, 299),
+    "9상세": (306, 289),
+
+    "10_예": (432, 273),
+    "10_아니오": (486, 273),
+
+    "11_예": (432, 250),
+    "11_아니오": (486, 250),
+    "11상세": (306, 234),
+
+    "작성자": (140, 194),
+    "관계": (428, 194),
+    "작성일": (432, 167)
+}
 
 
 # ============================================================
@@ -89,7 +171,6 @@ def format_registration_number(value):
 
 def format_phone(value):
     digits = digits_only(value)
-
     if not digits: return ""
     if len(digits) == 11: return f"{digits[:3]}-{digits[3:7]}-{digits[7:]}"
     if digits.startswith("02") and len(digits) == 10: return f"{digits[:2]}-{digits[2:6]}-{digits[6:]}"
@@ -135,21 +216,142 @@ def get_records():
 
 def mask_rrn(value):
     digits = digits_only(value)
-
-    if len(digits) == 13:
-        return f"{digits[:6]}-{digits[6]}******"
-
+    if len(digits) == 13: return f"{digits[:6]}-{digits[6]}******"
     return clean(value)
 
 
 def answer_text(record, number):
     answer = clean(record.get(str(number), ""))
     detail = clean(record.get(f"{number}상세", ""))
-
-    if detail:
-        return f"{answer} / {detail}"
-
+    if detail: return f"{answer} / {detail}"
     return answer
+
+
+# ============================================================
+# PDF 함수
+# ============================================================
+@st.cache_resource
+def register_pdf_fonts():
+    pdfmetrics.registerFont(UnicodeCIDFont("HYSMyeongJo-Medium"))
+
+
+def pdf_xy(key):
+    x, y = PDF_COORDS[key]
+    return x + PDF_OFFSET_X, y + PDF_OFFSET_Y
+
+
+def draw_pdf_text(c, key, value, size=8):
+    value = clean(value)
+
+    if not value:
+        return
+
+    x, y = pdf_xy(key)
+    c.setFont("HYSMyeongJo-Medium", size)
+    c.drawString(x, y, value)
+
+
+def draw_pdf_check(c, key):
+    x, y = pdf_xy(key)
+
+    # 원본 체크박스 안에 V 표시
+    c.setFont("Helvetica-Bold", 8)
+    c.drawString(x, y, "V")
+
+
+def draw_answer_check(c, prefix, answer):
+    answer = clean(answer)
+
+    if answer == "예":
+        draw_pdf_check(c, f"{prefix}_예")
+
+    elif answer == "아니오":
+        draw_pdf_check(c, f"{prefix}_아니오")
+
+
+def create_vaccination_pdf(record):
+    register_pdf_fonts()
+
+    template = PdfReader(PDF_TEMPLATE)
+    original_page = template.pages[0]
+
+    width = float(original_page.mediabox.width)
+    height = float(original_page.mediabox.height)
+
+    overlay_buffer = io.BytesIO()
+    c = canvas.Canvas(overlay_buffer, pagesize=(width, height))
+
+    # --------------------------------------------------------
+    # 인적사항
+    # --------------------------------------------------------
+    draw_pdf_text(c, "성명", record.get("성명"), 8)
+    draw_pdf_text(c, "주민번호", record.get("주민번호"), 8)
+
+    if clean(record.get("성별")) == "남":
+        draw_pdf_check(c, "성별_남")
+    elif clean(record.get("성별")) == "여":
+        draw_pdf_check(c, "성별_여")
+
+    draw_pdf_text(c, "생년월일", record.get("생년월일"), 8)
+    draw_pdf_text(c, "외국인번호", record.get("외국인번호"), 8)
+    draw_pdf_text(c, "집전화", record.get("집전화"), 8)
+    draw_pdf_text(c, "휴대전화", record.get("휴대전화"), 8)
+
+    weight = clean(record.get("체중"))
+    if weight:
+        draw_pdf_text(c, "체중", weight, 8)
+
+    # --------------------------------------------------------
+    # 개인정보 동의
+    # --------------------------------------------------------
+    draw_answer_check(c, "접종동의", record.get("접종동의"))
+    draw_answer_check(c, "알림동의", record.get("알림동의"))
+    draw_answer_check(c, "이상동의", record.get("이상동의"))
+
+    # --------------------------------------------------------
+    # 문진 1~11
+    # --------------------------------------------------------
+    for number in range(1, 12):
+        draw_answer_check(c, str(number), record.get(str(number)))
+
+    # 상세내용
+    for number in [1, 2, 3, 6, 9, 11]:
+        draw_pdf_text(c, f"{number}상세", record.get(f"{number}상세"), 7)
+
+    # --------------------------------------------------------
+    # 작성자
+    # --------------------------------------------------------
+    draw_pdf_text(c, "작성자", record.get("작성자"), 8)
+    draw_pdf_text(c, "관계", record.get("관계"), 8)
+
+    # 환자가 제출한 날짜
+    submitted_date = clean(record.get("DATE"))
+
+    try:
+        dt = datetime.strptime(submitted_date, "%Y-%m-%d %H:%M:%S")
+        date_text = f"{dt.year}      {dt.month}      {dt.day}"
+    except Exception:
+        date_text = datetime.now(TZ).strftime("%Y      %m      %d")
+
+    draw_pdf_text(c, "작성일", date_text, 8)
+
+    c.save()
+    overlay_buffer.seek(0)
+
+    # --------------------------------------------------------
+    # 원본 + 오버레이 병합
+    # --------------------------------------------------------
+    overlay_pdf = PdfReader(overlay_buffer)
+    original_page.merge_page(overlay_pdf.pages[0])
+
+    writer = PdfWriter()
+    writer.add_page(original_page)
+
+    output = io.BytesIO()
+    writer.write(output)
+    output.seek(0)
+
+    return output.getvalue()
 
 
 # ============================================================
@@ -157,7 +359,7 @@ def answer_text(record, number):
 # ============================================================
 def admin_page():
     st.title("💉 예방접종 관리자")
-    st.caption("예방접종 예진표 접수 내역 조회")
+    st.caption("예방접종 예진표 접수 내역 조회 및 출력")
 
     # --------------------------------------------------------
     # 관리자 로그인
@@ -187,11 +389,12 @@ def admin_page():
     with col2:
         if st.button("로그아웃", use_container_width=True):
             st.session_state.admin_authenticated = False
-            st.session_state.pop("selected_record_id", None)
+            st.session_state.pop("pdf_data", None)
+            st.session_state.pop("pdf_record_id", None)
             st.rerun()
 
     # --------------------------------------------------------
-    # 데이터 불러오기
+    # 데이터
     # --------------------------------------------------------
     try:
         records = get_records()
@@ -206,11 +409,10 @@ def admin_page():
         st.info("현재 접수된 예진표가 없습니다.")
         st.stop()
 
-    # 최신 접수순
     records = list(reversed(records))
 
     # --------------------------------------------------------
-    # 검색 / 필터
+    # 검색
     # --------------------------------------------------------
     filter_col1, filter_col2 = st.columns([1, 2])
 
@@ -224,15 +426,15 @@ def admin_page():
     filtered = []
 
     for record in records:
-        if period == "오늘" and not clean(record.get("DATE", "")).startswith(today_text):
+        if period == "오늘" and not clean(record.get("DATE")).startswith(today_text):
             continue
 
         keyword = clean(search).lower()
 
         if keyword:
-            name_value = clean(record.get("성명", "")).lower()
-            phone_value = clean(record.get("휴대전화", "")).lower()
-            phone_digits = digits_only(record.get("휴대전화", ""))
+            name_value = clean(record.get("성명")).lower()
+            phone_value = clean(record.get("휴대전화")).lower()
+            phone_digits = digits_only(record.get("휴대전화"))
             keyword_digits = digits_only(keyword)
 
             name_match = keyword in name_value
@@ -251,36 +453,46 @@ def admin_page():
         st.stop()
 
     # --------------------------------------------------------
-    # 접수 목록
+    # 환자 선택
     # --------------------------------------------------------
     options = {}
 
     for record in filtered:
-        record_id = clean(record.get("ID", ""))
-        date_value = clean(record.get("DATE", ""))
-        name_value = clean(record.get("성명", ""))
-        phone_value = clean(record.get("휴대전화", ""))
-
-        label = f"{date_value} | {name_value} | {phone_value}"
+        record_id = clean(record.get("ID"))
+        label = f"{clean(record.get('DATE'))} | {clean(record.get('성명'))} | {clean(record.get('휴대전화'))}"
         options[label] = record_id
 
-    selected_label = st.selectbox("예진표 선택", list(options.keys()), index=None, placeholder="확인할 예진표를 선택해주세요.")
+    selected_label = st.selectbox(
+        "예진표 선택",
+        list(options.keys()),
+        index=None,
+        placeholder="확인할 예진표를 선택해주세요."
+    )
 
     if selected_label is None:
         st.info("위 목록에서 확인할 예진표를 선택해주세요.")
         st.stop()
 
     selected_id = options[selected_label]
-    selected = next((record for record in filtered if clean(record.get("ID", "")) == selected_id), None)
+    selected = next((record for record in filtered if clean(record.get("ID")) == selected_id), None)
 
     if selected is None:
         st.error("선택한 예진표를 찾을 수 없습니다.")
         st.stop()
 
+    # 다른 환자를 선택하면 기존 PDF 제거
+    if st.session_state.get("pdf_record_id") != selected_id:
+        st.session_state.pop("pdf_data", None)
+        st.session_state.pop("pdf_record_id", None)
+
     # --------------------------------------------------------
-    # 선택 환자 상세
+    # 환자 정보
     # --------------------------------------------------------
     st.markdown('<div class="section-title">접종 대상자 정보</div>', unsafe_allow_html=True)
+
+    weight_text = clean(selected.get("체중"))
+    if weight_text:
+        weight_text += " kg"
 
     st.markdown(
         f"""
@@ -293,18 +505,24 @@ def admin_page():
         <b>외국인 등록번호</b>　{mask_rrn(selected.get("외국인번호"))}<br>
         <b>전화번호(집)</b>　{clean(selected.get("집전화"))}<br>
         <b>휴대전화</b>　{clean(selected.get("휴대전화"))}<br>
-        <b>체중</b>　{clean(selected.get("체중"))} kg
+        <b>체중</b>　{weight_text}
         </div>
         """,
         unsafe_allow_html=True
     )
 
+    # --------------------------------------------------------
+    # 동의
+    # --------------------------------------------------------
     st.markdown('<div class="section-title">동의 사항</div>', unsafe_allow_html=True)
 
     st.write(f"예방접종 내역 사전 확인: **{clean(selected.get('접종동의'))}**")
     st.write(f"다음 접종 및 완료 여부 알림: **{clean(selected.get('알림동의'))}**")
     st.write(f"예방접종 후 이상반응 알림: **{clean(selected.get('이상동의'))}**")
 
+    # --------------------------------------------------------
+    # 문진
+    # --------------------------------------------------------
     st.markdown('<div class="section-title">문진 내용</div>', unsafe_allow_html=True)
 
     questions = [
@@ -329,6 +547,9 @@ def admin_page():
         else:
             st.write(f"**{number}. {text}** → {value}")
 
+    # --------------------------------------------------------
+    # 작성자
+    # --------------------------------------------------------
     st.markdown('<div class="section-title">작성자</div>', unsafe_allow_html=True)
 
     st.markdown(
@@ -341,7 +562,45 @@ def admin_page():
         unsafe_allow_html=True
     )
 
-    st.info("다음 단계에서 이 선택된 예진표를 원본 예방접종 예진표 PDF에 자동 입력하여 출력하는 기능을 연결합니다.")
+    # --------------------------------------------------------
+    # PDF 생성
+    # --------------------------------------------------------
+    st.markdown('<div class="section-title">예진표 출력</div>', unsafe_allow_html=True)
+
+    st.caption("선택한 환자의 정보를 원본 예방접종 예진표에 입력하여 PDF를 생성합니다.")
+
+    if st.button("📄 선택한 예진표 PDF 생성", use_container_width=True, type="primary"):
+        try:
+            with st.spinner("예진표 PDF를 생성하고 있습니다..."):
+                st.session_state.pdf_data = create_vaccination_pdf(selected)
+                st.session_state.pdf_record_id = selected_id
+
+            st.success("PDF가 생성되었습니다.")
+
+        except FileNotFoundError:
+            st.error("vaccination_form.pdf 파일을 찾을 수 없습니다.")
+
+        except Exception as e:
+            st.error("PDF 생성 중 오류가 발생했습니다.")
+            st.exception(e)
+
+    # --------------------------------------------------------
+    # PDF 다운로드
+    # --------------------------------------------------------
+    if st.session_state.get("pdf_data") and st.session_state.get("pdf_record_id") == selected_id:
+        patient_name = clean(selected.get("성명")) or "환자"
+        date_string = datetime.now(TZ).strftime("%Y%m%d")
+        filename = f"{patient_name}_예방접종예진표_{date_string}.pdf"
+
+        st.download_button(
+            "⬇️ PDF 다운로드 / 인쇄",
+            data=st.session_state.pdf_data,
+            file_name=filename,
+            mime="application/pdf",
+            use_container_width=True
+        )
+
+        st.caption("다운로드한 PDF를 열어 인쇄할 때 용지 크기는 A4, 배율은 100% 또는 실제 크기로 설정해주세요.")
 
     st.stop()
 
