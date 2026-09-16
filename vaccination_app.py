@@ -483,7 +483,7 @@ def admin_page():
         # A4 미리보기
         # ----------------------------------------------------
         with preview_col:
-            st.image(preview_png, use_container_width=True)
+            st.image(preview_png, use_column_width=True)
 
         # ----------------------------------------------------
         # 인쇄 패널
