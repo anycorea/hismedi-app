@@ -10,6 +10,8 @@ import json
 import math
 import threading
 import hmac
+import tempfile
+from pathlib import Path
 from datetime import datetime, date
 from zoneinfo import ZoneInfo
 from google.oauth2.service_account import Credentials
@@ -323,6 +325,16 @@ def install_input_masks_and_numeric_months():
             function applyAll() {
                 bindMasks();
                 numericMonths();
+                // Scope the blue treatment to this one native Streamlit button.
+                for (const button of doc.querySelectorAll('button')) {
+                    if (button.textContent.trim() !== '🔄 새로고침') continue;
+                    button.style.setProperty('background-color', '#1976d2', 'important');
+                    button.style.setProperty('border-color', '#1565c0', 'important');
+                    button.style.setProperty('color', '#ffffff', 'important');
+                    for (const text of button.querySelectorAll('p, span')) {
+                        text.style.setProperty('color', '#ffffff', 'important');
+                    }
+                }
             }
 
             applyAll();
@@ -371,6 +383,7 @@ def get_records():
 
 
 def refresh_admin():
+    st.session_state.pop("admin_printed_ids", None)
     for key in list(st.session_state):
         if key in ("admin_records", "pdf_bundle") or key.startswith(("print_settings_", "settings_base_", "adjust_")):
             del st.session_state[key]
@@ -562,61 +575,215 @@ def question(number, text, detail_text=None, forced_answer=None):
 # ============================================================
 # 1클릭 인쇄
 # ============================================================
-def print_button(pdf_data, key_name):
-    key_name = hashlib.sha256(str(key_name).encode()).hexdigest()[:16]
-    encoded = base64.b64encode(pdf_data).decode()
+# Only IDs and click timestamps are stored here; patient data stays in its original sheet.
+PRINT_HISTORY_HEADERS = ["RECORD_ID", "PRINT_REQUESTED_AT", "EVENT_ID"]
 
-    html = f"""
-    <style>
-        body {{ margin:0; font-family:Arial,sans-serif; }}
-        button {{
-            width:100%; height:48px; border:0; border-radius:8px;
-            background:#ff4b4b; color:white; font-size:16px;
-            font-weight:700; cursor:pointer;
-        }}
-        button:hover {{ opacity:0.92; }}
-    </style>
 
-    <button id="print_{key_name}">🖨 바로 인쇄</button>
+def get_print_history_worksheet():
+    if "_print_history_worksheet" not in st.session_state:
+        with sheet_lock():
+            spreadsheet = get_spreadsheet()
+            try:
+                worksheet = spreadsheet.worksheet("print_history")
+            except gspread.WorksheetNotFound:
+                try:
+                    worksheet = spreadsheet.add_worksheet(title="print_history", rows=1000, cols=3)
+                except gspread.exceptions.APIError:
+                    # Another worker may have created the sheet concurrently.
+                    worksheet = spreadsheet.worksheet("print_history")
+            headers = worksheet.row_values(1)
+            if not headers:
+                worksheet.update(range_name="A1:C1", values=[PRINT_HISTORY_HEADERS],
+                                 value_input_option="RAW")
+            elif headers != PRINT_HISTORY_HEADERS:
+                raise ValueError("print_history 시트의 A1:C1 열 제목을 확인해주세요.")
+            st.session_state["_print_history_worksheet"] = worksheet
+    return st.session_state["_print_history_worksheet"]
 
-    <script>
-        document.getElementById("print_{key_name}").onclick = function() {{
-            const binary = atob("{encoded}");
-            const bytes = new Uint8Array(binary.length);
 
-            for (let i = 0; i < binary.length; i++) {{
-                bytes[i] = binary.charCodeAt(i);
-            }}
+def load_printed_ids():
+    if "admin_printed_ids" not in st.session_state:
+        ids = get_print_history_worksheet().col_values(1)
+        st.session_state["admin_printed_ids"] = {clean(v) for v in ids[1:] if clean(v)}
+    return st.session_state["admin_printed_ids"]
 
-            const blob = new Blob([bytes], {{type:"application/pdf"}});
-            const url = URL.createObjectURL(blob);
-            const frame = document.createElement("iframe");
 
-            frame.style.position = "fixed";
-            frame.style.right = "0";
-            frame.style.bottom = "0";
-            frame.style.width = "1px";
-            frame.style.height = "1px";
-            frame.style.border = "0";
-            frame.src = url;
+def save_print_event(event):
+    # Append avoids read/modify/write races between administrators.
+    # A duplicate after an uncertain timeout is harmless for the printed-ID set.
+    get_print_history_worksheet().append_row(
+        [event["record_id"], event["requested_at"], event["token"]],
+        value_input_option="RAW", insert_data_option="INSERT_ROWS", table_range="A1:C1")
 
-            document.body.appendChild(frame);
 
-            frame.onload = function() {{
-                setTimeout(function() {{
-                    try {{
-                        frame.contentWindow.focus();
-                        frame.contentWindow.print();
-                    }} catch (e) {{
-                        window.open(url, "_blank");
-                    }}
-                }}, 700);
-            }};
-        }};
-    </script>
-    """
+def accept_print_event(event, record_id):
+    if not isinstance(event, dict) or event.get("record_id") != record_id:
+        return False
+    token = event.get("token")
+    if not isinstance(token, str) or not 1 <= len(token) <= 100:
+        return False
+    seen = st.session_state.setdefault("print_seen_events", set())
+    if token in seen:
+        return False
+    seen.add(token)
+    item = {"record_id": record_id, "token": token,
+            "requested_at": datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")}
+    st.session_state.setdefault("print_local_ids", set()).add(record_id)
+    pending = st.session_state.setdefault("print_pending_events", {})
+    pending[token] = item
+    try:
+        save_print_event(item)
+    except Exception:
+        # The print operation can continue; show an explicit persistent save warning.
+        pass
+    else:
+        pending.pop(token, None)
+        if "admin_printed_ids" in st.session_state:
+            st.session_state["admin_printed_ids"].add(record_id)
+    return True
 
-    components.html(html, height=54)
+
+def retry_print_history():
+    pending = st.session_state.setdefault("print_pending_events", {})
+    for token, item in list(pending.items()):
+        try:
+            save_print_event(item)
+        except Exception:
+            break
+        else:
+            pending.pop(token, None)
+            if "admin_printed_ids" in st.session_state:
+                st.session_state["admin_printed_ids"].add(item["record_id"])
+
+
+def admin_instructions():
+    st.markdown("""**[설명]**
+
+- 진행순서 : 날짜 확인(필요시 선택) → 새로고침 → 접종자 선택 → 용지 선택(확인) → 바로 인쇄
+- 새로고침 버튼은 수시로 클릭해도 무방합니다.
+- 바로 인쇄 : 클릭 이후 접종자 리스트에서 배경색이 회색처리되나 이후에도 선택 출력이 가능합니다.
+""")
+    st.caption("회색은 ‘바로 인쇄’ 클릭 기록입니다. 인쇄창에서 취소해도 유지됩니다. 다른 관리자의 인쇄 기록은 새로고침하면 반영됩니다.")
+
+
+# A small, bidirectional component: no extra package or separately uploaded HTML needed.
+# textContent is used for all patient fields, preventing HTML injection.
+ADMIN_COMPONENT_HTML = r"""<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><style>
+*{box-sizing:border-box}body{margin:0;font-family:Arial,'Malgun Gothic',sans-serif;color:#313744}
+button{font:inherit;cursor:pointer}button:focus-visible,tr:focus-visible{outline:3px solid #1976d2;outline-offset:-3px}
+.scroll{height:500px;overflow:auto;border:1px solid #e2e8f0;border-radius:9px;background:#fff}
+table{width:100%;border-collapse:separate;border-spacing:0;font-size:14px;table-layout:fixed}
+th{position:sticky;top:0;background:#f7f8fa;color:#667085;text-align:left;font-weight:400;z-index:1}
+th,td{padding:10px 7px;border-bottom:1px solid #e5e7eb;border-right:1px solid #e5e7eb;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;height:39px}
+th:last-child,td:last-child{border-right:0}th button{background:none;border:0;padding:0;color:inherit;font:inherit;width:100%;text-align:left}
+th:first-child{width:32px}th:nth-child(2){width:64px}th:nth-child(4){width:104px}th:nth-child(5){width:62px}
+tr.patient{cursor:pointer}tr.patient td{background:#fff}tr.patient:hover td{background:#eff6ff}
+tr.patient.selected td{background:#fff0f0}tr.patient.printed td,tr.patient.printed:hover td,tr.patient.printed.selected td{background:#dedede;color:#30343b}
+tr.patient.selected td:first-child{box-shadow:inset 3px 0 #ff4b4b}input[type=checkbox]{accent-color:#ff4b4b;pointer-events:none;margin:0;width:17px;height:17px}
+#print{width:100%;height:48px;border:0;border-radius:8px;background:#ff4b4b;color:white;font-size:16px;font-weight:700}
+#print:hover{background:#e94040}#print:disabled{opacity:.55;cursor:wait}#message{font-size:12px;color:#b91c1c}
+</style></head><body><div id="root"></div><script>
+let args={}, kind='', sortField='', sortDirection=1, selected='', busy=false;
+const root=document.getElementById('root');
+const send=(type,data={})=>window.parent.postMessage({isStreamlitMessage:true,type,...data},'*');
+const value=v=>send('streamlit:setComponentValue',{value:v,dataType:'json'});
+const height=h=>send('streamlit:setFrameHeight',{height:h});
+function paintSelection(){
+ for(const row of document.querySelectorAll('tr.patient')){
+  const active=row.dataset.id===selected;
+  row.classList.toggle('selected',active);row.setAttribute('aria-selected',String(active));
+  row.querySelector('input').checked=active;
+ }
+}
+function drawTable(){
+ const old=document.querySelector('.scroll'); const scroll=old?old.scrollTop:0;
+ root.replaceChildren();
+ const box=document.createElement('div');box.className='scroll';
+ const table=document.createElement('table');table.setAttribute('aria-label','접종자 목록');
+ const head=document.createElement('thead'),hr=document.createElement('tr');
+ const columns=[['',''],['time','시간'],['name','성명'],['birth','생년월일'],['relation','관계']];
+ for(const [field,label] of columns){
+  const th=document.createElement('th');
+  if(field){const b=document.createElement('button');b.textContent=label+(sortField===field?(sortDirection===1?' ↑':' ↓'):'');
+   b.onclick=()=>{sortDirection=sortField===field?-sortDirection:1;sortField=field;drawTable()};th.appendChild(b);
+  }else{th.setAttribute('aria-label','선택')}
+  hr.appendChild(th);
+ }
+ head.appendChild(hr);table.appendChild(head);
+ const body=document.createElement('tbody'),rows=[...(args.rows||[])];
+ if(sortField)rows.sort((a,b)=>String(a[sortField]).localeCompare(String(b[sortField]),'ko')*sortDirection);
+ for(const data of rows){
+  const tr=document.createElement('tr');tr.className='patient'+(data.printed?' printed':'');tr.dataset.id=data.id;tr.tabIndex=0;
+  if(data.printed)tr.title='바로 인쇄 클릭 기록 있음 · 다시 인쇄할 수 있습니다';
+  const td=document.createElement('td'),check=document.createElement('input');check.type='checkbox';check.tabIndex=-1;
+  check.setAttribute('aria-label',data.name+' 선택');td.appendChild(check);tr.appendChild(td);
+  for(const [field] of columns.slice(1)){const cell=document.createElement('td');cell.textContent=data[field];cell.title=data[field];tr.appendChild(cell)}
+  const choose=()=>{selected=data.id;paintSelection();value({record_id:data.id})};
+  tr.onclick=choose;tr.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();choose()}};
+  body.appendChild(tr);
+ }
+ table.appendChild(body);box.appendChild(table);root.appendChild(box);box.scrollTop=scroll;paintSelection();height(502);
+}
+function drawPrint(){
+ if(document.getElementById('print'))return; // Preserve the PDF iframe during Streamlit reruns.
+ const button=document.createElement('button');button.id='print';button.textContent='🖨 바로 인쇄';
+ const message=document.createElement('div');message.id='message';root.append(button,message);height(58);
+ button.onclick=()=>{
+  if(busy||!args.pdf)return;
+  const snapshot={...args};busy=true;button.disabled=true;message.textContent='';
+  try{
+   const binary=atob(snapshot.pdf),bytes=Uint8Array.from(binary,c=>c.charCodeAt(0));
+   const url=URL.createObjectURL(new Blob([bytes],{type:'application/pdf'}));
+   const frame=document.createElement('iframe');
+   Object.assign(frame.style,{position:'fixed',right:'0',bottom:'0',width:'1px',height:'1px',border:'0'});
+   let disposed=false;
+   const cleanup=()=>{if(disposed)return;disposed=true;frame.remove();URL.revokeObjectURL(url)};
+   const unlock=()=>{busy=false;button.disabled=false};
+   // Keep the original PDF-in-iframe printing method. The component's stable key
+   // keeps this frame alive when the server updates the grey row.
+   frame.onload=()=>setTimeout(()=>{
+    try{frame.contentWindow.addEventListener('afterprint',()=>{unlock();setTimeout(cleanup,1000)},{once:true});
+        frame.contentWindow.focus();frame.contentWindow.print();}
+    catch(error){window.open(url,'_blank');message.textContent='인쇄창이 열리지 않으면 팝업 차단을 확인해주세요.';height(85)}
+    finally{unlock()}
+   },700);
+   frame.src=url;document.body.appendChild(frame);
+   const token=Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);
+   value({record_id:snapshot.record_id,token});
+   // Do not destroy a long-lived print dialog on an arbitrary timeout.
+   window.addEventListener('pagehide',cleanup,{once:true});
+   setTimeout(unlock,15000);
+  }catch(error){busy=false;button.disabled=false;message.textContent='인쇄 준비에 실패했습니다. 다시 시도해주세요.';height(85)}
+ };
+}
+window.addEventListener('message',event=>{
+ if(event.source!==window.parent||!event.data||event.data.type!=='streamlit:render')return;
+ args=event.data.args||{};
+ if(kind!==args.kind){root.replaceChildren();kind=args.kind}
+ if(kind==='table'){
+  selected=args.selected_id||'';drawTable();
+ }else{drawPrint()}
+});
+send('streamlit:componentReady',{apiVersion:1});
+</script></body></html>"""
+
+
+@st.cache_resource(show_spinner=False)
+def admin_component_directory():
+    directory = tempfile.TemporaryDirectory(prefix="vaccination_admin_")
+    Path(directory.name, "index.html").write_text(ADMIN_COMPONENT_HTML, encoding="utf-8")
+    return directory  # Retain the object so the directory stays alive for the server lifetime.
+
+
+def admin_component(**kwargs):
+    component = components.declare_component("vaccination_admin_controls", path=admin_component_directory().name)
+    return component(**kwargs)
+
+
+def print_button(pdf_data, record_id, mode):
+    return admin_component(kind="print", pdf=base64.b64encode(pdf_data).decode(),
+                           record_id=record_id, mode=mode, default=None, key="admin_print_control")
 
 
 # ============================================================
@@ -804,43 +971,45 @@ def admin_page():
 
         if not records:
             st.info("선택한 날짜에 접수된 예진표가 없습니다.")
+            admin_instructions()
             st.stop()
 
-        table_rows = []
+        try:
+            printed_ids = set(load_printed_ids())
+        except Exception:
+            printed_ids = set()
+            st.warning("인쇄 기록을 불러오지 못했습니다. 회색 표시가 정확하지 않을 수 있습니다. 새로고침해주세요.")
+        printed_ids.update(st.session_state.get("print_local_ids", set()))
 
-        for record in records:
-            table_rows.append({
-                "시간": record_time(record),
-                "성명": clean(record.get("성명"))[:8],
-                "생년월일": clean(record.get("생년월일")),
-                "관계": clean(record.get("관계"))[:6]
-            })
+        if st.session_state.get("print_pending_events"):
+            st.warning("인쇄 클릭 기록을 구글시트에 저장하지 못했습니다. 현재 화면에는 회색으로 표시되지만 다른 관리자에게는 아직 반영되지 않습니다. 로그아웃 전에 저장을 재시도해주세요.")
+            if st.button("인쇄 기록 저장 재시도", key="retry_print_history"):
+                retry_print_history()
+                st.rerun()
 
-        patient_df = pd.DataFrame(table_rows)
+        by_id = {clean(record.get("ID")): record for record in records}
+        if "" in by_id or len(by_id) != len(records):
+            st.error("접수 ID가 비어 있거나 중복되어 있습니다. 구글시트의 ID를 확인해주세요.")
+            admin_instructions()
+            st.stop()
 
-        event = st.dataframe(
-            patient_df,
-            use_container_width=True,
-            hide_index=True,
-            height=500,
-            on_select="rerun",
-            selection_mode="single-row",
-            key=f"patients_{date_text}_{st.session_state.get('table_generation', 0)}",
-            column_config={
-                "시간": st.column_config.TextColumn("시간", width=55),
-                "성명": st.column_config.TextColumn("성명", width=75),
-                "생년월일": st.column_config.TextColumn("생년월일", width=95),
-                "관계": st.column_config.TextColumn("관계", width=55)
-            }
-        )
-
-        selected_rows = event["selection"]["rows"]
-
-        if not selected_rows or selected_rows[0] >= len(records):
+        table_key = f"patients_{date_text}_{st.session_state.get('table_generation', 0)}"
+        previous_event = st.session_state.get(table_key)
+        selected_id = previous_event.get("record_id", "") if isinstance(previous_event, dict) else ""
+        table_rows = [{
+            "id": clean(record.get("ID")), "time": record_time(record),
+            "name": clean(record.get("성명"))[:8], "birth": clean(record.get("생년월일")),
+            "relation": clean(record.get("관계"))[:6],
+            "printed": clean(record.get("ID")) in printed_ids
+        } for record in records]
+        event = admin_component(kind="table", rows=table_rows,
+                                selected_id=selected_id, default=None, key=table_key)
+        admin_instructions()
+        selected_id = event.get("record_id", "") if isinstance(event, dict) else ""
+        if selected_id not in by_id:
             st.caption("↑ 접종자를 선택해주세요.")
             st.stop()
-
-        selected = records[selected_rows[0]]
+        selected = by_id[selected_id]
 
         st.success(
             f"선택 · {clean(selected.get('성명'))} / "
@@ -905,7 +1074,9 @@ def admin_page():
 
             st.divider()
 
-            print_button(print_pdf, f"{clean(selected.get('ID'))[:10]}_{mode}")
+            print_event = print_button(print_pdf, clean(selected.get("ID")), mode)
+            if accept_print_event(print_event, clean(selected.get("ID"))):
+                st.rerun()
 
             if mode == "blank":
                 st.markdown(
