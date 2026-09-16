@@ -305,9 +305,12 @@ def admin_page():
 
         with c2:
             st.markdown("### 관리자 로그인")
-            password = st.text_input("비밀번호", type="password", placeholder="관리자 비밀번호")
 
-            if st.button("로그인", type="primary", use_container_width=True):
+            with st.form("admin_login_form"):
+                password = st.text_input("비밀번호", type="password", placeholder="관리자 비밀번호")
+                login = st.form_submit_button("로그인", type="primary", use_container_width=True)
+
+            if login:
                 if password == st.secrets["admin"]["password"]:
                     st.session_state.admin_authenticated = True
                     st.rerun()
@@ -375,9 +378,9 @@ def admin_page():
         for record in records:
             table_rows.append({
                 "시간": record_time(record),
-                "접종자": clean(record.get("성명"))[:10],
-                "주민번호": rrn_front(record.get("주민번호")),
-                "관계": clean(record.get("관계"))[:8]
+                "성명": clean(record.get("성명"))[:8],
+                "생년월일": clean(record.get("생년월일")),
+                "관계": clean(record.get("관계"))[:6]
             })
 
         patient_df = pd.DataFrame(table_rows)
@@ -390,10 +393,10 @@ def admin_page():
             on_select="rerun",
             selection_mode="single-row",
             column_config={
-                "시간": st.column_config.TextColumn("시간", width="small"),
-                "접종자": st.column_config.TextColumn("접종자", width="medium"),
-                "주민번호": st.column_config.TextColumn("주민번호 앞자리", width="medium"),
-                "관계": st.column_config.TextColumn("관계", width="small")
+                "시간": st.column_config.TextColumn("시간", width=55),
+                "성명": st.column_config.TextColumn("성명", width=85),
+                "생년월일": st.column_config.TextColumn("생년월일", width=100),
+                "관계": st.column_config.TextColumn("관계", width=65)
             }
         )
 
@@ -408,7 +411,7 @@ def admin_page():
 
         st.success(
             f"선택 · {clean(selected.get('성명'))} / "
-            f"{rrn_front(selected.get('주민번호'))} / "
+            f"{clean(selected.get('생년월일'))} / "
             f"{clean(selected.get('관계'))}"
         )
 
