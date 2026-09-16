@@ -1,4 +1,7 @@
 import io
+import threading
+from pathlib import Path
+from functools import lru_cache
 from datetime import datetime
 
 import fitz
@@ -11,7 +14,8 @@ from pypdf import PdfReader, PdfWriter
 # ============================================================
 # 기본 설정
 # ============================================================
-PDF_TEMPLATE = "vaccination_form.pdf"
+PDF_TEMPLATE = Path(__file__).resolve().with_name("vaccination_form.pdf")
+_FONT_LOCK = threading.Lock()
 A4_WIDTH = 595.276
 A4_HEIGHT = 841.890
 
@@ -178,10 +182,16 @@ def mm_to_pt(mm):
 
 
 def register_fonts():
-    try:
-        pdfmetrics.getFont("HYSMyeongJo-Medium")
-    except KeyError:
-        pdfmetrics.registerFont(UnicodeCIDFont("HYSMyeongJo-Medium"))
+    with _FONT_LOCK:
+        try:
+            pdfmetrics.getFont("HYSMyeongJo-Medium")
+        except KeyError:
+            pdfmetrics.registerFont(UnicodeCIDFont("HYSMyeongJo-Medium"))
+
+
+@lru_cache(maxsize=2)
+def _template_bytes(path, mtime_ns, size):
+    return Path(path).read_bytes()
 
 
 # ============================================================
@@ -366,6 +376,8 @@ def create_overlay(record, settings=None):
 # 두 모드 모두 입력 데이터 좌표는 동일
 # ============================================================
 def create_print_pdf(record, mode="blank", settings=None):
+    if mode not in ("blank", "preprinted"):
+        raise ValueError("Unknown print mode")
     if settings is None:
         settings = default_settings()
 
@@ -376,10 +388,11 @@ def create_print_pdf(record, mode="blank", settings=None):
     writer = PdfWriter()
 
     if mode == "blank":
-        template = PdfReader(PDF_TEMPLATE)
-        page = template.pages[0]
+        path = Path(PDF_TEMPLATE)
+        stat = path.stat()
+        template = PdfReader(io.BytesIO(_template_bytes(str(path), stat.st_mtime_ns, stat.st_size)))
+        page = writer.add_page(template.pages[0])
         page.merge_page(overlay_page)
-        writer.add_page(page)
 
     else:
         page = writer.add_blank_page(width=A4_WIDTH, height=A4_HEIGHT)
@@ -406,11 +419,7 @@ def create_preview_pdf(record, settings=None):
 # PDF → PNG 미리보기
 # ============================================================
 def pdf_to_png(pdf_data, zoom=1.55):
-    document = fitz.open(stream=pdf_data, filetype="pdf")
-    page = document.load_page(0)
-    matrix = fitz.Matrix(zoom, zoom)
-    pixmap = page.get_pixmap(matrix=matrix, alpha=False)
-    image = pixmap.tobytes("png")
-    document.close()
-
-    return image
+    with fitz.open(stream=pdf_data, filetype="pdf") as document:
+        page = document.load_page(0)
+        pixmap = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+        return pixmap.tobytes("png")
