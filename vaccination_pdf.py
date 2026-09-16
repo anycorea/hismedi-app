@@ -1,5 +1,6 @@
 import io
 from datetime import datetime
+import fitz
 from reportlab.pdfgen import canvas
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.cidfonts import UnicodeCIDFont
@@ -13,11 +14,12 @@ PDF_TEMPLATE = "vaccination_form.pdf"
 A4_WIDTH = 595.276
 A4_HEIGHT = 841.890
 
+
 # ============================================================
-# PDF 원본 기준 좌표
+# PDF 좌표
 # ============================================================
 # 단위: PDF point
-# 1 mm ≒ 2.83465 pt
+# 1mm ≒ 2.83465pt
 PDF_COORDS = {
     "성명": (108, 729), "주민번호": (282, 729), "성별_남": (468, 729), "성별_여": (494, 729),
     "생년월일": (108, 716), "외국인번호": (282, 716),
@@ -44,7 +46,7 @@ PDF_COORDS = {
 
 
 # ============================================================
-# 공통 함수
+# 공통
 # ============================================================
 def clean(value):
     return "" if value is None else str(value).strip()
@@ -63,28 +65,23 @@ def register_fonts():
 
 def transformed_xy(key, offset_x_mm=0.0, offset_y_mm=0.0, scale_x=1.0, scale_y=1.0):
     x, y = PDF_COORDS[key]
-
-    # A4 좌측 하단을 기준으로 전체 좌표 배율 조정
     x = x * float(scale_x)
     y = A4_HEIGHT - ((A4_HEIGHT - y) * float(scale_y))
-
     x += mm_to_pt(offset_x_mm)
     y += mm_to_pt(offset_y_mm)
-
     return x, y
 
 
-def draw_text(c, key, value, size=8, offset_x_mm=0.0, offset_y_mm=0.0, scale_x=1.0, scale_y=1.0):
+def draw_text(c, key, value, size=8, **kwargs):
     value = clean(value)
     if not value: return
-
-    x, y = transformed_xy(key, offset_x_mm, offset_y_mm, scale_x, scale_y)
+    x, y = transformed_xy(key, **kwargs)
     c.setFont("HYSMyeongJo-Medium", size)
     c.drawString(x, y, value)
 
 
-def draw_check(c, key, offset_x_mm=0.0, offset_y_mm=0.0, scale_x=1.0, scale_y=1.0):
-    x, y = transformed_xy(key, offset_x_mm, offset_y_mm, scale_x, scale_y)
+def draw_check(c, key, **kwargs):
+    x, y = transformed_xy(key, **kwargs)
     c.setFont("Helvetica-Bold", 8)
     c.drawString(x, y, "V")
 
@@ -96,7 +93,7 @@ def draw_answer(c, prefix, answer, **kwargs):
 
 
 # ============================================================
-# 환자 데이터 오버레이
+# 입력 데이터 오버레이
 # ============================================================
 def create_overlay(record, offset_x_mm=0.0, offset_y_mm=0.0, scale_x=1.0, scale_y=1.0):
     register_fonts()
@@ -109,7 +106,6 @@ def create_overlay(record, offset_x_mm=0.0, offset_y_mm=0.0, scale_x=1.0, scale_
     buffer = io.BytesIO()
     c = canvas.Canvas(buffer, pagesize=(A4_WIDTH, A4_HEIGHT))
 
-    # 인적사항
     draw_text(c, "성명", record.get("성명"), 8, **kwargs)
     draw_text(c, "주민번호", record.get("주민번호"), 8, **kwargs)
 
@@ -122,26 +118,21 @@ def create_overlay(record, offset_x_mm=0.0, offset_y_mm=0.0, scale_x=1.0, scale_
     draw_text(c, "휴대전화", record.get("휴대전화"), 8, **kwargs)
     draw_text(c, "체중", record.get("체중"), 8, **kwargs)
 
-    # 개인정보 동의
     draw_answer(c, "접종동의", record.get("접종동의"), **kwargs)
     draw_answer(c, "알림동의", record.get("알림동의"), **kwargs)
     draw_answer(c, "이상동의", record.get("이상동의"), **kwargs)
 
-    # 문진
     for number in range(1, 12):
         draw_answer(c, str(number), record.get(str(number)), **kwargs)
 
     for number in [1, 2, 3, 6, 9, 11]:
         draw_text(c, f"{number}상세", record.get(f"{number}상세"), 7, **kwargs)
 
-    # 작성자
     draw_text(c, "작성자", record.get("작성자"), 8, **kwargs)
     draw_text(c, "관계", record.get("관계"), 8, **kwargs)
 
-    submitted_date = clean(record.get("DATE"))
-
     try:
-        dt = datetime.strptime(submitted_date, "%Y-%m-%d %H:%M:%S")
+        dt = datetime.strptime(clean(record.get("DATE")), "%Y-%m-%d %H:%M:%S")
         date_text = f"{dt.year}      {dt.month}      {dt.day}"
     except Exception:
         date_text = ""
@@ -150,33 +141,20 @@ def create_overlay(record, offset_x_mm=0.0, offset_y_mm=0.0, scale_x=1.0, scale_
 
     c.save()
     buffer.seek(0)
-
     return buffer
 
 
 # ============================================================
-# 최종 인쇄 PDF
+# 인쇄용 PDF 생성
 # ============================================================
 def create_print_pdf(record, mode="blank", offset_x_mm=0.0, offset_y_mm=0.0, scale_x=1.0, scale_y=1.0):
-    """
-    mode="blank"
-        빈 A4 용지에 인쇄.
-        공식 양식 + 환자 입력값 모두 출력.
-
-    mode="preprinted"
-        이미 양식이 인쇄된 종이에 출력.
-        환자 입력값만 출력.
-    """
-
-    overlay_buffer = create_overlay(record, offset_x_mm, offset_y_mm, scale_x, scale_y)
-    overlay_reader = PdfReader(overlay_buffer)
-    overlay_page = overlay_reader.pages[0]
-
+    overlay = create_overlay(record, offset_x_mm, offset_y_mm, scale_x, scale_y)
+    overlay_page = PdfReader(overlay).pages[0]
     writer = PdfWriter()
 
     if mode == "blank":
-        template_reader = PdfReader(PDF_TEMPLATE)
-        page = template_reader.pages[0]
+        template = PdfReader(PDF_TEMPLATE)
+        page = template.pages[0]
         page.merge_page(overlay_page)
         writer.add_page(page)
 
@@ -188,5 +166,25 @@ def create_print_pdf(record, mode="blank", offset_x_mm=0.0, offset_y_mm=0.0, sca
     output = io.BytesIO()
     writer.write(output)
     output.seek(0)
-
     return output.getvalue()
+
+
+# ============================================================
+# 화면 미리보기용 PDF
+# ============================================================
+def create_preview_pdf(record, offset_x_mm=0.0, offset_y_mm=0.0, scale_x=1.0, scale_y=1.0):
+    # 양식용지 인쇄를 선택해도 화면에서는 최종 완성 모습을 보여줌
+    return create_print_pdf(record, "blank", offset_x_mm, offset_y_mm, scale_x, scale_y)
+
+
+# ============================================================
+# PDF → PNG 미리보기
+# ============================================================
+def pdf_to_png(pdf_data, zoom=1.55):
+    document = fitz.open(stream=pdf_data, filetype="pdf")
+    page = document.load_page(0)
+    matrix = fitz.Matrix(zoom, zoom)
+    pixmap = page.get_pixmap(matrix=matrix, alpha=False)
+    image = pixmap.tobytes("png")
+    document.close()
+    return image
