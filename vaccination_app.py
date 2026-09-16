@@ -4,10 +4,16 @@ import pandas as pd
 import gspread
 import uuid
 import base64
+import copy
+import hashlib
+import json
+import math
+import threading
+import hmac
 from datetime import datetime, date
 from zoneinfo import ZoneInfo
 from google.oauth2.service_account import Credentials
-from vaccination_pdf import create_print_pdf, create_preview_pdf, pdf_to_png, default_settings
+from vaccination_pdf import create_print_pdf, create_preview_pdf, pdf_to_png, default_settings, clean
 
 
 # ============================================================
@@ -151,39 +157,46 @@ st.markdown("""
 # ============================================================
 # Google Sheets
 # ============================================================
-@st.cache_resource
 def get_spreadsheet():
-    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-    credentials = Credentials.from_service_account_info(dict(st.secrets["gcp_service_account"]), scopes=scopes)
-    client = gspread.authorize(credentials)
-    return client.open_by_key(st.secrets["gsheet"]["spreadsheet_id"])
+    # A connection belongs to one Streamlit session. Different patients can
+    # submit concurrently without sharing an HTTP session or a global write lock.
+    if "_sheet_connection" not in st.session_state:
+        scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+        credentials = Credentials.from_service_account_info(dict(st.secrets["gcp_service_account"]), scopes=scopes)
+        client = gspread.authorize(credentials)
+        client.set_timeout((5, 25))
+        st.session_state["_sheet_connection"] = client.open_by_key(st.secrets["gsheet"]["spreadsheet_id"])
+    return st.session_state["_sheet_connection"]
 
 
 @st.cache_resource
+def sheet_lock():
+    # Only administrative settings need read/compare/write serialization.
+    # This lock is process-local; it is not a distributed database transaction.
+    return threading.RLock()
+
+
 def get_worksheet():
-    return get_spreadsheet().worksheet(st.secrets["gsheet"]["worksheet_name"])
+    if "_patient_worksheet" not in st.session_state:
+        st.session_state["_patient_worksheet"] = get_spreadsheet().worksheet(st.secrets["gsheet"]["worksheet_name"])
+    return st.session_state["_patient_worksheet"]
 
 
-@st.cache_resource
 def get_settings_worksheet():
-    return get_spreadsheet().worksheet("print_settings")
-
-
-# ============================================================
-# 공통 함수
-# ============================================================
-def clean(value):
-    return "" if value is None else str(value).strip()
+    if "_settings_worksheet" not in st.session_state:
+        st.session_state["_settings_worksheet"] = get_spreadsheet().worksheet("print_settings")
+    return st.session_state["_settings_worksheet"]
 
 
 def digits_only(value):
-    return "".join(ch for ch in str(value) if ch.isdigit())
+    return "".join(ch for ch in str(value) if ch in "0123456789")
 
 
 def safe_float(value, default):
     try:
-        return float(value)
-    except Exception:
+        result = float(value)
+        return result if math.isfinite(result) else default
+    except (TypeError, ValueError):
         return default
 
 
@@ -212,6 +225,12 @@ def install_input_masks_and_numeric_months():
         <script>
         (function () {
             const doc = window.parent.document;
+            if (window.parent.__vaccinationObserver) {
+                window.parent.__vaccinationObserver.disconnect();
+            }
+            if (window.parent.__vaccinationTimer) {
+                window.parent.clearTimeout(window.parent.__vaccinationTimer);
+            }
 
             function digits(value) {
                 return (value || "").replace(/\D/g, "");
@@ -307,7 +326,11 @@ def install_input_masks_and_numeric_months():
             }
 
             applyAll();
-            const observer = new MutationObserver(applyAll);
+            const observer = new MutationObserver(function () {
+                window.parent.clearTimeout(window.parent.__vaccinationTimer);
+                window.parent.__vaccinationTimer = window.parent.setTimeout(applyAll, 80);
+            });
+            window.parent.__vaccinationObserver = observer;
             observer.observe(doc.body, {childList:true, subtree:true});
         })();
         </script>
@@ -328,94 +351,144 @@ def record_time(record):
         return clean(record.get("DATE"))
 
 
+def parse_sheet(values, required_headers):
+    if not values:
+        raise ValueError("시트의 첫 행에 열 제목이 필요합니다.")
+    headers = [clean(v) for v in values[0]]
+    nonempty = [h for h in headers if h]
+    if len(nonempty) != len(set(nonempty)) or not set(required_headers).issubset(headers):
+        raise ValueError("시트 열 제목이 누락되었거나 중복되었습니다.")
+    return [dict(zip(headers, row + [""] * max(0, len(headers) - len(row))))
+            for row in values[1:] if any(clean(v) for v in row)]
+
+
 def get_records():
-    values = get_worksheet().get_all_values()
-
-    if len(values) <= 1:
-        return []
-
-    headers = values[0]
-    records = []
-
-    for sheet_row, row in enumerate(values[1:], start=2):
-        padded = row + [""] * max(0, len(headers) - len(row))
-        record = dict(zip(headers, padded))
-        record["_sheet_row"] = sheet_row
-        records.append(record)
-
-    return records
+    # Patient records stay in this authenticated browser session, not a global cache.
+    if "admin_records" not in st.session_state:
+        values = get_worksheet().get_all_values()
+        st.session_state.admin_records = parse_sheet(values, SHEET_HEADERS)
+    return st.session_state.admin_records
 
 
-# ============================================================
-# 출력 설정 읽기 / 저장
-# ============================================================
-def load_print_settings(mode):
+def refresh_admin():
+    for key in list(st.session_state):
+        if key in ("admin_records", "pdf_bundle") or key.startswith(("print_settings_", "settings_base_", "adjust_")):
+            del st.session_state[key]
+    load_settings_rows.clear()
+    st.session_state["table_generation"] = st.session_state.get("table_generation", 0) + 1
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def load_settings_rows():
+    return parse_sheet(get_settings_worksheet().get_all_values(), SETTING_HEADERS)
+
+
+def settings_from_rows(rows, mode):
     settings = default_settings()
-
-    try:
-        rows = get_settings_worksheet().get_all_records()
-    except Exception:
-        return settings
-
+    seen = set()
     for row in rows:
         if clean(row.get("MODE")) != mode:
             continue
-
         section = clean(row.get("SECTION"))
-
         if section not in settings:
             continue
-
-        settings[section]["x"] = safe_float(row.get("OFFSET_X_MM"), 0.0)
-        settings[section]["y"] = safe_float(row.get("OFFSET_Y_MM"), 0.0)
-
-        if section == "global":
-            settings[section]["scale_x"] = safe_float(row.get("SCALE_X"), 1.0)
-            settings[section]["scale_y"] = safe_float(row.get("SCALE_Y"), 1.0)
-
+        if section in seen:
+            raise ValueError("출력 설정에 같은 영역이 중복되어 있습니다.")
+        seen.add(section)
+        for source, target, low, high in (
+            ("OFFSET_X_MM", "x", -30.0, 30.0),
+            ("OFFSET_Y_MM", "y", -30.0, 30.0),
+            ("SCALE_X", "scale_x", 0.95, 1.05),
+            ("SCALE_Y", "scale_y", 0.95, 1.05),
+        ):
+            if target.startswith("scale") and section != "global":
+                continue
+            value = safe_float(row.get(source), float("nan"))
+            if not math.isfinite(value) or not low <= value <= high:
+                raise ValueError("출력 설정 숫자 또는 허용 범위를 확인해주세요.")
+            settings[section][target] = value
     return settings
 
 
+def load_print_settings(mode):
+    return settings_from_rows(load_settings_rows(), mode)
+
+
 def save_print_settings(mode, settings):
-    worksheet = get_settings_worksheet()
+    # Never clear the sheet. Change only this mode's rows in one batch.
+    with sheet_lock():
+        worksheet = get_settings_worksheet()
+        values = worksheet.get_all_values()
+        existing = parse_sheet(values, SETTING_HEADERS)
+        current = settings_from_rows(existing, mode)
+        baseline = st.session_state.get(f"settings_base_{mode}")
+        if baseline is not None and current != baseline:
+            raise ValueError("다른 관리자가 설정을 변경했습니다. 새로고침 후 다시 조정해주세요.")
+        headers = [clean(v) for v in values[0]]
+        now = datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")
+        updates = []
+        next_row = len(values) + 1
+        for section in SECTION_KEYS:
+            matching = [i for i, row in enumerate(values[1:], 2)
+                        if clean(dict(zip(headers, row)).get("MODE")) == mode
+                        and clean(dict(zip(headers, row)).get("SECTION")) == section]
+            row_num = matching[0] if matching else next_row
+            if not matching:
+                next_row += 1
+            item = settings[section]
+            data = dict(zip(SETTING_HEADERS, [mode, section, item["x"], item["y"],
+                item.get("scale_x", 1.0), item.get("scale_y", 1.0), now]))
+            # Single-cell ranges preserve any additional site-specific columns.
+            for col, header in enumerate(headers, 1):
+                if header in data:
+                    updates.append({"range": gspread.utils.rowcol_to_a1(row_num, col),
+                                    "values": [[data[header]]]})
+        if next_row - 1 > worksheet.row_count:
+            worksheet.add_rows(next_row - 1 - worksheet.row_count)
+        worksheet.batch_update(updates, value_input_option="RAW")
+        load_settings_rows.clear()
+        st.session_state[f"settings_base_{mode}"] = copy.deepcopy(settings)
 
+
+def append_submission(record):
+    worksheet = get_worksheet()
+    headers = [clean(v) for v in worksheet.row_values(1)]
+    parse_sheet([headers], SHEET_HEADERS)
+    # Header order can differ; values must follow the actual sheet columns.
+    row = [record.get(header, "") for header in headers]
+    st.session_state["pending_submission"] = copy.deepcopy(record)
     try:
-        existing = worksheet.get_all_records()
-    except Exception:
-        existing = []
+        worksheet.append_row(row, value_input_option="RAW", insert_data_option="INSERT_ROWS",
+                             table_range="A1:" + gspread.utils.rowcol_to_a1(1, len(headers)))
+    except gspread.exceptions.APIError as exc:
+        # Definitive rejection: safe to let the patient try again after correction.
+        # Timeouts and server errors remain uncertain and must be reconciled.
+        if exc.response.status_code in (400, 401, 403, 404, 429):
+            st.session_state.pop("pending_submission", None)
+        raise
+    st.session_state.pop("pending_submission", None)
+    st.session_state.submitted = True
 
-    preserved = []
 
-    for row in existing:
-        if clean(row.get("MODE")) != mode:
-            preserved.append([
-                clean(row.get("MODE")),
-                clean(row.get("SECTION")),
-                clean(row.get("OFFSET_X_MM")),
-                clean(row.get("OFFSET_Y_MM")),
-                clean(row.get("SCALE_X")),
-                clean(row.get("SCALE_Y")),
-                clean(row.get("UPDATED_AT"))
-            ])
+def reconcile_submission(record):
+    # A timed-out append may already have succeeded. Never blindly append it again.
+    worksheet = get_worksheet()
+    headers = [clean(v) for v in worksheet.row_values(1)]
+    parse_sheet([headers], SHEET_HEADERS)
+    ids = worksheet.col_values(headers.index("ID") + 1)
+    return record["ID"] in ids[1:]
 
-    now = datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")
-    new_rows = []
 
-    for section in SECTION_KEYS:
-        setting = settings[section]
-
-        new_rows.append([
-            mode,
-            section,
-            setting.get("x", 0.0),
-            setting.get("y", 0.0),
-            setting.get("scale_x", 1.0) if section == "global" else 1.0,
-            setting.get("scale_y", 1.0) if section == "global" else 1.0,
-            now
-        ])
-
-    worksheet.clear()
-    worksheet.update(range_name="A1", values=[SETTING_HEADERS] + preserved + new_rows)
+def get_pdf_bundle(record, mode, settings):
+    payload = json.dumps([record, mode, settings], sort_keys=True, ensure_ascii=False)
+    key = hashlib.sha256(payload.encode()).hexdigest()
+    cached = st.session_state.get("pdf_bundle")
+    if cached is None or cached[0] != key:
+        preview = create_preview_pdf(record, settings)
+        printable = preview if mode == "blank" else create_print_pdf(record, mode, settings)
+        cached = (key, pdf_to_png(preview), printable)
+        st.session_state["pdf_bundle"] = cached
+    return cached[1], cached[2]
 
 
 def combine_print_settings(base, delta):
@@ -443,13 +516,14 @@ def ensure_settings_loaded(mode):
     key = settings_state_key(mode)
 
     if key not in st.session_state:
-        st.session_state[key] = load_print_settings(mode)
+        try:
+            st.session_state[key] = load_print_settings(mode)
+            st.session_state[f"settings_base_{mode}"] = copy.deepcopy(st.session_state[key])
+        except Exception:
+            st.error("출력 설정을 읽지 못했습니다. print_settings 시트와 연결 상태를 확인한 뒤 새로고침해주세요.")
+            st.stop()
 
     return st.session_state[key]
-
-
-def reset_print_settings(mode):
-    st.session_state[settings_state_key(mode)] = default_settings()
 
 
 # ============================================================
@@ -489,6 +563,7 @@ def question(number, text, detail_text=None, forced_answer=None):
 # 1클릭 인쇄
 # ============================================================
 def print_button(pdf_data, key_name):
+    key_name = hashlib.sha256(str(key_name).encode()).hexdigest()[:16]
     encoded = base64.b64encode(pdf_data).decode()
 
     html = f"""
@@ -631,8 +706,12 @@ def print_adjustment_ui(mode):
     with b2:
         if st.button("↺ 전체 초기화", use_container_width=True, key=f"reset_settings_{mode}"):
             reset_values = default_settings()
+            try:
+                save_print_settings(mode, reset_values)
+            except Exception as e:
+                st.error(f"설정 초기화에 실패했습니다: {type(e).__name__}")
+                st.stop()
             st.session_state[settings_state_key(mode)] = reset_values
-            save_print_settings(mode, reset_values)
 
             for key in list(st.session_state.keys()):
                 if key.startswith("adjust_") and mode in key:
@@ -668,7 +747,7 @@ def admin_page():
                 login = st.form_submit_button("로그인", type="primary", use_container_width=True)
 
             if login:
-                if password == st.secrets["admin"]["password"]:
+                if hmac.compare_digest(password.encode(), str(st.secrets["admin"]["password"]).encode()):
                     st.session_state.admin_authenticated = True
                     st.rerun()
                 else:
@@ -677,17 +756,10 @@ def admin_page():
         st.stop()
 
     if "admin_date" not in st.session_state:
-        st.session_state.admin_date = date.today()
+        st.session_state.admin_date = datetime.now(TZ).date()
 
     # 관리자 달력도 영문 월 대신 숫자 월로 표시합니다.
     install_input_masks_and_numeric_months()
-
-    try:
-        all_records = get_records()
-    except Exception as e:
-        st.error("접수 데이터를 불러오지 못했습니다.")
-        st.exception(e)
-        st.stop()
 
     # --------------------------------------------------------
     # PC 2단 구성
@@ -705,14 +777,21 @@ def admin_page():
         b1, b2 = st.columns(2)
 
         with b1:
-            if st.button("🔄 새로고침", use_container_width=True):
-                # 자동 갱신은 하지 않습니다. 관리자가 원할 때만 최신 Sheet 데이터를 다시 읽습니다.
-                st.rerun()
+            if st.button("🔄 새로고침", use_container_width=True, on_click=refresh_admin):
+                # on_click already invalidated the session snapshot before this run.
+                pass
 
         with b2:
             if st.button("로그아웃", use_container_width=True):
                 st.session_state.clear()
                 st.rerun()
+
+        try:
+            all_records = get_records()
+        except Exception as e:
+            st.error("접수 데이터를 불러오지 못했습니다.")
+            st.exception(e)
+            st.stop()
 
         date_text = selected_date.strftime("%Y-%m-%d")
         records = [r for r in all_records if record_date(r) == date_text]
@@ -746,6 +825,7 @@ def admin_page():
             height=500,
             on_select="rerun",
             selection_mode="single-row",
+            key=f"patients_{date_text}_{st.session_state.get('table_generation', 0)}",
             column_config={
                 "시간": st.column_config.TextColumn("시간", width=55),
                 "성명": st.column_config.TextColumn("성명", width=75),
@@ -754,9 +834,9 @@ def admin_page():
             }
         )
 
-        selected_rows = event.selection.rows
+        selected_rows = event["selection"]["rows"]
 
-        if not selected_rows:
+        if not selected_rows or selected_rows[0] >= len(records):
             st.caption("↑ 접종자를 선택해주세요.")
             st.stop()
 
@@ -798,14 +878,7 @@ def admin_page():
         # ----------------------------------------------------
         try:
             effective_settings = effective_print_settings(mode, settings)
-            preview_pdf = create_preview_pdf(selected, effective_settings)
-            preview_png = pdf_to_png(preview_pdf)
-
-            print_pdf = create_print_pdf(
-                selected,
-                mode=mode,
-                settings=effective_settings
-            )
+            preview_png, print_pdf = get_pdf_bundle(selected, mode, effective_settings)
 
         except Exception as e:
             st.error("예진표 생성 중 오류가 발생했습니다.")
@@ -874,6 +947,26 @@ if st.session_state.get("submitted", False):
     st.stop()
 
 
+if st.session_state.get("pending_submission"):
+    pending = st.session_state["pending_submission"]
+    st.warning("제출 결과를 확인하지 못했습니다. 중복 접수를 막기 위해 추가 제출을 멈췄습니다.")
+    st.caption(f"접수 확인번호: {pending['ID']}")
+    st.write("아래 버튼으로 저장 여부를 확인해주세요. 계속 확인되지 않으면 이 화면을 직원에게 보여주세요. 새로 작성하기 전에 기존 접수 여부를 확인해야 합니다.")
+    if st.button("저장 여부 다시 확인", type="primary"):
+        try:
+            found = reconcile_submission(pending)
+        except Exception:
+            st.error("연결되지 않습니다. 잠시 후 확인하거나 직원에게 문의해주세요.")
+        else:
+            if found:
+                st.session_state.pop("pending_submission", None)
+                st.session_state.submitted = True
+                st.rerun()
+            else:
+                st.info("아직 접수가 확인되지 않습니다. 직원에게 접수 확인번호를 알려주세요.")
+    st.stop()
+
+
 # ============================================================
 # 제목 / 개인정보
 # ============================================================
@@ -918,7 +1011,7 @@ birth_date = st.date_input(
     "실제 생년월일 *",
     value=None,
     min_value=date(1900, 1, 1),
-    max_value=date.today(),
+    max_value=datetime.now(TZ).date(),
     format="YYYY-MM-DD"
 )
 
@@ -1081,7 +1174,7 @@ if submitted:
 
     mobile_digits = digits_only(mobile_phone)
 
-    if mobile_digits and len(mobile_digits) not in (10, 11):
+    if clean(mobile_phone) and len(mobile_digits) not in (10, 11):
         errors.append("휴대전화 번호를 정확히 입력해주세요.")
 
     if vaccination_consent is None:
@@ -1148,30 +1241,20 @@ if submitted:
                 "알림동의": clean(notification_consent),
                 "이상동의": clean(adverse_consent),
 
-                "1": clean(q1), "1상세": clean(q1_detail),
-                "2": clean(q2), "2상세": clean(q2_detail),
-                "3": clean(q3), "3상세": clean(q3_detail),
-                "4": clean(q4),
-                "5": clean(q5),
-                "6": clean(q6), "6상세": clean(q6_detail),
-                "7": clean(q7),
-                "8": clean(q8),
-                "9": clean(q9), "9상세": clean(q9_detail),
-                "10": clean(q10),
-                "11": clean(q11), "11상세": clean(q11_detail),
+                **{str(number): clean(answer) for number, answer in enumerate(answers, 1)},
+                **{f"{number}상세": clean(detail) for number, answer, detail in details},
 
                 "작성자": clean(writer),
                 "관계": clean(relationship)
             }
 
-            row = [record.get(header, "") for header in SHEET_HEADERS]
-            get_worksheet().append_row(row, value_input_option="RAW")
+            append_submission(record)
 
-            st.session_state.submitted = True
+        except Exception:
+            if st.session_state.get("pending_submission"):
+                st.rerun()
+            st.error("예진표를 저장하지 못했습니다. 잠시 후 다시 제출해주세요. 반복되면 연결 상태·접근 권한·시트 열 제목을 직원에게 확인해주세요.")
+        else:
             st.rerun()
-
-        except Exception as e:
-            st.error("예진표 저장 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.")
-            st.exception(e)
 
 st.markdown("</div>", unsafe_allow_html=True)
