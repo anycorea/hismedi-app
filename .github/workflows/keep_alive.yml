@@ -19,7 +19,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
@@ -138,4 +138,3 @@ jobs:
                       'It does not test database writes or registration features.\n')
           raise SystemExit(0 if all(ok for _, ok in results) else 1)
           PY
-
