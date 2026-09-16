@@ -74,6 +74,7 @@ st.markdown("""
     .notice-box {
         padding: 1rem; border: 1px solid #ddd;
         border-radius: 10px; background: #fafafa;
+        color: #222222 !important;
         font-size: 0.92rem; line-height: 1.6;
         margin-bottom: 1rem;
     }
@@ -251,9 +252,28 @@ def install_input_masks_and_numeric_months():
                     const input = doc.querySelector('input[placeholder="' + placeholder + '"]');
                     if (!input || input.dataset.vaccinationMask === "1") continue;
                     input.dataset.vaccinationMask = "1";
+                    // Streamlit/React가 실제 변경값을 상태로 인식하도록
+                    // native value setter + input 이벤트를 다시 전달한다.
                     input.addEventListener("input", function () {
+                        if (input.dataset.vaccinationFormatting === "1") return;
+
                         const formatted = formatter(input.value);
-                        if (input.value !== formatted) input.value = formatted;
+                        if (input.value === formatted) return;
+
+                        input.dataset.vaccinationFormatting = "1";
+
+                        const setter = Object.getOwnPropertyDescriptor(
+                            window.parent.HTMLInputElement.prototype, "value"
+                        ).set;
+                        setter.call(input, formatted);
+
+                        input.dispatchEvent(new window.parent.InputEvent("input", {
+                            bubbles: true,
+                            inputType: "insertText",
+                            data: null
+                        }));
+
+                        input.dataset.vaccinationFormatting = "0";
                     }, true);
                 }
             }
@@ -907,10 +927,10 @@ foreigner_no = st.text_input("외국인 등록번호", placeholder="외국인인
 col1, col2 = st.columns(2)
 
 with col1:
-    home_phone = st.text_input("전화번호 (집)", placeholder="숫자만 입력")
+    home_phone = st.text_input("전화번호 (집)", placeholder="숫자만 입력", max_chars=13)
 
 with col2:
-    mobile_phone = st.text_input("휴대전화 *", placeholder="예: 010-1234-5678")
+    mobile_phone = st.text_input("휴대전화 *", placeholder="예: 010-1234-5678", max_chars=13)
 
 weight = st.number_input(
     "체중 (kg)",
