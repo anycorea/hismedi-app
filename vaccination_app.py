@@ -204,6 +204,99 @@ def format_phone(value):
     return digits
 
 
+def install_input_masks_and_numeric_months():
+    """브라우저에서 입력 중 하이픈 표시 + 달력의 영문 월을 숫자 월로 표시."""
+    components.html(
+        r"""
+        <script>
+        (function () {
+            const doc = window.parent.document;
+
+            function digits(value) {
+                return (value || "").replace(/\D/g, "");
+            }
+
+            function formatRrn(value) {
+                const d = digits(value).slice(0, 13);
+                if (d.length <= 6) return d;
+                return d.slice(0, 6) + "-" + d.slice(6);
+            }
+
+            function formatPhone(value) {
+                const d = digits(value).slice(0, 11);
+                if (!d) return "";
+
+                if (d.startsWith("02")) {
+                    if (d.length <= 2) return d;
+                    if (d.length <= 5) return d.slice(0, 2) + "-" + d.slice(2);
+                    if (d.length <= 9) return d.slice(0, 2) + "-" + d.slice(2, 5) + "-" + d.slice(5);
+                    return d.slice(0, 2) + "-" + d.slice(2, 6) + "-" + d.slice(6, 10);
+                }
+
+                if (d.length <= 3) return d;
+                if (d.length <= 6) return d.slice(0, 3) + "-" + d.slice(3);
+                if (d.length <= 10) return d.slice(0, 3) + "-" + d.slice(3, 6) + "-" + d.slice(6);
+                return d.slice(0, 3) + "-" + d.slice(3, 7) + "-" + d.slice(7, 11);
+            }
+
+            const masks = [
+                ["숫자 13자리 입력", formatRrn],
+                ["외국인인 경우 숫자 13자리 입력", formatRrn],
+                ["숫자만 입력", formatPhone],
+                ["예: 010-1234-5678", formatPhone]
+            ];
+
+            function bindMasks() {
+                for (const [placeholder, formatter] of masks) {
+                    const input = doc.querySelector('input[placeholder="' + placeholder + '"]');
+                    if (!input || input.dataset.vaccinationMask === "1") continue;
+                    input.dataset.vaccinationMask = "1";
+                    input.addEventListener("input", function () {
+                        const formatted = formatter(input.value);
+                        if (input.value !== formatted) input.value = formatted;
+                    }, true);
+                }
+            }
+
+            const monthMap = {
+                January:"1월", February:"2월", March:"3월", April:"4월",
+                May:"5월", June:"6월", July:"7월", August:"8월",
+                September:"9월", October:"10월", November:"11월", December:"12월"
+            };
+
+            function numericMonths() {
+                const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
+                let node;
+                while ((node = walker.nextNode())) {
+                    const text = (node.nodeValue || "").trim();
+                    if (monthMap[text]) node.nodeValue = node.nodeValue.replace(text, monthMap[text]);
+                    else {
+                        for (const [eng, kor] of Object.entries(monthMap)) {
+                            if (text.startsWith(eng + " ")) {
+                                node.nodeValue = node.nodeValue.replace(eng, kor);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            function applyAll() {
+                bindMasks();
+                numericMonths();
+            }
+
+            applyAll();
+            const observer = new MutationObserver(applyAll);
+            observer.observe(doc.body, {childList:true, subtree:true});
+        })();
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
+
+
 def record_date(record):
     return clean(record.get("DATE"))[:10]
 
@@ -566,6 +659,9 @@ def admin_page():
     if "admin_date" not in st.session_state:
         st.session_state.admin_date = date.today()
 
+    # 관리자 달력도 영문 월 대신 숫자 월로 표시합니다.
+    install_input_masks_and_numeric_months()
+
     try:
         all_records = get_records()
     except Exception as e:
@@ -589,8 +685,8 @@ def admin_page():
         b1, b2 = st.columns(2)
 
         with b1:
-            if st.button("오늘", use_container_width=True):
-                st.session_state.admin_date = date.today()
+            if st.button("🔄 새로고침", use_container_width=True):
+                # 자동 갱신은 하지 않습니다. 관리자가 원할 때만 최신 Sheet 데이터를 다시 읽습니다.
                 st.rerun()
 
         with b2:
@@ -785,6 +881,10 @@ if not privacy_confirm:
     st.stop()
 
 
+# 입력 마스크와 달력 월 숫자 표시는 환자 화면에서만 적용합니다.
+install_input_masks_and_numeric_months()
+
+
 # ============================================================
 # 인적사항
 # ============================================================
@@ -810,7 +910,7 @@ with col1:
     home_phone = st.text_input("전화번호 (집)", placeholder="숫자만 입력")
 
 with col2:
-    mobile_phone = st.text_input("휴대전화 *", placeholder="예: 01012345678")
+    mobile_phone = st.text_input("휴대전화 *", placeholder="예: 010-1234-5678")
 
 weight = st.number_input(
     "체중 (kg)",
