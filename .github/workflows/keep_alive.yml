@@ -43,6 +43,7 @@ jobs:
           APPS = [
               ('Vaccination', 'https://hismedi-vaccination.streamlit.app/'),
               ('Parking', 'https://hismedi-parking.streamlit.app/'),
+              ('Drugs', 'https://hismedi-app-f9r3rufhcehlfn7zgq6qtq.streamlit.app/'),
           ]
           WAKE = re.compile(r'^Yes, get this app back up!$', re.I)
 
