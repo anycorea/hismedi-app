@@ -29,10 +29,10 @@ SECTION_LABELS = {
     "global": "전체",
     "personal": "인적사항",
     "consent": "개인정보 동의",
-    "q1_3": "문진 1~3",
-    "q4_8": "문진 4~8",
-    "q9_11": "문진 9~11",
-    "writer": "작성자 · 날짜"
+    "questions": "문진 체크",
+    "details": "상세입력",
+    "writer": "작성자 · 관계",
+    "date": "날짜"
 }
 
 SECTION_KEYS = list(SECTION_LABELS.keys())
@@ -305,6 +305,23 @@ def save_print_settings(mode, settings):
     worksheet.update(range_name="A1", values=[SETTING_HEADERS] + preserved + new_rows)
 
 
+def combine_print_settings(base, delta):
+    combined = default_settings()
+
+    for section in combined:
+        combined[section]["x"] = float(base.get(section, {}).get("x", 0.0)) + float(delta.get(section, {}).get("x", 0.0))
+        combined[section]["y"] = float(base.get(section, {}).get("y", 0.0)) + float(delta.get(section, {}).get("y", 0.0))
+
+    combined["global"]["scale_x"] = float(base.get("global", {}).get("scale_x", 1.0)) * float(delta.get("global", {}).get("scale_x", 1.0))
+    combined["global"]["scale_y"] = float(base.get("global", {}).get("scale_y", 1.0)) * float(delta.get("global", {}).get("scale_y", 1.0))
+    return combined
+
+
+def effective_print_settings(mode, current_settings):
+    if mode == "blank": return current_settings
+    return combine_print_settings(load_print_settings("blank"), current_settings)
+
+
 def settings_state_key(mode):
     return f"print_settings_{mode}"
 
@@ -424,7 +441,7 @@ def print_adjustment_ui(mode):
         """
         <div class="adjust-help">
         <b>출력 위치 조정</b><br>
-        먼저 <b>전체</b>로 종이 전체 위치를 맞춘 뒤, 필요한 부분만 영역별로 미세 조정하세요.<br>
+        빈 용지는 기준값을 조정합니다. 양식 용지는 <b>저장된 빈 용지 설정을 기본값으로 상속</b>하고 여기 값만 추가 보정합니다.<br>
         +좌우 = 오른쪽 / -좌우 = 왼쪽 · +상하 = 위 / -상하 = 아래
         </div>
         """,
@@ -500,10 +517,12 @@ def print_adjustment_ui(mode):
 
     with b2:
         if st.button("↺ 전체 초기화", use_container_width=True, key=f"reset_settings_{mode}"):
-            reset_print_settings(mode)
+            reset_values = default_settings()
+            st.session_state[settings_state_key(mode)] = reset_values
+            save_print_settings(mode, reset_values)
 
             for key in list(st.session_state.keys()):
-                if key.startswith(f"adjust_") and mode in key:
+                if key.startswith("adjust_") and mode in key:
                     del st.session_state[key]
 
             st.rerun()
@@ -662,13 +681,14 @@ def admin_page():
         # PDF / 미리보기 생성
         # ----------------------------------------------------
         try:
-            preview_pdf = create_preview_pdf(selected, settings)
+            effective_settings = effective_print_settings(mode, settings)
+            preview_pdf = create_preview_pdf(selected, effective_settings)
             preview_png = pdf_to_png(preview_pdf)
 
             print_pdf = create_print_pdf(
                 selected,
                 mode=mode,
-                settings=settings
+                settings=effective_settings
             )
 
         except Exception as e:
