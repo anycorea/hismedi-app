@@ -999,8 +999,38 @@ st.markdown('<div class="section-title">작성자 확인</div>', unsafe_allow_ht
 
 st.write("의사의 진찰결과와 이상반응에 대한 설명을 듣고 예방접종을 하겠습니다.")
 
-writer = st.text_input("본인(법정대리인, 보호자) 성명 *", placeholder="작성자의 성명을 입력해주세요.")
-relationship = st.text_input("접종 대상자와의 관계 *", placeholder="예: 본인, 부, 모, 배우자")
+writer_default_label = clean(name) if clean(name) else "접종 대상자 본인"
+writer_choice = st.selectbox(
+    "본인(법정대리인, 보호자) 성명 *",
+    [writer_default_label, "직접입력"],
+    index=0,
+    key="writer_choice"
+)
+
+if writer_choice == "직접입력":
+    writer = st.text_input(
+        "작성자 성명 직접입력 *",
+        placeholder="법정대리인 또는 보호자 성명을 입력해주세요.",
+        key="writer_manual"
+    )
+else:
+    writer = clean(name)
+
+relationship_choice = st.selectbox(
+    "접종 대상자와의 관계 *",
+    ["본인", "부", "모", "배우자", "직접입력"],
+    index=0,
+    key="relationship_choice"
+)
+
+if relationship_choice == "직접입력":
+    relationship = st.text_input(
+        "관계 직접입력 *",
+        placeholder="접종 대상자와의 관계를 입력해주세요.",
+        key="relationship_manual"
+    )
+else:
+    relationship = relationship_choice
 
 final_confirm = st.checkbox("위 내용을 확인하였으며 작성한 내용이 사실과 다름없음을 확인합니다.")
 
