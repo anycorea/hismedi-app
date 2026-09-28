@@ -1,4 +1,15 @@
-import datetime, hashlib, json, requests, streamlit as st, streamlit.components.v1 as components
+import datetime
+import hashlib
+import html
+import json
+import uuid
+from zoneinfo import ZoneInfo
+
+import gspread
+import requests
+import streamlit as st
+import streamlit.components.v1 as components
+from google.oauth2.service_account import Credentials
 
 # 1. UI 및 페이지 기본 설정
 st.set_page_config(page_title="히즈메디병원 주차등록", page_icon="🏥", layout="centered")
@@ -138,19 +149,158 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 USER_ID, USER_PW, BASE_URL = "001", "1588", "http://115.21.205.117"
-today = datetime.datetime.now()
+today = datetime.datetime.now(ZoneInfo("Asia/Seoul"))
 today_yyyymmdd = today.strftime("%Y%m%d")
 
+# 시트 1행의 A:K 헤더와 순서까지 일치해야 합니다.
+SHEET_HEADERS = [
+    "기록ID", "등록요청일시", "환자등록번호", "차량뒷번호", "차량번호",
+    "입차일시", "입차ID", "무료주차시간", "처리결과", "최종갱신일시", "비고",
+]
+
+
+def now_kst():
+    return datetime.datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def get_worksheet():
+    # 인증 객체를 사용자 간 공유하지 않습니다. 실제 키는 Secrets에서만 읽습니다.
+    info = dict(st.secrets["gcp_service_account"])
+    info["private_key"] = info["private_key"].replace("\\n", "\n")
+    credentials = Credentials.from_service_account_info(
+        info, scopes=["https://www.googleapis.com/auth/spreadsheets"]
+    )
+    client = gspread.authorize(credentials)
+    client.set_timeout(10)
+    config = st.secrets["gsheet"]
+    worksheet = client.open_by_key(config["spreadsheet_id"]).worksheet(
+        config.get("worksheet_name", "parking_logs")
+    )
+    if worksheet.row_values(1) != SHEET_HEADERS:
+        raise ValueError("구글시트 1행의 A:K 헤더가 설정과 다릅니다.")
+    return worksheet
+
+
+def ensure_request_logged(record):
+    """할인 요청 전에 기록. 응답 유실 후 재시도 시 같은 기록ID를 확인합니다."""
+    worksheet = get_worksheet()
+    cell = worksheet.find(record[0], in_column=1)
+    if cell is None:
+        # 서버의 append로 여러 사용자 기록이 같은 행을 덮어쓰지 않도록 합니다.
+        # RAW로 환자등록번호/뒷번호의 선행 0과 문자열을 보존합니다.
+        worksheet.append_row(
+            record, value_input_option="RAW", insert_data_option="INSERT_ROWS",
+            table_range="A:K",
+        )
+
+
+def update_result_record(record):
+    worksheet = get_worksheet()
+    cell = worksheet.find(record[0], in_column=1)
+    if cell is None:
+        raise ValueError("등록 요청 기록을 찾을 수 없습니다.")
+    # 기존 행의 결과만 갱신. 이 함수는 주차 할인 API를 호출하지 않습니다.
+    worksheet.update(
+        range_name=f"I{cell.row}:K{cell.row}",
+        values=[record[8:11]], value_input_option="RAW",
+    )
+
+
 def get_authenticated_session():
-    s = requests.Session()
-    s.headers.update({"User-Agent": "Mozilla/5.0", "Referer": f"{BASE_URL}/login", "X-Requested-With": "XMLHttpRequest"})
-    if USER_ID != "***":
-        hashed_pw = hashlib.sha256(USER_PW.encode("utf-8")).hexdigest()
-        try: 
-            s.post(f"{BASE_URL}/login", data={"userId": USER_ID, "userPwd": hashed_pw}, timeout=5)
-        except Exception as e: 
-            st.error(f"로그인 통신 오류: {e}")
-    return s
+    session = requests.Session()
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0", "Referer": f"{BASE_URL}/login",
+        "X-Requested-With": "XMLHttpRequest",
+    })
+    hashed_pw = hashlib.sha256(USER_PW.encode("utf-8")).hexdigest()
+    try:
+        response = session.post(
+            f"{BASE_URL}/login", data={"userId": USER_ID, "userPwd": hashed_pw}, timeout=5
+        )
+        response.raise_for_status()
+    except requests.RequestException:
+        session.close()
+        raise
+    return session
+
+
+def is_confirmed_success(response):
+    # 'token' 등의 임의 문자열에 'ok'가 포함됐다고 성공으로 기록하지 않습니다.
+    text = response.text.strip()
+    if text.lower() in {"true", "ok", "success", "성공"}:
+        return True
+    try:
+        value = response.json()
+    except ValueError:
+        return False
+    if value is True:
+        return True
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "ok", "success", "성공"}
+    if isinstance(value, dict):
+        return any(
+            value.get(key) is True or (
+                isinstance(value.get(key), str)
+                and value[key].strip().lower() in {"true", "ok", "success", "성공"}
+            ) for key in ("success", "result")
+        )
+    return False
+
+
+def submit_registration(raw_receipt, car_suffix, pe_id, car_full, entry_str, lot_area):
+    signature = (raw_receipt, car_suffix, str(pe_id), car_full)
+    pending = st.session_state.get("pending_request")
+    if pending is None or pending["signature"] != signature:
+        timestamp = now_kst()
+        record = [
+            str(uuid.uuid4()), timestamp, raw_receipt, car_suffix, car_full,
+            entry_str, str(pe_id), "3", "처리중", timestamp,
+            "결과 갱신 전에는 할인 적용 여부를 확인해 주세요.",
+        ]
+        pending = {"signature": signature, "record": record}
+        st.session_state.pending_request = pending
+    record = pending["record"]
+    try:
+        ensure_request_logged(record)
+    except Exception:
+        st.error("등록 내역을 저장할 수 없어 주차 할인을 요청하지 않았습니다. 잠시 후 다시 시도하거나 원무팀에 문의해 주세요.")
+        return
+
+    state = "check_required"
+    status = "확인필요"
+    note = "주차 시스템에서 실제 할인 적용 여부 확인 필요"
+    message = "주차 할인 처리 결과를 확인하지 못했습니다. 중복 신청하지 마시고 원무팀에 문의해 주세요."
+    try:
+        with get_authenticated_session() as save_session:
+            save_payload = {
+                "peId": pe_id, "discountType": "2", "saveCnt": "1", "iCardType": "0",
+                "carNo": car_full, "iLotArea": lot_area, "acPlate2": "", "memo": "",
+            }
+            response = save_session.post(
+                f"{BASE_URL}/discount/registration/save", data=save_payload, timeout=5
+            )
+            response.raise_for_status()
+            if is_confirmed_success(response):
+                state, status, note = "success", "등록완료", "3시간 할인 적용 완료"
+                message = f"🎉 [{car_full}] 차량에 3시간 주차 할인이 완료되었습니다."
+            elif "<title>히즈메디병원</title>" in response.text:
+                note = "로그인 세션 만료 응답; 실제 적용 여부 확인 필요"
+    except requests.RequestException:
+        note = "주차 시스템 통신 오류; 실제 적용 여부 확인 필요"
+    except Exception:
+        note = "처리 오류; 실제 적용 여부 확인 필요"
+
+    # 먼저 결과 화면으로 잠금. DB 재시도는 할인 요청과 분리합니다.
+    record[8:11] = [status, now_kst(), note]
+    st.session_state.result_state = state
+    st.session_state.result_message = message
+    st.session_state.unsaved_record = record
+    try:
+        update_result_record(record)
+        st.session_state.unsaved_record = None
+    except Exception:
+        pass  # 결과 화면에서 기록만 재저장할 수 있습니다.
+    st.rerun()
 
 # ----------------------------------------------------
 # 4. 결과 화면 처리 (성공/중복/입차없음 상태 시 입력폼 가림)
@@ -158,6 +308,9 @@ def get_authenticated_session():
 if st.session_state.result_state == "success":
     st.success(st.session_state.result_message)
     st.info("💡 처리가 완료되었습니다. 이 창을 닫아주시기 바랍니다.")
+
+elif st.session_state.result_state == "check_required":
+    st.warning(st.session_state.result_message)
 
 elif st.session_state.result_state == "already":
     st.warning(st.session_state.result_message)
@@ -196,13 +349,16 @@ else:
             st.error("❌ 먼저 '환자등록번호'를 정확히 입력해 주세요 (숫자 5자리 또는 6자리).")
         else:
             try:
-                session = get_authenticated_session()
-                list_res = session.post(
-                    f"{BASE_URL}/discount/registration/listForDiscount", 
-                    data={"iLotArea": "621", "entryDate": today_yyyymmdd, "carNo": car_no_input}, 
-                    timeout=5
-                )
-                items = list_res.json()
+                with get_authenticated_session() as session:
+                    list_res = session.post(
+                        f"{BASE_URL}/discount/registration/listForDiscount",
+                        data={"iLotArea": "621", "entryDate": today_yyyymmdd, "carNo": car_no_input},
+                        timeout=5,
+                    )
+                    list_res.raise_for_status()
+                    items = list_res.json()
+                if not isinstance(items, list):
+                    raise ValueError("차량 조회 응답 형식 오류")
 
                 if items and isinstance(items, list) and len(items) > 0:
                     target = items[0]
@@ -227,33 +383,34 @@ else:
                         # 입차 정보 표시 카드
                         st.markdown(f"""
                         <div class="info-card">
-                            <div class="car-num">차량번호: {car_full}</div>
-                            <div class="entry-time">입차시간: {entry_str}</div>
+                            <div class="car-num">차량번호: {html.escape(str(car_full))}</div>
+                            <div class="entry-time">입차시간: {html.escape(str(entry_str))}</div>
                         </div>
                         """, unsafe_allow_html=True)
 
                         if st.button("주차 등록하기 (3시간 무료)", use_container_width=True):
-                            save_session = get_authenticated_session()
-                            save_payload = {"peId": pe_id, "discountType": "2", "saveCnt": "1", "iCardType": "0", "carNo": car_full, "iLotArea": lot_area, "acPlate2": "", "memo": ""}
-                            save_res = save_session.post(f"{BASE_URL}/discount/registration/save", data=save_payload, timeout=5)
-                            res_text = save_res.text.strip().lower()
-
-                            if "true" in res_text or "ok" in res_text or "성공" in res_text:
-                                # 성공 등록 완료 -> 전용 완료 화면으로 전환
-                                st.session_state.result_state = "success"
-                                st.session_state.result_message = f"🎉 [{car_full}] 차량에 3시간 주차 할인이 완료되었습니다."
-                                st.rerun()
-                            elif "<title>히즈메디병원</title>" in save_res.text:
-                                st.error("❌ 로그인 세션이 만료되었습니다. 잠시 후 다시 시도해 주세요.")
-                            else:
-                                st.error(f"❌ 주차 할인 등록 실패: {save_res.text}")
+                            submit_registration(
+                                raw_receipt, car_no_input, pe_id, car_full, entry_str, lot_area
+                            )
                 else:
                     # 입차 차량 없음 -> 전용 완료 화면으로 전환
                     st.session_state.result_state = "not_found"
                     st.session_state.result_message = "❌ 입차된 차량이 없습니다. 차량 번호를 다시 확인해 주세요."
                     st.rerun()
             except Exception as e:
-                st.error(f"처리 중 오류가 발생했습니다: {e}")
+                st.error("차량 조회 중 오류가 발생했습니다. 잠시 후 다시 시도하거나 원무팀에 문의해 주세요.")
+
+# 할인 재요청 없이 기록 갱신만 재시도합니다.
+if st.session_state.get("unsaved_record"):
+    st.warning("처리 결과 기록이 아직 저장되지 않았습니다. 아래 버튼을 눌러 주세요.")
+    if st.button("처리 기록 다시 저장", use_container_width=True):
+        try:
+            update_result_record(st.session_state.unsaved_record)
+        except Exception:
+            st.error("기록을 저장하지 못했습니다. 이 화면을 유지하고 원무팀에 문의해 주세요.")
+        else:
+            st.session_state.unsaved_record = None
+            st.rerun()
 
 # Enter 키 입력 시 다음 Input 포커스 자동 이동
 components.html("""<script>
