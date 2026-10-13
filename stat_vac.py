@@ -10,7 +10,7 @@ st.set_page_config(
     page_title="예방접종 통계 및 분석", page_icon="💉", layout="wide"
 )
 
-# 커스텀 CSS 및 A4 세로 인쇄 최적화 스타일
+# 커스텀 CSS 및 박스형 탭, A4 인쇄 최적화 스타일
 st.markdown(
     """
     <style>
@@ -35,20 +35,40 @@ st.markdown(
 
         hr { margin: 8px 0 !important; }
 
+        /* ==========================================
+           🎨 세련된 박스형 탭 메뉴 스타일링 (글자 크기 확대)
+           ================================---------- */
+        [data-testid="stTabs"] button[data-baseweb="tab"] {
+            font-size: 16px !important;
+            font-weight: 700 !important;
+            padding: 12px 24px !important;
+            border-radius: 8px 8px 0 0 !important;
+            background-color: #F1F5F9 !important;
+            color: #475569 !important;
+            border: 1px solid #CBD5E1 !important;
+            margin-right: 6px !important;
+        }
+        [data-testid="stTabs"] button[data-baseweb="tab"][aria-selected="true"] {
+            background-color: #2563EB !important;
+            color: #ffffff !important;
+            border-color: #2563EB !important;
+            box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.2);
+        }
+
         /* 보고서 상단 타이틀 스타일 */
         .report-header {
             background-color: #F8FAFC;
             border: 1px solid #CBD5E1;
             border-radius: 8px;
-            padding: 12px 18px;
+            padding: 14px 20px;
             text-align: center;
-            margin-bottom: 10px;
+            margin-bottom: 12px;
         }
         .report-header h2 {
-            font-size: 20px !important;
+            font-size: 21px !important;
             font-weight: 800;
             color: #0F172A !important;
-            margin-bottom: 4px !important;
+            margin-bottom: 6px !important;
         }
         .report-header .info-line {
             font-size: 13px;
@@ -60,116 +80,70 @@ st.markdown(
         .stats-highlight-box {
             background: linear-gradient(135deg, #1E3A8A 0%, #2563EB 100%);
             color: #ffffff;
-            border-radius: 8px;
-            padding: 14px 18px;
+            border-radius: 10px;
+            padding: 18px 22px;
             text-align: center;
-            margin-bottom: 14px;
+            margin-bottom: 18px;
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
         }
         .stats-highlight-box .main-stats {
-            font-size: 16px;
+            font-size: 18px;
             font-weight: 800;
-            margin-bottom: 8px;
+            margin-bottom: 10px;
             letter-spacing: -0.3px;
         }
         .stats-highlight-box .main-stats span {
             color: #FEF08A;
         }
         .stats-highlight-box .dept-stats {
-            font-size: 12.5px;
+            font-size: 13px;
             font-weight: 500;
             color: #E2E8F0;
             border-top: 1px solid rgba(255, 255, 255, 0.2);
-            padding-top: 8px;
-            line-height: 1.4;
+            padding-top: 10px;
+            line-height: 1.5;
         }
         .stats-highlight-box .dept-stats b {
             color: #ffffff;
         }
 
+        /* 전용 인쇄 컨테이너 스타일 */
+        .printable-report-wrapper {
+            background-color: #ffffff;
+            border: 1px solid #CBD5E1;
+            border-radius: 10px;
+            padding: 24px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+            max-width: 850px;
+            margin: 0 auto;
+        }
+
         /* ==========================================
-           🖨️ A4 세로 용지 인쇄/PDF 단일 열 완벽 맞춤
+           🖨️ A4 세로 인쇄 전용 최적화 (보고서 탭 전용)
            ================================---------- */
         @media print {
-            [data-testid="stSidebar"], .no-print, button, header, footer, iframe {
-                display: none !important;
+            body * {
+                visibility: hidden;
             }
-            
-            .main .block-container {
+            .printable-report-wrapper, .printable-report-wrapper * {
+                visibility: visible;
+            }
+            .printable-report-wrapper {
+                position: absolute;
+                left: 0;
+                top: 0;
+                width: 100% !important;
+                border: none !important;
+                box-shadow: none !important;
                 padding: 0 !important;
                 margin: 0 !important;
-                max-width: 100% !important;
-                width: 100% !important;
             }
-
+            [data-testid="stSidebar"], .no-print, button, header, footer, iframe, [data-testid="stTabs"] {
+                display: none !important;
+            }
             @page {
                 size: A4 portrait;
                 margin: 10mm;
-            }
-
-            body {
-                font-size: 9.5pt;
-                color: #000000;
-                background: #ffffff !important;
-                -webkit-print-color-adjust: exact;
-                width: 100%;
-            }
-
-            .report-header {
-                background-color: #ffffff !important;
-                border: 1px solid #000000 !important;
-                padding: 6px !important;
-                margin-bottom: 6px !important;
-            }
-            .report-header h2 {
-                font-size: 15px !important;
-                color: #000000 !important;
-                margin-bottom: 2px !important;
-            }
-            .report-header .info-line {
-                font-size: 10pt !important;
-                color: #000000 !important;
-            }
-
-            .stats-highlight-box {
-                background: #ffffff !important;
-                color: #000000 !important;
-                border: 1px solid #000000 !important;
-                padding: 8px !important;
-                margin-bottom: 8px !important;
-                box-shadow: none !important;
-            }
-            .stats-highlight-box .main-stats {
-                font-size: 11pt !important;
-                color: #000000 !important;
-                margin-bottom: 3px !important;
-            }
-            .stats-highlight-box .main-stats span {
-                color: #000000 !important;
-                font-weight: 800;
-                text-decoration: underline;
-            }
-            .stats-highlight-box .dept-stats {
-                color: #000000 !important;
-                border-top: 1px solid #000000 !important;
-                padding-top: 3px !important;
-                font-size: 9pt !important;
-            }
-
-            [data-testid="stDataFrame"] {
-                width: 100% !important;
-                font-size: 9pt !important;
-            }
-            [data-testid="stDataFrame"] div {
-                max-height: none !important;
-                overflow: visible !important;
-                width: 100% !important;
-            }
-            
-            table { width: 100% !important; }
-            tr, td, th {
-                page-break-inside: avoid;
-                padding: 4px 6px !important;
             }
         }
     </style>
@@ -217,7 +191,6 @@ st.sidebar.markdown(
     unsafe_allow_html=True,
 )
 
-# 🔄 구글 시트 데이터 새로고침 버튼
 if st.sidebar.button("🔄 데이터 새로고침", use_container_width=True):
   st.cache_data.clear()
   st.sidebar.success("최신 데이터를 불러왔습니다!")
@@ -323,7 +296,7 @@ else:  # 일별
 
 st.sidebar.divider()
 
-# 🏥 진료과 선택 방식 개선 (전체보기 vs 개별선택 모드 전환)
+# 2. 진료과 선택
 st.sidebar.subheader("🏥 진료과 선택")
 dept_mode = st.sidebar.radio(
     "진료과 모드",
@@ -346,7 +319,9 @@ else:
   if not selected_depts:
     selected_depts = unique_depts
 
-# 3. 예방접종 종류 선택 방식 개선 (전체보기 vs 개별선택 모드 전환)
+st.sidebar.divider()
+
+# 3. 예방접종 종류 선택
 st.sidebar.subheader("💉 예방접종 종류 선택")
 vax_mode = st.sidebar.radio(
     "접종 종류 모드",
@@ -388,11 +363,63 @@ unique_patients = (
 )
 current_time_str = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-# 탭 구성
-tab1, tab2 = st.tabs(["📊 예방접종 통계 및 보고서", "📋 개인별 상세 접종 내역"])
+# 통계 테이블 데이터 미리 준비
+if not filtered_df.empty:
+  agg_df = (
+      filtered_df.groupby([target_col, "처방코드", "처방명"])
+      .size()
+      .reset_index(name="접종건수")
+  )
+  stat_table = agg_df.sort_values(by="접종건수", ascending=False).reset_index(
+      drop=True
+  )
+  stat_table.columns = ["예방접종명", "처방코드", "처방명", "접종건수"]
+
+  total_sum = stat_table["접종건수"].sum()
+  stat_table["점유율(%)"] = (
+      stat_table["접종건수"] / total_sum * 100
+  ).map("{:.2f}%".format)
+
+  stat_table = stat_table[
+      ["예방접종명", "처방코드", "처방명", "접종건수", "점유율(%)"]
+  ]
+else:
+  stat_table = pd.DataFrame()
+
+# 진료과별 요약 문자열 준비
+dept_summary_parts = []
+if not filtered_df.empty and "과목명" in filtered_df.columns:
+  for dept in sorted(filtered_df["과목명"].dropna().unique()):
+    dept_sub_df = filtered_df[filtered_df["과목명"] == dept]
+    d_cases = len(dept_sub_df)
+    d_patients = (
+        dept_sub_df["차트번호"].nunique()
+        if "차트번호" in dept_sub_df.columns
+        else 0
+    )
+    dept_summary_parts.append(
+        f"<b>{dept}</b> : 건수 {d_cases:,}건 (환자수 {d_patients:,}명)"
+    )
+
+dept_summary_html = (
+    " &nbsp;&nbsp;|&nbsp;&nbsp; ".join(dept_summary_parts)
+    if dept_summary_parts
+    else "데이터 없음"
+)
+
+# ==========================================
+# 📑 [탭 구성] 세련된 박스형 탭 메뉴
+# ==========================================
+tab1, tab2, tab3 = st.tabs(
+    [
+        "📊 예방접종 통계 및 분석",
+        "📋 개인별 상세 접종 내역",
+        "📑 공식 보고서 출력",
+    ]
+)
 
 with tab1:
-  # 1. 상단 타이틀 헤더
+  # 기존 통계 및 분석 화면 (완전 보존)
   st.markdown(
       f"""
       <div class="report-header">
@@ -403,27 +430,6 @@ with tab1:
       </div>
       """,
       unsafe_allow_html=True,
-  )
-
-  # 2. 건수 및 진료과 통계 요약 박스
-  dept_summary_parts = []
-  if not filtered_df.empty and "과목명" in filtered_df.columns:
-    for dept in sorted(filtered_df["과목명"].dropna().unique()):
-      dept_sub_df = filtered_df[filtered_df["과목명"] == dept]
-      d_cases = len(dept_sub_df)
-      d_patients = (
-          dept_sub_df["차트번호"].nunique()
-          if "차트번호" in dept_sub_df.columns
-          else 0
-      )
-      dept_summary_parts.append(
-          f"<b>{dept}</b> : 건수 {d_cases:,}건 (환자수 {d_patients:,}명)"
-      )
-
-  dept_summary_html = (
-      " &nbsp;&nbsp;|&nbsp;&nbsp; ".join(dept_summary_parts)
-      if dept_summary_parts
-      else "데이터 없음"
   )
 
   st.markdown(
@@ -440,62 +446,18 @@ with tab1:
       unsafe_allow_html=True,
   )
 
-  if not filtered_df.empty:
-    # 🏆 통계 집계 생성 (예방접종명, 처방코드, 처방명, 접종건수, 점유율)
-    agg_df = (
-        filtered_df.groupby([target_col, "처방코드", "처방명"])
-        .size()
-        .reset_index(name="접종건수")
-    )
-    stat_table = agg_df.sort_values(by="접종건수", ascending=False).reset_index(
-        drop=True
-    )
-    stat_table.columns = ["예방접종명", "처방코드", "처방명", "접종건수"]
-
-    total_sum = stat_table["접종건수"].sum()
-    stat_table["점유율(%)"] = (
-        stat_table["접종건수"] / total_sum * 100
-    ).map("{:.2f}%".format)
-
-    stat_table = stat_table[
-        ["예방접종명", "처방코드", "처방명", "접종건수", "점유율(%)"]
-    ]
-
-    # 💡 단일 열(1-Column) 전체 폭 표 배치
+  if not stat_table.empty:
     st.dataframe(
         stat_table,
         use_container_width=True,
         hide_index=True,
         height=min(600, len(stat_table) * 33 + 40),
     )
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # 3. 인쇄 버튼을 맨 아래로 배치
-    print_button_html = """
-        <div class="no-print" style="text-align: center; margin-top: 5px; margin-bottom: 20px;">
-            <button onclick="window.parent.print();" style="
-                background-color: #2563EB;
-                color: #ffffff;
-                border: none;
-                padding: 10px 24px;
-                border-radius: 6px;
-                font-size: 15px;
-                font-weight: 600;
-                cursor: pointer;
-                box-shadow: 0 1px 3px rgba(0,0,0,0.15);
-            ">
-                🖨️ 보고서 인쇄 / PDF 저장
-            </button>
-        </div>
-    """
-    components.html(print_button_html, height=60)
-
   else:
     st.info("선택한 조건에 해당하는 데이터가 존재하지 않습니다.")
 
 with tab2:
-  # 환자명/차트번호 검색
+  # 개인별 상세 접종 내역 화면 (완전 보존)
   search_query = st.text_input(
       "검색",
       placeholder="환자명 또는 차트번호 입력...",
@@ -511,7 +473,6 @@ with tab2:
         .str.contains(search_query, na=False)
     ]
 
-  # 차트번호 9자리 텍스트형 포맷팅 (앞자리 0 채우기, 쉼표 제거)
   if "차트번호" in display_df.columns:
     display_df["차트번호"] = display_df["차트번호"].apply(
         lambda x: (
@@ -521,14 +482,12 @@ with tab2:
         )
     )
 
-  # 불필요한 파생 컬럼(연도, 월) 및 기본 인덱스 숨기기 정돈
   cols_to_drop = [c for c in ["연도", "월"] if c in display_df.columns]
   if cols_to_drop:
     display_df = display_df.drop(columns=cols_to_drop)
 
   st.dataframe(display_df, use_container_width=True, hide_index=True, height=450)
 
-  # CSV 다운로드
   csv_data = display_df.to_csv(index=False).encode("utf-8-sig")
   st.download_button(
       label="📥 상세 내역 CSV 다운로드",
@@ -536,3 +495,60 @@ with tab2:
       file_name=f"vaccine_detail_{datetime.now().strftime('%Y%m%d')}.csv",
       mime="text/csv",
   )
+
+with tab3:
+  # 📑 완벽한 A4 세로 인쇄 전용 공식 보고서 뷰
+  st.markdown(
+      """
+      <div style="text-align: right; margin-bottom: 10px;" class="no-print">
+          <span style="color: #64748B; font-size: 13px; margin-right: 10px;">💡 이 탭은 인쇄 및 PDF 저장 전용 뷰입니다.</span>
+          <button onclick="window.parent.print();" style="
+              background-color: #2563EB;
+              color: #ffffff;
+              border: none;
+              padding: 8px 18px;
+              border-radius: 6px;
+              font-size: 14px;
+              font-weight: 600;
+              cursor: pointer;
+              box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+          ">
+              🖨️ 인쇄 / PDF 저장하기
+          </button>
+      </div>
+      """,
+      unsafe_allow_html=True,
+  )
+
+  # 인쇄 시 깔끔하게 A4 용지에 꽉 차는 보고서 영역 컨테이너
+  report_html = f"""
+    <div class="printable-report-wrapper">
+        <div style="text-align: center; border-bottom: 2px solid #1E3A8A; padding-bottom: 12px; margin-bottom: 15px;">
+            <h2 style="font-size: 20px; font-weight: 800; color: #1E3A8A; margin: 0 0 6px 0;">[ 히즈메디병원 예방접종 현황 통계 보고서 ]</h2>
+            <div style="font-size: 12.5px; color: #475569; font-weight: 500;">
+                <b>조회 기간:</b> {start_date} ~ {end_date} &nbsp;&nbsp;|&nbsp;&nbsp; <b>발행일시:</b> {current_time_str}
+            </div>
+        </div>
+        
+        <div style="background-color: #F8FAFC; border: 1px solid #CBD5E1; border-radius: 6px; padding: 12px; text-align: center; margin-bottom: 15px;">
+            <div style="font-size: 15px; font-weight: 800; color: #0F172A; margin-bottom: 6px;">
+                총 접종 건수: <span style="color: #2563EB;">{total_cases:,}건</span> &nbsp;&nbsp;|&nbsp;&nbsp; 접종 환자 수(중복제거): <span style="color: #059669;">{unique_patients:,}명</span>
+            </div>
+            <div style="font-size: 12px; color: #475569; border-top: 1px solid #E2E8F0; padding-top: 6px;">
+                [{dept_summary_html}]
+            </div>
+        </div>
+    """
+  st.markdown(report_html, unsafe_allow_html=True)
+
+  if not stat_table.empty:
+    st.dataframe(
+        stat_table,
+        use_container_width=True,
+        hide_index=True,
+        height=min(650, len(stat_table) * 33 + 40),
+    )
+  else:
+    st.info("출력할 데이터가 존재하지 않습니다.")
+
+  st.markdown("</div>", unsafe_allow_html=True)
