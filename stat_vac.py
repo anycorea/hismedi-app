@@ -3,6 +3,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 # 페이지 기본 설정
 st.set_page_config(
@@ -36,17 +37,30 @@ st.markdown(
         /* 구분선 간격 줄이기 */
         hr { margin: 8px 0 !important; }
 
-        /* 핵심 메트릭 카드 스타일 */
-        .metric-container {
-            background-color: #F3F4F6;
+        /* 보고서 상단 타이틀 스타일 */
+        .report-header {
+            background-color: #F8FAFC;
+            border: 1px solid #E2E8F0;
             border-radius: 8px;
-            padding: 10px 16px;
-            border-left: 4px solid #2563EB;
+            padding: 16px;
+            text-align: center;
+            margin-bottom: 15px;
+        }
+        .report-header h2 {
+            font-size: 22px !important;
+            font-weight: 700;
+            color: #0F172A;
+            margin-bottom: 8px !important;
+        }
+        .report-header .info-line {
+            font-size: 13px;
+            color: #475569;
+            font-weight: 500;
         }
 
         /* 인쇄 전용 CSS (브라우저 인쇄 시 사이드바, 버튼 등 불필요한 UI 숨김) */
         @media print {
-            [data-testid="stSidebar"], .no-print, button, header, footer {
+            [data-testid="stSidebar"], .no-print, button, header, footer, iframe {
                 display: none !important;
             }
             .main .block-container {
@@ -243,22 +257,33 @@ if selected_depts:
 if selected_vax:
   filtered_df = filtered_df[filtered_df[target_col].isin(selected_vax)]
 
-# 상단 핵심 지표
-col_m1, col_m2, _ = st.columns([1, 1, 2])
-with col_m1:
-  st.metric(label="총 접종 건수", value=f"{len(filtered_df):,} 건")
-with col_m2:
-  unique_patients = (
-      filtered_df["차트번호"].nunique() if "차트번호" in filtered_df.columns else 0
-  )
-  st.metric(label="접종 환자 수 (중복제거)", value=f"{unique_patients:,} 명")
-
-st.divider()
+# 주요 집계 수치 계산
+total_cases = len(filtered_df)
+unique_patients = (
+    filtered_df["차트번호"].nunique() if "차트번호" in filtered_df.columns else 0
+)
+current_time_str = datetime.now().strftime("%Y-%m-%d %H:%M")
 
 # 탭 구성
 tab1, tab2 = st.tabs(["📊 예방접종 통계 및 보고서", "📋 개인별 상세 접종 내역"])
 
 with tab1:
+  # 상단 통합 보고서 타이틀 헤더
+  st.markdown(
+      f"""
+      <div class="report-header">
+          <h2>[ 히즈메디병원 예방접종 현황 통계 보고서 ]</h2>
+          <div class="info-line">
+              <b>조회 기간:</b> {start_date} ~ {end_date} &nbsp;|&nbsp;
+              <b>총 접종 건수:</b> {total_cases:,}건 &nbsp;|&nbsp;
+              <b>접종 환자 수(중복제거):</b> {unique_patients:,}명 &nbsp;|&nbsp;
+              <b>발행일시:</b> {current_time_str}
+          </div>
+      </div>
+      """,
+      unsafe_allow_html=True,
+  )
+
   if not filtered_df.empty:
     # 내림차순(많은 순) 정렬 통계 생성
     stat_table = (
@@ -269,55 +294,36 @@ with tab1:
         stat_table["접종 건수"] / stat_table["접종 건수"].sum() * 100
     ).round(2)
 
-    # 표 및 차트 나란히 배치
-    c_left, c_right = st.columns([1.2, 1])
-    with c_left:
-      st.dataframe(
-          stat_table, use_container_width=True, hide_index=True, height=380
-      )
-    with c_right:
-      st.bar_chart(
-          stat_table.set_index("예방접종명 (표준명)")["접종 건수"], height=380
-      )
-
-    st.divider()
-
-    # 인쇄 버튼 (클릭 시 브라우저 인쇄 미리보기 즉시 호출)
-    st.markdown(
-        """
-        <div class="no-print" style="margin-bottom: 10px;">
-            <button onclick="window.print();" style="
+    # 인쇄 버튼 (HTML Component 방식으로 상위 브라우저 window.print() 호환)
+    print_button_html = """
+        <div style="margin-bottom: 12px;">
+            <button onclick="window.parent.print();" style="
                 background-color: #ffffff;
                 color: #374151;
                 border: 1px solid #D1D5DB;
                 padding: 6px 16px;
                 border-radius: 6px;
                 font-size: 14px;
-                font-weight: 500;
+                font-weight: 600;
                 cursor: pointer;
                 box-shadow: 0 1px 2px rgba(0,0,0,0.05);
             ">
                 🖨️ 인쇄
             </button>
         </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    """
+    components.html(print_button_html, height=45)
 
-    # 보고서 미리보기 영역
-    st.markdown(
-        f"<h3 style='text-align: center; margin-bottom: 5px;'>[ 히즈메디병원 예방접종"
-        f" 현황 통계 보고서 ]</h3>",
-        unsafe_allow_html=True,
-    )
-    st.markdown(
-        f"<p style='text-align: center; color: #555; font-size: 13px;'>조회 기간:"
-        f" {start_date} ~ {end_date} &nbsp;|&nbsp; 총 접종 건수:"
-        f" {len(filtered_df):,}건 &nbsp;|&nbsp; 발행일시:"
-        f" {datetime.now().strftime('%Y-%m-%d %H:%M')}</p>",
-        unsafe_allow_html=True,
-    )
-    st.dataframe(stat_table, use_container_width=True, hide_index=True)
+    # 표 및 차트 나란히 배치
+    c_left, c_right = st.columns([1.2, 1])
+    with c_left:
+      st.dataframe(
+          stat_table, use_container_width=True, hide_index=True, height=450
+      )
+    with c_right:
+      st.bar_chart(
+          stat_table.set_index("예방접종명 (표준명)")["접종 건수"], height=450
+      )
 
   else:
     st.info("선택한 조건에 해당하는 데이터가 존재하지 않습니다.")
@@ -339,7 +345,7 @@ with tab2:
         .str.contains(search_query, na=False)
     ]
 
-  st.dataframe(display_df, use_container_width=True, height=420)
+  st.dataframe(display_df, use_container_width=True, height=450)
 
   # CSV 다운로드
   csv_data = display_df.to_csv(index=False).encode("utf-8-sig")
