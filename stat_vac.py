@@ -10,17 +10,16 @@ st.set_page_config(
     page_title="예방접종 통계 및 분석", page_icon="💉", layout="wide"
 )
 
-# 커스텀 CSS 및 A4 세로 인쇄 최적화 스타일 (단일 열 꽉 찬 보고서 구성)
+# 커스텀 CSS 및 A4 세로 인쇄 최적화 스타일
 st.markdown(
     """
     <style>
-        /* 사이드바 여백 최적화 */
+        /* 사이드바 여백 및 가독성 최적화 */
         [data-testid="stSidebar"] > div:first-child {
             padding-top: 1rem !important;
             padding-bottom: 1rem !important;
         }
         
-        /* 사이드바 제목 스타일 */
         .sidebar-title {
             font-size: 22px !important;
             font-weight: 800 !important;
@@ -34,7 +33,6 @@ st.markdown(
             margin-bottom: 12px !important;
         }
 
-        /* 구분선 간격 줄이기 */
         hr { margin: 8px 0 !important; }
 
         /* 보고서 상단 타이틀 스타일 */
@@ -158,7 +156,6 @@ st.markdown(
                 font-size: 9pt !important;
             }
 
-            /* 단일 열 표가 A4 폭에 꽉 차게 설정 */
             [data-testid="stDataFrame"] {
                 width: 100% !important;
                 font-size: 9pt !important;
@@ -169,10 +166,7 @@ st.markdown(
                 width: 100% !important;
             }
             
-            table {
-                width: 100% !important;
-            }
-            
+            table { width: 100% !important; }
             tr, td, th {
                 page-break-inside: avoid;
                 padding: 4px 6px !important;
@@ -253,7 +247,7 @@ if target_col not in df_merged.columns:
   df_merged[target_col] = df_merged["처방명"]
 
 # ==========================================
-# 🛠️ [왼쪽 메뉴] 필터 설정
+# 🛠️ [왼쪽 메뉴] 필터 설정 (간소화 및 개선)
 # ==========================================
 st.sidebar.markdown(
     '<div class="sidebar-title">💉 예방접종 통계 및 분석</div>',
@@ -322,35 +316,35 @@ else:  # 일별
 
 st.sidebar.divider()
 
-# 2. 진료과 선택
+# 2. 진료과 선택 (깔끔한 다중 선택)
 st.sidebar.subheader("🏥 진료과 선택")
 unique_depts = sorted(df_merged["과목명"].dropna().unique().tolist())
-dept_all = st.sidebar.checkbox("진료과 전체 선택", value=True)
-
-if dept_all:
-  selected_depts = st.sidebar.multiselect(
-      "진료과", options=unique_depts, default=unique_depts, label_visibility="collapsed"
-  )
-else:
-  selected_depts = st.sidebar.multiselect(
-      "진료과", options=unique_depts, default=[], label_visibility="collapsed"
-  )
+selected_depts = st.sidebar.multiselect(
+    "진료과", options=unique_depts, default=unique_depts, label_visibility="collapsed"
+)
 
 st.sidebar.divider()
 
-# 3. 예방접종 종류 선택
-st.sidebar.subheader("💉 예방접종 종류")
-unique_vax = sorted(df_merged[target_col].dropna().unique().tolist())
-vax_all = st.sidebar.checkbox("예방접종 전체 선택", value=True)
+# 3. 예방접종 종류 선택 방식 개선 (전체보기 vs 개별선택 모드 전환)
+st.sidebar.subheader("💉 예방접종 종류 선택")
+vax_mode = st.sidebar.radio(
+    "접종 종류 모드",
+    ["전체 예방접종 보기 (기본)", "특정 접종만 선택"],
+    label_visibility="collapsed",
+)
 
-if vax_all:
-  selected_vax = st.sidebar.multiselect(
-      "예방접종 종류", options=unique_vax, default=unique_vax, label_visibility="collapsed"
-  )
+unique_vax = sorted(df_merged[target_col].dropna().unique().tolist())
+if vax_mode == "전체 예방접종 보기 (기본)":
+  selected_vax = unique_vax
 else:
   selected_vax = st.sidebar.multiselect(
-      "예방접종 종류", options=unique_vax, default=[], label_visibility="collapsed"
+      "조회할 예방접종 선택",
+      options=unique_vax,
+      default=[],
+      placeholder="백신을 선택하세요...",
   )
+  if not selected_vax:
+    selected_vax = unique_vax  # 아무것도 선택 안했을 시 전체 조회
 
 # ==========================================
 # 📊 [메인 화면] 통계 및 데이터 출력
