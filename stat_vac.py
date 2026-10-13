@@ -81,7 +81,7 @@ st.markdown(
             }
 
             body {
-                font-size: 12pt;
+                font-size: 11pt;
                 color: #000000;
                 background: #ffffff !important;
             }
@@ -94,12 +94,11 @@ st.markdown(
                 margin-bottom: 10px !important;
             }
 
-            /* 데이터 테이블 및 차트가 인쇄 시 잘리지 않도록 설정 */
+            /* 테이블이 인쇄 시 잘리지 않도록 설정 */
             table, tr, td, th {
                 page-break-inside: avoid;
             }
             
-            /* 스트림릿 데이터프레임 스크롤 해제 및 전체 표시 */
             [data-testid="stDataFrame"] div {
                 max-height: none !important;
                 overflow: visible !important;
@@ -322,16 +321,18 @@ with tab1:
   )
 
   if not filtered_df.empty:
-    # 🏆 내림차순(많은 순) 정렬 통계 생성 (건수 기준 내림차순 정렬 보장)
+    # 🏆 내림차순(많은 순) 정렬 통계 생성 및 점유율 소수점 2자리 포맷팅
     stat_table = (
         filtered_df[target_col]
         .value_counts()
-        .reset_index(name="접종 건수")
+        .reset_index(name="접종건수")
     )
-    stat_table.columns = ["예방접종명 (표준명)", "접종 건수"]
+    stat_table.columns = ["예방접종명", "접종건수"]
+    
+    total_sum = stat_table["접종건수"].sum()
     stat_table["점유율(%)"] = (
-        stat_table["접종 건수"] / stat_table["접종 건수"].sum() * 100
-    ).round(2)
+        stat_table["접종건수"] / total_sum * 100
+    ).map("{:.2f}%".format)
 
     # 인쇄 버튼
     print_button_html = """
@@ -353,21 +354,28 @@ with tab1:
     """
     components.html(print_button_html, height=45)
 
-    # 1. 통계 데이터 전체 테이블 표시 (인쇄 시 잘리지 않고 전체 행 표시)
-    st.markdown("### 📋 표준 예방접종별 접종 순위표")
-    st.dataframe(
-        stat_table,
-        use_container_width=True,
-        hide_index=True,
-        height=min(350, len(stat_table) * 35 + 40),
-    )
+    # 💡 데이터를 2개의 열(Column)로 나누어 배치하기 위해 절반으로 분할
+    mid_idx = (len(stat_table) + 1) // 2
+    df_left = stat_table.iloc[:mid_idx].reset_index(drop=True)
+    df_right = stat_table.iloc[mid_idx:].reset_index(drop=True)
 
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # 2. 차트 표시 (많은 건수 순으로 정렬된 데이터 기준 바 차트)
-    st.markdown("### 📊 예방접종 건수 시각화 차트")
-    chart_data = stat_table.set_index("예방접종명 (표준명)")["접종 건수"]
-    st.bar_chart(chart_data, height=400)
+    # 좌우 2열 배치로 시각적 넓이 최적화
+    col1, col2 = st.columns(2)
+    
+    with col1:
+      st.dataframe(
+          df_left,
+          use_container_width=True,
+          hide_index=True,
+          height=min(400, len(df_left) * 35 + 40),
+      )
+    with col2:
+      st.dataframe(
+          df_right,
+          use_container_width=True,
+          hide_index=True,
+          height=min(400, len(df_right) * 35 + 40),
+      )
 
   else:
     st.info("선택한 조건에 해당하는 데이터가 존재하지 않습니다.")
