@@ -218,9 +218,9 @@ st.sidebar.markdown(
 )
 
 # 🔄 구글 시트 데이터 새로고침 버튼
-if st.sidebar.button("🔄 구글시트 데이터 새로고침", use_container_width=True):
+if st.sidebar.button("🔄 데이터 새로고침", use_container_width=True):
   st.cache_data.clear()
-  st.sidebar.success("최신 구글 시트 데이터를 불러왔습니다!")
+  st.sidebar.success("최신 데이터를 불러왔습니다!")
   st.rerun()
 
 st.sidebar.divider()
