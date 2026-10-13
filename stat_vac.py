@@ -18,7 +18,6 @@ st.markdown(
             padding-top: 1rem !important;
             padding-bottom: 1rem !important;
         }
-        .css-1d39121, .css-1lcbmhc { padding-top: 1rem !important; }
         
         /* 사이드바 제목 스타일 */
         .sidebar-title {
@@ -171,7 +170,6 @@ if period_mode == "선택기간":
       min_value=min_date,
       max_value=max_date,
   )
-  # 시작일만 선택했을 때 에러 방지 핸들링
   if isinstance(date_range, (list, tuple)):
     if len(date_range) == 2:
       start_date, end_date = date_range
@@ -245,7 +243,7 @@ if selected_depts:
 if selected_vax:
   filtered_df = filtered_df[filtered_df[target_col].isin(selected_vax)]
 
-# 상단 핵심 지표 (2가지 지정 항목만 깔끔하게 표시)
+# 상단 핵심 지표
 col_m1, col_m2, _ = st.columns([1, 1, 2])
 with col_m1:
   st.metric(label="총 접종 건수", value=f"{len(filtered_df):,} 건")
@@ -257,7 +255,7 @@ with col_m2:
 
 st.divider()
 
-# 탭 구성 (1. 예방접종 통계 및 보고서, 2. 상세 내역)
+# 탭 구성
 tab1, tab2 = st.tabs(["📊 예방접종 통계 및 보고서", "📋 개인별 상세 접종 내역"])
 
 with tab1:
@@ -284,18 +282,29 @@ with tab1:
 
     st.divider()
 
-    # 인쇄 버튼 및 동작 연결 (클릭 시 미리보기 창 즉시 출력)
-    btn_col, _ = st.columns([1, 4])
-    with btn_col:
-      st.button(
-          "🖨️ 인쇄",
-          on_click=lambda: st.components.v1.html(
-              "<script>window.print();</script>", height=0, width=0
-          ),
-          class_name="no-print",
-      )
+    # 인쇄 버튼 (클릭 시 브라우저 인쇄 미리보기 즉시 호출)
+    st.markdown(
+        """
+        <div class="no-print" style="margin-bottom: 10px;">
+            <button onclick="window.print();" style="
+                background-color: #ffffff;
+                color: #374151;
+                border: 1px solid #D1D5DB;
+                padding: 6px 16px;
+                border-radius: 6px;
+                font-size: 14px;
+                font-weight: 500;
+                cursor: pointer;
+                box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+            ">
+                🖨️ 인쇄
+            </button>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-    # 실제 출력/미리보기용 영구 요약 표
+    # 보고서 미리보기 영역
     st.markdown(
         f"<h3 style='text-align: center; margin-bottom: 5px;'>[ 히즈메디병원 예방접종"
         f" 현황 통계 보고서 ]</h3>",
@@ -339,5 +348,4 @@ with tab2:
       data=csv_data,
       file_name=f"vaccine_detail_{datetime.now().strftime('%Y%m%d')}.csv",
       mime="text/csv",
-      class_name="no-print",
   )
