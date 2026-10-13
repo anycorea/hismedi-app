@@ -10,7 +10,7 @@ st.set_page_config(
     page_title="예방접종 통계 및 분석", page_icon="💉", layout="wide"
 )
 
-# 커스텀 CSS 및 A4 세로 인쇄 최적화 스타일 (가독성 및 폰트 크기 강조)
+# 커스텀 CSS 및 A4 세로 인쇄 완벽 맞춤 스타일
 st.markdown(
     """
     <style>
@@ -58,7 +58,7 @@ st.markdown(
             font-weight: 500;
         }
 
-        /* 건수 및 진료과 통계 요약 박스 (글자 크기 확대 및 눈에 띄게 강조) */
+        /* 건수 및 진료과 통계 요약 박스 */
         .stats-highlight-box {
             background: linear-gradient(135deg, #1E3A8A 0%, #2563EB 100%);
             color: #ffffff;
@@ -90,57 +90,93 @@ st.markdown(
         }
 
         /* ==========================================
-           🖨️ A4 세로 용지 인쇄/PDF 최적화 스타일
+           🖨️ A4 세로 용지 인쇄/PDF 완벽 맞춤 최적화 스타일
            ================================---------- */
         @media print {
+            /* 브라우저 인쇄 시 사이드바, 버튼, 네비게이션, 헤더/푸터 숨김 */
             [data-testid="stSidebar"], .no-print, button, header, footer, iframe {
                 display: none !important;
             }
             
+            /* 본문 영역 마진 및 패딩 완전 제거 */
             .main .block-container {
                 padding: 0 !important;
                 margin: 0 !important;
                 max-width: 100% !important;
+                width: 100% !important;
             }
 
+            /* A4 세로 용지 설정 및 여백 최소화 (딱 맞춤) */
             @page {
                 size: A4 portrait;
-                margin: 12mm;
+                margin: 10mm 10mm 10mm 10mm;
             }
 
             body {
-                font-size: 10pt;
+                font-size: 9pt;
                 color: #000000;
                 background: #ffffff !important;
+                -webkit-print-color-adjust: exact;
             }
 
+            /* 보고서 헤더 깔끔하게 인쇄 */
             .report-header {
                 background-color: #ffffff !important;
                 border: 1px solid #000000 !important;
+                padding: 8px !important;
+                margin-bottom: 8px !important;
+            }
+            .report-header h2 {
+                font-size: 16px !important;
+                color: #000000 !important;
             }
 
+            /* 요약 박스 테두리 인쇄 */
             .stats-highlight-box {
                 background: #ffffff !important;
                 color: #000000 !important;
-                border: 2px solid #000000 !important;
+                border: 1px solid #000000 !important;
+                padding: 10px !important;
+                margin-bottom: 10px !important;
                 box-shadow: none !important;
+            }
+            .stats-highlight-box .main-stats {
+                font-size: 13px !important;
+                color: #000000 !important;
+                margin-bottom: 4px !important;
             }
             .stats-highlight-box .main-stats span {
                 color: #000000 !important;
+                font-weight: 800;
                 text-decoration: underline;
             }
             .stats-highlight-box .dept-stats {
                 color: #000000 !important;
                 border-top: 1px solid #000000 !important;
+                padding-top: 4px !important;
+                font-size: 11px !important;
             }
 
-            table, tr, td, th {
-                page-break-inside: avoid;
+            /* 2열 테이블이 A4 폭에 딱 맞게 수평 배치되도록 강제 조정 */
+            [data-testid="column"] {
+                width: 49% !important;
+                float: left !important;
+                flex: 1 1 49% !important;
+                min-width: 49% !important;
             }
-            
+
+            /* 데이터프레임 내부 글자 크기 및 여백 축소로 용지 안에 꽉 차게 밀착 */
+            [data-testid="stDataFrame"] {
+                font-size: 8.5pt !important;
+            }
             [data-testid="stDataFrame"] div {
                 max-height: none !important;
                 overflow: visible !important;
+            }
+            
+            table, tr, td, th {
+                page-break-inside: avoid;
+                padding: 4px 6px !important;
             }
         }
     </style>
@@ -355,7 +391,7 @@ with tab1:
       unsafe_allow_html=True,
   )
 
-  # 2. 건수 및 진료과 통계 요약 박스 (글자 크기 확대 및 눈에 띄게 강조)
+  # 2. 건수 및 진료과 통계 요약 박스
   dept_summary_parts = []
   if not filtered_df.empty and "과목명" in filtered_df.columns:
     for dept in sorted(filtered_df["과목명"].dropna().unique()):
@@ -422,14 +458,14 @@ with tab1:
           df_left,
           use_container_width=True,
           hide_index=True,
-          height=min(420, len(df_left) * 35 + 40),
+          height=min(420, len(df_left) * 33 + 40),
       )
     with col2:
       st.dataframe(
           df_right,
           use_container_width=True,
           hide_index=True,
-          height=min(420, len(df_right) * 35 + 40),
+          height=min(420, len(df_right) * 33 + 40),
       )
 
     st.markdown("<br>", unsafe_allow_html=True)
