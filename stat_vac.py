@@ -323,14 +323,28 @@ else:  # 일별
 
 st.sidebar.divider()
 
-# 2. 진료과 선택
+# 🏥 진료과 선택 방식 개선 (전체보기 vs 개별선택 모드 전환)
 st.sidebar.subheader("🏥 진료과 선택")
-unique_depts = sorted(df_merged["과목명"].dropna().unique().tolist())
-selected_depts = st.sidebar.multiselect(
-    "진료과", options=unique_depts, default=unique_depts, label_visibility="collapsed"
+dept_mode = st.sidebar.radio(
+    "진료과 모드",
+    ["전체 진료과 보기 (기본)", "특정 진료과만 선택"],
+    label_visibility="collapsed",
+    key="dept_mode_radio",
 )
 
-st.sidebar.divider()
+unique_depts = sorted(df_merged["과목명"].dropna().unique().tolist())
+if dept_mode == "전체 진료과 보기 (기본)":
+  selected_depts = unique_depts
+else:
+  selected_depts = st.sidebar.multiselect(
+      "조회할 진료과 선택",
+      options=unique_depts,
+      default=[],
+      placeholder="진료과를 선택하세요...",
+      key="dept_multiselect",
+  )
+  if not selected_depts:
+    selected_depts = unique_depts
 
 # 3. 예방접종 종류 선택 방식 개선 (전체보기 vs 개별선택 모드 전환)
 st.sidebar.subheader("💉 예방접종 종류 선택")
