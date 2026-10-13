@@ -414,7 +414,7 @@ tab1, tab2, tab3 = st.tabs(
     [
         "📊 예방접종 통계 및 분석",
         "📋 개인별 상세 접종 내역",
-        "📑 공식 보고서 출력",
+        "📑 보고서 출력",
     ]
 )
 
@@ -497,16 +497,15 @@ with tab2:
   )
 
 with tab3:
-  # 📑 완벽한 A4 세로 인쇄 전용 공식 보고서 뷰
-  st.markdown(
-      """
+  # 📑 완벽한 A4 세로 인쇄 전용 공식 보고서 뷰 (안전한 컴포넌트 버튼 적용)
+  print_btn_html = """
       <div style="text-align: right; margin-bottom: 10px;" class="no-print">
-          <span style="color: #64748B; font-size: 13px; margin-right: 10px;">💡 이 탭은 인쇄 및 PDF 저장 전용 뷰입니다.</span>
+          <span style="color: #64748B; font-size: 13px; margin-right: 10px;">💡 인쇄 버튼 클릭 시 A4 세로 인쇄 미리보기가 실행됩니다.</span>
           <button onclick="window.parent.print();" style="
               background-color: #2563EB;
               color: #ffffff;
               border: none;
-              padding: 8px 18px;
+              padding: 9px 20px;
               border-radius: 6px;
               font-size: 14px;
               font-weight: 600;
@@ -516,9 +515,8 @@ with tab3:
               🖨️ 인쇄 / PDF 저장하기
           </button>
       </div>
-      """,
-      unsafe_allow_html=True,
-  )
+  """
+  components.html(print_btn_html, height=50)
 
   # 인쇄 시 깔끔하게 A4 용지에 꽉 차는 보고서 영역 컨테이너
   report_html = f"""
