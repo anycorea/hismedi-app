@@ -10,7 +10,7 @@ st.set_page_config(
     page_title="예방접종 통계 및 분석", page_icon="💉", layout="wide"
 )
 
-# 커스텀 CSS 및 A4 세로 인쇄 최적화 스타일 (가독성 대폭 강화)
+# 커스텀 CSS 및 A4 세로 인쇄 최적화 스타일 (가독성 및 폰트 크기 강조)
 st.markdown(
     """
     <style>
@@ -37,45 +37,56 @@ st.markdown(
         /* 구분선 간격 줄이기 */
         hr { margin: 8px 0 !important; }
 
-        /* 보고서 상단 타이틀 스타일 (눈에 띄게 강조) */
+        /* 보고서 상단 타이틀 스타일 */
         .report-header {
+            background-color: #F8FAFC;
+            border: 1px solid #CBD5E1;
+            border-radius: 8px;
+            padding: 14px 20px;
+            text-align: center;
+            margin-bottom: 12px;
+        }
+        .report-header h2 {
+            font-size: 21px !important;
+            font-weight: 800;
+            color: #0F172A !important;
+            margin-bottom: 6px !important;
+        }
+        .report-header .info-line {
+            font-size: 13px;
+            color: #475569;
+            font-weight: 500;
+        }
+
+        /* 건수 및 진료과 통계 요약 박스 (글자 크기 확대 및 눈에 띄게 강조) */
+        .stats-highlight-box {
             background: linear-gradient(135deg, #1E3A8A 0%, #2563EB 100%);
             color: #ffffff;
             border-radius: 10px;
-            padding: 20px 24px;
+            padding: 18px 22px;
             text-align: center;
-            margin-bottom: 15px;
+            margin-bottom: 18px;
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
         }
-        .report-header h2 {
-            font-size: 24px !important;
+        .stats-highlight-box .main-stats {
+            font-size: 18px;
             font-weight: 800;
-            color: #ffffff !important;
-            margin-bottom: 12px !important;
-            letter-spacing: -0.5px;
+            margin-bottom: 10px;
+            letter-spacing: -0.3px;
         }
-        .report-header .info-grid {
-            font-size: 14px;
-            color: #E2E8F0;
-            font-weight: 500;
-            line-height: 1.6;
-        }
-        .report-header .highlight {
+        .stats-highlight-box .main-stats span {
             color: #FEF08A;
-            font-weight: 700;
         }
-
-        /* 진료과별 요약 박스 스타일 (눈에 띄는 디자인) */
-        .dept-summary-box {
-            background-color: #F8FAFC;
-            border: 1px solid #CBD5E1;
-            border-left: 5px solid #2563EB;
-            padding: 12px 18px;
-            border-radius: 8px;
-            margin-bottom: 18px;
+        .stats-highlight-box .dept-stats {
             font-size: 13px;
-            color: #0F172A;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+            font-weight: 500;
+            color: #E2E8F0;
+            border-top: 1px solid rgba(255, 255, 255, 0.2);
+            padding-top: 10px;
+            line-height: 1.5;
+        }
+        .stats-highlight-box .dept-stats b {
+            color: #ffffff;
         }
 
         /* ==========================================
@@ -104,29 +115,23 @@ st.markdown(
             }
 
             .report-header {
+                background-color: #ffffff !important;
+                border: 1px solid #000000 !important;
+            }
+
+            .stats-highlight-box {
                 background: #ffffff !important;
                 color: #000000 !important;
                 border: 2px solid #000000 !important;
-                padding: 12px !important;
-                margin-bottom: 10px !important;
                 box-shadow: none !important;
             }
-            .report-header h2 {
-                color: #000000 !important;
-                font-size: 20px !important;
-            }
-            .report-header .info-grid {
-                color: #334155 !important;
-            }
-            .report-header .highlight {
+            .stats-highlight-box .main-stats span {
                 color: #000000 !important;
                 text-decoration: underline;
             }
-
-            .dept-summary-box {
-                background-color: #ffffff !important;
-                border: 1px solid #64748B !important;
-                border-left: 5px solid #000000 !important;
+            .stats-highlight-box .dept-stats {
+                color: #000000 !important;
+                border-top: 1px solid #000000 !important;
             }
 
             table, tr, td, th {
@@ -337,23 +342,22 @@ current_time_str = datetime.now().strftime("%Y-%m-%d %H:%M")
 tab1, tab2 = st.tabs(["📊 예방접종 통계 및 보고서", "📋 개인별 상세 접종 내역"])
 
 with tab1:
-  # 1. 상단 통합 보고서 타이틀 헤더 (시각적 강조 디자인)
+  # 1. 상단 타이틀 헤더
   st.markdown(
       f"""
       <div class="report-header">
           <h2>[ 히즈메디병원 예방접종 현황 통계 보고서 ]</h2>
-          <div class="info-grid">
-              <b>조회 기간:</b> {start_date} ~ {end_date} &nbsp;&nbsp;|&nbsp;&nbsp; <b>발행일시:</b> {current_time_str}<br>
-              <b>총 접종 건수:</b> <span class="highlight">{total_cases:,}건</span> &nbsp;&nbsp;|&nbsp;&nbsp; <b>접종 환자 수(중복제거):</b> <span class="highlight">{unique_patients:,}명</span>
+          <div class="info-line">
+              <b>조회 기간:</b> {start_date} ~ {end_date} &nbsp;&nbsp;|&nbsp;&nbsp; <b>발행일시:</b> {current_time_str}
           </div>
       </div>
       """,
       unsafe_allow_html=True,
   )
 
-  # 2. 진료과별 요약 표시
+  # 2. 건수 및 진료과 통계 요약 박스 (글자 크기 확대 및 눈에 띄게 강조)
+  dept_summary_parts = []
   if not filtered_df.empty and "과목명" in filtered_df.columns:
-    dept_summary_parts = []
     for dept in sorted(filtered_df["과목명"].dropna().unique()):
       dept_sub_df = filtered_df[filtered_df["과목명"] == dept]
       d_cases = len(dept_sub_df)
@@ -363,19 +367,28 @@ with tab1:
           else 0
       )
       dept_summary_parts.append(
-          f"<b>{dept}</b> : 건수 <span style='color:#2563EB; font-weight:700;'>{d_cases:,}건</span>"
-          f" (환자수 <span style='color:#059669; font-weight:700;'>{d_patients:,}명</span>)"
+          f"<b>{dept}</b> : 건수 {d_cases:,}건 (환자수 {d_patients:,}명)"
       )
 
-    dept_summary_html = " &nbsp;&nbsp;|&nbsp;&nbsp; ".join(dept_summary_parts)
-    st.markdown(
-        f"""
-        <div class="dept-summary-box">
-            <b>🏥 진료과별 요약 현황:</b><br>{dept_summary_html}
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+  dept_summary_html = (
+      " &nbsp;&nbsp;|&nbsp;&nbsp; ".join(dept_summary_parts)
+      if dept_summary_parts
+      else "데이터 없음"
+  )
+
+  st.markdown(
+      f"""
+      <div class="stats-highlight-box">
+          <div class="main-stats">
+              총 접종 건수: <span>{total_cases:,}건</span> &nbsp;&nbsp;|&nbsp;&nbsp; 접종 환자 수(중복제거): <span>{unique_patients:,}명</span>
+          </div>
+          <div class="dept-stats">
+              [{dept_summary_html}]
+          </div>
+      </div>
+      """,
+      unsafe_allow_html=True,
+  )
 
   if not filtered_df.empty:
     # 🏆 통계 집계 생성 (예방접종명, 처방코드, 처방명, 접종건수, 점유율)
