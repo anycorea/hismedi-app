@@ -3,14 +3,13 @@ import gspread
 from google.oauth2.service_account import Credentials
 import pandas as pd
 import streamlit as st
-import streamlit.components.v1 as components
 
 # 페이지 기본 설정
 st.set_page_config(
     page_title="예방접종 통계 및 분석", page_icon="💉", layout="wide"
 )
 
-# 커스텀 CSS 및 박스형 탭, A4 인쇄 최적화 스타일
+# 커스텀 CSS 및 세련된 박스형 탭 스타일
 st.markdown(
     """
     <style>
@@ -55,25 +54,13 @@ st.markdown(
             box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.2);
         }
 
-        /* 보고서 상단 타이틀 스타일 */
-        .report-header {
-            background-color: #F8FAFC;
-            border: 1px solid #CBD5E1;
-            border-radius: 8px;
-            padding: 14px 20px;
+        /* 탭 위 최상단 공통 헤더 스타일 (박스 없음) */
+        .top-info-header {
             text-align: center;
             margin-bottom: 12px;
-        }
-        .report-header h2 {
-            font-size: 21px !important;
-            font-weight: 800;
-            color: #0F172A !important;
-            margin-bottom: 6px !important;
-        }
-        .report-header .info-line {
-            font-size: 13px;
+            font-size: 13.5px;
             color: #475569;
-            font-weight: 500;
+            font-weight: 600;
         }
 
         /* 건수 및 진료과 통계 요약 박스 */
@@ -105,46 +92,6 @@ st.markdown(
         }
         .stats-highlight-box .dept-stats b {
             color: #ffffff;
-        }
-
-        /* 전용 인쇄 컨테이너 스타일 */
-        .printable-report-wrapper {
-            background-color: #ffffff;
-            border: 1px solid #CBD5E1;
-            border-radius: 10px;
-            padding: 24px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
-            max-width: 850px;
-            margin: 0 auto;
-        }
-
-        /* ==========================================
-           🖨️ A4 세로 인쇄 전용 최적화 (보고서 탭 전용)
-           ================================---------- */
-        @media print {
-            body * {
-                visibility: hidden !important;
-            }
-            .printable-report-wrapper, .printable-report-wrapper * {
-                visibility: visible !important;
-            }
-            .printable-report-wrapper {
-                position: absolute !important;
-                left: 0 !important;
-                top: 0 !important;
-                width: 100% !important;
-                border: none !important;
-                box-shadow: none !important;
-                padding: 0 !important;
-                margin: 0 !important;
-            }
-            [data-testid="stSidebar"], .no-print, button, header, footer, iframe, [data-testid="stTabs"] {
-                display: none !important;
-            }
-            @page {
-                size: A4 portrait;
-                margin: 10mm;
-            }
         }
     </style>
 """,
@@ -408,44 +355,37 @@ dept_summary_html = (
 )
 
 # ==========================================
-# 📑 [탭 구성] 세련된 박스형 탭 메뉴
+# 📑 [최상단 공통 헤더 및 요약 박스 배치] (탭 바로 위)
 # ==========================================
-tab1, tab2, tab3 = st.tabs(
-    [
-        "📊 예방접종 통계 및 분석",
-        "📋 개인별 상세 접종 내역",
-        "📑 보고서 출력",
-    ]
+st.markdown(
+    f"""
+    <div class="top-info-header">
+        <b>조회 기간:</b> {start_date} ~ {end_date} &nbsp;&nbsp;|&nbsp;&nbsp; <b>발행일시:</b> {current_time_str}
+    </div>
+    """,
+    unsafe_allow_html=True,
 )
 
+st.markdown(
+    f"""
+    <div class="stats-highlight-box">
+        <div class="main-stats">
+            총 접종 건수: <span>{total_cases:,}건</span> &nbsp;&nbsp;|&nbsp;&nbsp; 접종 환자 수(중복제거): <span>{unique_patients:,}명</span>
+        </div>
+        <div class="dept-stats">
+            [{dept_summary_html}]
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+# ==========================================
+# 📑 [탭 구성] 세련된 박스형 탭 메뉴 (2개 탭)
+# ==========================================
+tab1, tab2 = st.tabs(["📊 예방접종 통계 및 분석", "📋 개인별 상세 접종 내역"])
+
 with tab1:
-  # 기존 통계 및 분석 화면 (완전 보존)
-  st.markdown(
-      f"""
-      <div class="report-header">
-          <h2>[ 히즈메디병원 예방접종 현황 통계 보고서 ]</h2>
-          <div class="info-line">
-              <b>조회 기간:</b> {start_date} ~ {end_date} &nbsp;&nbsp;|&nbsp;&nbsp; <b>발행일시:</b> {current_time_str}
-          </div>
-      </div>
-      """,
-      unsafe_allow_html=True,
-  )
-
-  st.markdown(
-      f"""
-      <div class="stats-highlight-box">
-          <div class="main-stats">
-              총 접종 건수: <span>{total_cases:,}건</span> &nbsp;&nbsp;|&nbsp;&nbsp; 접종 환자 수(중복제거): <span>{unique_patients:,}명</span>
-          </div>
-          <div class="dept-stats">
-              [{dept_summary_html}]
-          </div>
-      </div>
-      """,
-      unsafe_allow_html=True,
-  )
-
   if not stat_table.empty:
     st.dataframe(
         stat_table,
@@ -453,11 +393,22 @@ with tab1:
         hide_index=True,
         height=min(600, len(stat_table) * 33 + 40),
     )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # 📥 통계 요약표 CSV 다운로드 버튼 추가
+    stat_csv_data = stat_table.to_csv(index=False).encode("utf-8-sig")
+    st.download_button(
+        label="📥 통계 요약표 CSV 다운로드",
+        data=stat_csv_data,
+        file_name=f"vaccine_stat_{datetime.now().strftime('%Y%m%d')}.csv",
+        mime="text/csv",
+    )
   else:
     st.info("선택한 조건에 해당하는 데이터가 존재하지 않습니다.")
 
 with tab2:
-  # 개인별 상세 접종 내역 화면 (완전 보존)
+  # 개인별 상세 접종 내역 화면
   search_query = st.text_input(
       "검색",
       placeholder="환자명 또는 차트번호 입력...",
@@ -495,58 +446,3 @@ with tab2:
       file_name=f"vaccine_detail_{datetime.now().strftime('%Y%m%d')}.csv",
       mime="text/csv",
   )
-
-with tab3:
-  # 📑 A4 세로 인쇄 전용 공식 보고서 뷰 (iframe 내부에서 메인 윈도우 인쇄 트리거)
-  print_btn_html = """
-      <div style="text-align: right; margin-bottom: 10px;" class="no-print">
-          <span style="color: #64748B; font-size: 13px; margin-right: 10px;">💡 인쇄 버튼 클릭 시 보고서 내용이 A4 세로 규격으로 출력됩니다.</span>
-          <button onclick="parent.window.print();" style="
-              background-color: #2563EB;
-              color: #ffffff;
-              border: none;
-              padding: 9px 20px;
-              border-radius: 6px;
-              font-size: 14px;
-              font-weight: 600;
-              cursor: pointer;
-              box-shadow: 0 1px 3px rgba(0,0,0,0.15);
-          ">
-              🖨️ 인쇄 / PDF 저장하기
-          </button>
-      </div>
-  """
-  components.html(print_btn_html, height=50)
-
-  # 인쇄 시 깔끔하게 A4 용지에 꽉 차는 보고서 영역 컨테이너
-  report_html = f"""
-    <div class="printable-report-wrapper">
-        <div style="text-align: center; border-bottom: 2px solid #1E3A8A; padding-bottom: 12px; margin-bottom: 15px;">
-            <h2 style="font-size: 20px; font-weight: 800; color: #1E3A8A; margin: 0 0 6px 0;">[ 히즈메디병원 예방접종 현황 통계 보고서 ]</h2>
-            <div style="font-size: 12.5px; color: #475569; font-weight: 500;">
-                <b>조회 기간:</b> {start_date} ~ {end_date} &nbsp;&nbsp;|&nbsp;&nbsp; <b>발행일시:</b> {current_time_str}
-            </div>
-        </div>
-        
-        <div style="background-color: #F8FAFC; border: 1px solid #CBD5E1; border-radius: 6px; padding: 12px; text-align: center; margin-bottom: 15px;">
-            <div style="font-size: 15px; font-weight: 800; color: #0F172A; margin-bottom: 6px;">
-                총 접종 건수: <span style="color: #2563EB;">{total_cases:,}건</span> &nbsp;&nbsp;|&nbsp;&nbsp; 접종 환자 수(중복제거): <span style="color: #059669;">{unique_patients:,}명</span>
-            </div>
-            <div style="font-size: 12px; color: #475569; border-top: 1px solid #E2E8F0; padding-top: 6px;">
-                [{dept_summary_html}]
-            </div>
-        </div>
-    """
-  st.markdown(report_html, unsafe_allow_html=True)
-
-  if not stat_table.empty:
-    st.dataframe(
-        stat_table,
-        use_container_width=True,
-        hide_index=True,
-        height=min(650, len(stat_table) * 33 + 40),
-    )
-  else:
-    st.info("출력할 데이터가 존재하지 않습니다.")
-
-  st.markdown("</div>", unsafe_allow_html=True)
