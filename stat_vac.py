@@ -10,7 +10,7 @@ st.set_page_config(
     page_title="예방접종 통계 및 분석", page_icon="💉", layout="wide"
 )
 
-# 커스텀 CSS (사이드바 간격 축소, 세련된 디자인 및 인쇄 전용 스타일)
+# 커스텀 CSS 및 A4 세로 인쇄 최적화 스타일
 st.markdown(
     """
     <style>
@@ -58,14 +58,51 @@ st.markdown(
             font-weight: 500;
         }
 
-        /* 인쇄 전용 CSS (브라우저 인쇄 시 사이드바, 버튼 등 불필요한 UI 숨김) */
+        /* ==========================================
+           🖨️ A4 세로 용지 인쇄/PDF 최적화 스타일
+           ================================---------- */
         @media print {
+            /* 브라우저 인쇄 시 사이드바, 버튼, 네비게이션 숨김 */
             [data-testid="stSidebar"], .no-print, button, header, footer, iframe {
                 display: none !important;
             }
+            
+            /* 본문 영역 마진 및 패딩 제거하여 전체 활용 */
             .main .block-container {
                 padding: 0 !important;
                 margin: 0 !important;
+                max-width: 100% !important;
+            }
+
+            /* A4 세로 용지 크기 및 여백 지정 */
+            @page {
+                size: A4 portrait;
+                margin: 15mm;
+            }
+
+            body {
+                font-size: 12pt;
+                color: #000000;
+                background: #ffffff !important;
+            }
+
+            /* 보고서 헤더 테두리 깔끔하게 인쇄 */
+            .report-header {
+                background-color: #ffffff !important;
+                border: 1px solid #000000 !important;
+                padding: 10px !important;
+                margin-bottom: 10px !important;
+            }
+
+            /* 데이터 테이블 및 차트가 인쇄 시 잘리지 않도록 설정 */
+            table, tr, td, th {
+                page-break-inside: avoid;
+            }
+            
+            /* 스트림릿 데이터프레임 스크롤 해제 및 전체 표시 */
+            [data-testid="stDataFrame"] div {
+                max-height: none !important;
+                overflow: visible !important;
             }
         }
     </style>
@@ -285,45 +322,52 @@ with tab1:
   )
 
   if not filtered_df.empty:
-    # 내림차순(많은 순) 정렬 통계 생성
+    # 🏆 내림차순(많은 순) 정렬 통계 생성 (건수 기준 내림차순 정렬 보장)
     stat_table = (
-        filtered_df[target_col].value_counts().reset_index(name="접종 건수")
+        filtered_df[target_col]
+        .value_counts()
+        .reset_index(name="접종 건수")
     )
     stat_table.columns = ["예방접종명 (표준명)", "접종 건수"]
     stat_table["점유율(%)"] = (
         stat_table["접종 건수"] / stat_table["접종 건수"].sum() * 100
     ).round(2)
 
-    # 인쇄 버튼 (HTML Component 방식으로 상위 브라우저 window.print() 호환)
+    # 인쇄 버튼
     print_button_html = """
-        <div style="margin-bottom: 12px;">
+        <div class="no-print" style="margin-bottom: 15px;">
             <button onclick="window.parent.print();" style="
-                background-color: #ffffff;
-                color: #374151;
-                border: 1px solid #D1D5DB;
-                padding: 6px 16px;
+                background-color: #2563EB;
+                color: #ffffff;
+                border: none;
+                padding: 8px 18px;
                 border-radius: 6px;
                 font-size: 14px;
                 font-weight: 600;
                 cursor: pointer;
-                box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+                box-shadow: 0 1px 3px rgba(0,0,0,0.1);
             ">
-                🖨️ 인쇄
+                🖨️ 보고서 인쇄 / PDF 저장
             </button>
         </div>
     """
     components.html(print_button_html, height=45)
 
-    # 표 및 차트 나란히 배치
-    c_left, c_right = st.columns([1.2, 1])
-    with c_left:
-      st.dataframe(
-          stat_table, use_container_width=True, hide_index=True, height=450
-      )
-    with c_right:
-      st.bar_chart(
-          stat_table.set_index("예방접종명 (표준명)")["접종 건수"], height=450
-      )
+    # 1. 통계 데이터 전체 테이블 표시 (인쇄 시 잘리지 않고 전체 행 표시)
+    st.markdown("### 📋 표준 예방접종별 접종 순위표")
+    st.dataframe(
+        stat_table,
+        use_container_width=True,
+        hide_index=True,
+        height=min(350, len(stat_table) * 35 + 40),
+    )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # 2. 차트 표시 (많은 건수 순으로 정렬된 데이터 기준 바 차트)
+    st.markdown("### 📊 예방접종 건수 시각화 차트")
+    chart_data = stat_table.set_index("예방접종명 (표준명)")["접종 건수"]
+    st.bar_chart(chart_data, height=400)
 
   else:
     st.info("선택한 조건에 해당하는 데이터가 존재하지 않습니다.")
