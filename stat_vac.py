@@ -44,7 +44,7 @@ st.markdown(
             border-radius: 8px;
             padding: 16px;
             text-align: center;
-            margin-bottom: 15px;
+            margin-bottom: 12px;
         }
         .report-header h2 {
             font-size: 22px !important;
@@ -58,43 +58,55 @@ st.markdown(
             font-weight: 500;
         }
 
+        /* 진료과별 요약 박스 스타일 */
+        .dept-summary-box {
+            background-color: #F1F5F9;
+            border-left: 4px solid #3B82F6;
+            padding: 10px 14px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+            font-size: 13px;
+            color: #1E293B;
+        }
+
         /* ==========================================
            🖨️ A4 세로 용지 인쇄/PDF 최적화 스타일
            ================================---------- */
         @media print {
-            /* 브라우저 인쇄 시 사이드바, 버튼, 네비게이션 숨김 */
             [data-testid="stSidebar"], .no-print, button, header, footer, iframe {
                 display: none !important;
             }
             
-            /* 본문 영역 마진 및 패딩 제거하여 전체 활용 */
             .main .block-container {
                 padding: 0 !important;
                 margin: 0 !important;
                 max-width: 100% !important;
             }
 
-            /* A4 세로 용지 크기 및 여백 지정 */
             @page {
                 size: A4 portrait;
-                margin: 15mm;
+                margin: 12mm;
             }
 
             body {
-                font-size: 11pt;
+                font-size: 10pt;
                 color: #000000;
                 background: #ffffff !important;
             }
 
-            /* 보고서 헤더 테두리 깔끔하게 인쇄 */
             .report-header {
                 background-color: #ffffff !important;
                 border: 1px solid #000000 !important;
-                padding: 10px !important;
-                margin-bottom: 10px !important;
+                padding: 8px !important;
+                margin-bottom: 8px !important;
             }
 
-            /* 테이블이 인쇄 시 잘리지 않도록 설정 */
+            .dept-summary-box {
+                background-color: #ffffff !important;
+                border: 1px solid #94A3B8 !important;
+                border-left: 4px solid #000000 !important;
+            }
+
             table, tr, td, th {
                 page-break-inside: avoid;
             }
@@ -117,7 +129,6 @@ SHEET_ID = st.secrets.get("gsheet", {}).get(
 
 @st.cache_data(ttl=600)
 def load_data_from_gsheet():
-  """gspread 및 st.secrets의 [gcp_service_account]를 사용하여 vac, std 시트 로드"""
   scope = [
       "https://www.googleapis.com/auth/spreadsheets",
       "https://www.googleapis.com/auth/drive",
@@ -304,7 +315,7 @@ current_time_str = datetime.now().strftime("%Y-%m-%d %H:%M")
 tab1, tab2 = st.tabs(["📊 예방접종 통계 및 보고서", "📋 개인별 상세 접종 내역"])
 
 with tab1:
-  # 상단 통합 보고서 타이틀 헤더
+  # 1. 상단 통합 보고서 타이틀 헤더
   st.markdown(
       f"""
       <div class="report-header">
@@ -320,62 +331,97 @@ with tab1:
       unsafe_allow_html=True,
   )
 
+  # 2. 진료과별 요약 표시
+  if not filtered_df.empty and "과목명" in filtered_df.columns:
+    dept_summary_parts = []
+    for dept in sorted(filtered_df["과목명"].dropna().unique()):
+      dept_sub_df = filtered_df[filtered_df["과목명"] == dept]
+      d_cases = len(dept_sub_df)
+      d_patients = (
+          dept_sub_df["차트번호"].nunique()
+          if "차트번호" in dept_sub_df.columns
+          else 0
+      )
+      dept_summary_parts.append(
+          f"<b>{dept}</b> : 접종 건수 {d_cases:,}건 &nbsp;|&nbsp; 접종 환자수"
+          f" {d_patients:,}명"
+      )
+
+    dept_summary_html = " &nbsp;&nbsp;|&nbsp;&nbsp; ".join(dept_summary_parts)
+    st.markdown(
+        f"""
+        <div class="dept-summary-box">
+            <b>🏥 진료과별 현황:</b> {dept_summary_html}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
   if not filtered_df.empty:
-    # 🏆 내림차순(많은 순) 정렬 통계 생성 및 점유율 소수점 2자리 포맷팅
-    stat_table = (
-        filtered_df[target_col]
-        .value_counts()
+    # 🏆 통계 집계 생성 (예방접종명, 처방코드, 처방명, 접종건수, 점유율)
+    agg_df = (
+        filtered_df.groupby([target_col, "처방코드", "처방명"])
+        .size()
         .reset_index(name="접종건수")
     )
-    stat_table.columns = ["예방접종명", "접종건수"]
-    
+    # 접종건수 기준 내림차순 정렬
+    stat_table = agg_df.sort_values(by="접종건수", ascending=False).reset_index(
+        drop=True
+    )
+    stat_table.columns = ["예방접종명", "처방코드", "처방명", "접종건수"]
+
     total_sum = stat_table["접종건수"].sum()
     stat_table["점유율(%)"] = (
         stat_table["접종건수"] / total_sum * 100
     ).map("{:.2f}%".format)
 
-    # 인쇄 버튼
-    print_button_html = """
-        <div class="no-print" style="margin-bottom: 15px;">
-            <button onclick="window.parent.print();" style="
-                background-color: #2563EB;
-                color: #ffffff;
-                border: none;
-                padding: 8px 18px;
-                border-radius: 6px;
-                font-size: 14px;
-                font-weight: 600;
-                cursor: pointer;
-                box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-            ">
-                🖨️ 보고서 인쇄 / PDF 저장
-            </button>
-        </div>
-    """
-    components.html(print_button_html, height=45)
+    # 컬럼 순서 재배치 (예방접종명, 처방코드, 처방명, 접종건수, 점유율(%))
+    stat_table = stat_table[
+        ["예방접종명", "처방코드", "처방명", "접종건수", "점유율(%)"]
+    ]
 
-    # 💡 데이터를 2개의 열(Column)로 나누어 배치하기 위해 절반으로 분할
+    # 💡 데이터를 2개의 열(Column)로 나누어 배치
     mid_idx = (len(stat_table) + 1) // 2
     df_left = stat_table.iloc[:mid_idx].reset_index(drop=True)
     df_right = stat_table.iloc[mid_idx:].reset_index(drop=True)
 
-    # 좌우 2열 배치로 시각적 넓이 최적화
     col1, col2 = st.columns(2)
-    
     with col1:
       st.dataframe(
           df_left,
           use_container_width=True,
           hide_index=True,
-          height=min(400, len(df_left) * 35 + 40),
+          height=min(420, len(df_left) * 35 + 40),
       )
     with col2:
       st.dataframe(
           df_right,
           use_container_width=True,
           hide_index=True,
-          height=min(400, len(df_right) * 35 + 40),
+          height=min(420, len(df_right) * 35 + 40),
       )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # 3. 인쇄 버튼을 맨 아래로 배치
+    print_button_html = """
+        <div class="no-print" style="text-align: center; margin-top: 10px; margin-bottom: 20px;">
+            <button onclick="window.parent.print();" style="
+                background-color: #2563EB;
+                color: #ffffff;
+                border: none;
+                padding: 10px 24px;
+                border-radius: 6px;
+                font-size: 15px;
+                font-weight: 600;
+                cursor: pointer;
+                box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+            ">
+                🖨️ 보고서 인쇄 / PDF 저장
+            </button>
+        </div>
+    """
+    components.html(print_button_html, height=60)
 
   else:
     st.info("선택한 조건에 해당하는 데이터가 존재하지 않습니다.")
@@ -397,7 +443,22 @@ with tab2:
         .str.contains(search_query, na=False)
     ]
 
-  st.dataframe(display_df, use_container_width=True, height=450)
+  # 차트번호 9자리 텍스트형 포맷팅 (앞자리 0 채우기, 쉼표 제거)
+  if "차트번호" in display_df.columns:
+    display_df["차트번호"] = display_df["차트번호"].apply(
+        lambda x: (
+            str(int(x)).zfill(9)
+            if pd.notnull(x) and str(x).isdigit()
+            else str(x).zfill(9)
+        )
+    )
+
+  # 불필요한 파생 컬럼(연도, 월) 및 기본 인덱스 숨기기 정돈
+  cols_to_drop = [c for c in ["연도", "월"] if c in display_df.columns]
+  if cols_to_drop:
+    display_df = display_df.drop(columns=cols_to_drop)
+
+  st.dataframe(display_df, use_container_width=True, hide_index=True, height=450)
 
   # CSV 다운로드
   csv_data = display_df.to_csv(index=False).encode("utf-8-sig")
