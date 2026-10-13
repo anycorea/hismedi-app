@@ -205,6 +205,26 @@ def load_data_from_gsheet():
   return df_vac, df_std
 
 
+# ==========================================
+# 🛠️ [왼쪽 메뉴] 필터 설정 및 데이터 새로고침
+# ==========================================
+st.sidebar.markdown(
+    '<div class="sidebar-title">💉 예방접종 통계 및 분석</div>',
+    unsafe_allow_html=True,
+)
+st.sidebar.markdown(
+    '<div class="sidebar-sub">히즈메디병원 접종 현황 관리</div>',
+    unsafe_allow_html=True,
+)
+
+# 🔄 구글 시트 데이터 새로고침 버튼
+if st.sidebar.button("🔄 구글시트 데이터 새로고침", use_container_width=True):
+  st.cache_data.clear()
+  st.sidebar.success("최신 구글 시트 데이터를 불러왔습니다!")
+  st.rerun()
+
+st.sidebar.divider()
+
 # 데이터 로드 및 예외 처리
 try:
   df_vac, df_std = load_data_from_gsheet()
@@ -245,19 +265,6 @@ if "접수일자" in df_merged.columns:
 target_col = "예방접종명(표준명)"
 if target_col not in df_merged.columns:
   df_merged[target_col] = df_merged["처방명"]
-
-# ==========================================
-# 🛠️ [왼쪽 메뉴] 필터 설정 (간소화 및 개선)
-# ==========================================
-st.sidebar.markdown(
-    '<div class="sidebar-title">💉 예방접종 통계 및 분석</div>',
-    unsafe_allow_html=True,
-)
-st.sidebar.markdown(
-    '<div class="sidebar-sub">히즈메디병원 접종 현황 관리</div>',
-    unsafe_allow_html=True,
-)
-st.sidebar.divider()
 
 # 1. 기간 선택
 st.sidebar.subheader("📅 기간 선택")
@@ -316,7 +323,7 @@ else:  # 일별
 
 st.sidebar.divider()
 
-# 2. 진료과 선택 (깔끔한 다중 선택)
+# 2. 진료과 선택
 st.sidebar.subheader("🏥 진료과 선택")
 unique_depts = sorted(df_merged["과목명"].dropna().unique().tolist())
 selected_depts = st.sidebar.multiselect(
@@ -344,7 +351,7 @@ else:
       placeholder="백신을 선택하세요...",
   )
   if not selected_vax:
-    selected_vax = unique_vax  # 아무것도 선택 안했을 시 전체 조회
+    selected_vax = unique_vax
 
 # ==========================================
 # 📊 [메인 화면] 통계 및 데이터 출력
