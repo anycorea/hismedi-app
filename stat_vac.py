@@ -1,229 +1,193 @@
-import streamlit as st
-import pandas as pd
+from datetime import datetime
 import gspread
 from google.oauth2.service_account import Credentials
-from datetime import datetime, date
+import pandas as pd
+import streamlit as st
 
-# -----------------------------------------------------------------------------
-# 1. Page Configuration & Layout
-# -----------------------------------------------------------------------------
+# 페이지 설정
 st.set_page_config(
-    page_title="예방접종 현황 조회 및 통계",
-    page_icon="💉",
-    layout="wide"
+    page_title="예방접종 현황 조회 앱", page_icon="💉", layout="wide"
 )
 
-# -----------------------------------------------------------------------------
-# 2. Google Sheets Authentication & Data Load
-# -----------------------------------------------------------------------------
-SPREADSHEET_ID = "1a4TtjVYZDKOGetmfawS7VtTmMfAhBKRyXMY-SX4tsRU"
-SCOPES = [
-    "https://www.googleapis.com/auth/spreadsheets.readonly",
-    "https://www.googleapis.com/auth/drive.readonly",
-]
+# 구글 시트 ID 설정 (시크릿 또는 직접 지정)
+SHEET_ID = st.secrets.get("gsheet", {}).get(
+    "spreadsheet_id", "1a4TtjVYZDKOGetmfawS7VtTmMfAhBKRyXMY-SX4tsRU"
+)
 
-@st.cache_resource(ttl=3600)
-def init_gspread():
-    """st.secrets["gspread_auth"] 기반 서비스 계정 인증"""
-    if "gspread_auth" not in st.secrets:
-        st.error("`st.secrets['gspread_auth']` 설정이 존재하지 않습니다. Streamlit Secrets를 확인해주세요.")
-        st.stop()
-        
-    creds_dict = dict(st.secrets["gspread_auth"])
-    credentials = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
-    client = gspread.authorize(credentials)
-    return client
 
-@st.cache_data(ttl=300)
-def load_sheets_data():
-    """vac, std 시트 데이터 로드 및 병합"""
-    try:
-        client = init_gspread()
-        doc = client.open_by_key(SPREADSHEET_ID)
+@st.cache_data(ttl=600)
+def load_data_from_gsheet():
+  """gspread 및 st.secrets의 [gcp_service_account]를 사용하여 vac 및 std 시트 데이터를 불러옵니다."""
+  scope = [
+      "https://www.googleapis.com/auth/spreadsheets",
+      "https://www.googleapis.com/auth/drive",
+  ]
 
-        # vac 시트 및 std 시트 가져오기
-        vac_sheet = doc.worksheet("vac")
-        std_sheet = doc.worksheet("std")
+  # secrets.toml의 [gcp_service_account] 섹션을 딕셔너리로 가져옴
+  creds_dict = dict(st.secrets["gcp_service_account"])
+  credentials = Credentials.from_service_account_info(
+      creds_dict, scopes=scope
+  )
+  gc = gspread.authorize(credentials)
 
-        df_vac = pd.DataFrame(vac_sheet.get_all_records())
-        df_std = pd.DataFrame(std_sheet.get_all_records())
+  # 스프레드시트 열기
+  spreadsheet = gc.open_by_key(SHEET_ID)
 
-        # 열 이름 공백 제거
-        df_vac.columns = df_vac.columns.str.strip()
-        df_std.columns = df_std.columns.str.strip()
+  # 1. vac 시트 데이터 로드
+  ws_vac = spreadsheet.worksheet("vac")
+  df_vac = pd.DataFrame(ws_vac.get_all_records())
 
-        # 데이터 병합 (처방코드 기준)
-        if "처방코드" in df_vac.columns and "처방코드" in df_std.columns:
-            # std 시트에서 처방코드 및 예방접종명(표준명) 선택
-            target_std_col = "예방접종명(표준명)" if "예방접종명(표준명)" in df_std.columns else df_std.columns[-1]
-            df_std_sub = df_std[["처방코드", target_std_col]].drop_duplicates(subset=["처방코드"])
+  # 2. std 시트 데이터 로드
+  ws_std = spreadsheet.worksheet("std")
+  df_std = pd.DataFrame(ws_std.get_all_records())
 
-            df_merged = pd.merge(df_vac, df_std_sub, on="처방코드", how="left")
-            
-            # 매핑되지 않은 경우 기존 처방명으로 대체
-            df_merged[target_std_col] = df_merged[target_std_col].fillna(df_merged["처방명"])
-            df_merged.rename(columns={target_std_col: "예방접종명(표준명)"}, inplace=True)
-        else:
-            df_merged = df_vac.copy()
-            if "예방접종명(표준명)" not in df_merged.columns:
-                df_merged["예방접종명(표준명)"] = df_merged.get("처방명", "미분류")
+  return df_vac, df_std
 
-        # 접수일자 datetime 포맷 변환
-        if "접수일자" in df_merged.columns:
-            df_merged["접수일자_dt"] = pd.to_datetime(df_merged["접수일자"].astype(str), errors="coerce")
-            df_merged["접수일자_str"] = df_merged["접수일자_dt"].dt.strftime("%Y-%m-%d")
 
-        return df_merged
+# 제목
+st.title("💉 예방접종 접종 내역 조회 및 관리 앱")
+st.markdown(
+    "구글 시트(`vac`, `std`) 데이터를 기반으로 기간별·예방접종 표준명별 접종"
+    " 내역을 조회합니다."
+)
 
-    except Exception as e:
-        st.error(f"구글 시트 데이터를 불러오는 중 오류가 발생했습니다: {e}")
-        return pd.DataFrame()
-
-# -----------------------------------------------------------------------------
-# 3. Main Application Flow
-# -----------------------------------------------------------------------------
-st.title("💉 예방접종 접종 내역 및 통계 조회")
-st.caption("구글 시트('vac', 'std') 데이터 연동 시스템")
-
-with st.spinner("구글 시트 데이터를 동기화 중입니다..."):
-    df_raw = load_sheets_data()
-
-if df_raw.empty:
-    st.warning("불러올 수 있는 데이터가 없거나 시트 구조를 확인해야 합니다.")
+# 데이터 로드
+with st.spinner("구글 시트에서 데이터를 불러오는 중입니다..."):
+  try:
+    df_vac, df_std = load_data_from_gsheet()
+  except Exception as e:
+    st.error(
+        f"구글 시트 연동 중 오류가 발생했습니다. secrets 설정을 확인해주세요."
+        f" 오류: {e}"
+    )
     st.stop()
 
-# -----------------------------------------------------------------------------
-# 4. Sidebar Filters
-# -----------------------------------------------------------------------------
-st.sidebar.header("🔍 조회 조건 필터")
+if df_vac is not None and df_std is not None:
+  # 데이터 병합 (처방코드 기준 표준명 매핑)
+  if "처방코드" in df_vac.columns and "처방코드" in df_std.columns:
+    # 표준명 컬럼 찾기 (예방접종명(표준명) 또는 유사 컬럼)
+    std_col_candidates = [
+        col for col in df_std.columns if "표준명" in col or "예방접종명" in col
+    ]
+    std_col_name = std_col_candidates[0] if std_col_candidates else "예방접종명(표준명)"
 
-# 4-1. 날짜 범위 필터
-valid_dates = df_raw["접수일자_dt"].dropna()
-if not valid_dates.empty:
-    min_date = valid_dates.min().date()
-    max_date = valid_dates.max().date()
-else:
-    min_date = date.today()
-    max_date = date.today()
-
-date_range = st.sidebar.date_input(
-    "접수일자 선택",
-    value=(min_date, max_date),
-    min_value=min_date,
-    max_value=max_date
-)
-
-if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
-    start_date, end_date = date_range
-else:
-    start_date, end_date = min_date, max_date
-
-# 4-2. 예방접종명(표준명) Multi-Select
-std_list = sorted(list(df_raw["예방접종명(표준명)"].dropna().unique()))
-selected_std = st.sidebar.multiselect(
-    "예방접종명(표준명)",
-    options=std_list,
-    default=std_list
-)
-
-# 4-3. 과목명 필터 (존재할 경우)
-if "과목명" in df_raw.columns:
-    dept_list = sorted(list(df_raw["과목명"].dropna().unique()))
-    selected_dept = st.sidebar.multiselect(
-        "과목명",
-        options=dept_list,
-        default=dept_list
+    df_merged = pd.merge(
+        df_vac,
+        df_std[["처방코드", std_col_name]],
+        on="처방코드",
+        how="left",
     )
-else:
-    selected_dept = None
+    # 표준명 컬럼명 통일
+    if std_col_name != "예방접종명(표준명)":
+      df_merged.rename(
+          columns={std_col_name: "예방접종명(표준명)"}, inplace=True
+      )
+  else:
+    st.error("시트 내에 '처방코드' 컬럼이 존재하지 않습니다.")
+    st.stop()
 
-# -----------------------------------------------------------------------------
-# 5. Data Filtering
-# -----------------------------------------------------------------------------
-filtered_df = df_raw.copy()
+  # 날짜 형식 변환
+  if "접수일자" in df_merged.columns:
+    df_merged["접수일자"] = pd.to_datetime(
+        df_merged["접수일자"], errors="coerce"
+    ).dt.date
 
-# 날짜 필터링
-if "접수일자_dt" in filtered_df.columns:
+  # --- 사이드바 필터 설정 ---
+  st.sidebar.header("🔍 조회 필터")
+
+  # 1. 기간 선택 필터
+  if "접수일자" in df_merged.columns and not df_merged["접수일자"].isna().all():
+    min_date = df_merged["접수일자"].min()
+    max_date = df_merged["접수일자"].max()
+
+    start_date, end_date = st.sidebar.date_input(
+        "조회 기간 선택",
+        value=(min_date, max_date),
+        min_value=min_date,
+        max_value=max_date,
+    )
+  else:
+    start_date, end_date = None, None
+
+  # 2. 예방접종명(표준명) 멀티 선택 필터
+  target_col = (
+      "예방접종명(표준명)"
+      if "예방접종명(표준명)" in df_merged.columns
+      else df_merged.columns[-1]
+  )
+  unique_std_names = sorted(df_merged[target_col].dropna().unique().tolist())
+  selected_std_names = st.sidebar.multiselect(
+      "예방접종명(표준명) 선택",
+      options=unique_std_names,
+      default=unique_std_names,
+  )
+
+  # 3. 과목명 필터
+  if "과목명" in df_merged.columns:
+    unique_departments = sorted(df_merged["과목명"].dropna().unique().tolist())
+    selected_departments = st.sidebar.multiselect(
+        "과목명 선택", options=unique_departments, default=unique_departments
+    )
+  else:
+    selected_departments = []
+
+  # --- 필터 적용 ---
+  filtered_df = df_merged.copy()
+
+  if start_date and end_date:
     filtered_df = filtered_df[
-        (filtered_df["접수일자_dt"].dt.date >= start_date) &
-        (filtered_df["접수일자_dt"].dt.date <= end_date)
+        (filtered_df["접수일자"] >= start_date)
+        & (filtered_df["접수일자"] <= end_date)
     ]
 
-# 표준명 필터링
-if selected_std:
-    filtered_df = filtered_df[filtered_df["예방접종명(표준명)"].isin(selected_std)]
+  if selected_std_names:
+    filtered_df = filtered_df[filtered_df[target_col].isin(selected_std_names)]
 
-# 과목명 필터링
-if selected_dept and "과목명" in filtered_df.columns:
-    filtered_df = filtered_df[filtered_df["과목명"].isin(selected_dept)]
+  if selected_departments and "과목명" in filtered_df.columns:
+    filtered_df = filtered_df[filtered_df["과목명"].isin(selected_departments)]
 
-# -----------------------------------------------------------------------------
-# 6. Dashboards & Metrics
-# -----------------------------------------------------------------------------
-col1, col2, col3, col4 = st.columns(4)
+  # --- 메인 화면 출력 ---
+  col1, col2, col3 = st.columns(3)
+  with col1:
+    st.metric(label="총 조회 건수", value=f"{len(filtered_df):,} 건")
+  with col2:
+    st.metric(
+        label="접종 환자 수 (중복제거)",
+        value=(
+            f"{filtered_df['차트번호'].nunique():,}"
+            if "차트번호" in filtered_df.columns
+            else "-"
+        ),
+    )
+  with col3:
+    st.metric(
+        label="선택된 표준 백신 수",
+        value=f"{filtered_df[target_col].nunique():,} 개",
+    )
 
-with col1:
-    st.metric("총 접종 건수", f"{len(filtered_df):,} 건")
+  st.divider()
 
-with col2:
-    patient_cnt = filtered_df["차트번호"].nunique() if "차트번호" in filtered_df.columns else 0
-    st.metric("실 환자 수", f"{patient_cnt:,} 명")
+  # 데이터 프레임 출력
+  st.subheader("📋 예방접종 접종 목록")
+  st.dataframe(filtered_df, use_container_width=True)
 
-with col3:
-    std_cnt = filtered_df["예방접종명(표준명)"].nunique()
-    st.metric("선택 백신 종류", f"{std_cnt:,} 개")
+  # 데이터 다운로드 버튼
+  csv_data = filtered_df.to_csv(index=False).encode("utf-8-sig")
+  st.download_button(
+      label="📥 조회 결과 CSV 다운로드",
+      data=csv_data,
+      file_name=f"vaccine_report_{datetime.now().strftime('%Y%m%d')}.csv",
+      mime="text/csv",
+  )
 
-with col4:
-    doc_cnt = filtered_df["주치의"].nunique() if "주치의" in filtered_df.columns else 0
-    st.metric("참여 주치의 수", f"{doc_cnt:,} 명")
-
-st.divider()
-
-# -----------------------------------------------------------------------------
-# 7. Main Data Table & CSV Download
-# -----------------------------------------------------------------------------
-st.subheader("📋 접종 내역 상세 조회")
-
-# 표시용 컬럼 정렬
-display_cols = [col for col in [
-    "접수일자_str", "과목명", "주치의", "차트번호", "환자명", 
-    "성별", "나이", "처방코드", "처방명", "예방접종명(표준명)"
-] if col in filtered_df.columns]
-
-output_df = filtered_df[display_cols].rename(columns={"접수일자_str": "접수일자"})
-
-st.dataframe(output_df, use_container_width=True, hide_index=True)
-
-# CSV 다운로드 버튼
-csv_data = output_df.to_csv(index=False).encode("utf-8-sig")
-st.download_button(
-    label="📥 조회 결과 CSV 다운로드",
-    data=csv_data,
-    file_name=f"stat_vac_{start_date}_{end_date}.csv",
-    mime="text/csv"
-)
-
-# -----------------------------------------------------------------------------
-# 8. Charts & Aggregation Analysis
-# -----------------------------------------------------------------------------
-st.divider()
-st.subheader("📊 예방접종(표준명)별 집계 통계")
-
-if not filtered_df.empty:
-    chart_col1, chart_col2 = st.columns([1, 1])
-
-    with chart_col1:
-        summary_df = (
-            filtered_df.groupby("예방접종명(표준명)")
-            .size()
-            .reset_index(name="접종 건수")
-            .sort_values(by="접종 건수", ascending=False)
-        )
-        st.write("**백신 종류별 접종 건수**")
-        st.dataframe(summary_df, use_container_width=True, hide_index=True)
-
-    with chart_col2:
-        st.write("**백신 종류별 비율 차트**")
-        st.bar_chart(summary_df.set_index("예방접종명(표준명)"))
-else:
-    st.info("선택한 조건에 일치하는 데이터가 없습니다.")
+  # --- 통계 차트 ---
+  st.divider()
+  st.subheader("📊 표준 예방접종별 접종 현황 통계")
+  if not filtered_df.empty:
+    chart_data = (
+        filtered_df[target_col].value_counts().reset_index(name="접종 건수")
+    )
+    chart_data.columns = ["예방접종명(표준명)", "접종 건수"]
+    st.bar_chart(chart_data.set_index("예방접종명(표준명)"))
+  else:
+    st.info("조건에 맞는 데이터가 없습니다.")
