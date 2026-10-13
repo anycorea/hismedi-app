@@ -9,7 +9,7 @@ st.set_page_config(
     page_title="예방접종 통계 및 분석", page_icon="💉", layout="wide"
 )
 
-# 커스텀 CSS 및 세련된 박스형 탭 스타일
+# 커스텀 CSS 및 박스 제거 레이아웃 스타일
 st.markdown(
     """
     <style>
@@ -34,9 +34,7 @@ st.markdown(
 
         hr { margin: 8px 0 !important; }
 
-        /* ==========================================
-           🎨 세련된 박스형 탭 메뉴 스타일링 (글자 크기 확대)
-           ================================---------- */
+        /* 세련된 박스형 탭 메뉴 스타일링 */
         [data-testid="stTabs"] button[data-baseweb="tab"] {
             font-size: 16px !important;
             font-weight: 700 !important;
@@ -54,44 +52,35 @@ st.markdown(
             box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.2);
         }
 
-        /* 탭 위 최상단 공통 헤더 스타일 (박스 없음) */
-        .top-info-header {
-            text-align: center;
-            margin-bottom: 12px;
-            font-size: 13.5px;
-            color: #475569;
-            font-weight: 600;
+        /* 깔끔한 인라인 요약 영역 스타일 */
+        .header-container {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            border-bottom: 2px solid #E2E8F0;
+            padding-bottom: 8px;
+            margin-bottom: 10px;
         }
-
-        /* 건수 및 진료과 통계 요약 박스 */
-        .stats-highlight-box {
-            background: linear-gradient(135deg, #1E3A8A 0%, #2563EB 100%);
-            color: #ffffff;
-            border-radius: 10px;
-            padding: 18px 22px;
-            text-align: center;
-            margin-bottom: 18px;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-        }
-        .stats-highlight-box .main-stats {
+        .main-stats-text {
             font-size: 18px;
             font-weight: 800;
-            margin-bottom: 10px;
+            color: #0F172A;
             letter-spacing: -0.3px;
         }
-        .stats-highlight-box .main-stats span {
-            color: #FEF08A;
+        .main-stats-text span {
+            color: #2563EB;
         }
-        .stats-highlight-box .dept-stats {
-            font-size: 13px;
+        .sub-info-text {
+            font-size: 12.5px;
+            color: #64748B;
             font-weight: 500;
-            color: #E2E8F0;
-            border-top: 1px solid rgba(255, 255, 255, 0.2);
-            padding-top: 10px;
-            line-height: 1.5;
         }
-        .stats-highlight-box .dept-stats b {
-            color: #ffffff;
+        .dept-stats-text {
+            font-size: 13.5px;
+            font-weight: 600;
+            color: #334155;
+            margin-bottom: 15px;
+            padding: 4px 0;
         }
     </style>
 """,
@@ -333,10 +322,16 @@ if not filtered_df.empty:
 else:
   stat_table = pd.DataFrame()
 
-# 진료과별 요약 문자열 준비
+# 진료과별 요약 문자열 준비 (소아청소년과 우선 정렬)
 dept_summary_parts = []
 if not filtered_df.empty and "과목명" in filtered_df.columns:
-  for dept in sorted(filtered_df["과목명"].dropna().unique()):
+  depts = sorted(filtered_df["과목명"].dropna().unique().tolist())
+  # '소아청소년과'가 있으면 맨 앞으로 배치
+  if "소아청소년과" in depts:
+    depts.remove("소아청소년과")
+    depts = ["소아청소년과"] + depts
+
+  for dept in depts:
     dept_sub_df = filtered_df[filtered_df["과목명"] == dept]
     d_cases = len(dept_sub_df)
     d_patients = (
@@ -355,26 +350,20 @@ dept_summary_html = (
 )
 
 # ==========================================
-# 📑 [최상단 공통 헤더 및 요약 박스 배치] (탭 바로 위)
+# 📑 [최상단 요약 정보 및 진료과 통계 배치] (박스 제거, 슬림화)
 # ==========================================
 st.markdown(
     f"""
-    <div class="top-info-header">
-        <b>조회 기간:</b> {start_date} ~ {end_date} &nbsp;&nbsp;|&nbsp;&nbsp; <b>발행일시:</b> {current_time_str}
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-st.markdown(
-    f"""
-    <div class="stats-highlight-box">
-        <div class="main-stats">
+    <div class="header-container">
+        <div class="main-stats-text">
             총 접종 건수: <span>{total_cases:,}건</span> &nbsp;&nbsp;|&nbsp;&nbsp; 접종 환자 수(중복제거): <span>{unique_patients:,}명</span>
         </div>
-        <div class="dept-stats">
-            [{dept_summary_html}]
+        <div class="sub-info-text">
+            <b>조회 기간:</b> {start_date} ~ {end_date} &nbsp;&nbsp;|&nbsp;&nbsp; <b>발행일시:</b> {current_time_str}
         </div>
+    </div>
+    <div class="dept-stats-text">
+        [{dept_summary_html}]
     </div>
     """,
     unsafe_allow_html=True,
