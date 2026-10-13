@@ -10,7 +10,7 @@ st.set_page_config(
     page_title="예방접종 통계 및 분석", page_icon="💉", layout="wide"
 )
 
-# 커스텀 CSS 및 A4 세로 인쇄 완벽 맞춤 스타일
+# 커스텀 CSS 및 A4 세로 인쇄 강제 밀착 스타일
 st.markdown(
     """
     <style>
@@ -90,7 +90,7 @@ st.markdown(
         }
 
         /* ==========================================
-           🖨️ A4 세로 용지 인쇄/PDF 완벽 맞춤 최적화 스타일
+           🖨️ A4 세로 용지 인쇄/PDF 강제 밀착 최적화
            ================================---------- */
         @media print {
             /* 브라우저 인쇄 시 사이드바, 버튼, 네비게이션, 헤더/푸터 숨김 */
@@ -106,10 +106,10 @@ st.markdown(
                 width: 100% !important;
             }
 
-            /* A4 세로 용지 설정 및 여백 최소화 (딱 맞춤) */
+            /* A4 세로 용지 규격 및 최소 여백 지정 */
             @page {
                 size: A4 portrait;
-                margin: 10mm 10mm 10mm 10mm;
+                margin: 8mm;
             }
 
             body {
@@ -117,17 +117,23 @@ st.markdown(
                 color: #000000;
                 background: #ffffff !important;
                 -webkit-print-color-adjust: exact;
+                width: 210mm;
             }
 
             /* 보고서 헤더 깔끔하게 인쇄 */
             .report-header {
                 background-color: #ffffff !important;
                 border: 1px solid #000000 !important;
-                padding: 8px !important;
-                margin-bottom: 8px !important;
+                padding: 6px !important;
+                margin-bottom: 6px !important;
             }
             .report-header h2 {
-                font-size: 16px !important;
+                font-size: 15px !important;
+                color: #000000 !important;
+                margin-bottom: 2px !important;
+            }
+            .report-header .info-line {
+                font-size: 10.5pt !important;
                 color: #000000 !important;
             }
 
@@ -136,14 +142,14 @@ st.markdown(
                 background: #ffffff !important;
                 color: #000000 !important;
                 border: 1px solid #000000 !important;
-                padding: 10px !important;
-                margin-bottom: 10px !important;
+                padding: 8px !important;
+                margin-bottom: 8px !important;
                 box-shadow: none !important;
             }
             .stats-highlight-box .main-stats {
-                font-size: 13px !important;
+                font-size: 11pt !important;
                 color: #000000 !important;
-                margin-bottom: 4px !important;
+                margin-bottom: 3px !important;
             }
             .stats-highlight-box .main-stats span {
                 color: #000000 !important;
@@ -153,21 +159,22 @@ st.markdown(
             .stats-highlight-box .dept-stats {
                 color: #000000 !important;
                 border-top: 1px solid #000000 !important;
-                padding-top: 4px !important;
-                font-size: 11px !important;
+                padding-top: 3px !important;
+                font-size: 9.5pt !important;
             }
 
-            /* 2열 테이블이 A4 폭에 딱 맞게 수평 배치되도록 강제 조정 */
+            /* 2열 테이블이 A4 폭에 좌우 대칭으로 딱 맞게 수평 배치되도록 고정 */
             [data-testid="column"] {
-                width: 49% !important;
+                width: 48.5% !important;
                 float: left !important;
-                flex: 1 1 49% !important;
-                min-width: 49% !important;
+                flex: 1 1 48.5% !important;
+                min-width: 48.5% !important;
+                margin-right: 1.5% !important;
             }
 
-            /* 데이터프레임 내부 글자 크기 및 여백 축소로 용지 안에 꽉 차게 밀착 */
+            /* 데이터프레임 내부 글자 크기 축소 */
             [data-testid="stDataFrame"] {
-                font-size: 8.5pt !important;
+                font-size: 8pt !important;
             }
             [data-testid="stDataFrame"] div {
                 max-height: none !important;
@@ -176,7 +183,7 @@ st.markdown(
             
             table, tr, td, th {
                 page-break-inside: avoid;
-                padding: 4px 6px !important;
+                padding: 3px 5px !important;
             }
         }
     </style>
@@ -458,14 +465,14 @@ with tab1:
           df_left,
           use_container_width=True,
           hide_index=True,
-          height=min(420, len(df_left) * 33 + 40),
+          height=min(420, len(df_left) * 31 + 40),
       )
     with col2:
       st.dataframe(
           df_right,
           use_container_width=True,
           hide_index=True,
-          height=min(420, len(df_right) * 33 + 40),
+          height=min(420, len(df_right) * 31 + 40),
       )
 
     st.markdown("<br>", unsafe_allow_html=True)
