@@ -408,41 +408,72 @@ with tab1:
     st.info("선택한 조건에 해당하는 데이터가 존재하지 않습니다.")
 
 with tab2:
-  # 개인별 상세 접종 내역 화면
-  search_query = st.text_input(
-      "검색",
-      placeholder="환자명 또는 차트번호 입력...",
-      label_visibility="collapsed",
-  )
+  # 🔒 개인정보 보호 비밀번호 인증 세션 초기화
+  if "auth_passed" not in st.session_state:
+    st.session_state.auth_passed = False
 
-  display_df = filtered_df.copy()
-  if search_query:
-    display_df = display_df[
-        display_df["환자명"].astype(str).str.contains(search_query, na=False)
-        | display_df["차트번호"]
-        .astype(str)
-        .str.contains(search_query, na=False)
-    ]
+  if not st.session_state.auth_passed:
+    st.warning(
+        "🔒 개인별 상세 접종 내역에는 민감한 환자 개인정보가 포함되어 있습니다."
+    )
+    entered_pw = st.text_input(
+        "비밀번호를 입력하세요", type="password", placeholder="비밀번호 입력..."
+    )
+    if st.button("확인"):
+      if entered_pw == "15880223":
+        st.session_state.auth_passed = True
+        st.rerun()
+      else:
+        st.error("비밀번호가 틀렸습니다.")
+  else:
+    # 인증 완료 후 화면
+    if st.button("🔓 잠금 (로그아웃)", key="logout_btn"):
+      st.session_state.auth_passed = False
+      st.rerun()
 
-  if "차트번호" in display_df.columns:
-    display_df["차트번호"] = display_df["차트번호"].apply(
-        lambda x: (
-            str(int(x)).zfill(9)
-            if pd.notnull(x) and str(x).isdigit()
-            else str(x).zfill(9)
-        )
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # 전체 항목 통합 검색 박스
+    search_query = st.text_input(
+        "통합 검색",
+        placeholder=(
+            "모든 항목 검색 (환자명, 차트번호, 백신명, 처방코드, 과목명 등 입력)..."
+        ),
     )
 
-  cols_to_drop = [c for c in ["연도", "월"] if c in display_df.columns]
-  if cols_to_drop:
-    display_df = display_df.drop(columns=cols_to_drop)
+    display_df = filtered_df.copy()
 
-  st.dataframe(display_df, use_container_width=True, hide_index=True, height=450)
+    # 차트번호 9자리 텍스트형 포맷팅 (앞자리 0 채우기, 쉼표 제거)
+    if "차트번호" in display_df.columns:
+      display_df["차트번호"] = display_df["차트번호"].apply(
+          lambda x: (
+              str(int(x)).zfill(9)
+              if pd.notnull(x) and str(x).isdigit()
+              else str(x).zfill(9)
+          )
+      )
 
-  csv_data = display_df.to_csv(index=False).encode("utf-8-sig")
-  st.download_button(
-      label="📥 상세 내역 CSV 다운로드",
-      data=csv_data,
-      file_name=f"vaccine_detail_{datetime.now().strftime('%Y%m%d')}.csv",
-      mime="text/csv",
-  )
+    # 불필요한 파생 컬럼(연도, 월) 숨기기 정돈
+    cols_to_drop = [c for c in ["연도", "월"] if c in display_df.columns]
+    if cols_to_drop:
+      display_df = display_df.drop(columns=cols_to_drop)
+
+    # 전체 항목(모든 컬럼) 대상 통합 검색 필터링 적용
+    if search_query:
+      mask = display_df.astype(str).apply(
+          lambda row: row.str.contains(search_query, case=False, na=False).any(),
+          axis=1,
+      )
+      display_df = display_df[mask]
+
+    st.dataframe(
+        display_df, use_container_width=True, hide_index=True, height=450
+    )
+
+    csv_data = display_df.to_csv(index=False).encode("utf-8-sig")
+    st.download_button(
+        label="📥 상세 내역 CSV 다운로드",
+        data=csv_data,
+        file_name=f"vaccine_detail_{datetime.now().strftime('%Y%m%d')}.csv",
+        mime="text/csv",
+    )
