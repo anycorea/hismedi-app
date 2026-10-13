@@ -10,7 +10,7 @@ st.set_page_config(
     page_title="예방접종 통계 및 분석", page_icon="💉", layout="wide"
 )
 
-# 커스텀 CSS 및 A4 세로 인쇄 최적화 스타일
+# 커스텀 CSS 및 A4 세로 인쇄 최적화 스타일 (가독성 대폭 강화)
 st.markdown(
     """
     <style>
@@ -37,36 +37,45 @@ st.markdown(
         /* 구분선 간격 줄이기 */
         hr { margin: 8px 0 !important; }
 
-        /* 보고서 상단 타이틀 스타일 */
+        /* 보고서 상단 타이틀 스타일 (눈에 띄게 강조) */
         .report-header {
-            background-color: #F8FAFC;
-            border: 1px solid #E2E8F0;
-            border-radius: 8px;
-            padding: 16px;
+            background: linear-gradient(135deg, #1E3A8A 0%, #2563EB 100%);
+            color: #ffffff;
+            border-radius: 10px;
+            padding: 20px 24px;
             text-align: center;
-            margin-bottom: 12px;
+            margin-bottom: 15px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
         }
         .report-header h2 {
-            font-size: 22px !important;
-            font-weight: 700;
-            color: #0F172A;
-            margin-bottom: 8px !important;
+            font-size: 24px !important;
+            font-weight: 800;
+            color: #ffffff !important;
+            margin-bottom: 12px !important;
+            letter-spacing: -0.5px;
         }
-        .report-header .info-line {
-            font-size: 13px;
-            color: #475569;
+        .report-header .info-grid {
+            font-size: 14px;
+            color: #E2E8F0;
             font-weight: 500;
+            line-height: 1.6;
+        }
+        .report-header .highlight {
+            color: #FEF08A;
+            font-weight: 700;
         }
 
-        /* 진료과별 요약 박스 스타일 */
+        /* 진료과별 요약 박스 스타일 (눈에 띄는 디자인) */
         .dept-summary-box {
-            background-color: #F1F5F9;
-            border-left: 4px solid #3B82F6;
-            padding: 10px 14px;
-            border-radius: 6px;
-            margin-bottom: 15px;
+            background-color: #F8FAFC;
+            border: 1px solid #CBD5E1;
+            border-left: 5px solid #2563EB;
+            padding: 12px 18px;
+            border-radius: 8px;
+            margin-bottom: 18px;
             font-size: 13px;
-            color: #1E293B;
+            color: #0F172A;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
         }
 
         /* ==========================================
@@ -95,16 +104,29 @@ st.markdown(
             }
 
             .report-header {
-                background-color: #ffffff !important;
-                border: 1px solid #000000 !important;
-                padding: 8px !important;
-                margin-bottom: 8px !important;
+                background: #ffffff !important;
+                color: #000000 !important;
+                border: 2px solid #000000 !important;
+                padding: 12px !important;
+                margin-bottom: 10px !important;
+                box-shadow: none !important;
+            }
+            .report-header h2 {
+                color: #000000 !important;
+                font-size: 20px !important;
+            }
+            .report-header .info-grid {
+                color: #334155 !important;
+            }
+            .report-header .highlight {
+                color: #000000 !important;
+                text-decoration: underline;
             }
 
             .dept-summary-box {
                 background-color: #ffffff !important;
-                border: 1px solid #94A3B8 !important;
-                border-left: 4px solid #000000 !important;
+                border: 1px solid #64748B !important;
+                border-left: 5px solid #000000 !important;
             }
 
             table, tr, td, th {
@@ -315,16 +337,14 @@ current_time_str = datetime.now().strftime("%Y-%m-%d %H:%M")
 tab1, tab2 = st.tabs(["📊 예방접종 통계 및 보고서", "📋 개인별 상세 접종 내역"])
 
 with tab1:
-  # 1. 상단 통합 보고서 타이틀 헤더
+  # 1. 상단 통합 보고서 타이틀 헤더 (시각적 강조 디자인)
   st.markdown(
       f"""
       <div class="report-header">
           <h2>[ 히즈메디병원 예방접종 현황 통계 보고서 ]</h2>
-          <div class="info-line">
-              <b>조회 기간:</b> {start_date} ~ {end_date} &nbsp;|&nbsp;
-              <b>총 접종 건수:</b> {total_cases:,}건 &nbsp;|&nbsp;
-              <b>접종 환자 수(중복제거):</b> {unique_patients:,}명 &nbsp;|&nbsp;
-              <b>발행일시:</b> {current_time_str}
+          <div class="info-grid">
+              <b>조회 기간:</b> {start_date} ~ {end_date} &nbsp;&nbsp;|&nbsp;&nbsp; <b>발행일시:</b> {current_time_str}<br>
+              <b>총 접종 건수:</b> <span class="highlight">{total_cases:,}건</span> &nbsp;&nbsp;|&nbsp;&nbsp; <b>접종 환자 수(중복제거):</b> <span class="highlight">{unique_patients:,}명</span>
           </div>
       </div>
       """,
@@ -343,15 +363,15 @@ with tab1:
           else 0
       )
       dept_summary_parts.append(
-          f"<b>{dept}</b> : 접종 건수 {d_cases:,}건 &nbsp;|&nbsp; 접종 환자수"
-          f" {d_patients:,}명"
+          f"<b>{dept}</b> : 건수 <span style='color:#2563EB; font-weight:700;'>{d_cases:,}건</span>"
+          f" (환자수 <span style='color:#059669; font-weight:700;'>{d_patients:,}명</span>)"
       )
 
     dept_summary_html = " &nbsp;&nbsp;|&nbsp;&nbsp; ".join(dept_summary_parts)
     st.markdown(
         f"""
         <div class="dept-summary-box">
-            <b>🏥 진료과별 현황:</b> {dept_summary_html}
+            <b>🏥 진료과별 요약 현황:</b><br>{dept_summary_html}
         </div>
         """,
         unsafe_allow_html=True,
@@ -364,7 +384,6 @@ with tab1:
         .size()
         .reset_index(name="접종건수")
     )
-    # 접종건수 기준 내림차순 정렬
     stat_table = agg_df.sort_values(by="접종건수", ascending=False).reset_index(
         drop=True
     )
@@ -375,7 +394,6 @@ with tab1:
         stat_table["접종건수"] / total_sum * 100
     ).map("{:.2f}%".format)
 
-    # 컬럼 순서 재배치 (예방접종명, 처방코드, 처방명, 접종건수, 점유율(%))
     stat_table = stat_table[
         ["예방접종명", "처방코드", "처방명", "접종건수", "점유율(%)"]
     ]
