@@ -10,7 +10,7 @@ st.set_page_config(
     page_title="예방접종 통계 및 분석", page_icon="💉", layout="wide"
 )
 
-# 커스텀 CSS 및 A4 세로 인쇄 강제 밀착 스타일
+# 커스텀 CSS 및 A4 세로 인쇄 최적화 스타일 (단일 열 꽉 찬 보고서 구성)
 st.markdown(
     """
     <style>
@@ -42,15 +42,15 @@ st.markdown(
             background-color: #F8FAFC;
             border: 1px solid #CBD5E1;
             border-radius: 8px;
-            padding: 14px 20px;
+            padding: 12px 18px;
             text-align: center;
-            margin-bottom: 12px;
+            margin-bottom: 10px;
         }
         .report-header h2 {
-            font-size: 21px !important;
+            font-size: 20px !important;
             font-weight: 800;
             color: #0F172A !important;
-            margin-bottom: 6px !important;
+            margin-bottom: 4px !important;
         }
         .report-header .info-line {
             font-size: 13px;
@@ -62,43 +62,41 @@ st.markdown(
         .stats-highlight-box {
             background: linear-gradient(135deg, #1E3A8A 0%, #2563EB 100%);
             color: #ffffff;
-            border-radius: 10px;
-            padding: 18px 22px;
+            border-radius: 8px;
+            padding: 14px 18px;
             text-align: center;
-            margin-bottom: 18px;
+            margin-bottom: 14px;
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
         }
         .stats-highlight-box .main-stats {
-            font-size: 18px;
+            font-size: 16px;
             font-weight: 800;
-            margin-bottom: 10px;
+            margin-bottom: 8px;
             letter-spacing: -0.3px;
         }
         .stats-highlight-box .main-stats span {
             color: #FEF08A;
         }
         .stats-highlight-box .dept-stats {
-            font-size: 13px;
+            font-size: 12.5px;
             font-weight: 500;
             color: #E2E8F0;
             border-top: 1px solid rgba(255, 255, 255, 0.2);
-            padding-top: 10px;
-            line-height: 1.5;
+            padding-top: 8px;
+            line-height: 1.4;
         }
         .stats-highlight-box .dept-stats b {
             color: #ffffff;
         }
 
         /* ==========================================
-           🖨️ A4 세로 용지 인쇄/PDF 강제 밀착 최적화
+           🖨️ A4 세로 용지 인쇄/PDF 단일 열 완벽 맞춤
            ================================---------- */
         @media print {
-            /* 브라우저 인쇄 시 사이드바, 버튼, 네비게이션, 헤더/푸터 숨김 */
             [data-testid="stSidebar"], .no-print, button, header, footer, iframe {
                 display: none !important;
             }
             
-            /* 본문 영역 마진 및 패딩 완전 제거 */
             .main .block-container {
                 padding: 0 !important;
                 margin: 0 !important;
@@ -106,21 +104,19 @@ st.markdown(
                 width: 100% !important;
             }
 
-            /* A4 세로 용지 규격 및 최소 여백 지정 */
             @page {
                 size: A4 portrait;
-                margin: 8mm;
+                margin: 10mm;
             }
 
             body {
-                font-size: 9pt;
+                font-size: 9.5pt;
                 color: #000000;
                 background: #ffffff !important;
                 -webkit-print-color-adjust: exact;
-                width: 210mm;
+                width: 100%;
             }
 
-            /* 보고서 헤더 깔끔하게 인쇄 */
             .report-header {
                 background-color: #ffffff !important;
                 border: 1px solid #000000 !important;
@@ -133,11 +129,10 @@ st.markdown(
                 margin-bottom: 2px !important;
             }
             .report-header .info-line {
-                font-size: 10.5pt !important;
+                font-size: 10pt !important;
                 color: #000000 !important;
             }
 
-            /* 요약 박스 테두리 인쇄 */
             .stats-highlight-box {
                 background: #ffffff !important;
                 color: #000000 !important;
@@ -160,30 +155,27 @@ st.markdown(
                 color: #000000 !important;
                 border-top: 1px solid #000000 !important;
                 padding-top: 3px !important;
-                font-size: 9.5pt !important;
+                font-size: 9pt !important;
             }
 
-            /* 2열 테이블이 A4 폭에 좌우 대칭으로 딱 맞게 수평 배치되도록 고정 */
-            [data-testid="column"] {
-                width: 48.5% !important;
-                float: left !important;
-                flex: 1 1 48.5% !important;
-                min-width: 48.5% !important;
-                margin-right: 1.5% !important;
-            }
-
-            /* 데이터프레임 내부 글자 크기 축소 */
+            /* 단일 열 표가 A4 폭에 꽉 차게 설정 */
             [data-testid="stDataFrame"] {
-                font-size: 8pt !important;
+                width: 100% !important;
+                font-size: 9pt !important;
             }
             [data-testid="stDataFrame"] div {
                 max-height: none !important;
                 overflow: visible !important;
+                width: 100% !important;
             }
             
-            table, tr, td, th {
+            table {
+                width: 100% !important;
+            }
+            
+            tr, td, th {
                 page-break-inside: avoid;
-                padding: 3px 5px !important;
+                padding: 4px 6px !important;
             }
         }
     </style>
@@ -454,32 +446,19 @@ with tab1:
         ["예방접종명", "처방코드", "처방명", "접종건수", "점유율(%)"]
     ]
 
-    # 💡 데이터를 2개의 열(Column)로 나누어 배치
-    mid_idx = (len(stat_table) + 1) // 2
-    df_left = stat_table.iloc[:mid_idx].reset_index(drop=True)
-    df_right = stat_table.iloc[mid_idx:].reset_index(drop=True)
-
-    col1, col2 = st.columns(2)
-    with col1:
-      st.dataframe(
-          df_left,
-          use_container_width=True,
-          hide_index=True,
-          height=min(420, len(df_left) * 31 + 40),
-      )
-    with col2:
-      st.dataframe(
-          df_right,
-          use_container_width=True,
-          hide_index=True,
-          height=min(420, len(df_right) * 31 + 40),
-      )
+    # 💡 단일 열(1-Column) 전체 폭 표 배치
+    st.dataframe(
+        stat_table,
+        use_container_width=True,
+        hide_index=True,
+        height=min(600, len(stat_table) * 33 + 40),
+    )
 
     st.markdown("<br>", unsafe_allow_html=True)
 
     # 3. 인쇄 버튼을 맨 아래로 배치
     print_button_html = """
-        <div class="no-print" style="text-align: center; margin-top: 10px; margin-bottom: 20px;">
+        <div class="no-print" style="text-align: center; margin-top: 5px; margin-bottom: 20px;">
             <button onclick="window.parent.print();" style="
                 background-color: #2563EB;
                 color: #ffffff;
