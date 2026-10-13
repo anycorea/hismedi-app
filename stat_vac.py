@@ -123,15 +123,15 @@ st.markdown(
            ================================---------- */
         @media print {
             body * {
-                visibility: hidden;
+                visibility: hidden !important;
             }
             .printable-report-wrapper, .printable-report-wrapper * {
-                visibility: visible;
+                visibility: visible !important;
             }
             .printable-report-wrapper {
-                position: absolute;
-                left: 0;
-                top: 0;
+                position: absolute !important;
+                left: 0 !important;
+                top: 0 !important;
                 width: 100% !important;
                 border: none !important;
                 box-shadow: none !important;
@@ -497,11 +497,11 @@ with tab2:
   )
 
 with tab3:
-  # 📑 완벽한 A4 세로 인쇄 전용 공식 보고서 뷰 (안전한 컴포넌트 버튼 적용)
+  # 📑 A4 세로 인쇄 전용 공식 보고서 뷰 (iframe 내부에서 메인 윈도우 인쇄 트리거)
   print_btn_html = """
       <div style="text-align: right; margin-bottom: 10px;" class="no-print">
-          <span style="color: #64748B; font-size: 13px; margin-right: 10px;">💡 인쇄 버튼 클릭 시 A4 세로 인쇄 미리보기가 실행됩니다.</span>
-          <button onclick="window.parent.print();" style="
+          <span style="color: #64748B; font-size: 13px; margin-right: 10px;">💡 인쇄 버튼 클릭 시 보고서 내용이 A4 세로 규격으로 출력됩니다.</span>
+          <button onclick="parent.window.print();" style="
               background-color: #2563EB;
               color: #ffffff;
               border: none;
