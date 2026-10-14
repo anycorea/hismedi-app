@@ -23,14 +23,17 @@ st.markdown(
             font-size: 20px !important;
             font-weight: 800 !important;
             color: #1E3A8A !important;
+            margin-top: 4px !important;
             margin-bottom: 2px !important;
             line-height: 1.2;
+            text-align: center;
         }
         .sidebar-sub {
             font-size: 13.5px !important;
             color: #4B5563 !important;
             font-weight: 600 !important;
             margin-bottom: 12px !important;
+            text-align: center;
         }
 
         hr { margin: 8px 0 !important; }
@@ -110,20 +113,19 @@ def load_data_from_gsheet():
 # ==========================================
 # 🛠️ [왼쪽 메뉴] 로고 및 필터 설정
 # ==========================================
-# 사이드바 상단에 로고와 타이틀 배치
-sb_col1, sb_col2 = st.sidebar.columns([3, 1])
-with sb_col1:
-  st.markdown(
-      '<div class="sidebar-title">예방접종 통계 및 분석</div>',
-      unsafe_allow_html=True,
-  )
-with sb_col2:
-  # GitHub에 업로드된 로고 파일 표시
-  try:
-    st.image("Hismedi_logo.png", width=55)
-  except Exception:
-    pass
+# 사이드바 최상단 중앙에 로고 배치
+with st.sidebar:
+  col1, col2, col3 = st.columns([1, 2, 1])
+  with col2:
+    try:
+      st.image("Hismedi_logo.png", width=90)
+    except Exception:
+      pass
 
+st.sidebar.markdown(
+    '<div class="sidebar-title">예방접종 통계 및 분석</div>',
+    unsafe_allow_html=True,
+)
 st.sidebar.markdown(
     '<div class="sidebar-sub">히즈메디병원 접종 현황 관리</div>',
     unsafe_allow_html=True,
