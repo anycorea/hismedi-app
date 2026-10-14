@@ -202,9 +202,10 @@ if period_mode == "선택기간":
     elif len(date_range) == 1:
       start_date = end_date = date_range[0]
 elif period_mode == "월별":
-  all_months = sorted(df_merged["월"].dropna().unique().tolist())
+  # 최근 월이 위로 오도록 내림차순 정렬된 월 리스트 생성
+  all_months = sorted(df_merged["월"].dropna().unique().tolist(), reverse=True)
   if all_months:
-    selected_month = st.sidebar.selectbox("월 선택", all_months, index=len(all_months) - 1)
+    selected_month = st.sidebar.selectbox("월 선택", all_months, index=0)
     start_date = datetime.strptime(selected_month + "-01", "%Y-%m-%d").date()
     if start_date.month == 12:
       end_date = datetime(start_date.year + 1, 1, 1).date() - pd.Timedelta(days=1)
@@ -214,9 +215,11 @@ elif period_mode == "월별":
           - pd.Timedelta(days=1)
       )
 elif period_mode == "연도별":
-  all_years = sorted(df_merged["연도"].dropna().unique().tolist())
+  all_years = sorted(
+      df_merged["연도"].dropna().unique().tolist(), reverse=True
+  )
   if all_years:
-    selected_year = st.sidebar.selectbox("연도 선택", all_years, index=len(all_years) - 1)
+    selected_year = st.sidebar.selectbox("연도 선택", all_years, index=0)
     start_date = datetime(selected_year, 1, 1).date()
     end_date = datetime(selected_year, 12, 31).date()
 else:  # 일별
@@ -296,7 +299,6 @@ current_time_str = datetime.now().strftime("%Y-%m-%d %H:%M")
 if not filtered_df.empty:
   total_sum = len(filtered_df)
 
-  # 백신명별 전체 총합 집계 (소계용)
   vax_group_sum = (
       filtered_df.groupby(target_col).size().reset_index(name="접종건수")
   )
@@ -304,7 +306,6 @@ if not filtered_df.empty:
       by="접종건수", ascending=False
   ).reset_index(drop=True)
 
-  # 백신명 + 처방코드 + 처방명 상세 집계
   detail_agg = (
       filtered_df.groupby([target_col, "처방코드", "처방명"])
       .size()
@@ -317,7 +318,6 @@ if not filtered_df.empty:
     v_total_cnt = v_row["접종건수"]
     v_share = (v_total_cnt / total_sum * 100) if total_sum > 0 else 0
 
-    # 1) 소계 행 추가
     hierarchical_rows.append({
         "예방접종명": f"📌 [{v_name}] 소계",
         "처방코드": "-",
@@ -326,7 +326,6 @@ if not filtered_df.empty:
         "점유율(%)": f"{v_share:.2f}%",
     })
 
-    # 2) 해당 백신의 세부 처방코드별 행 추가 (건수 기준 내림차순 정렬)
     sub_df = detail_agg[detail_agg[target_col] == v_name].sort_values(
         by="접종건수", ascending=False
     )
@@ -382,7 +381,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# 진료과별 통계 미니 표 출력
 if not dept_df.empty:
   st.markdown(
       "<div style='font-size: 14px; font-weight: 700; color: #1E3A8A; margin-bottom"
@@ -409,7 +407,6 @@ with tab1:
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # 📥 통계 요약표 CSV 다운로드 버튼 추가
     stat_csv_data = stat_table.to_csv(index=False).encode("utf-8-sig")
     st.download_button(
         label="📥 통계 요약표 CSV 다운로드",
@@ -421,7 +418,6 @@ with tab1:
     st.info("선택한 조건에 해당하는 데이터가 존재하지 않습니다.")
 
 with tab2:
-  # 🔒 개인정보 보호 비밀번호 인증 세션 초기화
   if "auth_passed" not in st.session_state:
     st.session_state.auth_passed = False
 
@@ -439,14 +435,12 @@ with tab2:
       else:
         st.error("비밀번호가 틀렸습니다.")
   else:
-    # 인증 완료 후 화면
     if st.button("🔓 잠금 (로그아웃)", key="logout_btn"):
       st.session_state.auth_passed = False
       st.rerun()
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # 전체 항목 통합 검색 박스
     search_query = st.text_input(
         "통합 검색",
         placeholder=(
@@ -456,7 +450,6 @@ with tab2:
 
     display_df = filtered_df.copy()
 
-    # 차트번호 9자리 텍스트형 포맷팅 (앞자리 0 채우기, 쉼표 제거)
     if "차트번호" in display_df.columns:
       display_df["차트번호"] = display_df["차트번호"].apply(
           lambda x: (
@@ -466,12 +459,10 @@ with tab2:
           )
       )
 
-    # 불필요한 파생 컬럼(연도, 월) 숨기기 정돈
     cols_to_drop = [c for c in ["연도", "월"] if c in display_df.columns]
     if cols_to_drop:
       display_df = display_df.drop(columns=cols_to_drop)
 
-    # 전체 항목(모든 컬럼) 대상 통합 검색 필터링 적용
     if search_query:
       mask = display_df.astype(str).apply(
           lambda row: row.str.contains(search_query, case=False, na=False).any(),
