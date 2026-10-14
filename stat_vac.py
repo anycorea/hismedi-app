@@ -416,7 +416,8 @@ if not dept_df.empty:
       ": 4px;'>🏥 진료과별 현황 요약</div>",
       unsafe_allow_html=True,
   )
-  st.dataframe(dept_df, use_container_width=True, hide_index=True, height=130)
+  # 진료과 표 높이를 170으로 넉넉하게 키워 일반외과까지 잘림 없이 표시
+  st.dataframe(dept_df, use_container_width=True, hide_index=True, height=170)
 
 st.markdown("<br>", unsafe_allow_html=True)
 
