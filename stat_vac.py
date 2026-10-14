@@ -9,7 +9,7 @@ st.set_page_config(
     page_title="예방접종 통계 및 분석", page_icon="💉", layout="wide"
 )
 
-# 커스텀 CSS 및 박스 제거 레이아웃 스타일
+# 커스텀 CSS 및 레이아웃 스타일
 st.markdown(
     """
     <style>
@@ -52,7 +52,7 @@ st.markdown(
             box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.2);
         }
 
-        /* 깔끔한 인라인 요약 영역 스타일 */
+        /* 깔끔한 상단 요약 영역 스타일 */
         .header-container {
             display: flex;
             justify-content: space-between;
@@ -74,13 +74,6 @@ st.markdown(
             font-size: 12.5px;
             color: #64748B;
             font-weight: 500;
-        }
-        .dept-stats-text {
-            font-size: 13.5px;
-            font-weight: 600;
-            color: #334155;
-            margin-bottom: 15px;
-            padding: 4px 0;
         }
     </style>
 """,
@@ -299,34 +292,63 @@ unique_patients = (
 )
 current_time_str = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-# 통계 테이블 데이터 미리 준비
+# 1. 예방접종명별 소계 및 처방코드별 계층형 통계 테이블 생성
 if not filtered_df.empty:
-  agg_df = (
+  total_sum = len(filtered_df)
+
+  # 백신명별 전체 총합 집계 (소계용)
+  vax_group_sum = (
+      filtered_df.groupby(target_col).size().reset_index(name="접종건수")
+  )
+  vax_group_sum = vax_group_sum.sort_values(
+      by="접종건수", ascending=False
+  ).reset_index(drop=True)
+
+  # 백신명 + 처방코드 + 처방명 상세 집계
+  detail_agg = (
       filtered_df.groupby([target_col, "처방코드", "처방명"])
       .size()
       .reset_index(name="접종건수")
   )
-  stat_table = agg_df.sort_values(by="접종건수", ascending=False).reset_index(
-      drop=True
-  )
-  stat_table.columns = ["예방접종명", "처방코드", "처방명", "접종건수"]
 
-  total_sum = stat_table["접종건수"].sum()
-  stat_table["점유율(%)"] = (
-      stat_table["접종건수"] / total_sum * 100
-  ).map("{:.2f}%".format)
+  hierarchical_rows = []
+  for _, v_row in vax_group_sum.iterrows():
+    v_name = v_row[target_col]
+    v_total_cnt = v_row["접종건수"]
+    v_share = (v_total_cnt / total_sum * 100) if total_sum > 0 else 0
 
-  stat_table = stat_table[
-      ["예방접종명", "처방코드", "처방명", "접종건수", "점유율(%)"]
-  ]
+    # 1) 소계 행 추가
+    hierarchical_rows.append({
+        "예방접종명": f"📌 [{v_name}] 소계",
+        "처방코드": "-",
+        "처방명": f"총 {v_total_cnt:,}건",
+        "접종건수": v_total_cnt,
+        "점유율(%)": f"{v_share:.2f}%",
+    })
+
+    # 2) 해당 백신의 세부 처방코드별 행 추가 (건수 기준 내림차순 정렬)
+    sub_df = detail_agg[detail_agg[target_col] == v_name].sort_values(
+        by="접종건수", ascending=False
+    )
+    for _, s_row in sub_df.iterrows():
+      s_cnt = s_row["접종건수"]
+      s_share = (s_cnt / total_sum * 100) if total_sum > 0 else 0
+      hierarchical_rows.append({
+          "예방접종명": f" └ {v_name}",
+          "처방코드": str(s_row["처방코드"]),
+          "처방명": str(s_row["처방명"]),
+          "접종건수": s_cnt,
+          "점유율(%)": f"{s_share:.2f}%",
+      })
+
+  stat_table = pd.DataFrame(hierarchical_rows)
 else:
   stat_table = pd.DataFrame()
 
-# 진료과별 요약 문자열 준비 (소아청소년과 우선 정렬)
-dept_summary_parts = []
+# 2. 진료과별 통계 데이터프레임 준비 (소아청소년과 우선 정렬)
+dept_rows = []
 if not filtered_df.empty and "과목명" in filtered_df.columns:
   depts = sorted(filtered_df["과목명"].dropna().unique().tolist())
-  # '소아청소년과'가 있으면 맨 앞으로 배치
   if "소아청소년과" in depts:
     depts.remove("소아청소년과")
     depts = ["소아청소년과"] + depts
@@ -339,18 +361,12 @@ if not filtered_df.empty and "과목명" in filtered_df.columns:
         if "차트번호" in dept_sub_df.columns
         else 0
     )
-    dept_summary_parts.append(
-        f"<b>{dept}</b> : 건수 {d_cases:,}건 (환자수 {d_patients:,}명)"
-    )
+    dept_rows.append({"진료과": dept, "접종 건수": d_cases, "환자 수(중복제거)": d_patients})
 
-dept_summary_html = (
-    " &nbsp;&nbsp;|&nbsp;&nbsp; ".join(dept_summary_parts)
-    if dept_summary_parts
-    else "데이터 없음"
-)
+dept_df = pd.DataFrame(dept_rows)
 
 # ==========================================
-# 📑 [최상단 요약 정보 및 진료과 통계 배치] (박스 제거, 슬림화)
+# 📑 [최상단 요약 정보 배치]
 # ==========================================
 st.markdown(
     f"""
@@ -362,12 +378,20 @@ st.markdown(
             <b>조회 기간:</b> {start_date} ~ {end_date} &nbsp;&nbsp;|&nbsp;&nbsp; <b>발행일시:</b> {current_time_str}
         </div>
     </div>
-    <div class="dept-stats-text">
-        [{dept_summary_html}]
-    </div>
     """,
     unsafe_allow_html=True,
 )
+
+# 진료과별 통계 미니 표 출력
+if not dept_df.empty:
+  st.markdown(
+      "<div style='font-size: 14px; font-weight: 700; color: #1E3A8A; margin-bottom"
+      ": 6px;'>🏥 진료과별 현황 요약</div>",
+      unsafe_allow_html=True,
+  )
+  st.dataframe(dept_df, use_container_width=True, hide_index=True, height=140)
+
+st.markdown("<br>", unsafe_allow_html=True)
 
 # ==========================================
 # 📑 [탭 구성] 세련된 박스형 탭 메뉴 (2개 탭)
