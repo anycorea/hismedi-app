@@ -168,11 +168,11 @@ target_col = "예방접종명(표준명)"
 if target_col not in df_merged.columns:
   df_merged[target_col] = df_merged["처방명"]
 
-# 1. 기간 선택
+# 1. 기간 선택 (기본값을 '월별' 모드 및 '가장 최신 월'로 설정)
 st.sidebar.subheader("📅 기간 선택")
 period_mode = st.sidebar.radio(
     "기간 단위",
-    ["선택기간", "일별", "월별", "연도별"],
+    ["월별", "선택기간", "일별", "연도별"],
     label_visibility="collapsed",
 )
 
@@ -202,7 +202,6 @@ if period_mode == "선택기간":
     elif len(date_range) == 1:
       start_date = end_date = date_range[0]
 elif period_mode == "월별":
-  # 최근 월이 위로 오도록 내림차순 정렬된 월 리스트 생성
   all_months = sorted(df_merged["월"].dropna().unique().tolist(), reverse=True)
   if all_months:
     selected_month = st.sidebar.selectbox("월 선택", all_months, index=0)
