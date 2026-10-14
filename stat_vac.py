@@ -20,15 +20,16 @@ st.markdown(
         }
         
         .sidebar-title {
-            font-size: 22px !important;
+            font-size: 21px !important;
             font-weight: 800 !important;
             color: #1E3A8A !important;
             margin-bottom: 2px !important;
             line-height: 1.2;
         }
         .sidebar-sub {
-            font-size: 12px !important;
-            color: #6B7280 !important;
+            font-size: 13.5px !important;
+            color: #4B5563 !important;
+            font-weight: 600 !important;
             margin-bottom: 12px !important;
         }
 
@@ -57,9 +58,7 @@ st.markdown(
             display: flex;
             justify-content: space-between;
             align-items: baseline;
-            border-bottom: 2px solid #E2E8F0;
-            padding-bottom: 8px;
-            margin-bottom: 10px;
+            padding-bottom: 4px;
         }
         .main-stats-text {
             font-size: 18px;
@@ -112,7 +111,7 @@ def load_data_from_gsheet():
 # 🛠️ [왼쪽 메뉴] 필터 설정 및 데이터 새로고침
 # ==========================================
 st.sidebar.markdown(
-    '<div class="sidebar-title">💉 예방접종 통계 및 분석</div>',
+    '<div class="sidebar-title">예방접종 통계 및 분석</div>',
     unsafe_allow_html=True,
 )
 st.sidebar.markdown(
@@ -164,11 +163,20 @@ if "접수일자" in df_merged.columns:
       lambda x: x.strftime("%Y-%m") if pd.notnull(x) else None
   )
 
+# 구글 시트 vac 데이터 기준 가장 마지막(최신) 접수일자 추출
+latest_data_date_str = "-"
+if not df_merged["접수일자"].isna().all() and "접수일자" in df_vac.columns:
+  max_dt = df_merged["접수일자"].max()
+  if pd.notnull(max_dt):
+    days_kr = ["월", "화", "수", "목", "금", "토", "일"]
+    day_of_week = days_kr[max_dt.weekday()]
+    latest_data_date_str = f"{max_dt.strftime('%Y-%m-%d')}({day_of_week})"
+
 target_col = "예방접종명(표준명)"
 if target_col not in df_merged.columns:
   df_merged[target_col] = df_merged["처방명"]
 
-# 1. 기간 선택 (기본값을 '월별' 모드 및 '가장 최신 월'로 설정)
+# 1. 기간 선택 (기본값을 가장 최신 월로 설정)
 st.sidebar.subheader("📅 기간 선택")
 period_mode = st.sidebar.radio(
     "기간 단위",
@@ -292,7 +300,6 @@ total_cases = len(filtered_df)
 unique_patients = (
     filtered_df["차트번호"].nunique() if "차트번호" in filtered_df.columns else 0
 )
-current_time_str = datetime.now().strftime("%Y-%m-%d %H:%M")
 
 # 1. 예방접종명별 소계 및 처방코드별 계층형 통계 테이블 생성
 if not filtered_df.empty:
@@ -364,21 +371,30 @@ if not filtered_df.empty and "과목명" in filtered_df.columns:
 dept_df = pd.DataFrame(dept_rows)
 
 # ==========================================
-# 📑 [최상단 요약 정보 배치]
+# 📑 [최상단 요약 정보 및 로고 배치]
 # ==========================================
-st.markdown(
-    f"""
+col_logo, col_info = st.columns([1, 11])
+
+with col_logo:
+  # GitHub에 업로드된 로고 파일 연결 (width로 크기 조절)
+  st.image("Hismedi_logo.png", width=75)[cite: 4]
+
+with col_info:
+  st.markdown(
+      f"""
     <div class="header-container">
         <div class="main-stats-text">
             총 접종 건수: <span>{total_cases:,}건</span> &nbsp;&nbsp;|&nbsp;&nbsp; 접종 환자 수(중복제거): <span>{unique_patients:,}명</span>
         </div>
         <div class="sub-info-text">
-            <b>조회 기간:</b> {start_date} ~ {end_date} &nbsp;&nbsp;|&nbsp;&nbsp; <b>발행일시:</b> {current_time_str}
+            <b>조회 기간:</b> {start_date} ~ {end_date} &nbsp;&nbsp;|&nbsp;&nbsp; <b>최종 DATA:</b> {latest_data_date_str}
         </div>
     </div>
     """,
-    unsafe_allow_html=True,
-)
+      unsafe_allow_html=True,
+  )
+
+st.markdown("<div style='margin-bottom: 10px;'></div>", unsafe_allow_html=True)
 
 if not dept_df.empty:
   st.markdown(
