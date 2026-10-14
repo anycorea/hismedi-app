@@ -20,7 +20,7 @@ st.markdown(
         }
         
         .sidebar-title {
-            font-size: 21px !important;
+            font-size: 20px !important;
             font-weight: 800 !important;
             color: #1E3A8A !important;
             margin-bottom: 2px !important;
@@ -108,12 +108,22 @@ def load_data_from_gsheet():
 
 
 # ==========================================
-# 🛠️ [왼쪽 메뉴] 필터 설정 및 데이터 새로고침
+# 🛠️ [왼쪽 메뉴] 로고 및 필터 설정
 # ==========================================
-st.sidebar.markdown(
-    '<div class="sidebar-title">예방접종 통계 및 분석</div>',
-    unsafe_allow_html=True,
-)
+# 사이드바 상단에 로고와 타이틀 배치
+sb_col1, sb_col2 = st.sidebar.columns([3, 1])
+with sb_col1:
+  st.markdown(
+      '<div class="sidebar-title">예방접종 통계 및 분석</div>',
+      unsafe_allow_html=True,
+  )
+with sb_col2:
+  # GitHub에 업로드된 로고 파일 표시
+  try:
+    st.image("Hismedi_logo.png", width=55)
+  except Exception:
+    pass
+
 st.sidebar.markdown(
     '<div class="sidebar-sub">히즈메디병원 접종 현황 관리</div>',
     unsafe_allow_html=True,
@@ -371,17 +381,10 @@ if not filtered_df.empty and "과목명" in filtered_df.columns:
 dept_df = pd.DataFrame(dept_rows)
 
 # ==========================================
-# 📑 [최상단 요약 정보 및 로고 배치]
+# 📑 [최상단 요약 정보 배치]
 # ==========================================
-col_logo, col_info = st.columns([1, 11])
-
-with col_logo:
-  # GitHub에 업로드된 로고 파일 연결 (width로 크기 조절)
-  st.image("Hismedi_logo.png", width=75)[cite: 4]
-
-with col_info:
-  st.markdown(
-      f"""
+st.markdown(
+    f"""
     <div class="header-container">
         <div class="main-stats-text">
             총 접종 건수: <span>{total_cases:,}건</span> &nbsp;&nbsp;|&nbsp;&nbsp; 접종 환자 수(중복제거): <span>{unique_patients:,}명</span>
@@ -391,8 +394,8 @@ with col_info:
         </div>
     </div>
     """,
-      unsafe_allow_html=True,
-  )
+    unsafe_allow_html=True,
+)
 
 st.markdown("<div style='margin-bottom: 10px;'></div>", unsafe_allow_html=True)
 
