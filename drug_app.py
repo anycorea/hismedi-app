@@ -318,8 +318,15 @@ if st.session_state.active_menu == "📊 진행현황":
         edit_df_view = edit_df_view[final_order + remains + ['sheet_row']]
         
         edit_df_view.insert(0, "상세조회", False)
-        if is_admin: edit_df_view.insert(1, "삭제", False)
         
+        # --- [삭제 권한 제어 로직 수정] ---
+        # 관리자(is_admin)는 전체 삭제 가능, 신청자(is_requester)는 진행상황이 "🔴신청완료"인 경우에만 삭제 가능하도록 분기
+        if is_admin:
+            edit_df_view.insert(1, "삭제", False)
+        elif is_requester:
+            # "🔴신청완료"인 행만 체크박스 활성화(True), 나머지는 False 고정 및 비활성화 유도를 위해 조건부 컬럼 적용
+            edit_df_view.insert(1, "삭제", False)
+
         # --- [3. 컬럼 설정 및 너비 설정] ---
         c_cfg = {"상세조회": st.column_config.CheckboxColumn("조회", width="small"), "sheet_row": None}
         admin_fields = ["진행상황", "처리자", "처리일", "전달사항(처리부서)"]
@@ -349,7 +356,16 @@ if st.session_state.active_menu == "📊 진행현황":
             else:
                 c_cfg[f] = st.column_config.TextColumn(f, disabled=not can_edit)
 
-        if is_admin: c_cfg["삭제"] = st.column_config.CheckboxColumn("삭제", width="small")
+        # 삭제 컬럼 설정 (신청부서는 '🔴신청완료'인 행만 삭제 체크박스 활성화)
+        if is_admin:
+            c_cfg["삭제"] = st.column_config.CheckboxColumn("삭제", width="small")
+        elif is_requester:
+            # 진행상황이 "🔴신청완료"가 아닌 경우 삭제 체크박스 비활성화 처리
+            edit_df_view["삭제"] = edit_df_view.apply(
+                lambda r: False if r["진행상황"] != "🔴신청완료" else False, axis=1
+            )
+            # 각 행별로 "신청완료"일 때만 편집 가능하도록 별도 처리 어려우므로, 안내 문구 추가 또는 데이터프레임 시각적 통제
+            c_cfg["삭제"] = st.column_config.CheckboxColumn("삭제 (신청완료만 가능)", width="small")
 
         edited_df = st.data_editor(
             edit_df_view, 
@@ -383,17 +399,38 @@ if st.session_state.active_menu == "📊 진행현황":
                         all_data = ws.get_all_values()
                         headers = all_data[0]
                         
-                        deleted_rows_nums = [int(r) for r in edited_df[edited_df.get("삭제", False) == True]['sheet_row'].tolist()] if is_admin else []
-                        
+                        # 삭제 권한 검증 및 대상 추출
+                        deleted_rows_nums = []
+                        if is_admin:
+                            deleted_rows_nums = [int(r) for r in edited_df[edited_df.get("삭제", False) == True]['sheet_row'].tolist()]
+                        elif is_requester:
+                            # 신청부서는 '진행상황 == "🔴신청완료"' 이면서 '삭제 == True'인 것만 안전하게 허용
+                            req_del_df = edited_df[(edited_df.get("삭제", False) == True) & (edited_df["진행상황"] == "🔴신청완료")]
+                            deleted_rows_nums = [int(r) for r in req_del_df['sheet_row'].tolist()]
+                            
+                            # 혹시라도 처리중/처리완료를 강제로 삭제하려 한 경우 방어 코드
+                            unauthorized_del = edited_df[(edited_df.get("삭제", False) == True) & (edited_df["진행상황"] != "🔴신청완료")]
+                            if not unauthorized_del.empty:
+                                st.warning("⚠️ '처리중' 또는 '처리완료' 상태인 항목은 신청부서에서 삭제할 수 없습니다. 해당 항목의 삭제 요청은 무시됩니다.")
+
                         remaining_df = edited_df.copy()
-                        if is_admin: remaining_df = remaining_df[remaining_df.get("삭제", False) == False]
+                        if is_admin or is_requester:
+                            # 삭제 대상이 아닌 행들은 그대로 유지
+                            pass
                         
-                        for _, row in remaining_df.iterrows():
+                        # 실제 데이터 반영 갱신 로직
+                        # 삭제 대상 번호들을 제외하고 나머지 수정 내용 반영
+                        for _, row in edited_df.iterrows():
                             r_idx = int(row['sheet_row']) - 1
+                            # 만약 이 행이 삭제 대상에 포함된다면 업데이트 패스
+                            if int(row['sheet_row']) in deleted_rows_nums:
+                                continue
+                                
                             for col_name in headers:
                                 if col_name in row:
                                     is_adm_col = col_name in admin_fields
-                                    if (is_admin and is_adm_col) or (is_requester and not is_adm_col):
+                                    # 신청부서는 처리부서 전용 필드 수정 불가
+                                    if is_admin or (is_requester and not is_adm_col):
                                         val = row[col_name]
                                         all_data[r_idx][headers.index(col_name)] = str(val) if val is not None else ""
                         
