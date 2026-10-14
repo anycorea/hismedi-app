@@ -9,11 +9,20 @@ st.set_page_config(
     page_title="예방접종 통계 및 분석", page_icon="💉", layout="wide"
 )
 
-# 커스텀 CSS 및 레이아웃 스타일
+# 커스텀 CSS 및 상단 여백 제거(끌어올리기) 스타일
 st.markdown(
     """
     <style>
-        /* 사이드바 여백 및 가독성 최적화 */
+        /* ==========================================
+           📐 상단 여백 제거 및 전체 레이아웃 위로 올리기
+           ================================---------- */
+        .stApp > header {
+            display: none !important;
+        }
+        .main .block-container {
+            padding-top: 1.5rem !important;
+            padding-bottom: 2rem !important;
+        }
         [data-testid="stSidebar"] > div:first-child {
             padding-top: 1rem !important;
             padding-bottom: 1rem !important;
@@ -399,15 +408,15 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.markdown("<div style='margin-bottom: 10px;'></div>", unsafe_allow_html=True)
+st.markdown("<div style='margin-bottom: 8px;'></div>", unsafe_allow_html=True)
 
 if not dept_df.empty:
   st.markdown(
       "<div style='font-size: 14px; font-weight: 700; color: #1E3A8A; margin-bottom"
-      ": 6px;'>🏥 진료과별 현황 요약</div>",
+      ": 4px;'>🏥 진료과별 현황 요약</div>",
       unsafe_allow_html=True,
   )
-  st.dataframe(dept_df, use_container_width=True, hide_index=True, height=140)
+  st.dataframe(dept_df, use_container_width=True, hide_index=True, height=130)
 
 st.markdown("<br>", unsafe_allow_html=True)
 
