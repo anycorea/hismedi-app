@@ -9,10 +9,9 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# --- 2. Streamlit 상단 여백 및 헤더 완전히 제거하는 Custom CSS ---
+# --- 2. Streamlit 상단 여백 완전 제거 ---
 st.markdown("""
     <style>
-    /* 상단 기본 여백 및 헤더/메뉴 제거 */
     #MainMenu {visibility: hidden;}
     header {visibility: hidden;}
     footer {visibility: hidden;}
@@ -24,16 +23,20 @@ st.markdown("""
         padding-right: 0rem !important;
         max-width: 100% !important;
     }
-    
-    iframe {
-        border: none !important;
-        width: 100% !important;
-    }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 3. 심사평가원 공식 비급여 iframe 임베드 (상단부터 시작) ---
+# --- 3. 원하는 상단 위치("히즈메디병원"에서 시행중인... 텍스트)부터 출력되도록 상단 크롭 처리 ---
 hira_iframe_url = "https://www.hira.or.kr/re/diag/getNpayNotiCsuiSvcFom.do?yadmSbstKey=rbGHaZKha4UZWTsy"
 
-# 로고 위치부터 시원하게 보이도록 높이 지정
-components.iframe(hira_iframe_url, height=1300, scrolling=True)
+# 상단 80px 영역(최상단 타이틀)을 위로 끌어올려서 잘라내고, 로고 및 고지 문구부터 바로 노출
+custom_html = f"""
+<div style="overflow: hidden; width: 100%; height: 1300px; position: relative;">
+    <iframe src="{hira_iframe_url}" 
+            style="position: absolute; top: -80px; left: 0; width: 100%; height: 1380px; border: none; scrolling: yes;">
+    </iframe>
+</div>
+"""
+
+# HTML 컴포넌트로 렌더링
+components.html(custom_html, height=1300, scrolling=True)
