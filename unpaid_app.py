@@ -14,8 +14,8 @@ st.set_page_config(
 HIRA_URL = "https://www.hira.or.kr/re/diag/getNpayNotiCsuiSvcFom.do?yadmSbstKey=rbGHaZKha4UZWTsy"
 
 # 원본 화면 상단의 로고·안내문을 가리고 '행위료' 탭부터 표시
-# HIRA 페이지 구성과 브라우저에 따라 180~240 정도로 조절하세요.
-CROP_TOP = 195
+# 현재 캡처 기준 탭 시작점까지 약 590px를 가립니다. 탭이 잘리면 값을 낮추세요.
+CROP_TOP = 590
 # 데이터 영역의 표시 높이(PC 화면 기준). HIRA 내부 스크롤은 그대로 사용합니다.
 DATA_HEIGHT = 1050
 
@@ -31,24 +31,28 @@ st.markdown("""
   [data-testid="stElementContainer"] {margin-bottom:0 !important;}
   .hospital-head {
     display:flex; align-items:center; gap:22px;
-    border-bottom:2px solid #1762af; padding:18px 12px 15px;
-    margin-bottom:4px;
+    border-bottom:2px solid #1762af; padding:12px 12px 10px;
+    margin-bottom:0;
   }
   .hospital-mark {font-size:38px; flex-shrink:0;}
   .hospital-title {font-size:32px; font-weight:750; color:#183d75; line-height:1.25;}
-  .hospital-subtitle {font-size:15px; color:#4b5563; padding-top:7px; line-height:1.6;}
   @media(max-width:650px) {
     .hospital-head {gap:12px;padding:12px 4px;}
     .hospital-mark {font-size:27px;}
     .hospital-title {font-size:22px;}
-    .hospital-subtitle {font-size:12px;}
   }
 </style>
 """, unsafe_allow_html=True)
 
-# 'logo.png'를 앱 파일과 같은 폴더에 두면 실제 로고로 교체할 수 있습니다.
-logo_path = Path(__file__).with_name("logo.png")
-if logo_path.exists():
+# GitHub 저장소에 이미 있는 실제 병원 로고 사용
+# 실행 파일과 저장소 루트 양쪽에서 로고를 찾습니다.
+HERE = Path(__file__).resolve().parent
+logo_candidates = [
+    HERE / "Hismedi_logo.png",
+    HERE.parent / "Hismedi_logo.png",
+]
+logo_path = next((p for p in logo_candidates if p.is_file()), None)
+if logo_path is not None:
     import base64
     encoded = base64.b64encode(logo_path.read_bytes()).decode("ascii")
     logo_html = f'<img src="data:image/png;base64,{encoded}" alt="히즈메디병원" style="width:105px;max-width:20vw;height:auto">'
@@ -60,7 +64,6 @@ st.markdown(f"""
   {logo_html}
   <div>
     <div class="hospital-title">비급여 진료비용 안내</div>
-    <div class="hospital-subtitle">의료법 제45조 제1항 및 제2항과 동법 시행규칙 제42조의2에 따라 비급여 진료비용을 고지합니다.</div>
   </div>
 </div>
 """, unsafe_allow_html=True)
@@ -103,3 +106,6 @@ frame_html = f"""
 </html>
 """
 components.html(frame_html, height=DATA_HEIGHT, scrolling=False)
+
+# 배포 확인용: 실제 변경이 반영되는지 확인한 뒤 필요하면 삭제해도 됩니다.
+st.caption("화면 버전: HIRA-DATA-ONLY-20261020")
