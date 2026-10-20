@@ -15,7 +15,7 @@ HIRA_URL = "https://www.hira.or.kr/re/diag/getNpayNotiCsuiSvcFom.do?yadmSbstKey=
 
 # 원본 화면 상단의 로고·안내문을 가리고 '행위료' 탭부터 표시
 # 현재 캡처 기준 탭 시작점까지 약 590px를 가립니다. 탭이 잘리면 값을 낮추세요.
-CROP_TOP = 590
+CROP_TOP = 660
 # 데이터 영역의 표시 높이(PC 화면 기준). HIRA 내부 스크롤은 그대로 사용합니다.
 DATA_HEIGHT = 1050
 
