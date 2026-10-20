@@ -13,10 +13,10 @@ st.set_page_config(
 st.title("🏥 히즈메디병원 비급여 진료비 안내")
 st.caption("의료법 제45조에 의거한 건강보험심사평가원 연동 히즈메디병원 비급여 진료비용입니다. (실시간 자동 연동)")
 
-# --- 3. 심사평가원 공식 비급여 iframe 임베드 (PC 및 모바일 반응형) ---
-hira_iframe_url = "http://www.hira.or.kr/re/diag/getNpayNotiCsuiSvcFom.do?yadmSbstKey=rbGHaZKha4UZWTsy"
+# --- 3. 심사평가원 공식 비급여 iframe 임베드 (https 적용) ---
+hira_iframe_url = "https://www.hira.or.kr/re/diag/getNpayNotiCsuiSvcFom.do?yadmSbstKey=rbGHaZKha4UZWTsy"
 
-# Streamlit 컴포넌트를 이용해 병원 홈페이지와 똑같은 iframe을 넓고 쾌적하게 렌더링
+# 브라우저 보안에 걸리지 않도록 https 주소로 렌더링
 components.iframe(hira_iframe_url, height=1100, scrolling=True)
 
 # --- 4. 하단 푸터 및 원본 링크 ---
