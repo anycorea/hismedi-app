@@ -14,28 +14,23 @@ st.set_page_config(
 # --- 2. 모바일 가독성 최적화 Custom CSS ---
 st.markdown("""
     <style>
-    /* 상단 헤더 간격 축소 및 모바일 여백 최적화 */
     .block-container {
         padding-top: 1.5rem;
         padding-bottom: 2rem;
         padding-left: 1rem;
         padding-right: 1rem;
     }
-    /* 검색창 및 안내 문구 스타일 */
     .stTextInput > div > div > input {
         font-size: 16px;
         border-radius: 8px;
     }
-    /* 카드형/테이블 반응형 여백 */
     .element-container {
         margin-bottom: 0.5rem;
     }
     </style>
 """, unsafe_allow_html=True)
 
-
-# --- 3. 실시간 홈페이지 크롤링 및 캐싱 ---
-# 10분(600초) 캐싱 적용: 속도 향상 및 기존 서버 부담 최소화
+# --- 3. 실시간 홈페이지 크롤링 및 데이터 가공 함수 ---
 @st.cache_data(ttl=600)
 def fetch_unpaid_data():
     url = "http://hismedi.kr/etc/unpaid.asp"
@@ -45,34 +40,53 @@ def fetch_unpaid_data():
     
     try:
         response = requests.get(url, headers=headers, timeout=10)
-        response.encoding = 'euc-kr'  # 기존 ASP 페이지 인코딩에 맞게 설정 (필요시 utf-8로 변경)
+        response.encoding = 'euc-kr'  # ASP 페이지 인코딩 대응
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # 테이블 추출 (홈페이지 내 비급여 표 구조에 맞춰 파싱)
-        table = soup.find('table')
-        if not table:
-            return None, "표 데이터를 찾을 수 없습니다."
+        # 페이지 내 모든 테이블 탐색
+        tables = soup.find_all('table')
+        if not tables:
+            return None, "HTML 내에 표(Table) 태그가 존재하지 않습니다."
             
-        rows = table.find_all('tr')
         data = []
         headers_list = []
         
-        for i, row in enumerate(rows):
-            cols = row.find_all(['th', 'td'])
-            cols_text = [c.get_text(strip=True) for c in cols]
+        # 모든 테이블의 행을 순회하며 데이터 수집
+        for table in tables:
+            rows = table.find_all('tr')
+            for i, row in enumerate(rows):
+                cols = row.find_all(['th', 'td'])
+                cols_text = [c.get_text(strip=True) for c in cols]
+                
+                if not headers_list and i == 0 and len(cols_text) > 1:
+                    headers_list = cols_text
+                else:
+                    if len(cols_text) >= 2:  # 유의미한 데이터 행만 추가
+                        data.append(cols_text)
+                        
+        if not data:
+            return None, "표에서 추출할 데이터가 없습니다."
             
-            if i == 0:
-                headers_list = cols_text
+        # 컬럼명이 없거나 맞지 않을 경우 기본값 지정
+        if not headers_list or len(headers_list) < 2:
+            headers_list = ["진료항목", "구분", "가격(원)"]
+            
+        # 데이터프레임 변환 시 컬럼 길이 맞추기
+        cleaned_data = []
+        for row in data:
+            if len(row) == len(headers_list):
+                cleaned_data.append(row)
+            elif len(row) > len(headers_list):
+                cleaned_data.append(row[:len(headers_list)])
             else:
-                if cols_text:
-                    data.append(cols_text)
-                    
-        df = pd.DataFrame(data, columns=headers_list if headers_list else None)
+                # 모자란 컬럼은 빈 값으로 채움
+                cleaned_data.append(row + [''] * (len(headers_list) - len(row)))
+                
+        df = pd.DataFrame(cleaned_data, columns=headers_list)
         return df, None
 
     except Exception as e:
         return None, str(e)
-
 
 # --- 4. 메인 UI 구성 ---
 st.title("🏥 비급여 진료비 안내")
@@ -82,9 +96,12 @@ st.caption("의료법 제45조에 의거한 히즈메디병원 비급여 진료�
 with st.spinner("최신 비급여 정보를 불러오는 중..."):
     df, err = fetch_unpaid_data()
 
-if err or df is None:
-    st.error(f"데이터를 불러오는데 실패했습니다: {err}")
-    st.info("원래 페이지 직접 보기: http://hismedi.kr/etc/unpaid.asp")
+# 파싱 실패 시 안내 및 원본 링크 제공 (앱이 죽지 않도록 방어 코드 적용)
+if err or df is None or df.empty:
+    st.warning("⚠️ 실시간 페이지 구조 변경 등으로 데이터를 직접 불러오지 못했습니다.")
+    st.info(f"상세 에러 내용: {err}")
+    st.markdown("👉 정확한 내용은 아래 히즈메디병원 공식 홈페이지에서 확인하실 수 있습니다.")
+    st.markdown("[히즈메디병원 비급여진료비 페이지 바로가기](http://hismedi.kr/etc/unpaid.asp)")
 else:
     # --- 5. 초고속 검색 필터 ---
     search_term = st.text_input(
@@ -93,7 +110,7 @@ else:
         help="원하시는 비급여 항목이나 키워드를 입력하세요."
     )
 
-    # 검색어 필터링 (전체 컬럼 대상)
+    # 검색어 필터링
     if search_term:
         mask = df.apply(lambda row: row.astype(str).str.contains(search_term, case=False).any(), axis=1)
         filtered_df = df[mask]
@@ -102,7 +119,6 @@ else:
         filtered_df = df
 
     # --- 6. 모바일 최적화 데이터 표시 ---
-    # Streamlit의 dataframe/table을 활용하거나 컬럼별 검색 가능
     st.dataframe(
         filtered_df,
         use_container_width=True,
