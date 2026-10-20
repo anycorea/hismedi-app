@@ -3,7 +3,7 @@ import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 
-# --- 1. 페이지 설정 (PC 최적화 와이드 레이아웃) ---
+# --- 1. 페이지 설정 ---
 st.set_page_config(
     page_title="히즈메디병원 비급여 진료비 안내",
     page_icon="🏥",
@@ -11,7 +11,6 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# --- 2. 스타일링 적용 ---
 st.markdown("""
     <style>
     .block-container {
@@ -34,16 +33,16 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 3. 병원 홈페이지 실시간 데이터 연동 (안정형 크롤링) ---
+# --- 2. 실시간 크롤링 함수 (에러 내용 반환 기능 추가) ---
 @st.cache_data(ttl=300)
 def fetch_live_unpaid_data():
-    url = "http://hismedi.kr/etc/unpaid.asp"
+    # https로 변경하여 보안 접속 시도
+    url = "https://hismedi.kr/etc/unpaid.asp"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
     
     try:
-        # GET 방식으로 페이지 전체 소스 요청 (내부 탭 및 전체 데이터가 포함된 기본 페이지)
         response = requests.get(url, headers=headers, timeout=10)
         response.encoding = 'euc-kr'
         
@@ -51,7 +50,7 @@ def fetch_live_unpaid_data():
         tables = soup.find_all('table')
         
         if not tables:
-            return pd.DataFrame()
+            return None, "페이지 내에서 <table> 태그를 찾지 못했습니다."
             
         data = []
         headers_list = []
@@ -69,9 +68,8 @@ def fetch_live_unpaid_data():
                         data.append(cols_text)
                         
         if not data:
-            return pd.DataFrame()
+            return None, "테이블 내에 추출할 데이터 행이 없습니다."
             
-        # 기본 헤더가 없을 경우 병원 홈페이지 표준 컬럼 매칭
         if not headers_list or len(headers_list) < 5:
             headers_list = ["중분류", "소분류", "코드", "명칭", "구분", "비용", "최저비용", "최고비용", "치료재료대포함", "약제비포함", "특이사항", "최종변경일"]
             
@@ -85,24 +83,24 @@ def fetch_live_unpaid_data():
                 cleaned_data.append(row + [''] * (len(headers_list) - len(row)))
                 
         df = pd.DataFrame(cleaned_data, columns=headers_list)
-        return df
+        return df, None
 
     except Exception as e:
-        return pd.DataFrame()
+        return None, str(e)
 
-# --- 4. 타이틀 및 안내 문구 ---
+# --- 3. 메인 UI ---
 st.markdown("<h1>🏥 히즈메디병원 비급여 진료비 안내</h1>", unsafe_allow_html=True)
 st.markdown("<div class='sub-text'>의료법 제45조에 의거하여 병원 홈페이지와 실시간 연동되는 비급여 진료비용 고지 화면입니다.</div>", unsafe_allow_html=True)
 
-# 데이터 로드
-with st.spinner("병원 홈페이지에서 최신 비급여 정보를 실시간으로 불러오는 중..."):
-    df = fetch_live_unpaid_data()
+with st.spinner("병원 홈페이지 데이터를 실시간으로 불러오는 중..."):
+    df, err = fetch_live_unpaid_data()
 
-if df.empty:
-    st.warning("⚠️ 실시간 데이터를 가져오는 중 문제가 발생했습니다. 하단의 [즉시 새로고침] 버튼을 눌러주세요.")
-    st.markdown("🔗 [히즈메디병원 원본 페이지 직접 보기](http://hismedi.kr/etc/unpaid.asp)")
+if err or df is None or df.empty:
+    st.error(f"⚠️ 데이터를 불러오지 못했습니다. (원인: {err})")
+    st.info("💡 클라우드 서버(Streamlit Cloud)의 IP 대역이 병원 방화벽에 차단되었거나, 외부 스크래핑을 허용하지 않는 구조일 수 있습니다.")
+    st.markdown("👉 원본 페이지 확인: [히즈메디병원 비급여진료비 바로가기](http://hismedi.kr/etc/unpaid.asp)")
 else:
-    # --- 5. 상단 4대 대분류 탭 구성 ---
+    # 탭 구성
     tab_names = ["행위료", "치료재료대", "약제비", "제증명수수료"]
     tabs = st.tabs(tab_names)
 
@@ -110,14 +108,12 @@ else:
         with tabs[i]:
             st.markdown(f"### 📌 {tab_title} 실시간 안내")
             
-            # 대분류 컬럼이 있다면 해당 키워드로 필터링, 없으면 전체 데이터 활용
             tab_df = df.copy()
             if "대분류" in tab_df.columns:
                 matched_df = tab_df[tab_df["대분류"].str.contains(tab_title, na=False)]
                 if not matched_df.empty:
                     tab_df = matched_df
                     
-            # --- 6. 중분류 라디오 버튼 필터 ---
             target_col = tab_df.columns[0] if len(tab_df.columns) > 0 else None
             for col in tab_df.columns:
                 if "중분류" in col:
@@ -136,17 +132,15 @@ else:
             
             st.markdown("---")
             
-            # --- 7. 검색바 ---
             c1, c2 = st.columns([3, 1])
             with c2:
                 search_keyword = st.text_input(
                     "검색", 
-                    placeholder="검색어를 입력하세요 (예: 도수치료, MRI)", 
+                    placeholder="검색어 입력", 
                     key=f"search_{i}",
                     label_visibility="collapsed"
                 )
                 
-            # 필터 적용
             filtered_df = tab_df.copy()
             if selected_sub != "전체" and target_col:
                 filtered_df = filtered_df[filtered_df[target_col] == selected_sub]
@@ -155,23 +149,15 @@ else:
                 mask = filtered_df.apply(lambda row: row.astype(str).str.contains(search_keyword, case=False).any(), axis=1)
                 filtered_df = filtered_df[mask]
                 
-            st.caption(f"검색 결과: 총 **{len(filtered_df)}** 건 (실시간 연동됨)")
-            
-            # --- 8. 테이블 렌더링 ---
-            st.dataframe(
-                filtered_df,
-                use_container_width=True,
-                hide_index=True,
-                height=500
-            )
+            st.caption(f"검색 결과: 총 **{len(filtered_df)}** 건")
+            st.dataframe(filtered_df, use_container_width=True, hide_index=True, height=500)
 
-# --- 9. 하단 푸터 및 새로고침 버튼 ---
 st.markdown("---")
 col_f1, col_f2, col_f3 = st.columns([2, 1, 1])
 with col_f1:
     st.caption("※ 본 데이터는 히즈메디병원 공식 홈페이지와 실시간 연동되어 제공됩니다.")
 with col_f2:
-    if st.button("🔄 즉시 새로고침 (캐시 초기화)"):
+    if st.button("🔄 즉시 새로고침"):
         st.cache_data.clear()
         st.rerun()
 with col_f3:
