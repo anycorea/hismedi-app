@@ -33,7 +33,7 @@ hira_iframe_url = "https://www.hira.or.kr/re/diag/getNpayNotiCsuiSvcFom.do?yadmS
 crop_html = f"""
 <div style="overflow: hidden; width: 100%; height: 1350px; position: relative;">
     <iframe src="{hira_iframe_url}" 
-            style="position: absolute; top: -35px; left: 0; width: 100%; height: 1400px; border: none; scrolling: yes;">
+            style="position: absolute; top: -50px; left: 0; width: 100%; height: 1400px; border: none; scrolling: yes;">
     </iframe>
 </div>
 """
