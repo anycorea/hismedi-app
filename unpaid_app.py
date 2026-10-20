@@ -31,7 +31,7 @@ st.markdown("""
         margin-bottom: 0.5rem;
     }
     </style>
-""", unsafe_unsafe_html=True)
+""", unsafe_allow_html=True)
 
 
 # --- 3. 실시간 홈페이지 크롤링 및 캐싱 ---
