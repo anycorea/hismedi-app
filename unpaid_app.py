@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 
-# --- 1. 페이지 기본 설정 (모바일/PC 반응형) ---
+# --- 1. 페이지 설정 (PC 최적화 와이드 레이아웃) ---
 st.set_page_config(
     page_title="히즈메디병원 비급여 진료비 안내",
     page_icon="🏥",
@@ -9,103 +9,103 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# --- 2. 모바일 가독성 최적화 Custom CSS ---
+# --- 2. PC 화면 가독성 극대화 CSS ---
 st.markdown("""
     <style>
     .block-container {
-        padding-top: 1.5rem;
+        padding-top: 2rem;
         padding-bottom: 2rem;
-        padding-left: 1rem;
-        padding-right: 1rem;
+        padding-left: 2rem;
+        padding-right: 2rem;
     }
-    .stTextInput > div > div > input {
-        font-size: 16px;
-        border-radius: 8px;
-    }
-    .element-container {
-        margin-bottom: 0.5rem;
+    /* 테이블 행 높이 및 폰트 크기 최적화 */
+    dataframe {
+        font-size: 14px;
     }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 3. 비급여 진료비 데이터 정의 (필요시 항목 추가/수정 용이) ---
+# --- 3. 비급여 데이터 로드 (CSV 연동) ---
 @st.cache_data
-def get_unpaid_data():
-    data = [
-        # 도수치료 및 물리치료
-        {"분류": "도수치료", "항목명": "도수치료 (1일당)", "가격(원)": "100,000 ~ 150,000"},
-        {"분류": "도수치료", "항목명": "도수윈백운동치료 (1일당)", "가격(원)": "100,000 ~ 150,000"},
-        {"분류": "도수치료", "항목명": "도수운동치료 (1일당)", "가격(원)": "100,000 ~ 150,000"},
-        {"분류": "주사료", "항목명": "프롤로테라피 - 사지관절 (1부위)", "가격(원)": "50,000 ~ 80,000"},
-        {"분류": "주사료", "항목명": "프롤로테라피 - 사지관절 (2부위 이상)", "가격(원)": "50,000 ~ 80,000"},
+def load_unpaid_data():
+    try:
+        # UTF-8 또는 CP949 인코딩 자동 대응
+        df = pd.read_csv("unpaid_data.csv", encoding="utf-8")
+    except UnicodeDecodeError:
+        df = pd.read_csv("unpaid_data.csv", encoding="cp949")
+    except FileNotFoundError:
+        # 파일이 없을 경우 테스트용 샘플 데이터 반환
+        sample_data = [
+            {"구분": "행위료", "중분류": "상급병실료(차액)", "소분류": "상급병실료(차액)", "코드": "ABZ010001", "명칭": "상급병실료(1인실)", "구분상세": "상급병실료", "비용": "220,000", "최저비용": "-", "최고비용": "-", "특이사항": "", "최종변경일": "21.01.01"},
+            {"구분": "행위료", "중분류": "검사료", "소분류": "일반화학검사", "코드": "CZ2420000", "명칭": "아밀로이드 A", "구분상세": "", "비용": "50,000", "최저비용": "-", "최고비용": "-", "특이사항": "", "최종변경일": "23.08.11"},
+            {"구분": "치료재료대", "중분류": "처치 및 수술용", "소분류": "기타재료", "코드": "T001", "명칭": "특수 드레싱 재료", "구분상세": "치료재료", "비용": "15,000", "최저비용": "-", "최고비용": "-", "특이사항": "", "최종변경일": "24.01.01"},
+            {"구분": "약제비", "중분류": "주사제", "소분류": "원내약품", "코드": "D001", "명칭": "비급여 영양수액", "구분상세": "약제", "비용": "80,000", "최저비용": "-", "최고비용": "-", "특이사항": "", "최종변경일": "24.05.01"},
+            {"구분": "제증명수수료", "중분류": "제증명", "소분류": "진단서", "코드": "C001", "명칭": "일반진단서", "구분상세": "수수료", "비용": "20,000", "최저비용": "-", "최고비용": "-", "특이사항": "", "최종변경일": "22.01.01"}
+        ]
+        df = pd.DataFrame(sample_data)
+    return df
+
+df = load_unpaid_data()
+
+# --- 4. 메인 타이틀 ---
+st.title("🏥 히즈메디병원 비급여 진료비 안내")
+st.caption("의료법 제45조에 의거한 비급여 진료비용 안내입니다. (PC 최적화 버전)")
+
+# --- 5. 병원 홈페이지와 동일한 상단 탭 구성 ---
+tab_list = ["행위료", "치료재료대", "약제비", "제증명수수료"]
+tabs = st.tabs(tab_list)
+
+# 데이터에 '구분' 컬럼이 없으면 기본값 부여
+if "구분" not in df.columns:
+    df["구분"] = "행위료"
+
+for i, tab_name in enumerate(tab_list):
+    with tabs[i]:
+        # 해당 탭에 맞는 데이터 필터링
+        tab_df = df[df["구분"] == tab_name]
+        if tab_df.empty:
+            tab_df = df # 데이터가 부족할 경우 전체 표시 방어 코드
+            
+        # PC 화면에 어울리는 2단 레이아웃 (중분류 필터 + 키워드 검색창)
+        col1, col2 = st.columns([1, 3])
         
-        # 예방접종
-        {"분류": "예방접종", "항목명": "가다실 4가 프리필드시린지", "가격(원)": "180,000"},
-        {"분류": "예방접종", "항목명": "가다실 9가 프리필드시린지", "가격(원)": "변동문의"},
-        {"분류": "예방접종", "항목명": "서바릭스 프리필드시린지", "가격(원)": "150,000"},
-        {"분류": "예방접종", "항목명": "지씨플루쿼드리밸런트 (4가 독감)", "가격(원)": "35,000"},
-        {"분류": "예방접종", "항목명": "플루아릭스테트라 (4가 독감)", "가격(원)": "35,000"},
-        {"분류": "예방접종", "항목명": "부스트릭스 프리필드시린지 (Tdap)", "가격(원)": "50,000"},
-        {"분류": "예방접종", "항목명": "아다셀주 (Tdap)", "가격(원)": "50,000"},
-        {"분류": "예방접종", "항목명": "프리베나13주 (폐렴구균)", "가격(원)": "150,000"},
-        {"분류": "예방접종", "항목명": "하브릭스주 1.0ml (성인 A형간염)", "가격(원)": "80,000"},
+        with col1:
+            if "중분류" in tab_df.columns:
+                sub_categories = ["전체"] + list(tab_df["중분류"].dropna().unique())
+                selected_sub = st.selectbox(f"📂 [{tab_name}] 중분류 선택", sub_categories, key=f"sub_{i}")
+            else:
+                selected_sub = "전체"
+                
+        with col2:
+            search_query = st.text_input(
+                f"🔍 [{tab_name}] 항목명 또는 코드 검색", 
+                placeholder="예: MRI, 도수치료, 1인실, 수액 등", 
+                key=f"search_{i}"
+            )
+            
+        # 필터 적용
+        current_df = tab_df.copy()
+        if selected_sub != "전체" and "중분류" in current_df.columns:
+            current_df = current_df[current_df["중분류"] == selected_sub]
+            
+        if search_query:
+            mask = current_df.apply(lambda row: row.astype(str).str.contains(search_query, case=False).any(), axis=1)
+            current_df = current_df[mask]
+            
+        st.write(f"검색 결과: **{len(current_df)}** 건")
         
-        # MRI 검사
-        {"분류": "MRI", "항목명": "기본자기공명영상진단 - 두경부 (부비동/안와 등)", "가격(원)": "580,000"},
-        {"분류": "MRI", "항목명": "기본자기공명영상진단 - 척추 (경추/흉추/요천추)", "가격(원)": "600,000"},
-        {"분류": "MRI", "항목명": "기본자기공명영상진단 - 근골격계 (견관절/주관절 등 일반)", "가격(원)": "500,000"},
-        {"분류": "MRI", "항목명": "기본자기공명영상진단 - 근골격계 (제한적 MRI)", "가격(원)": "170,000"},
-        {"분류": "MRI", "항목명": "기본자기공명영상진단 - 뇌혈관 (Brain MRA)", "가격(원)": "400,000"},
-        {"분류": "MRI", "항목명": "기본자기공명영상진단 - 경부혈관 (Neck MRA)", "가격(원)": "400,000"},
-        
-        # 초음파 검사
-        {"분류": "초음파", "항목명": "단순초음파 (Ⅰ)", "가격(원)": "30,000"},
-        {"분류": "초음파", "항목명": "단순초음파 (Ⅱ)", "가격(원)": "50,000"},
-        {"분류": "초음파", "항목명": "갑상선·부갑상선 초음파", "가격(원)": "130,000"},
-        {"분류": "초음파", "항목명": "유방·액와부 초음파", "가격(원)": "150,000"},
-    ]
-    return pd.DataFrame(data)
+        # 넓고 깔끔한 PC용 와이드 데이터프레임 (모바일에서도 가로 스크롤로 대응됨)
+        st.dataframe(
+            current_df,
+            use_container_width=True,
+            hide_index=True,
+            height=500
+        )
 
-# --- 4. 메인 UI 구성 ---
-st.title("🏥 비급여 진료비 안내")
-st.caption("의료법 제45조에 의거한 히즈메디병원 비급여 진료비용 안내입니다.")
-
-# 데이터 불러오기
-df = get_unpaid_data()
-
-# --- 5. 카테고리 필터 및 검색창 ---
-col1, col2 = st.columns([1, 2])
-with col1:
-    categories = ["전체"] + list(df["분류"].unique())
-    selected_category = st.selectbox("📂 분류 선택", categories)
-
-with col2:
-    search_term = st.text_input(
-        "🔍 진료 항목 검색", 
-        placeholder="예: 도수치료, MRI, 가다실, 초음파 등",
-        help="원하시는 비급여 항목이나 키워드를 입력하세요."
-    )
-
-# --- 6. 필터링 로직 ---
-filtered_df = df.copy()
-
-if selected_category != "전체":
-    filtered_df = filtered_df[filtered_df["분류"] == selected_category]
-
-if search_term:
-    mask = filtered_df.apply(lambda row: row.astype(str).str.contains(search_term, case=False).any(), axis=1)
-    filtered_df = filtered_df[mask]
-
-st.write(f"검색 결과: **{len(filtered_df)}** 건")
-
-# --- 7. 모바일 최적화 테이블 표시 ---
-st.dataframe(
-    filtered_df,
-    use_container_width=True,
-    hide_index=True
-)
-
-# --- 8. 하단 안내 및 원본 링크 ---
+# --- 6. 하단 푸터 ---
 st.markdown("---")
-st.caption("※ 실제 진료비용은 환자의 상태나 진료 내용에 따라 차이가 있을 수 있습니다.")
-st.markdown("🔗 [히즈메디병원 공식 홈페이지 비급여진료비 원본 보기](http://hismedi.kr/etc/unpaid.asp)")
+col_f1, col_f2 = st.columns([3, 1])
+with col_f1:
+    st.caption("※ 실제 진료비용은 환자의 상태, 진료 내용 및 선택 사항에 따라 차이가 발생할 수 있습니다.")
+with col_f2:
+    st.markdown("🔗 [병원 원본 페이지 보기](http://hismedi.kr/etc/unpaid.asp)")
