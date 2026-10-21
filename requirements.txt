@@ -1,5 +1,5 @@
 # Streamlit & 데이터
-streamlit>=1.37,<1.40
+streamlit>=1.42,<2
 pandas>=2.2.2,<2.3
 numpy>=1.26
 
