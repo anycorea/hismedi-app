@@ -93,4 +93,4 @@ def download_photo(url):
 
 
 def fetch_doctors(sidx):
-    response = requests.get(f'{BASE_URL}/medical/section_view.asp',
+    response = requests.get(BASE_URL + '/medical/section_view.asp', params={'sidx': sidx}, timeout=(5, 15))
