@@ -5,15 +5,19 @@ from parking_kiosk_service import ParkingService
 
 st.set_page_config(page_title='히즈메디병원 · 주차등록',page_icon='🏥',layout='wide',initial_sidebar_state='collapsed')
 st.markdown('''<style>
-#MainMenu,footer,header[data-testid="stHeader"]{display:none!important}
-.stApp{background:#eef4f8;color:#17354b}.block-container{padding:1rem 1.4rem 2rem;max-width:1500px}
-h1{font-size:34px!important}h2{font-size:26px!important}
-div.stButton>button{min-height:64px;width:100%;font-size:23px!important;border-radius:12px;touch-action:manipulation}
+#MainMenu,footer,header[data-testid="stHeader"],[data-testid="stToolbar"],[data-testid="stAppDeployButton"],[data-testid="stStatusWidget"],[class*="viewerBadge"]{display:none!important}
+.stApp{background:#eef4f8;color:#17354b}.block-container{padding:.6rem 1.2rem 1rem;max-width:1400px}
+h1{font-size:30px!important;padding:.2rem 0!important}h2{font-size:24px!important;padding:.2rem 0!important}
+[data-testid="stVerticalBlock"]{gap:.65rem}
+[data-testid="stImage"] img{max-height:210px;object-fit:contain;border-radius:10px}
+.st-key-parking-choice button{border:2px solid #078aab;background:#e2f4f7;text-align:left}
+.st-key-parking-choice button p{font-size:21px!important}
+div.stButton>button{min-height:54px;width:100%;font-size:23px!important;border-radius:12px;touch-action:manipulation}
 div.stButton>button p{font-size:23px!important;font-weight:700}
-.kiosk-number{background:white;border:3px solid #078aab;border-radius:14px;padding:14px;text-align:center;font:700 46px/1.3 sans-serif;letter-spacing:10px;margin-bottom:12px}
-.kiosk-card{background:white;padding:20px;border-radius:14px;border:1px solid #ccdce5;margin-bottom:12px;font-size:23px;line-height:1.7}
-.kiosk-next{background:#fff4d6;border-left:6px solid #d99000;border-radius:10px;padding:14px 18px;font-size:25px;font-weight:800;margin:0 0 18px;line-height:1.5}
-.kiosk-step{font-size:24px;font-weight:800;margin:16px 0 10px;color:#17354b}
+.kiosk-number{background:white;border:3px solid #078aab;border-radius:14px;padding:8px;text-align:center;font:700 40px/1.3 sans-serif;letter-spacing:10px;margin-bottom:12px}
+.kiosk-card{background:white;padding:12px;border-radius:14px;border:1px solid #ccdce5;margin-bottom:12px;font-size:21px;line-height:1.4}
+.kiosk-next{background:#fff4d6;border-left:6px solid #d99000;border-radius:10px;padding:10px 14px;font-size:22px;font-weight:800;margin:0 0 10px;line-height:1.5}
+.kiosk-step{font-size:24px;font-weight:800;margin:8px 0 6px;color:#17354b}
 .kiosk-note{font-size:20px;color:#45616f;margin-bottom:18px}
 </style>''',unsafe_allow_html=True)
 
@@ -86,7 +90,7 @@ if result:
     st.stop()
 
 if st.session_state.selected:
-    next_action='④ 차량번호와 사진을 확인한 뒤, 오른쪽 아래 ‘3시간 할인 등록’을 눌러 주세요.'
+    next_action='④ 차량번호와 사진을 확인한 뒤, 오른쪽 ‘3시간 할인 등록’을 눌러 주세요.'
 elif st.session_state.cars:
     next_action='③ 오른쪽 목록에서 본인 차량번호를 눌러 주세요.'
 elif len(st.session_state.suffix)==4:
@@ -94,7 +98,7 @@ elif len(st.session_state.suffix)==4:
 else:
     next_action='① 왼쪽 숫자 버튼으로 차량번호 뒤 4자리를 입력해 주세요.'
 st.markdown('<div class="kiosk-next">'+next_action+'</div>',unsafe_allow_html=True)
-left,right=st.columns([1,1.25],gap='large')
+left,right=st.columns([.85,1.45],gap='medium')
 with left:
     st.subheader('① 차량번호 입력')
     st.markdown('<div class="kiosk-number">'+html.escape(st.session_state.suffix.ljust(4,'·'))+'</div>',unsafe_allow_html=True)
@@ -124,38 +128,44 @@ with right:
     if not st.session_state.cars and not st.session_state.notice:
         st.info('왼쪽 숫자 키패드로 차량번호 뒤 4자리를 입력해 주세요.')
     if st.session_state.cars:
-        st.caption('아래 차량번호를 눌러 선택하세요. 선택 후 입차 사진이 표시됩니다.')
-    for index,car in enumerate(st.session_state.cars):
-        label=f"{car['carNo']}  |  입차 {car.get('entryDateToString','')}"
-        if st.button(label,key='car_'+str(index),disabled=st.session_state.sending,use_container_width=True):
-            st.session_state.selected=car;st.session_state.request_record=None
-            st.session_state.photo=None;st.session_state.photo_note=''
-            try:
-                with st.spinner('입차 사진을 확인하고 있습니다.'):
-                    st.session_state.photo=service.entry_photo(car)
-                if st.session_state.photo is None:st.session_state.photo_note='등록된 입차 사진이 없습니다.'
-            except Exception:
-                st.session_state.photo_note='입차 사진을 불러오지 못했습니다. 차량번호와 입차시간을 확인해 주세요.'
-            st.rerun()
+        st.markdown('**본인 차량의 파란색 ‘이 차량 선택’ 버튼을 눌러 주세요.**')
+    with st.container(key='parking-choice'):
+        for index,car in enumerate(st.session_state.cars):
+            selected=st.session_state.selected
+            chosen=selected is not None and str(selected.get('id'))==str(car.get('id')) and selected.get('carNo')==car.get('carNo')
+            label=f"{'✓ 선택됨' if chosen else '👉 이 차량 선택'} · {car['carNo']}  |  입차 {car.get('entryDateToString','')}"
+            if st.button(label,key='car_'+str(index),disabled=st.session_state.sending,use_container_width=True):
+                st.session_state.selected=car;st.session_state.request_record=None
+                st.session_state.photo=None;st.session_state.photo_note=''
+                try:
+                    with st.spinner('입차 사진을 확인하고 있습니다.'):
+                        st.session_state.photo=service.entry_photo(car)
+                    if st.session_state.photo is None:st.session_state.photo_note='등록된 입차 사진이 없습니다.'
+                except Exception:
+                    st.session_state.photo_note='입차 사진을 불러오지 못했습니다. 차량번호와 입차시간을 확인해 주세요.'
+                st.rerun()
     car=st.session_state.selected
     if car:
-        st.markdown('<div class="kiosk-card"><b>'+html.escape(str(car['carNo']))+'</b><br>입차시간: '+html.escape(str(car.get('entryDateToString','')))+'</div>',unsafe_allow_html=True)
-        if st.session_state.photo:
-            st.image(st.session_state.photo,width=430)
-        elif st.session_state.photo_note:
-            st.caption(st.session_state.photo_note)
-        st.markdown('<div class="kiosk-step">④ 3시간 할인 등록</div>',unsafe_allow_html=True)
-        st.info('본인 차량이 맞으면 아래 ‘3시간 할인 등록’을 눌러 주세요.')
-        if st.button('3시간 할인 등록',type='primary',use_container_width=True,disabled=st.session_state.sending):
-            st.session_state.sending=True
-            st.markdown('<div id="hismedi-kiosk-state" data-state="busy" style="display:none"></div>',unsafe_allow_html=True)
-            try:
-                if st.session_state.request_record is None:
-                    st.session_state.request_record=service.prepare_record(st.session_state.suffix,car)
-                with st.spinner('할인을 등록하고 있습니다. 다시 누르지 말고 기다려 주세요.'):
-                    st.session_state.result=service.submit(st.session_state.suffix,car,st.session_state.request_record)
-            except Exception:
-                st.session_state.notice='조회 또는 기록 저장을 확인하지 못했습니다. 새로 조회하거나 원무팀에 문의해 주세요.'
-            finally:
-                st.session_state.sending=False
-            st.rerun()
+        photo_col,action_col=st.columns([1,1.1],gap='medium')
+        with photo_col:
+            st.markdown('<div class="kiosk-card"><b>'+html.escape(str(car['carNo']))+'</b><br>입차시간: '+html.escape(str(car.get('entryDateToString','')))+'</div>',unsafe_allow_html=True)
+            if st.session_state.photo:
+                st.image(st.session_state.photo,width=280)
+            elif st.session_state.photo_note:
+                st.caption(st.session_state.photo_note)
+        with action_col:
+            st.markdown('<div class="kiosk-step">④ 3시간 할인 등록</div>',unsafe_allow_html=True)
+            st.info('본인 차량이 맞으면 아래 ‘3시간 할인 등록’을 눌러 주세요.')
+            if st.button('3시간 할인 등록',type='primary',use_container_width=True,disabled=st.session_state.sending):
+                st.session_state.sending=True
+                st.markdown('<div id="hismedi-kiosk-state" data-state="busy" style="display:none"></div>',unsafe_allow_html=True)
+                try:
+                    if st.session_state.request_record is None:
+                        st.session_state.request_record=service.prepare_record(st.session_state.suffix,car)
+                    with st.spinner('할인을 등록하고 있습니다. 다시 누르지 말고 기다려 주세요.'):
+                        st.session_state.result=service.submit(st.session_state.suffix,car,st.session_state.request_record)
+                except Exception:
+                    st.session_state.notice='조회 또는 기록 저장을 확인하지 못했습니다. 새로 조회하거나 원무팀에 문의해 주세요.'
+                finally:
+                    st.session_state.sending=False
+                st.rerun()
