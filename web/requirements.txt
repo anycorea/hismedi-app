@@ -1,0 +1,5 @@
+streamlit==1.66.1
+requests
+gspread
+google-auth
+beautifulsoup4
