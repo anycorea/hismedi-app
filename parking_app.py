@@ -54,15 +54,18 @@ st.markdown("""
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
     }
     .header-box img {
-        max-width: 220px;
+        width: 150px;
+        max-width: 48%;
         height: auto;
         margin-bottom: 8px;
     }
     .main-title { 
-        font-size: 1.5rem !important; 
-        font-weight: 800; 
-        color: #1E293B !important; 
-        margin-top: 5px; 
+        font-size: clamp(32px, 8vw, 44px) !important;
+        line-height: 1.25;
+        letter-spacing: -1.2px; 
+        font-weight: 900; 
+        color: #075985 !important; 
+        margin-top: 10px; 
     }
     .sub-title { 
         font-size: 1rem; 
@@ -368,6 +371,16 @@ def submit_registration(raw_receipt, car_suffix, pe_id, car_full, entry_str, lot
             st.session_state.unsaved_record = None
     st.rerun()
 
+def restart_after_not_found():
+    # 입차 조회 실패 화면에서만 초기화합니다. 할인 요청 결과는 초기화하지 않습니다.
+    if st.session_state.get("result_state") != "not_found":
+        return
+    st.session_state.result_state = None
+    st.session_state.result_message = ""
+    for key in ("input_receipt_no", "input_car_no"):
+        st.session_state[key] = ""
+
+
 # ----------------------------------------------------
 # 4. 결과 화면 처리 (성공/중복/입차없음 상태 시 입력폼 가림)
 # ----------------------------------------------------
@@ -384,7 +397,9 @@ elif st.session_state.result_state == "already":
 
 elif st.session_state.result_state == "not_found":
     st.error(st.session_state.result_message)
-    st.info("💡 이 창을 닫고 번호를 다시 확인한 후 재시도해 주세요.")
+    st.info("차량번호를 확인한 뒤 아래 버튼을 눌러 다시 입력해 주세요.")
+    st.button("주차등록 다시 시도하기", type="primary", use_container_width=True,
+              on_click=restart_after_not_found)
 
 # ----------------------------------------------------
 # 5. 미완료 상태 시 기존 입력 및 등록 절차 실행
