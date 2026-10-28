@@ -2,11 +2,12 @@ name: Wake Streamlit Apps
 
 on:
   schedule:
-    # Daily at 06:07 and 06:37 KST (21:07 and 21:37 UTC the previous day)
-    - cron: '7,37 21 * * *'
+    # Four times daily: 06:07, 11:07, 16:07, 21:07 KST
+    # UTC schedule: 21:07 (previous day), 02:07, 07:07, 12:07
+    # GitHub Actions scheduling is best-effort and may be delayed or skipped.
+    - cron: '7 2,7,12,21 * * *'
   workflow_dispatch:
 
-# No repository checkout, commits, secrets, or write permission needed.
 permissions: {}
 
 concurrency:
@@ -23,119 +24,140 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install browser
+      - name: Install Playwright Chromium
         run: |
           python -m pip install --disable-pip-version-check playwright==1.55.0
           python -m playwright install --with-deps chromium
 
-      - name: Wake apps and verify rendered sessions
+      - name: Wake apps and verify working Streamlit sessions
         shell: bash
         run: |
           python - <<'PY'
+          import asyncio
           import os
           import re
           import time
           from datetime import datetime
           from urllib.parse import urlparse
           from zoneinfo import ZoneInfo
-          from playwright.sync_api import sync_playwright, Error
+          from playwright.async_api import async_playwright, Error
 
           APPS = [
               ('Vaccination', 'https://hismedi-vaccination.streamlit.app/'),
               ('Parking', 'https://hismedi-parking.streamlit.app/'),
               ('Drugs', 'https://hismedi-app-f9r3rufhcehlfn7zgq6qtq.streamlit.app/'),
+              ('Medical', 'https://hismedi-app-medical.streamlit.app/'),
+              ('Unpaid', 'https://hismedi-app-unpaid.streamlit.app/'),
+              ('Kiosk', 'https://hismedi-app-kiosk.streamlit.app/'),
           ]
-          WAKE = re.compile(r'^Yes, get this app back up!$', re.I)
+          WAKE = re.compile(r'Yes, get this app back up!', re.I)
+          ATTEMPTS = 3
+          ATTEMPT_SECONDS = 150
+          STABLE_SECONDS = 10
+          CHECK_INTERVAL = 2
+          PARALLEL = 3
 
-          def check(browser, name, url):
-              for attempt in range(1, 3):
-                  context = browser.new_context(locale='en-US')
-                  page = context.new_page()
-                  page.set_default_timeout(5000)
-                  streams = []
+          async def check(browser, semaphore, name, url):
+              async with semaphore:
+                  for attempt in range(1, ATTEMPTS + 1):
+                      context = await browser.new_context(locale='en-US')
+                      page = await context.new_page()
+                      page.set_default_timeout(6000)
+                      streams = []
 
-                  def track_socket(ws):
-                      if '/_stcore/stream' not in ws.url:
-                          return
-                      state = {'received': False, 'closed': False}
-                      streams.append(state)
-                      ws.on('framereceived', lambda _: state.update(received=True))
-                      ws.on('close', lambda _: state.update(closed=True))
+                      def track_socket(ws):
+                          if '/_stcore/stream' not in ws.url:
+                              return
+                          state = {'received': False, 'closed': False}
+                          streams.append(state)
+                          ws.on('framereceived', lambda _frame: state.update(received=True))
+                          ws.on('close', lambda _ws=None: state.update(closed=True))
 
-                  page.on('websocket', track_socket)
-                  ready_since = None
-                  clicked_at = 0
+                      page.on('websocket', track_socket)
+                      ready_since = None
+                      last_wake = 0.0
+                      try:
+                          print(f'{name}: attempt {attempt}/{ATTEMPTS}', flush=True)
+                          # A sleeping app may redirect to the Streamlit wake page.
+                          await page.goto(url, wait_until='domcontentloaded', timeout=60000)
+                          deadline = time.monotonic() + ATTEMPT_SECONDS
+                          while time.monotonic() < deadline:
+                              ready = False
+                              for frame in page.frames:
+                                  host = urlparse(frame.url).hostname or ''
+                                  trusted = (host.endswith('.streamlit.app') or
+                                             host == 'share.streamlit.io')
+                                  if not trusted:
+                                      continue
+                                  wake = frame.get_by_role('button', name=WAKE)
+                                  if await wake.count() and await wake.first.is_visible():
+                                      if time.monotonic() - last_wake >= 25:
+                                          try:
+                                              await wake.first.click(timeout=6000)
+                                              last_wake = time.monotonic()
+                                              print(f'{name}: wake button clicked', flush=True)
+                                          except Error:
+                                              pass
+                                      continue
+                                  if host != urlparse(url).hostname:
+                                      continue
+                                  app = frame.locator('[data-testid="stAppViewContainer"]')
+                                  content = frame.locator(
+                                      '[data-testid="stMarkdownContainer"], '
+                                      '[data-testid="stHeading"], '
+                                      '[data-testid="stTextInput"], '
+                                      '[data-testid="stForm"], '
+                                      '[data-testid="stButton"], '
+                                      '[data-testid="stDataFrame"]'
+                                  )
+                                  errors = frame.locator('[data-testid="stException"]')
+                                  visible_error = await errors.count() > 0 and await errors.first.is_visible()
+                                  rendered = any([await content.nth(i).is_visible()
+                                                  for i in range(min(await content.count(), 12))])
+                                  connected = any(s['received'] and not s['closed'] for s in streams)
+                                  if (await app.count() and await app.first.is_visible() and
+                                          rendered and connected and not visible_error):
+                                      ready = True
+                              if ready:
+                                  ready_since = ready_since or time.monotonic()
+                                  if time.monotonic() - ready_since >= STABLE_SECONDS:
+                                      print(f'{name}: PASS (rendered + active session)', flush=True)
+                                      return name, True
+                              else:
+                                  ready_since = None
+                              await page.wait_for_timeout(CHECK_INTERVAL * 1000)
+                          print(f'{name}: attempt timed out', flush=True)
+                      except (Error, asyncio.TimeoutError) as exc:
+                          print(f'{name}: navigation/session check failed ({type(exc).__name__})', flush=True)
+                      finally:
+                          await context.close()
+                      if attempt < ATTEMPTS:
+                          await asyncio.sleep(5 * attempt)
+                  print(f'::error::{name}: failed after {ATTEMPTS} attempts', flush=True)
+                  return name, False
+
+          async def main():
+              semaphore = asyncio.Semaphore(PARALLEL)
+              async with async_playwright() as p:
+                  browser = await p.chromium.launch(headless=True)
                   try:
-                      print(f'{name}: attempt {attempt}/2', flush=True)
-                      page.goto(url, wait_until='domcontentloaded', timeout=60000)
-                      deadline = time.monotonic() + 180
-                      while time.monotonic() < deadline:
-                          ready = False
-                          for frame in page.frames:
-                              host = urlparse(frame.url).hostname or ''
-                              trusted = (host.endswith('.streamlit.app') or
-                                         host == 'share.streamlit.io')
-                              if not trusted:
-                                  continue
-                              wake = frame.get_by_role('button', name=WAKE)
-                              if wake.count() and wake.first.is_visible():
-                                  if time.monotonic() - clicked_at > 30:
-                                      wake.first.click(timeout=5000)
-                                      clicked_at = time.monotonic()
-                                      print(f'{name}: wake requested', flush=True)
-                                  continue
-                              if host != urlparse(url).hostname:
-                                  continue
-                              app = frame.locator('[data-testid="stAppViewContainer"]')
-                              content = frame.locator(
-                                  '[data-testid="stMarkdownContainer"], '
-                                  '[data-testid="stHeading"], '
-                                  '[data-testid="stTextInput"], '
-                                  '[data-testid="stForm"]'
-                              )
-                              errors = frame.locator('[data-testid="stException"]')
-                              visible_error = any(errors.nth(i).is_visible()
-                                                  for i in range(errors.count()))
-                              rendered = any(content.nth(i).is_visible()
-                                             for i in range(content.count()))
-                              connected = any(s['received'] and not s['closed']
-                                              for s in streams)
-                              if (app.count() and app.first.is_visible() and
-                                      rendered and connected and not visible_error):
-                                  ready = True
-                          if ready:
-                              if ready_since is None:
-                                  ready_since = time.monotonic()
-                              if time.monotonic() - ready_since >= 15:
-                                  print(f'{name}: PASS (rendered, connected session)', flush=True)
-                                  return True
-                          else:
-                              ready_since = None
-                          page.wait_for_timeout(2000)
-                      print(f'{name}: session verification timed out', flush=True)
-                  except Error:
-                      # Do not log page text, screenshots, or potentially sensitive payloads.
-                      print(f'{name}: browser/navigation check failed', flush=True)
+                      results = await asyncio.gather(*[
+                          check(browser, semaphore, name, url) for name, url in APPS
+                      ])
                   finally:
-                      context.close()
-              print(f'::error::{name}: could not verify app readiness')
-              return False
+                      await browser.close()
+              stamp = datetime.now(ZoneInfo('Asia/Seoul')).strftime('%Y-%m-%d %H:%M:%S KST')
+              lines = [f'## Streamlit wake check: {stamp}', '',
+                       '| App | Result |', '| --- | --- |']
+              lines += [f'| {name} | {"PASS" if ok else "FAIL"} |' for name, ok in results]
+              lines += ['', 'PASS = visible Streamlit UI + active WebSocket session '
+                        'for at least 10 seconds. This is not a test of business functions.']
+              summary_path = os.environ.get('GITHUB_STEP_SUMMARY')
+              if summary_path:
+                  with open(summary_path, 'a', encoding='utf-8') as f:
+                      f.write('\n'.join(lines) + '\n')
+              print('\n'.join(lines), flush=True)
+              return 0 if all(ok for _, ok in results) else 1
 
-          results = []
-          with sync_playwright() as p:
-              browser = p.chromium.launch(headless=True)
-              try:
-                  for name, url in APPS:
-                      results.append((name, check(browser, name, url)))
-              finally:
-                  browser.close()
-
-          stamp = datetime.now(ZoneInfo('Asia/Seoul')).strftime('%Y-%m-%d %H:%M:%S KST')
-          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as f:
-              f.write(f'## Streamlit check: {stamp}\n\n')
-              for name, ok in results:
-                  f.write(f'- {name}: {"PASS" if ok else "FAIL"}\n')
-              f.write('\nPASS means a rendered Streamlit session with an active connection. '
-                      'It does not test database writes or registration features.\n')
-          raise SystemExit(0 if all(ok for _, ok in results) else 1)
+          raise SystemExit(asyncio.run(main()))
           PY
