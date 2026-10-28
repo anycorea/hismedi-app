@@ -3,6 +3,8 @@ import hashlib
 import html
 import json
 import uuid
+import time
+import re
 from zoneinfo import ZoneInfo
 
 import gspread
@@ -206,6 +208,55 @@ def update_result_record(record):
     )
 
 
+def save_result_with_retry(record, attempts=3):
+    """같은 기록ID의 결과 셀만 갱신하며 할인 등록은 호출하지 않습니다."""
+    for attempt in range(attempts):
+        try:
+            update_result_record(record)
+            return True
+        except Exception:
+            if attempt + 1 < attempts:
+                time.sleep(attempt + 1)
+    return False
+
+
+def verify_three_hour_discount(car_suffix, pe_id, car_full, entry_date, lot_area):
+    """응답이 불확실할 때 읽기 전용으로 확인합니다. 건수만으로 3시간을 확정하지 않습니다."""
+    for attempt in range(2):
+        try:
+            with get_authenticated_session() as session:
+                response = session.post(
+                    f"{BASE_URL}/discount/registration/listForDiscount",
+                    data={"iLotArea": lot_area, "entryDate": entry_date, "carNo": car_suffix},
+                    timeout=5,
+                )
+                response.raise_for_status()
+                items = response.json()
+            if not isinstance(items, list):
+                continue
+            for car in items:
+                if not isinstance(car, dict) or str(car.get("id")) != str(pe_id) or car.get("carNo") != car_full:
+                    continue
+                # 기존 API의 할인명과 건수를 함께 확인합니다. 알 수 없는 상세 형식은 추측하지 않습니다.
+                names = [car.get(key) for key in ("discountName", "dscntName", "dcName")]
+                positive_count = False
+                for key in ("dscnt_cnt", "dscntCnt", "discountCnt"):
+                    try:
+                        positive_count |= int(car.get(key) or 0) > 0
+                    except (TypeError, ValueError):
+                        pass
+                if positive_count and any(
+                    isinstance(name, str) and re.search(r"(?<![0-9])3\s*시간", name)
+                    and not re.search(r"취소|삭제|미적용|예정", name) for name in names
+                ):
+                    return True
+        except Exception:
+            pass
+        if attempt == 0:
+            time.sleep(1)
+    return False
+
+
 def get_authenticated_session():
     session = requests.Session()
     session.headers.update({
@@ -257,9 +308,13 @@ def submit_registration(raw_receipt, car_suffix, pe_id, car_full, entry_str, lot
             entry_str, str(pe_id), "3", "처리중", timestamp,
             "결과 갱신 전에는 할인 적용 여부를 확인해 주세요.",
         ]
-        pending = {"signature": signature, "record": record}
+        pending = {"signature": signature, "record": record, "save_attempted": False,
+                   "entry_date": now_kst()[:10].replace("-", "")}
         st.session_state.pending_request = pending
     record = pending["record"]
+    if pending.get("save_attempted") and st.session_state.get("result_state") in ("success", "check_required"):
+        st.rerun()
+        return
     try:
         ensure_request_logged(record)
     except Exception:
@@ -271,11 +326,14 @@ def submit_registration(raw_receipt, car_suffix, pe_id, car_full, entry_str, lot
     note = "주차 시스템에서 실제 할인 적용 여부 확인 필요"
     message = "주차 할인 처리 결과를 확인하지 못했습니다. 중복 신청하지 마시고 원무팀에 문의해 주세요."
     try:
+        if pending.get("save_attempted"):
+            raise RuntimeError("이미 전송한 할인 요청은 반복하지 않습니다.")
         with get_authenticated_session() as save_session:
             save_payload = {
                 "peId": pe_id, "discountType": "2", "saveCnt": "1", "iCardType": "0",
                 "carNo": car_full, "iLotArea": lot_area, "acPlate2": "", "memo": "",
             }
+            pending["save_attempted"] = True
             response = save_session.post(
                 f"{BASE_URL}/discount/registration/save", data=save_payload, timeout=5
             )
@@ -290,16 +348,24 @@ def submit_registration(raw_receipt, car_suffix, pe_id, car_full, entry_str, lot
     except Exception:
         note = "처리 오류; 실제 적용 여부 확인 필요"
 
+    if state != "success" and pending.get("save_attempted"):
+        with st.spinner("할인 적용 여부를 다시 확인하고 있습니다. 창을 닫지 말고 기다려 주세요."):
+            verified = verify_three_hour_discount(
+                car_suffix, pe_id, car_full, pending["entry_date"], lot_area
+            )
+        if verified:
+            state, status = "success", "등록완료"
+            note = "동일 입차ID·차량번호의 3시간 할인명 및 할인건수 재조회 확인"
+            message = f"🎉 [{car_full}] 차량의 3시간 할인 적용을 재조회로 확인했습니다."
+
     # 먼저 결과 화면으로 잠금. DB 재시도는 할인 요청과 분리합니다.
     record[8:11] = [status, now_kst(), note]
     st.session_state.result_state = state
     st.session_state.result_message = message
     st.session_state.unsaved_record = record
-    try:
-        update_result_record(record)
-        st.session_state.unsaved_record = None
-    except Exception:
-        pass  # 결과 화면에서 기록만 재저장할 수 있습니다.
+    with st.spinner("처리 결과 기록을 저장하고 있습니다. 잠시만 기다려 주세요."):
+        if save_result_with_retry(record):
+            st.session_state.unsaved_record = None
     st.rerun()
 
 # ----------------------------------------------------
@@ -307,7 +373,7 @@ def submit_registration(raw_receipt, car_suffix, pe_id, car_full, entry_str, lot
 # ----------------------------------------------------
 if st.session_state.result_state == "success":
     st.success(st.session_state.result_message)
-    st.info("💡 처리가 완료되었습니다. 이 창을 닫아주시기 바랍니다.")
+    st.info("💡 3시간 할인 적용이 확인되었습니다. 주차시간에 따라 추가 요금이 발생할 수 있습니다.")
 
 elif st.session_state.result_state == "check_required":
     st.warning(st.session_state.result_message)
@@ -402,15 +468,13 @@ else:
 
 # 할인 재요청 없이 기록 갱신만 재시도합니다.
 if st.session_state.get("unsaved_record"):
-    st.warning("처리 결과 기록이 아직 저장되지 않았습니다. 아래 버튼을 눌러 주세요.")
+    st.warning("할인 처리 결과의 기록 저장에 실패했습니다. 할인 등록을 다시 하지 말고 아래 ‘처리 기록 다시 저장’을 눌러 주세요.")
     if st.button("처리 기록 다시 저장", use_container_width=True):
-        try:
-            update_result_record(st.session_state.unsaved_record)
-        except Exception:
-            st.error("기록을 저장하지 못했습니다. 이 화면을 유지하고 원무팀에 문의해 주세요.")
-        else:
+        if save_result_with_retry(st.session_state.unsaved_record):
             st.session_state.unsaved_record = None
             st.rerun()
+        else:
+            st.error("기록을 저장하지 못했습니다. 이 화면을 유지하고 원무팀에 문의해 주세요.")
 
 # Enter 키 입력 시 다음 Input 포커스 자동 이동
 components.html("""<script>
