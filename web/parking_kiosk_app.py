@@ -12,6 +12,8 @@ div.stButton>button{min-height:64px;width:100%;font-size:23px!important;border-r
 div.stButton>button p{font-size:23px!important;font-weight:700}
 .kiosk-number{background:white;border:3px solid #078aab;border-radius:14px;padding:14px;text-align:center;font:700 46px/1.3 sans-serif;letter-spacing:10px;margin-bottom:12px}
 .kiosk-card{background:white;padding:20px;border-radius:14px;border:1px solid #ccdce5;margin-bottom:12px;font-size:23px;line-height:1.7}
+.kiosk-next{background:#fff4d6;border-left:6px solid #d99000;border-radius:10px;padding:14px 18px;font-size:25px;font-weight:800;margin:0 0 18px;line-height:1.5}
+.kiosk-step{font-size:24px;font-weight:800;margin:16px 0 10px;color:#17354b}
 .kiosk-note{font-size:20px;color:#45616f;margin-bottom:18px}
 </style>''',unsafe_allow_html=True)
 
@@ -63,7 +65,7 @@ def digit(value):
     st.session_state.photo=None;st.session_state.photo_note=''
 
 st.title('히즈메디병원 · 주차등록')
-st.markdown('<div class="kiosk-note">차량번호 뒤 4자리 조회 → 차량 선택 → 3시간 할인 등록</div>',unsafe_allow_html=True)
+st.markdown('<div class="kiosk-note">① 번호 입력 → ② 차량 조회 → ③ 차량 선택 → ④ 할인 등록</div>',unsafe_allow_html=True)
 result=st.session_state.result
 st.markdown('<div id="hismedi-kiosk-state" data-state="'+('hold' if result and result.get('record') is not None else 'done' if result else 'ready')+'" style="display:none"></div>',unsafe_allow_html=True)
 if result:
@@ -83,13 +85,23 @@ if result:
         reset();st.rerun()
     st.stop()
 
+if st.session_state.selected:
+    next_action='④ 차량번호와 사진을 확인한 뒤, 오른쪽 아래 ‘3시간 할인 등록’을 눌러 주세요.'
+elif st.session_state.cars:
+    next_action='③ 오른쪽 목록에서 본인 차량번호를 눌러 주세요.'
+elif len(st.session_state.suffix)==4:
+    next_action='② 왼쪽 아래 ‘차량 조회’ 버튼을 눌러 주세요.'
+else:
+    next_action='① 왼쪽 숫자 버튼으로 차량번호 뒤 4자리를 입력해 주세요.'
+st.markdown('<div class="kiosk-next">'+next_action+'</div>',unsafe_allow_html=True)
 left,right=st.columns([1,1.25],gap='large')
 with left:
-    st.subheader('차량번호 입력')
+    st.subheader('① 차량번호 입력')
     st.markdown('<div class="kiosk-number">'+html.escape(st.session_state.suffix.ljust(4,'·'))+'</div>',unsafe_allow_html=True)
     for row in [('1','2','3'),('4','5','6'),('7','8','9'),('clear','0','back')]:
         for col,key in zip(st.columns(3),row):
             col.button({'clear':'전체삭제','back':'⌫'}.get(key,key),key='key_'+key,on_click=digit,args=(key,),disabled=st.session_state.sending,use_container_width=True)
+    st.markdown('<div class="kiosk-step">② 입력한 번호로 차량 조회</div>',unsafe_allow_html=True)
     if st.button('차량 조회',type='primary',use_container_width=True,disabled=len(st.session_state.suffix)!=4 or st.session_state.sending):
         st.session_state.sending=True
         try:
@@ -107,10 +119,12 @@ with left:
     if st.button('입력 초기화',disabled=st.session_state.sending):
         reset();st.rerun()
 with right:
-    st.subheader('조회 결과 · 할인정보 등록')
+    st.subheader('③ 차량 선택')
     if st.session_state.notice:st.info(st.session_state.notice)
     if not st.session_state.cars and not st.session_state.notice:
         st.info('왼쪽 숫자 키패드로 차량번호 뒤 4자리를 입력해 주세요.')
+    if st.session_state.cars:
+        st.caption('아래 차량번호를 눌러 선택하세요. 선택 후 입차 사진이 표시됩니다.')
     for index,car in enumerate(st.session_state.cars):
         label=f"{car['carNo']}  |  입차 {car.get('entryDateToString','')}"
         if st.button(label,key='car_'+str(index),disabled=st.session_state.sending,use_container_width=True):
@@ -130,7 +144,8 @@ with right:
             st.image(st.session_state.photo,width=430)
         elif st.session_state.photo_note:
             st.caption(st.session_state.photo_note)
-        st.info('선택한 차량에 3시간 할인을 등록합니다.')
+        st.markdown('<div class="kiosk-step">④ 3시간 할인 등록</div>',unsafe_allow_html=True)
+        st.info('본인 차량이 맞으면 아래 ‘3시간 할인 등록’을 눌러 주세요.')
         if st.button('3시간 할인 등록',type='primary',use_container_width=True,disabled=st.session_state.sending):
             st.session_state.sending=True
             st.markdown('<div id="hismedi-kiosk-state" data-state="busy" style="display:none"></div>',unsafe_allow_html=True)
