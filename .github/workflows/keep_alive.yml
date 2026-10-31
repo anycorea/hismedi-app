@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   wake:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - name: Set up Python
@@ -126,38 +126,3 @@ jobs:
                               else:
                                   ready_since = None
                               await page.wait_for_timeout(CHECK_INTERVAL * 1000)
-                          print(f'{name}: attempt timed out', flush=True)
-                      except (Error, asyncio.TimeoutError) as exc:
-                          print(f'{name}: navigation/session check failed ({type(exc).__name__})', flush=True)
-                      finally:
-                          await context.close()
-                      if attempt < ATTEMPTS:
-                          await asyncio.sleep(5 * attempt)
-                  print(f'::error::{name}: failed after {ATTEMPTS} attempts', flush=True)
-                  return name, False
-
-          async def main():
-              semaphore = asyncio.Semaphore(PARALLEL)
-              async with async_playwright() as p:
-                  browser = await p.chromium.launch(headless=True)
-                  try:
-                      results = await asyncio.gather(*[
-                          check(browser, semaphore, name, url) for name, url in APPS
-                      ])
-                  finally:
-                      await browser.close()
-              stamp = datetime.now(ZoneInfo('Asia/Seoul')).strftime('%Y-%m-%d %H:%M:%S KST')
-              lines = [f'## Streamlit wake check: {stamp}', '',
-                       '| App | Result |', '| --- | --- |']
-              lines += [f'| {name} | {"PASS" if ok else "FAIL"} |' for name, ok in results]
-              lines += ['', 'PASS = visible Streamlit UI + active WebSocket session '
-                        'for at least 10 seconds. This is not a test of business functions.']
-              summary_path = os.environ.get('GITHUB_STEP_SUMMARY')
-              if summary_path:
-                  with open(summary_path, 'a', encoding='utf-8') as f:
-                      f.write('\n'.join(lines) + '\n')
-              print('\n'.join(lines), flush=True)
-              return 0 if all(ok for _, ok in results) else 1
-
-          raise SystemExit(asyncio.run(main()))
-          PY
