@@ -52,7 +52,7 @@ jobs:
           ]
           WAKE = re.compile(r'Yes, get this app back up!', re.I)
           ATTEMPTS = 3
-          ATTEMPT_SECONDS = 150
+          ATTEMPT_SECONDS = 75
           STABLE_SECONDS = 10
           CHECK_INTERVAL = 2
           PARALLEL = 3
@@ -76,10 +76,13 @@ jobs:
                       page.on('websocket', track_socket)
                       ready_since = None
                       last_wake = 0.0
+                      last_http = None
+                      seen = {'wake': False, 'app': False, 'content': False, 'socket': False, 'error': False}
                       try:
                           print(f'{name}: attempt {attempt}/{ATTEMPTS}', flush=True)
                           # A sleeping app may redirect to the Streamlit wake page.
-                          await page.goto(url, wait_until='domcontentloaded', timeout=60000)
+                          response = await page.goto(url, wait_until='domcontentloaded', timeout=30000)
+                          last_http = response.status if response else None
                           deadline = time.monotonic() + ATTEMPT_SECONDS
                           while time.monotonic() < deadline:
                               ready = False
@@ -91,6 +94,7 @@ jobs:
                                       continue
                                   wake = frame.get_by_role('button', name=WAKE)
                                   if await wake.count() and await wake.first.is_visible():
+                                      seen['wake'] = True
                                       if time.monotonic() - last_wake >= 25:
                                           try:
                                               await wake.first.click(timeout=6000)
@@ -115,6 +119,10 @@ jobs:
                                   rendered = any([await content.nth(i).is_visible()
                                                   for i in range(min(await content.count(), 12))])
                                   connected = any(s['received'] and not s['closed'] for s in streams)
+                                  seen['app'] |= bool(await app.count() and await app.first.is_visible())
+                                  seen['content'] |= rendered
+                                  seen['socket'] |= connected
+                                  seen['error'] |= visible_error
                                   if (await app.count() and await app.first.is_visible() and
                                           rendered and connected and not visible_error):
                                       ready = True
@@ -130,6 +138,15 @@ jobs:
                       except (Error, asyncio.TimeoutError) as exc:
                           print(f'{name}: navigation/session check failed ({type(exc).__name__})', flush=True)
                       finally:
+                          # Record only diagnostic metadata, not page text or private values.
+                          host = urlparse(page.url).hostname or 'unknown'
+                          is_target = host == urlparse(url).hostname
+                          is_auth = host == 'share.streamlit.io'
+                          print(f'{name}: diagnostic attempt={attempt} '
+                                f'http={last_http} target_host={is_target} auth_host={is_auth} '
+                                f'wake={seen["wake"]} app={seen["app"]} '
+                                f'content={seen["content"]} websocket={seen["socket"]} '
+                                f'app_error={seen["error"]}', flush=True)
                           await context.close()
                       if attempt < ATTEMPTS:
                           await asyncio.sleep(5 * attempt)
