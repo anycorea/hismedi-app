@@ -2,7 +2,7 @@ name: Wake Streamlit Apps
 
 on:
   schedule:
-    # KST 06:07, 11:07, 16:07, 21:07 (UTC the previous/same day)
+    # KST 06:07 / 11:07 / 16:07 / 21:07
     - cron: '7 21,2,7,12 * * *'
   workflow_dispatch:
 
@@ -21,75 +21,115 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: '3.12'
+
       - name: Install Chromium
         run: |
           python -m pip install --disable-pip-version-check playwright==1.55.0
           python -m playwright install --with-deps chromium
-      - name: Wake Streamlit apps
+
+      - name: Wake all Streamlit apps
         shell: bash
         run: |
           python - <<'PY'
           import asyncio
+          import os
           import re
-          from playwright.async_api import async_playwright, TimeoutError as BrowserTimeout
-          
+          from datetime import datetime
+          from zoneinfo import ZoneInfo
+          from playwright.async_api import async_playwright
+
           APPS = [
-              ("Vaccination", "https://hismedi-vaccination.streamlit.app/"),
-              ("Parking", "https://hismedi-parking.streamlit.app/"),
-              ("Drugs", "https://hismedi-app-f9r3rufhcehlfn7zgq6qtq.streamlit.app/"),
-              ("Medical", "https://hismedi-app-medical.streamlit.app/"),
-              ("Unpaid", "https://hismedi-app-unpaid.streamlit.app/"),
-              ("Kiosk", "https://hismedi-app-kiosk.streamlit.app/"),
+              ("인증", "https://hismedi-app-nlyfdy5m68hfmnafchqbrr.streamlit.app/"),
+              ("모바일진료예약", "https://hismedi-app-2tjy6mrzdvuu2ohmb6cihq.streamlit.app/"),
+              ("주요업무보고", "https://hismedi-app-akdbdih2rgeo5pzzkvj2ig.streamlit.app/"),
+              ("약무업무", "https://hismedi-app-f9r3rufhcehlfn7zgq6qtq.streamlit.app/"),
+              ("인사관리", "https://hismedi-app-a3cyqhakd7fpgnnn3ugezs.streamlit.app/"),
+              ("의료진안내", "https://hismedi-app-medical.streamlit.app/"),
+              ("뉴스스크랩", "https://hismedi-app-vsvzyqge54k9qb6vnfl8n2.streamlit.app/"),
+              ("모바일주차등록", "https://hismedi-parking.streamlit.app/"),
+              ("내과처방현황", "https://hismedi-app-pnzu8rxkdsryeq2www5hu8.streamlit.app/"),
+              ("진료실적보고", "https://hismedi-app-report.streamlit.app/"),
+              ("백신통계", "https://hismedi-app-stat-vac.streamlit.app/"),
+              ("비급여안내", "https://hismedi-app-unpaid.streamlit.app/"),
+              ("예방접종예진표", "https://hismedi-vaccination.streamlit.app/"),
+              ("키오스크", "https://hismedi-app-kiosk.streamlit.app/"),
+              ("주간업무보고", "https://hismedi-app-h6jc8egutxhnhafthftq89.streamlit.app/"),
           ]
-          
-          async def wake(browser, name, url):
-              for attempt in (1, 2):
-                  context = await browser.new_context(locale="en-US")
-                  page = await context.new_page()
-                  try:
+          WAKE_BUTTON = re.compile(r"get this app back up", re.I)
+
+          async def check_one(browser, sem, name, url):
+              async with sem:
+                  for attempt in (1, 2):
+                      context = await browser.new_context(locale="en-US")
+                      page = await context.new_page()
+                      status = None
                       try:
-                          response = await page.goto(url, wait_until="domcontentloaded", timeout=20000)
-                      except BrowserTimeout:
-                          response = None  # The page may still be loading; check its buttons.
-                      for _ in range(12):
-                          for frame in page.frames:
-                              button = frame.get_by_role("button", name=re.compile(r"get this app back up", re.I))
-                              if await button.count() and await button.first.is_visible():
-                                  await button.first.click(timeout=5000)
-                                  print(f"{name}: wake button clicked", flush=True)
-                                  await page.wait_for_timeout(3500)
-                                  return name, True
-                          if response and response.status < 400 and page.url.startswith(url.rstrip('/')):
-                              print(f"{name}: page opened ({response.status})", flush=True)
-                              return name, True
-                          await page.wait_for_timeout(1000)
-                      print(f"{name}: attempt {attempt} did not open", flush=True)
-                  except Exception as exc:
-                      print(f"{name}: attempt {attempt} error ({type(exc).__name__})", flush=True)
-                  finally:
-                      await context.close()
-                  if attempt == 1:
-                      await asyncio.sleep(3)
-              print(f"::warning::{name}: could not confirm page access or wake click", flush=True)
-              return name, False
-          
+                          try:
+                              response = await page.goto(url, wait_until="domcontentloaded", timeout=25000)
+                              status = response.status if response else None
+                          except Exception:
+                              pass  # Continue checking a slow-loading page.
+
+                          if status in (404, 410):
+                              print(f"{name}: SKIPPED (HTTP {status}; possibly removed)", flush=True)
+                              return name, "SKIPPED", f"HTTP {status}"
+
+                          # A sleeping app may display the wake button inside a frame.
+                          clicked = False
+                          for _ in range(18):
+                              for frame in page.frames:
+                                  button = frame.get_by_role("button", name=WAKE_BUTTON)
+                                  if await button.count() and await button.first.is_visible():
+                                      await button.first.click(timeout=5000)
+                                      clicked = True
+                                      print(f"{name}: wake button clicked", flush=True)
+                                      break
+                              if clicked:
+                                  break
+                              # Only count a rendered Streamlit app as already awake.
+                              for frame in page.frames:
+                                  app = frame.locator('[data-testid="stAppViewContainer"]')
+                                  if await app.count() and await app.first.is_visible():
+                                      print(f"{name}: OK (Streamlit screen visible)", flush=True)
+                                      return name, "OK", "App screen visible"
+                              await page.wait_for_timeout(1000)
+
+                          if clicked:
+                              # Confirm the wake request was made; server start may take longer.
+                              print(f"{name}: REQUESTED (wake clicked)", flush=True)
+                              return name, "REQUESTED", "Wake button clicked"
+                          print(f"{name}: attempt {attempt}/2 not confirmed (HTTP {status})", flush=True)
+                      except Exception as exc:
+                          print(f"{name}: attempt {attempt}/2 error ({type(exc).__name__})", flush=True)
+                      finally:
+                          await context.close()
+                      if attempt == 1:
+                          await asyncio.sleep(2)
+                  print(f"::warning::{name}: not confirmed; check this app manually", flush=True)
+                  return name, "CHECK", "Could not confirm"
+
           async def main():
+              sem = asyncio.Semaphore(3)
               async with async_playwright() as p:
                   browser = await p.chromium.launch(headless=True)
                   try:
-                      # Three browsers at once, without slow WebSocket/UI validation.
-                      sem = asyncio.Semaphore(3)
-                      async def limited(name, url):
-                          async with sem:
-                              return await wake(browser, name, url)
-                      results = await asyncio.gather(*(limited(n, u) for n, u in APPS))
+                      results = await asyncio.gather(*(
+                          check_one(browser, sem, name, url) for name, url in APPS
+                      ))
                   finally:
                       await browser.close()
-              for name, ok in results:
-                  print(f"{name}: {'OK' if ok else 'CHECK NEEDED'}", flush=True)
-              # A single restricted client (e.g. kiosk) must not cause false all-jobs-failed emails.
-              # Warnings are still shown for any app that could not be reached.
+              stamp = datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y-%m-%d %H:%M KST")
+              lines = [f"## Streamlit wake: {stamp}", "", "| App | Status | Note |", "| --- | --- | --- |"]
+              lines.extend(f"| {n} | {s} | {detail} |" for n, s, detail in results)
+              lines.extend(["", "OK = app screen visible; REQUESTED = wake button clicked (not proof of full startup).",
+                            "SKIPPED = app appears removed; CHECK = no confirmation. Other apps continue regardless."])
+              summary = "\n".join(lines) + "\n"
+              print(summary, flush=True)
+              if os.environ.get("GITHUB_STEP_SUMMARY"):
+                  with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
+                      f.write(summary)
+              # Keep other apps running even if one is deleted, private, or temporarily down.
               return 0
-          
+
           raise SystemExit(asyncio.run(main()))
           PY
