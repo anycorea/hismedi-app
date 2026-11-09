@@ -62,6 +62,11 @@ st.markdown("""<style>
 [data-testid="stSidebar"] [data-testid="stWidgetLabel"] p {font-size:16px!important;font-weight:750!important}
 [data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] {font-size:15px!important}
 .report-note{font-size:13px;color:#64748b;margin-top:.5rem}
+/* Footer credit is independent of Streamlit Community Cloud branding. */
+.anycorea-credit {position:fixed;bottom:12px;right:16px;z-index:5;
+ background:rgba(255,255,255,.94);color:#617084;font-size:12px;
+ padding:5px 10px;border:1px solid #dce3ec;border-radius:7px;
+ box-shadow:0 1px 4px rgba(0,0,0,.05);pointer-events:none}
 </style>""", unsafe_allow_html=True)
 
 
@@ -312,6 +317,11 @@ def total_row(rows, date_label, label, category="합계"):
             **{k: sum(int(r.get(k, 0)) for r in rows) for k in NUMERIC}}
 
 
+def has_any_activity(row):
+    """Hide zero-only individual/provider rows, but keep totals calculable."""
+    return any(number(row.get(field, 0)) != 0 for field in NUMERIC)
+
+
 def report_data(clinical, exams, start, end, dept, doctor, master, user):
     frame = clinical[(clinical["일자"] >= start) & (clinical["일자"] <= end)].copy()
     exam = exams[(exams["일자"] >= start) & (exams["일자"] <= end)].copy()
@@ -341,6 +351,8 @@ def report_data(clinical, exams, start, end, dept, doctor, master, user):
             if r["진료과"] == "건강검진" and r["의사명"] == "최홍우":
                 r["외래"] = 0
         shown = []
+        # 개인 실적이 모두 0이면 행을 숨깁니다. 합계 계산은 원본 자료를 유지합니다.
+        filtered = [r for r in filtered if has_any_activity(r)]
         for dept_name in order_departments({r["진료과"] for r in filtered}):
             group = sorted((r for r in filtered if r["진료과"] == dept_name),
                            key=lambda r: (r["의사명"] == NO_PROVIDER, r["의사명"]))
@@ -372,7 +384,9 @@ def report_data(clinical, exams, start, end, dept, doctor, master, user):
     # 건강검진 과 소속 의사는 최홍우의 임상 외래 환자수를 노출하지 않습니다.
     if own_dept == "건강검진" and own_name == "최홍우":
         own["외래"] = 0
-    visible = [own, dept_total]
+    visible = ([own] if has_any_activity(own) else [])
+    if has_any_activity(dept_total):
+        visible.append(dept_total)
     if exam_record is not None:
         exam_record["_class"] = "exam"
         visible.append(exam_record)
@@ -474,6 +488,7 @@ if user is None:
                 st.session_state["login_pin"] = str(account["PIN"])
                 st.session_state["login_name"] = str(account["의사"])
                 st.rerun()
+    st.markdown('<div class="anycorea-credit">Created by anycorea</div>', unsafe_allow_html=True)
     st.stop()
 
 is_master = user["권한"] == "master"
@@ -531,7 +546,7 @@ with st.sidebar:
         dept_choice, doctor_choice = user["진료과"], user["의사"]
         st.caption(f"진료과: {dept_choice}")
         st.caption("조회: 본인 실적 / 소속 진료과 합계 / 병원 전체 합계")
-    if st.button("🔄 구글시트 데이터 동기화", use_container_width=True):
+    if st.button("🔄 데이터 동기화", use_container_width=True):
         load_source.clear()
         load_accounts.clear()
         st.rerun()
@@ -594,15 +609,18 @@ if is_master and active_menu == "⚙️ 권한관리":
         action = st.radio("관리 작업", ["계정 추가", "계정 수정", "계정 삭제"], horizontal=True)
         if action == "계정 추가":
             with st.form("account_create"):
-                dept = st.selectbox("진료과", ["전체"] + depts)
+                dept = st.selectbox("진료과", ["전체"] + depts + ["➕ 새 진료과 추가"])
+                new_dept = st.text_input("새 진료과 이름 (새 진료과 추가 선택 시에만 입력)")
                 name = st.text_input("이름")
                 pin = st.text_input("PIN (4자리)", type="password", max_chars=4)
                 role = st.selectbox("권한", ["user", "master"])
                 submitted = st.form_submit_button("계정 추가")
             if submitted:
                 name = name.strip()
+                if dept == "➕ 새 진료과 추가":
+                    dept = dept_normalize(new_dept)
                 duplicate = accounts[(accounts["진료과"] == dept) & (accounts["의사"] == name)]
-                if not name or not pin_valid(pin) or (role == "user" and dept == "전체"):
+                if not dept or not name or not pin_valid(pin) or (role == "user" and dept == "전체"):
                     st.error("진료과와 이름, 4자리 PIN을 확인하세요. 일반 사용자는 소속 진료과를 지정해야 합니다.")
                 elif pin in accounts["PIN"].tolist() or not duplicate.empty:
                     st.error("중복된 PIN 또는 계정입니다.")
@@ -663,3 +681,9 @@ if is_master and active_menu == "⚙️ 권한관리":
                             st.rerun()
                         except Exception as ex:
                             st.error(f"삭제 실패: {ex}")
+
+# 제작자 표시는 Streamlit 자체 도구/배지와 별개로 제공합니다.
+st.markdown(
+    '<div class="anycorea-credit" aria-label="Developer credit">Created by anycorea</div>',
+    unsafe_allow_html=True,
+)
