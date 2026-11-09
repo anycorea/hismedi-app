@@ -243,4 +243,3 @@ if not view_df.empty:
     st.dataframe(view_df, use_container_width=True, hide_index=True)
 else:
     st.info("선택하신 조건에 해당하는 실적 데이터가 없습니다.")
-```[cite: 10]
