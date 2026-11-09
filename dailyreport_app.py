@@ -20,8 +20,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# 2. 구글 시트 데이터 로드 함수 (캐시 적용)
-@st.cache_data(ttl=60)
+# 2. 구글 시트 데이터 로드 및 업데이트 함수 (캐시 적용)
+@st.cache_data(ttl=10)
 def load_all_data():
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
@@ -46,12 +46,13 @@ def load_all_data():
     except:
         df_db = pd.DataFrame()
 
-    # PIN_관리 탭 로드
+    # PIN_관리 탭 로드 (A:진료과, B:의사, C:PIN, D:권한)
     try:
         pin_ws = spreadsheet.worksheet("PIN_관리")
-        df_pin = pd.DataFrame(pin_ws.get_all_records())
+        pin_records = pin_ws.get_all_records()
+        df_pin = pd.DataFrame(pin_records)
     except:
-        df_pin = pd.DataFrame(columns=["이름", "진료과", "PIN", "권한"])
+        df_pin = pd.DataFrame(columns=["진료과", "의사", "PIN", "권한"])
         
     return df_db, df_pin
 
@@ -62,7 +63,7 @@ except Exception as e:
     st.error(f"구글 시트 연동 오류: {e}")
     st.stop()
 
-# 3. 세션 상태 기반 PIN 인증 로직
+# 3. 세션 상태 기반 PIN 인증 로직 (엔터키 지원)
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
     st.session_state["user_info"] = None
@@ -77,29 +78,36 @@ if not st.session_state["authenticated"]:
             st.markdown("### 🏥 HISMEDI")
             
         st.markdown("<p class='main-title'>진료현황 시스템</p>", unsafe_allow_html=True)
-        st.markdown("<p class='sub-title'>4자리 PIN 코드를 입력해주세요.</p>", unsafe_allow_html=True)
+        st.markdown("<p class='sub-title'>PIN 번호 입력 후 엔터를 누르세요.</p>", unsafe_allow_html=True)
         
-        pin_input = st.text_input("PIN 코드 (4자리)", type="password", max_chars=4)
-        if st.button("로그인", use_container_width=True):
-            if pin_input == "0000":
-                st.session_state["authenticated"] = True
-                st.session_state["user_info"] = {"이름": "마스터 관리자", "진료과": "전체", "권한": "master"}
-                st.rerun()
-            elif not df_pins.empty:
-                matched = df_pins[df_pins["PIN"].astype(str).str.strip() == pin_input.strip()]
-                if not matched.empty:
-                    user_row = matched.iloc[0]
+        # 엔터키 로그인을 위한 form 적용
+        with st.form("login_form"):
+            pin_input = st.text_input("PIN 코드 (4자리)", type="password", max_chars=4)
+            submit_btn = st.form_submit_button("로그인", use_container_width=True)
+            
+            if submit_btn:
+                pin_str = str(pin_input).strip()
+                if pin_str == "0000":
                     st.session_state["authenticated"] = True
-                    st.session_state["user_info"] = {
-                        "이름": str(user_row.get("이름", "사용자")),
-                        "진료과": str(user_row.get("진료과", "전체")),
-                        "권한": str(user_row.get("권한", "user"))
-                    }
+                    st.session_state["user_info"] = {"진료과": "전체", "의사": "마스터", "PIN": "0000", "권한": "master"}
                     st.rerun()
+                elif not df_pins.empty:
+                    # B열(의사) 기준 매칭
+                    matched = df_pins[df_pins["PIN"].astype(str).str.strip() == pin_str]
+                    if not matched.empty:
+                        user_row = matched.iloc[0]
+                        st.session_state["authenticated"] = True
+                        st.session_state["user_info"] = {
+                            "진료과": str(user_row.get("진료과", "전체")),
+                            "의사": str(user_row.get("의사", "사용자")),
+                            "PIN": str(user_row.get("PIN", "")),
+                            "권한": str(user_row.get("권한", "user"))
+                        }
+                        st.rerun()
+                    else:
+                        st.error("일치하지 않는 PIN 코드입니다.")
                 else:
-                    st.error("일치하지 않는 PIN 코드입니다.")
-            else:
-                st.error("PIN_관리 시트를 읽어오지 못했습니다.")
+                    st.error("PIN_관리 시트를 읽어오지 못했습니다.")
     st.stop()
 
 user = st.session_state["user_info"]
@@ -112,13 +120,43 @@ with st.sidebar:
     except:
         st.markdown("### 🏥 HISMEDI")
         
-    st.markdown(f"👤 **접속자:** {user['이름']} ({user['진료과']})")
+    st.markdown(f"👤 **접속자:** {user['의사']} ({user['진료과']})")
     
     if st.button("🔄 구글시트 동기화", use_container_width=True):
         st.cache_data.clear()
         st.success("동기화 완료!")
         st.rerun()
         
+    st.markdown("---")
+    st.markdown("### 🔒 PIN 번호 변경")
+    with st.form("change_pin_form"):
+        new_pin = st.text_input("새로운 PIN (4자리)", type="password", max_chars=4)
+        change_btn = st.form_submit_button("PIN 변경", use_container_width=True)
+        if change_btn:
+            if len(new_pin.strip()) == 4:
+                try:
+                    # 구글 시트 연결하여 PIN 번호 업데이트
+                    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+                    creds_dict = dict(st.secrets["gcp_service_account"])
+                    credentials = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+                    gc = gspread.authorize(credentials)
+                    spreadsheet = gc.open_by_key(st.secrets["gsheet"]["spreadsheet_id"])
+                    pin_ws = spreadsheet.worksheet("PIN_관리")
+                    
+                    # 해당 의사 행 찾기
+                    cell = pin_ws.find(user["의사"])
+                    if cell:
+                        # C열(3번째 열)이 PIN
+                        pin_ws.update_cell(cell.row, 3, new_pin.strip())
+                        st.success("PIN 번호가 변경되었습니다!")
+                        st.cache_data.clear()
+                    else:
+                        st.error("시트에서 사용자를 찾을 수 없습니다.")
+                except Exception as ex:
+                    st.error(f"변경 실패: {ex}")
+            else:
+                st.warning("4자리 숫자를 입력해주세요.")
+
     st.markdown("---")
     st.markdown("### 🔍 조회 필터")
     
@@ -143,11 +181,12 @@ with st.sidebar:
                     doctors = ["전체"] + sorted(df_main[df_main['진료과'] == selected_dept]['의사명'].unique().tolist())
                 selected_doctor = st.selectbox("👨‍⚕️ 의사명 선택", doctors)
             else:
+                # 일반 사용자: 본인 소속 진료과 기준
                 selected_dept = user["진료과"]
                 st.info(f"🩺 소속 진료과: {selected_dept}")
                 
                 dept_doctors = df_main[df_main['진료과'] == selected_dept]['의사명'].unique().tolist()
-                user_name = user["이름"]
+                user_name = user["의사"]
                 doctors = ["전체", user_name] + [d for d in dept_doctors if d != user_name]
                 selected_doctor = st.selectbox("👨‍⚕️ 의사명 선택", list(dict.fromkeys(doctors)))
         else:
@@ -204,3 +243,4 @@ if not view_df.empty:
     st.dataframe(view_df, use_container_width=True, hide_index=True)
 else:
     st.info("선택하신 조건에 해당하는 실적 데이터가 없습니다.")
+```[cite: 10]
