@@ -78,18 +78,41 @@ def parse_day(value):
     return None
 
 
+# 이름이 달라도 같은 진료과로 묶고, 의사 이름 없는 자료는 공통으로 관리합니다.
+EXCLUDED_HOSPITAL_DEPTS = {"건강검진"}  # 과별 조회에는 표시하지만 병원 총합에서는 제외
+DEPT_ALIASES = {"일반외과": "외과"}
+NO_PROVIDER = "공통"
+
+
 def dept_normalize(raw):
-    department = str(raw).strip()
-    department = re.sub(r"\s+(치료|진료)$", "", department)
-    return {"일반외과": "외과"}.get(department, department)
+    dept = re.sub(r"\s+", " ", str(raw or "").strip())
+    dept = re.sub(r"\s*(치료|진료)$", "", dept).strip()
+    return DEPT_ALIASES.get(dept, dept)
+
+
+def provider_normalize(raw):
+    name = re.sub(r"\s+", "", str(raw or "").strip())
+    if not name or name in {"공통", "미지정", "-"}:
+        return NO_PROVIDER
+    # 접미어가 붙은 동일 의사명: 유현수PD -> 유현수
+    name = re.sub(r"(?i)(?:PD)$", "", name).strip()
+    return name or NO_PROVIDER
 
 
 def parse_provider(text):
-    match = re.match(r"^\s*(.*?)\s*\(([^()]+)\)\s*$", str(text))
-    if not match:
+    source = str(text or "").strip()
+    if not source or source in {"합계", "총계", "소계", "전체", "진료과"}:
         return None
-    dept, doctor = match.groups()
-    return dept_normalize(dept), doctor.strip()
+    matched = re.fullmatch(r"(.*?)\s*\(([^()]*)\)", source)
+    if matched:
+        dept, provider = matched.groups()
+    else:
+        # '소아청소년과', '외과 치료'처럼 괄호 없는 행은 과 공통실적으로 분류
+        dept, provider = source, NO_PROVIDER
+    dept = dept_normalize(dept)
+    if not dept or dept in {"합계", "총계", "소계", "전체"}:
+        return None
+    return dept, provider_normalize(provider)
 
 
 @st.cache_resource
@@ -164,7 +187,7 @@ def load_accounts():
         if not str(obj.get("의사", "")).strip():
             continue
         accounts.append({"진료과": dept_normalize(obj.get("진료과", "")),
-                         "의사": str(obj.get("의사", "")).strip(),
+                         "의사": provider_normalize(obj.get("의사", "")),
                          "PIN": str(obj.get("PIN", "")).strip(),
                          "권한": str(obj.get("권한", "user")).strip().lower(), "_row": row_index})
     return pd.DataFrame(accounts, columns=["진료과", "의사", "PIN", "권한", "_row"])
@@ -235,25 +258,44 @@ def report_data(clinical, exams, start, end, dept, doctor, master, user):
                        **{c: 0 for c in NUMERIC}}
         exam_record.update({"남": int(sums["남"]), "여": int(sums["여"]), "계": int(sums["계"]),
                             "검진포함": int(sums["검진수입"])})
-    hospital_rows = all_clinical + ([exam_record] if exam_record is not None else [])
-    hospital_total = total_row(hospital_rows, label, "병원 전체", "합계")
+
+    # 병원 총합: 건강검진 원본은 제외. RAW_검진은 독립 검진실적으로 반영.
+    hospital_sources = [r for r in all_clinical if r["진료과"] not in EXCLUDED_HOSPITAL_DEPTS]
+    if exam_record is not None:
+        hospital_sources.append(exam_record)
+    hospital_total = total_row(hospital_sources, label, "병원 전체", "합계")
+    hospital_total["_class"] = "total"
 
     if master:
-        shown = [r for r in all_clinical if (dept == "전체" or r["진료과"] == dept) and
-                 (doctor == "전체" or r["의사명"] == doctor)]
+        filtered = [r.copy() for r in all_clinical
+                    if (dept == "전체" or r["진료과"] == dept)
+                    and (doctor == "전체" or r["의사명"] == doctor)]
+        shown = []
+        for dept_name in sorted({r["진료과"] for r in filtered}):
+            group = sorted((r for r in filtered if r["진료과"] == dept_name),
+                           key=lambda r: (r["의사명"] == NO_PROVIDER, r["의사명"]))
+            shown.extend(group)
+            if doctor == "전체" and group:
+                subtotal = total_row(group, label, dept_name, "진료과 합계")
+                subtotal["_class"] = "subtotal"
+                shown.append(subtotal)
+        # 검진 독립행은 전체 조회 시에만 보여줍니다.
         if dept == "전체" and doctor == "전체" and exam_record is not None:
             shown.append(exam_record)
-        return pd.DataFrame(shown, columns=FIELDS), total_row(shown, label, "전체", "합계"), []
+        # 화면에 표시된 소계는 다시 더하지 않으며, 선택 조건에 따른 합계만 산출.
+        if dept == "전체" and doctor == "전체":
+            aggregate = hospital_total
+        else:
+            aggregate = total_row(filtered, label, dept if dept != "전체" else "전체", "합계")
+        return pd.DataFrame(shown, columns=FIELDS + ["_class"]), aggregate, []
 
-    # 일반 사용자: 타 의사 개인행은 어떤 경우에도 표시하지 않음.
-    own_dept, own_name = user["진료과"], user["의사"]
+    # 일반 계정: 본인/소속과/병원 전체 합계. 타 의사 개인 행은 절대 노출하지 않음.
+    own_dept, own_name = dept_normalize(user["진료과"]), provider_normalize(user["의사"])
     own_rows = [r for r in all_clinical if r["진료과"] == own_dept and r["의사명"] == own_name]
     dept_rows = [r for r in all_clinical if r["진료과"] == own_dept]
     own = total_row(own_rows, label, own_dept, own_name)
     dept_total = total_row(dept_rows, label, own_dept, "진료과 합계")
-    own["_class"] = ""
     dept_total["_class"] = "subtotal"
-    hospital_total["_class"] = "total"
     return pd.DataFrame([own, dept_total, hospital_total], columns=FIELDS + ["_class"]), None, []
 
 
@@ -407,7 +449,7 @@ with tabs[0]:
     st.markdown(format_report(report, totals), unsafe_allow_html=True)
     if report.empty:
         st.info("해당 기간에 조회되는 실적이 없습니다.")
-    st.caption(f"조회: {start:%Y-%m-%d} ~ {end:%Y-%m-%d} · 낮병동 제외 · 임상/검진 동일 표 집계")
+    st.caption(f"조회: {start:%Y-%m-%d} ~ {end:%Y-%m-%d} · 낮병동 제외 · 건강검진은 과별 표시, 병원 합계 제외 · RAW_검진 통합")
     if not is_master:
         st.caption("일반 계정에는 타 의사의 개별 실적을 표시하지 않습니다.")
 
@@ -444,7 +486,7 @@ with tabs[2]:
 if is_master:
     with tabs[3]:
         st.subheader("권한관리")
-        st.caption("PIN_관리 시트의 진료과 / 의사 / PIN / 권한 4개 열을 사용합니다. 계정 관리용 명단은 진료실적 원본과 별개입니다.")
+        st.caption("PIN_관리 시트의 진료과 / 의사 / PIN / 권한 4개 열을 사용합니다. 계정은 추가·삭제할 수 있고, 원본에 새 진료과·의사가 나타나면 조회 목록에 자동 반영됩니다.")
         st.dataframe(accounts[["진료과", "의사", "권한"]], use_container_width=True, hide_index=True)
         action = st.radio("관리 작업", ["계정 추가", "계정 수정", "계정 삭제"], horizontal=True)
         if action == "계정 추가":
