@@ -143,12 +143,12 @@ with st.sidebar:
                     doctors = ["전체"] + sorted(df_main[df_main['진료과'] == selected_dept]['의사명'].unique().tolist())
                 selected_doctor = st.selectbox("👨‍⚕️ 의사명 선택", doctors)
             else:
-                # 일반 사용자 (소속 진료과 기준)
                 selected_dept = user["진료과"]
                 st.info(f"🩺 소속 진료과: {selected_dept}")
                 
                 dept_doctors = df_main[df_main['진료과'] == selected_dept]['의사명'].unique().tolist()
-                doctors = ["전체", user["name"] if "name" in user else user["이름"]] + [d for d in dept_doctors if d != user["이름"]]
+                user_name = user["이름"]
+                doctors = ["전체", user_name] + [d for d in dept_doctors if d != user_name]
                 selected_doctor = st.selectbox("👨‍⚕️ 의사명 선택", list(dict.fromkeys(doctors)))
         else:
             st.error("시트 컬럼명 형식을 확인해주세요.")
@@ -204,4 +204,3 @@ if not view_df.empty:
     st.dataframe(view_df, use_container_width=True, hide_index=True)
 else:
     st.info("선택하신 조건에 해당하는 실적 데이터가 없습니다.")
-```[cite: 9]
