@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 from io import BytesIO
+from PIL import Image
 from pathlib import Path
 from zoneinfo import ZoneInfo
 import html
@@ -30,7 +31,28 @@ TZ = ZoneInfo("Asia/Seoul")
 st.markdown("""<style>
 .block-container {padding-top:.85rem; padding-bottom:2rem; max-width:100%}
 [data-testid="stSidebar"] {background:#f7f9fc}
-[data-testid="stSidebar"] [data-testid="stImage"] img {object-fit:contain!important;object-position:left center;max-width:100%;height:auto}
+[data-testid="stSidebar"] {min-width:290px;max-width:320px}
+[data-testid="stSidebar"] [data-testid="stImage"] img {object-fit:contain!important;object-position:left center!important;max-width:100%;height:auto!important}
+/* Both old and recent Streamlit tab DOM variants: prevent invisible/clipped captions. */
+[data-testid="stTabs"] [data-baseweb="tab-list"], .stTabs [data-baseweb="tab-list"] {
+  overflow:visible!important;min-height:52px!important;display:flex!important;
+  border-bottom:1px solid #dbe3ec!important;gap:8px!important;
+}
+[data-testid="stTabs"] [data-baseweb="tab"], .stTabs [data-baseweb="tab"] {
+  display:flex!important;align-items:center!important;justify-content:center!important;
+  min-height:45px!important;height:auto!important;padding:10px 18px!important;
+  color:#223450!important;opacity:1!important;visibility:visible!important;
+  background:transparent!important;font-weight:650!important;font-size:15px!important;
+}
+[data-testid="stTabs"] [data-baseweb="tab"] *, .stTabs [data-baseweb="tab"] * {
+  color:inherit!important;opacity:1!important;visibility:visible!important;
+  font-size:inherit!important;line-height:1.4!important;
+}
+[data-testid="stTabs"] [aria-selected="true"], .stTabs [aria-selected="true"] {
+  color:#13549e!important;border-bottom:3px solid #2478bd!important;
+}
+[data-testid="stSidebar"] [data-baseweb="popover"] [role="listbox"],
+[data-baseweb="popover"] [role="listbox"] {max-height:78vh!important;}
 [data-testid="stSidebar"] .stButton button {width:100%}
 .report-scroll {overflow-x:auto;max-width:100%;border:1px solid #d5dde7;border-radius:8px;margin-top:.15rem}
 .report-table {border-collapse:collapse;width:100%;min-width:1110px;font-size:13px;text-align:center;line-height:1.4}
@@ -82,6 +104,26 @@ def parse_day(value):
 EXCLUDED_HOSPITAL_DEPTS = {"건강검진"}  # 과별 조회에는 표시하지만 병원 총합에서는 제외
 DEPT_ALIASES = {"일반외과": "외과"}
 NO_PROVIDER = "공통"
+DEPT_DISPLAY_ORDER = ["소아청소년과", "내과", "외과", "정형외과", "건강검진", "마취통증의학과", "진단검사의학과"]
+
+
+def order_departments(values):
+    available = {str(v) for v in values if str(v).strip() and str(v) != "전체"}
+    return [d for d in DEPT_DISPLAY_ORDER if d in available] + sorted(available - set(DEPT_DISPLAY_ORDER))
+
+
+@st.cache_data(show_spinner=False)
+def padded_logo(path: str):
+    """Add a white safety margin so logo never touches Streamlit image edges."""
+    with Image.open(path) as img:
+        img = img.convert("RGBA")
+        # Avoid visually clipping original image even when the source has no margins.
+        margin = round(max(img.size) * .16)
+        canvas = Image.new("RGBA", (img.width + margin * 2, img.height + margin * 2), (255, 255, 255, 255))
+        canvas.alpha_composite(img, (margin, margin))
+        output = BytesIO()
+        canvas.convert("RGB").save(output, format="PNG")
+        return output.getvalue()
 
 
 def dept_normalize(raw):
@@ -254,12 +296,12 @@ def report_data(clinical, exams, start, end, dept, doctor, master, user):
     exam_record = None
     if not exam.empty:
         sums = exam[["남", "여", "계", "검진수입"]].sum()
-        exam_record = {"일자": label, "진료과": "검진", "의사명": "검진실적",
+        exam_record = {"일자": label, "진료과": "건강검진", "의사명": "검진실적",
                        **{c: 0 for c in NUMERIC}}
         exam_record.update({"남": int(sums["남"]), "여": int(sums["여"]), "계": int(sums["계"]),
                             "검진포함": int(sums["검진수입"])})
 
-    # 병원 총합: 건강검진 원본은 제외. RAW_검진은 독립 검진실적으로 반영.
+    # 병원 총합: 임상원본 건강검진은 제외. RAW_검진은 독립 검진실적으로 반영.
     hospital_sources = [r for r in all_clinical if r["진료과"] not in EXCLUDED_HOSPITAL_DEPTS]
     if exam_record is not None:
         hospital_sources.append(exam_record)
@@ -270,8 +312,12 @@ def report_data(clinical, exams, start, end, dept, doctor, master, user):
         filtered = [r.copy() for r in all_clinical
                     if (dept == "전체" or r["진료과"] == dept)
                     and (doctor == "전체" or r["의사명"] == doctor)]
+        # 건강검진 최홍우의 외래 환자수는 건강검진 별도 집계와 혼동하지 않도록 숨깁니다.
+        for r in filtered:
+            if r["진료과"] == "건강검진" and r["의사명"] == "최홍우":
+                r["외래"] = 0
         shown = []
-        for dept_name in sorted({r["진료과"] for r in filtered}):
+        for dept_name in order_departments({r["진료과"] for r in filtered}):
             group = sorted((r for r in filtered if r["진료과"] == dept_name),
                            key=lambda r: (r["의사명"] == NO_PROVIDER, r["의사명"]))
             shown.extend(group)
@@ -279,14 +325,16 @@ def report_data(clinical, exams, start, end, dept, doctor, master, user):
                 subtotal = total_row(group, label, dept_name, "진료과 합계")
                 subtotal["_class"] = "subtotal"
                 shown.append(subtotal)
-        # 검진 독립행은 전체 조회 시에만 보여줍니다.
-        if dept == "전체" and doctor == "전체" and exam_record is not None:
+        # 검진은 건강검진 과로 표시합니다. 다른 진료과를 선택한 경우에는 보이지 않습니다.
+        if (dept in ("전체", "건강검진") and doctor == "전체" and exam_record is not None):
             shown.append(exam_record)
+            # 건강검진 조회라면 RAW 검진 수치도 선택 합계에 포함합니다.
         # 화면에 표시된 소계는 다시 더하지 않으며, 선택 조건에 따른 합계만 산출.
         if dept == "전체" and doctor == "전체":
             aggregate = hospital_total
         else:
-            aggregate = total_row(filtered, label, dept if dept != "전체" else "전체", "합계")
+            aggregate_sources = filtered + ([exam_record] if dept == "건강검진" and doctor == "전체" and exam_record is not None else [])
+            aggregate = total_row(aggregate_sources, label, dept if dept != "전체" else "전체", "합계")
         return pd.DataFrame(shown, columns=FIELDS + ["_class"]), aggregate, []
 
     # 일반 계정: 본인/소속과/병원 전체 합계. 타 의사 개인 행은 절대 노출하지 않음.
@@ -296,7 +344,16 @@ def report_data(clinical, exams, start, end, dept, doctor, master, user):
     own = total_row(own_rows, label, own_dept, own_name)
     dept_total = total_row(dept_rows, label, own_dept, "진료과 합계")
     dept_total["_class"] = "subtotal"
-    return pd.DataFrame([own, dept_total, hospital_total], columns=FIELDS + ["_class"]), None, []
+    # 로그인한 의사에게도 병원 전체 건강검진 원본의 집계치를 독립행으로 제공합니다.
+    # 건강검진 과 소속 의사는 최홍우의 임상 외래 환자수를 노출하지 않습니다.
+    if own_dept == "건강검진" and own_name == "최홍우":
+        own["외래"] = 0
+    visible = [own, dept_total]
+    if exam_record is not None:
+        exam_record["_class"] = "exam"
+        visible.append(exam_record)
+    visible.append(hospital_total)
+    return pd.DataFrame(visible, columns=FIELDS + ["_class"]), None, []
 
 
 def format_report(df, totals):
@@ -307,7 +364,7 @@ def format_report(df, totals):
     body = []
     for _, row in df.iterrows():
         kind = row.get("_class", "")
-        if not kind and row["진료과"] == "검진":
+        if not kind and row["의사명"] == "검진실적":
             kind = "exam"
         cells = "".join(f"<td>{html.escape(str(row[c]))}</td>" for c in FIELDS[:3])
         cells += "".join(f'<td class="num">{int(row[c]):,}</td>' for c in NUMERIC)
@@ -367,7 +424,7 @@ if user is None:
     left, _ = st.columns([1, 2])
     with left:
         if Path("Hismedi_logo.png").is_file():
-            st.image("Hismedi_logo.png", width=112)
+            st.image(padded_logo("Hismedi_logo.png"), width=132)
         st.title("Hismedi 진료현황")
         st.caption("4자리 PIN을 입력한 뒤 Enter를 누르세요.")
         with st.form("login_form"):
@@ -403,7 +460,7 @@ initial_day = yesterday  # 기본값은 전일, 데이터가 없어도 임의로
 
 with st.sidebar:
     if Path("Hismedi_logo.png").is_file():
-        st.image("Hismedi_logo.png", width=95)
+        st.image(padded_logo("Hismedi_logo.png"), width=112)
     st.markdown("### Hismedi 진료현황")
     st.caption(f"접속: {user['의사']} · {'마스터' if is_master else user['진료과']}")
     st.divider()
@@ -413,8 +470,8 @@ with st.sidebar:
     if start > end:
         st.error("시작일이 종료일보다 늦습니다.")
         st.stop()
-    depts = sorted(set(clinical["진료과"].dropna().tolist()) | {
-        x for x in accounts["진료과"].tolist() if x and x != "전체"})
+    depts = order_departments(set(clinical["진료과"].dropna().tolist()) | {
+        x for x in accounts["진료과"].tolist() if x and x != "전체"} | {"건강검진"})
     if is_master:
         dept_choice = st.selectbox("진료과", ["전체"] + depts)
         matching_doctors = clinical if dept_choice == "전체" else clinical[clinical["진료과"] == dept_choice]
@@ -449,7 +506,7 @@ with tabs[0]:
     st.markdown(format_report(report, totals), unsafe_allow_html=True)
     if report.empty:
         st.info("해당 기간에 조회되는 실적이 없습니다.")
-    st.caption(f"조회: {start:%Y-%m-%d} ~ {end:%Y-%m-%d} · 낮병동 제외 · 건강검진은 과별 표시, 병원 합계 제외 · RAW_검진 통합")
+    st.caption(f"조회: {start:%Y-%m-%d} ~ {end:%Y-%m-%d} · 낮병동 제외 · 임상원본 건강검진 병원 합계 제외 · RAW_검진은 건강검진으로 통합")
     if not is_master:
         st.caption("일반 계정에는 타 의사의 개별 실적을 표시하지 않습니다.")
 
