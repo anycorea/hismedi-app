@@ -49,6 +49,7 @@ jobs:
               ("모바일주차등록", "https://hismedi-parking.streamlit.app/"),
               ("내과처방현황", "https://hismedi-app-pnzu8rxkdsryeq2www5hu8.streamlit.app/"),
               ("진료실적보고", "https://hismedi-app-report.streamlit.app/"),
+              ("진료현황", "https://hismedi-app-dailyreport.streamlit.app/"),
               ("백신통계", "https://hismedi-app-stat-vac.streamlit.app/"),
               ("비급여안내", "https://hismedi-app-unpaid.streamlit.app/"),
               ("예방접종예진표", "https://hismedi-vaccination.streamlit.app/"),
