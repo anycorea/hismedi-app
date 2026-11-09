@@ -11,6 +11,7 @@ from PIL import Image
 from pathlib import Path
 from zoneinfo import ZoneInfo
 import html
+import base64
 import re
 
 import gspread
@@ -33,24 +34,16 @@ st.markdown("""<style>
 [data-testid="stSidebar"] {background:#f7f9fc}
 [data-testid="stSidebar"] {min-width:290px;max-width:320px}
 [data-testid="stSidebar"] [data-testid="stImage"] img {object-fit:contain!important;object-position:left center!important;max-width:100%;height:auto!important}
-/* Both old and recent Streamlit tab DOM variants: prevent invisible/clipped captions. */
-[data-testid="stTabs"] [data-baseweb="tab-list"], .stTabs [data-baseweb="tab-list"] {
-  overflow:visible!important;min-height:52px!important;display:flex!important;
-  border-bottom:1px solid #dbe3ec!important;gap:8px!important;
-}
-[data-testid="stTabs"] [data-baseweb="tab"], .stTabs [data-baseweb="tab"] {
-  display:flex!important;align-items:center!important;justify-content:center!important;
-  min-height:45px!important;height:auto!important;padding:10px 18px!important;
-  color:#223450!important;opacity:1!important;visibility:visible!important;
-  background:transparent!important;font-weight:650!important;font-size:15px!important;
-}
-[data-testid="stTabs"] [data-baseweb="tab"] *, .stTabs [data-baseweb="tab"] * {
-  color:inherit!important;opacity:1!important;visibility:visible!important;
-  font-size:inherit!important;line-height:1.4!important;
-}
-[data-testid="stTabs"] [aria-selected="true"], .stTabs [aria-selected="true"] {
-  color:#13549e!important;border-bottom:3px solid #2478bd!important;
-}
+/* Readable sidebar; the native tabs are replaced by a radio menu. */
+[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {padding-top:22px!important}
+[data-testid="stSidebar"] label, [data-testid="stSidebar"] p {font-size:15px!important}
+[data-testid="stSidebar"] .stMarkdown h3 {font-size:19px!important;font-weight:750!important}
+[data-testid="stSidebar"] [data-testid="stWidgetLabel"] p {font-weight:700!important;font-size:15px!important}
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"] p {font-size:13px!important}
+/* Main navigation is an ordinary horizontal radio, with visible text even if BaseWeb tabs are clipped. */
+[data-testid="stMain"] [role="radiogroup"] {gap:12px!important;flex-wrap:wrap!important}
+[data-testid="stMain"] [role="radiogroup"] label {border:1px solid #d4dfec!important;border-radius:8px!important;padding:10px 17px!important;background:#f5f8fc!important}
+[data-testid="stMain"] [role="radiogroup"] label p {font-size:16px!important;font-weight:750!important;color:#162f50!important}
 [data-testid="stSidebar"] [data-baseweb="popover"] [role="listbox"],
 [data-baseweb="popover"] [role="listbox"] {max-height:78vh!important;}
 [data-testid="stSidebar"] .stButton button {width:100%}
@@ -124,6 +117,24 @@ def padded_logo(path: str):
         output = BytesIO()
         canvas.convert("RGB").save(output, format="PNG")
         return output.getvalue()
+
+
+def show_logo(path: str, width: int, *, centered: bool = False):
+    """HTML image with its own explicit canvas. Avoid Streamlit image clipping/cropping."""
+    if not Path(path).is_file():
+        st.markdown("**HISMEDI HOSPITAL**")
+        return
+    binary = padded_logo(path)
+    data = base64.b64encode(binary).decode("ascii")
+    align = "center" if centered else "left"
+    st.markdown(
+        f'<div style="display:flex;justify-content:{align};align-items:center;'
+        f'width:100%;min-height:{int(width*1.04)}px;margin:0 0 4px 0;overflow:visible">'
+        f'<img src="data:image/png;base64,{data}" alt="Hismedi Hospital" '
+        f'style="width:{width}px;height:auto;max-width:100%;display:block;object-fit:contain;'
+        f'overflow:visible;clip-path:none"/></div>',
+        unsafe_allow_html=True,
+    )
 
 
 def dept_normalize(raw):
@@ -421,10 +432,10 @@ except Exception as ex:
 
 user = logged_in_account(accounts)
 if user is None:
-    left, _ = st.columns([1, 2])
+    st.markdown('<div style="height:35px"></div>', unsafe_allow_html=True)
+    left, _ = st.columns([1.1, 1.8])
     with left:
-        if Path("Hismedi_logo.png").is_file():
-            st.image(padded_logo("Hismedi_logo.png"), width=132)
+        show_logo("Hismedi_logo.png", 148)
         st.title("Hismedi 진료현황")
         st.caption("4자리 PIN을 입력한 뒤 Enter를 누르세요.")
         with st.form("login_form"):
@@ -459,8 +470,7 @@ yesterday = datetime.now(TZ).date() - timedelta(days=1)
 initial_day = yesterday  # 기본값은 전일, 데이터가 없어도 임의로 다른 날짜로 변경하지 않음
 
 with st.sidebar:
-    if Path("Hismedi_logo.png").is_file():
-        st.image(padded_logo("Hismedi_logo.png"), width=112)
+    show_logo("Hismedi_logo.png", 104)
     st.markdown("### Hismedi 진료현황")
     st.caption(f"접속: {user['의사']} · {'마스터' if is_master else user['진료과']}")
     st.divider()
@@ -500,9 +510,15 @@ with st.sidebar:
         st.rerun()
 
 report, totals, _ = report_data(clinical, exams, start, end, dept_choice, doctor_choice, is_master, user)
-tabs = st.tabs(["📊 진료실적", "🔒 내 PIN 번호 변경", "⬇️ 엑셀다운로드"] + (["⚙️ 권한관리"] if is_master else []))
+# Give the menu a deliberate vertical offset instead of using the fragile Streamlit Tabs DOM.
+st.markdown('<div style="height:48px"></div>', unsafe_allow_html=True)
+menu_items = ["📊 진료실적", "🔒 내 PIN 번호 변경", "⬇️ 엑셀다운로드"]
+if is_master:
+    menu_items.append("⚙️ 권한관리")
+active_menu = st.radio("메뉴", menu_items, horizontal=True, label_visibility="collapsed", key="main_nav")
+st.markdown('<div style="height:12px"></div>', unsafe_allow_html=True)
 
-with tabs[0]:
+if active_menu == "📊 진료실적":
     st.markdown(format_report(report, totals), unsafe_allow_html=True)
     if report.empty:
         st.info("해당 기간에 조회되는 실적이 없습니다.")
@@ -510,7 +526,7 @@ with tabs[0]:
     if not is_master:
         st.caption("일반 계정에는 타 의사의 개별 실적을 표시하지 않습니다.")
 
-with tabs[1]:
+if active_menu == "🔒 내 PIN 번호 변경":
     st.subheader("내 PIN 번호 변경")
     with st.form("change_own_pin"):
         current = st.text_input("현재 PIN", type="password", max_chars=4)
@@ -533,15 +549,14 @@ with tabs[1]:
             except Exception as ex:
                 st.error(f"PIN 변경 실패: {ex}")
 
-with tabs[2]:
+if active_menu == "⬇️ 엑셀다운로드":
     st.subheader("엑셀다운로드")
     st.caption("현재 화면에 표시된 행과 합계가 같은 2단 헤더 엑셀 파일로 저장됩니다.")
     st.download_button("⬇️ 조회 결과 엑셀 다운로드", data=to_excel(report, totals),
                        file_name=f"Hismedi_진료현황_{start:%Y%m%d}_{end:%Y%m%d}.xlsx",
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
-if is_master:
-    with tabs[3]:
+if is_master and active_menu == "⚙️ 권한관리":
         st.subheader("권한관리")
         st.caption("PIN_관리 시트의 진료과 / 의사 / PIN / 권한 4개 열을 사용합니다. 계정은 추가·삭제할 수 있고, 원본에 새 진료과·의사가 나타나면 조회 목록에 자동 반영됩니다.")
         st.dataframe(accounts[["진료과", "의사", "권한"]], use_container_width=True, hide_index=True)
