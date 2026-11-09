@@ -3,7 +3,7 @@ import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
 
-# 1. 페이지 기본 설정
+# 페이지 기본 설정
 st.set_page_config(
     page_title=st.secrets["app"]["TITLE"],
     layout="wide"
@@ -12,7 +12,7 @@ st.set_page_config(
 st.title(f"🏥 {st.secrets['app']['TITLE']} 대시보드")
 st.markdown("구글 시트(`2026_Q4` 및 `RAW_검진`) 데이터를 기반으로 집계된 실적 현황입니다.")
 
-# 2. 구글 시트 데이터 로드 함수
+# 구글 시트 데이터 로드 함수
 @st.cache_data(ttl=60)
 def load_data():
     scopes = [
@@ -26,7 +26,7 @@ def load_data():
     spreadsheet_id = st.secrets["gsheet"]["spreadsheet_id"]
     spreadsheet = gc.open_by_key(spreadsheet_id)
     
-    # 임상 데이터 로드 (분기별 시트: 2026_Q4)
+    # 임상 데이터 로드 (2026_Q4)
     try:
         clinical_ws = spreadsheet.worksheet("2026_Q4")
         clinical_data = clinical_ws.get_all_records()
@@ -50,11 +50,10 @@ except Exception as e:
     st.error(f"구글 시트 연동 중 오류가 발생했습니다: {e}")
     st.stop()
 
-# 3. 데이터 전처리 및 의사명/진료과 정제 함수
+# 진료과 및 의사명 정제 함수
 def parse_doctor_and_dept(row_text):
     text = str(row_text).strip()
     
-    # 진료과 분류 매핑
     if "외과 치료" in text or "일반외과" in text or "외과" in text:
         dept = "외과"
     elif "정형외과" in text:
@@ -67,10 +66,11 @@ def parse_doctor_and_dept(row_text):
         dept = "마취통증의학과"
     elif "진단검사의학과" in text:
         dept = "진단검사의학과"
+    elif "건강검진" in text:
+        dept = "건강검진"
     else:
         dept = "기타"
 
-    # 의사명 추출 (괄호 안의 이름 기준, 없으면 '공통')
     if "(" in text and ")" in text:
         start = text.find("(")
         end = text.find(")")
@@ -81,20 +81,20 @@ def parse_doctor_and_dept(row_text):
         
     return pd.Series([dept, doc])
 
-# 데이터 정제 실행
 if not df_cli.empty:
-    # 컬럼명 공백 제거 및 정렬 표준화
     df_cli.columns = [str(c).strip() for c in df_cli.columns]
     
-    # 날짜 컬럼 확인 (일자함수 또는 일자 활용)
-    date_col = "일자함수" if "일자함수" in df_cli.columns else ("일자" if "일자" in df_cli.columns else None)
-    
-    if date_col and "진료과" in df_cli.columns:
-        df_cli['정제_일자'] = pd.to_datetime(df_cli[date_col], errors='coerce').dt.strftime('%Y-%m-%d')
+    # '합계' 행 제거 및 일자 데이터 정제 (A열 '일자' 기준)
+    if "일자" in df_cli.columns and "진료과" in df_cli.columns:
+        # 빈 값 제거 및 '합계' 행 필터링
+        df_cli = df_cli[df_cli['일자'].astype(str).str.strip() != ""]
+        df_cli = df_cli[~df_cli['진료과'].astype(str).str.contains("합계", na=False)]
+        
+        df_cli['정제_일자'] = pd.to_datetime(df_cli['일자'], errors='coerce').dt.strftime('%Y-%m-%d')
         df_cli[['정제_진료과', '정제_의사명']] = df_cli['진료과'].apply(parse_doctor_and_dept)
         
-        # 사이드바 날짜 필터
         valid_dates = sorted(df_cli['정제_일자'].dropna().unique(), reverse=True)
+        
         if valid_dates:
             selected_date = st.sidebar.selectbox("📅 조회 일자 선택", valid_dates)
             
@@ -118,7 +118,6 @@ if not df_cli.empty:
                 st.markdown("### 건강검진 일자별 현황")
                 if not df_exm.empty:
                     df_exm.columns = [str(c).strip() for c in df_exm.columns]
-                    # 검진 일자 표준화
                     if "일자" in df_exm.columns:
                         df_exm['정제_일자'] = pd.to_datetime(df_exm['일자'].astype(str), format='%Y%m%d', errors='coerce').dt.strftime('%Y-%m-%d')
                         filtered_exam = df_exm[df_exm['정제_일자'] == selected_date]
@@ -128,8 +127,8 @@ if not df_cli.empty:
                 else:
                     st.info("RAW_검진 시트에 데이터가 없습니다.")
         else:
-            st.warning("유효한 날짜 데이터가 없습니다. 시트의 일자 컬럼을 확인해주세요.")
+            st.warning("유효한 날짜 데이터가 없습니다.")
     else:
         st.error("시트 내에 '일자' 또는 '진료과' 컬럼을 찾을 수 없습니다.")
 else:
-    st.info("`2026_Q4` 시트에 입력된 데이터가 없습니다. 병원 통계 데이터를 붙여넣어 주세요.")
+    st.info("`2026_Q4` 시트에 입력된 데이터가 없습니다.")
