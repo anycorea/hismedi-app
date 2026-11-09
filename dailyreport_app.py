@@ -1,20 +1,14 @@
-"""HISMEDI 진료현황 — Google Sheets / Streamlit.
+"""Hismedi 진료현황 (Streamlit / Google Sheets).
 
-필수 Streamlit secrets:
-[gcp_service_account] : Google service-account JSON fields
-[gsheet]
-spreadsheet_id = "..."
-[app]
-TITLE = "Hismedi 진료현황"
-TZ = "Asia/Seoul"
-
-서비스 계정에 원본 Google Sheet 편집자 권한을 부여해야 PIN 변경/관리 가능.
+Secrets: [gcp_service_account], [gsheet] spreadsheet_id.
+데이터: 20YY_Q1~Q4, RAW_검진, PIN_관리(진료과/의사/PIN/권한).
 """
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
+from zoneinfo import ZoneInfo
 import html
 import re
 
@@ -26,270 +20,323 @@ from gspread.exceptions import WorksheetNotFound
 
 st.set_page_config(page_title="Hismedi 진료현황", page_icon="🏥", layout="wide", initial_sidebar_state="expanded")
 
-SPREADSHEET_ID = st.secrets["gsheet"]["spreadsheet_id"]
 SHEET_PIN = "PIN_관리"
-COLUMNS = ["일자", "진료과", "의사명", "외래", "입원", "퇴원", "재원", "남", "여", "계", "외래수입", "입원수입", "검진제외", "검진포함"]
-NUMERIC = COLUMNS[3:]
+FIELDS = ["일자", "진료과", "의사명", "외래", "입원", "퇴원", "재원", "남", "여", "계", "외래수입", "입원수입", "검진제외", "검진포함"]
+NUMERIC = FIELDS[3:]
+CLINICAL_FIELDS = ["외래", "입원", "퇴원", "재원", "외래수입", "입원수입", "검진제외"]
+QUARTER_RE = re.compile(r"^20\d{2}_Q[1-4]$")
+TZ = ZoneInfo("Asia/Seoul")
 
 st.markdown("""<style>
-.block-container {padding-top:1.0rem;max-width:100%}
+.block-container {padding-top:.85rem; padding-bottom:2rem; max-width:100%}
 [data-testid="stSidebar"] {background:#f7f9fc}
+[data-testid="stSidebar"] [data-testid="stImage"] img {object-fit:contain!important;object-position:left center;max-width:100%;height:auto}
 [data-testid="stSidebar"] .stButton button {width:100%}
-.report-wrap {overflow-x:auto;border:1px solid #ccd4dd;border-radius:5px;margin-top:12px}
-.report-table {border-collapse:collapse;width:100%;min-width:1120px;font-size:13px;text-align:center}
-.report-table th {background:#e0e6ee;border:1px solid #c7cdd4;padding:9px 6px;white-space:nowrap;color:#152238}
-.report-table td {border:1px solid #e0e4e8;padding:7px 8px;white-space:nowrap;color:#18212e}
-.report-table td:nth-child(2), .report-table td:nth-child(3) {text-align:left}
-.report-table tr:nth-child(even) td {background:#f8fafc}
-.report-table tr.total td {background:#e7eef9;font-weight:750;border-top:2px solid #8aa6cf}
-.report-table tr.exam td {background:#f1f7f3}
-.report-table .num {text-align:right;font-variant-numeric:tabular-nums}
-.small-help {font-size:12px;color:#667085}
+.report-scroll {overflow-x:auto;max-width:100%;border:1px solid #d5dde7;border-radius:8px;margin-top:.15rem}
+.report-table {border-collapse:collapse;width:100%;min-width:1110px;font-size:13px;text-align:center;line-height:1.4}
+.report-table th {background:#e2e9f2;color:#1e334e;border:1px solid #cbd5e1;padding:9px 7px;white-space:nowrap}
+.report-table td {border:1px solid #e4e8ef;padding:8px 8px;white-space:nowrap;color:#1b293b}
+.report-table td:nth-child(2),.report-table td:nth-child(3){text-align:left}
+.report-table tbody tr:nth-child(even):not(.total) td{background:#f8fafc}
+.report-table tbody tr.total td{background:#dfeaf9!important;font-weight:750;border-top:2px solid #769dce}
+.report-table tbody tr.subtotal td{background:#eef4fb!important;font-weight:700;border-top:1px solid #a9c2df}
+.report-table tbody tr.exam td{background:#f2f7f4}
+.report-table .num{text-align:right;font-variant-numeric:tabular-nums}
+.report-note{font-size:12px;color:#64748b;margin-top:.5rem}
 </style>""", unsafe_allow_html=True)
 
 
-@st.cache_resource
-def client():
-    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
-    credentials = Credentials.from_service_account_info(dict(st.secrets["gcp_service_account"]), scopes=scopes)
-    return gspread.authorize(credentials)
-
-
-def doc():
-    return client().open_by_key(SPREADSHEET_ID)
-
-
-@st.cache_data(ttl=120, show_spinner=False)
-def fetch_data():
-    workbook = doc()
-    clinical = []
-    for ws in workbook.worksheets():
-        if re.fullmatch(r"20\d{2}_Q[1-4]", ws.title):
-            rows = ws.get_all_values()
-            for r in rows[2:]:
-                if len(r) < 11:
-                    continue
-                day = parse_day(r[0])
-                deptdoctor = str(r[1]).strip()
-                if not day or not deptdoctor or any(w in deptdoctor for w in ("합계", "총계", "소계")):
-                    continue
-                matched = re.match(r"^\s*(.*?)\s*\(([^()]+)\)\s*$", deptdoctor)
-                if not matched:
-                    continue
-                department, doctor = (x.strip() for x in matched.groups())
-                # 예: 내과 치료(윤한결) -> 내과; 세부 원본 문자열은 표시용으로만 사용
-                department = re.sub(r"\s+(치료|진료)$", "", department).strip()
-                clinical.append({"일자": day, "진료과": department, "의사명": doctor,
-                                 "외래": number(r[2]), "입원": number(r[4]), "퇴원": number(r[5]), "재원": number(r[6]),
-                                 "외래수입": number(r[7]), "입원수입": number(r[9]),
-                                 "검진제외": number(r[7]) + number(r[9])})
-    clinical_df = pd.DataFrame(clinical)
-    exam_rows = []
+def number(x):
     try:
-        for r in workbook.worksheet("RAW_검진").get_all_values()[1:]:
-            if len(r) < 6:
-                continue
-            day = parse_day(r[1]) or parse_day(r[0])
-            if day:
-                exam_rows.append({"일자": day, "남": number(r[2]), "여": number(r[3]), "계": number(r[4]), "검진수입": number(r[5])})
-    except WorksheetNotFound:
-        pass
-    exam_df = pd.DataFrame(exam_rows)
-    return clinical_df, exam_df
-
-
-@st.cache_data(ttl=20, show_spinner=False)
-def fetch_accounts():
-    rows = doc().worksheet(SHEET_PIN).get_all_values()
-    if not rows:
-        return pd.DataFrame(columns=["진료과", "의사", "PIN", "권한", "_row"])
-    headings = [h.strip() for h in rows[0]]
-    accounts = []
-    for i, row in enumerate(rows[1:], start=2):
-        vals = dict(zip(headings, row))
-        if not str(vals.get("의사", "")).strip():
-            continue
-        accounts.append({"진료과": str(vals.get("진료과", "")).strip(),
-                         "의사": str(vals.get("의사", "")).strip(),
-                         "PIN": str(vals.get("PIN", "")).strip(),
-                         "권한": str(vals.get("권한", "user")).strip().lower(), "_row": i})
-    return pd.DataFrame(accounts)
-
-
-def number(value):
-    try:
-        return int(round(float(str(value).replace(",", "").replace("₩", "").strip())))
-    except (TypeError, ValueError):
+        value = str(x).strip().replace(",", "").replace("₩", "")
+        return int(round(float(value))) if value else 0
+    except (TypeError, ValueError, OverflowError):
         return 0
 
 
 def parse_day(value):
-    if isinstance(value, (date, datetime)):
-        return value.date() if isinstance(value, datetime) else value
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
     s = str(value).strip()
     if not s or s.startswith("#"):
         return None
-    s = re.sub(r"\.0$", "", s)
-    for fmt in ("%Y%m%d", "%Y-%m-%d", "%Y.%m.%d", "%Y/%m/%d", "%Y-%m-%d %H:%M:%S"):
+    # 구글시트·엑셀에서 날짜가 일련번호(예 46334)로 반환되는 경우
+    if re.fullmatch(r"\d{5}(?:\.0+)?", s):
+        serial = int(float(s))
+        if 30000 <= serial <= 80000:
+            return date(1899, 12, 30) + timedelta(days=serial)
+    s = re.sub(r"\.0+$", "", s)
+    compact = re.sub(r"\s+", "", s)
+    compact = compact.rstrip(".")
+    for fmt in ("%Y%m%d", "%Y-%m-%d", "%Y.%m.%d", "%Y/%m/%d", "%m/%d/%Y", "%Y-%m-%d%H:%M:%S"):
         try:
-            return datetime.strptime(s, fmt).date()
+            return datetime.strptime(compact, fmt).date()
         except ValueError:
             pass
     return None
+
+
+def dept_normalize(raw):
+    department = str(raw).strip()
+    department = re.sub(r"\s+(치료|진료)$", "", department)
+    return {"일반외과": "외과"}.get(department, department)
+
+
+def parse_provider(text):
+    match = re.match(r"^\s*(.*?)\s*\(([^()]+)\)\s*$", str(text))
+    if not match:
+        return None
+    dept, doctor = match.groups()
+    return dept_normalize(dept), doctor.strip()
+
+
+@st.cache_resource
+def gclient():
+    creds = Credentials.from_service_account_info(
+        dict(st.secrets["gcp_service_account"]),
+        scopes=["https://www.googleapis.com/auth/spreadsheets"],
+    )
+    return gspread.authorize(creds)
+
+
+def spreadsheet():
+    return gclient().open_by_key(st.secrets["gsheet"]["spreadsheet_id"])
+
+
+@st.cache_data(ttl=180, show_spinner=False)
+def load_source():
+    book = spreadsheet()
+    clinical_rows = []
+    quarter_titles = []
+    for ws in book.worksheets():
+        if not QUARTER_RE.fullmatch(ws.title):
+            continue
+        quarter_titles.append(ws.title)
+        rows = ws.get_all_values()
+        # 원본 첫 2행은 병합 헤더. 3행부터 자료.
+        for r in rows[2:]:
+            if len(r) < 11:
+                continue
+            when = parse_day(r[0])
+            parsed = parse_provider(r[1])
+            if when is None or parsed is None:
+                continue  # 합계/소계 등 원본 집계행 제외 (중복 방지)
+            dept, doctor = parsed
+            out_revenue = number(r[7])
+            in_revenue = number(r[9])
+            clinical_rows.append({
+                "일자": when, "진료과": dept, "의사명": doctor,
+                "외래": number(r[2]), "입원": number(r[4]), "퇴원": number(r[5]), "재원": number(r[6]),
+                "외래수입": out_revenue, "입원수입": in_revenue,
+                "검진제외": out_revenue + in_revenue,
+            })  # 낮병동: 환자수 D, 수입 I 둘 다 제외
+
+    exam_rows = []
+    try:
+        for r in book.worksheet("RAW_검진").get_all_values()[1:]:
+            if len(r) < 6:
+                continue
+            when = parse_day(r[1]) or parse_day(r[0])  # Date(B열) 우선
+            if when is not None:
+                exam_rows.append({"일자": when, "남": number(r[2]), "여": number(r[3]),
+                                  "계": number(r[4]), "검진수입": number(r[5])})
+    except WorksheetNotFound:
+        pass
+    return (pd.DataFrame(clinical_rows, columns=["일자", "진료과", "의사명"] + CLINICAL_FIELDS),
+            pd.DataFrame(exam_rows, columns=["일자", "남", "여", "계", "검진수입"]),
+            tuple(quarter_titles))
+
+
+@st.cache_data(ttl=20, show_spinner=False)
+def load_accounts():
+    rows = spreadsheet().worksheet(SHEET_PIN).get_all_values()
+    if not rows:
+        return pd.DataFrame(columns=["진료과", "의사", "PIN", "권한", "_row"])
+    headers = [x.strip() for x in rows[0]]
+    required = {"진료과", "의사", "PIN", "권한"}
+    if not required.issubset(headers):
+        raise ValueError("PIN_관리의 1행은 진료과, 의사, PIN, 권한이어야 합니다.")
+    accounts = []
+    for row_index, row in enumerate(rows[1:], 2):
+        obj = dict(zip(headers, row))
+        if not str(obj.get("의사", "")).strip():
+            continue
+        accounts.append({"진료과": dept_normalize(obj.get("진료과", "")),
+                         "의사": str(obj.get("의사", "")).strip(),
+                         "PIN": str(obj.get("PIN", "")).strip(),
+                         "권한": str(obj.get("권한", "user")).strip().lower(), "_row": row_index})
+    return pd.DataFrame(accounts, columns=["진료과", "의사", "PIN", "권한", "_row"])
 
 
 def pin_valid(pin):
     return bool(re.fullmatch(r"\d{4}", str(pin)))
 
 
-def refresh():
-    fetch_data.clear()
-    fetch_accounts.clear()
+def clear_session():
+    for key in ("account_row", "login_pin", "login_name"):
+        st.session_state.pop(key, None)
 
 
-def authenticated_user(accounts):
-    identity = st.session_state.get("account_row")
-    if identity is None:
+def logged_in_account(accounts):
+    rid = st.session_state.get("account_row")
+    if rid is None:
         return None
-    match = accounts[accounts["_row"] == identity]
-    if match.empty:
-        st.session_state.pop("account_row", None)
+    matched = accounts[accounts["_row"] == rid]
+    if len(matched) != 1:
+        clear_session()
         return None
-    row = match.iloc[0].to_dict()
+    row = matched.iloc[0].to_dict()
     if row["PIN"] != st.session_state.get("login_pin") or row["의사"] != st.session_state.get("login_name"):
-        st.session_state.pop("account_row", None)
+        clear_session()
         return None
     return row
 
 
-def add_account(dept, name, pin, permission):
-    ws = doc().worksheet(SHEET_PIN)
-    ws.append_row([dept, name, pin, permission], value_input_option="RAW")
-    fetch_accounts.clear()
+def update_pin_account(row_index, dept, name, pin, role):
+    spreadsheet().worksheet(SHEET_PIN).update(
+        range_name=f"A{row_index}:D{row_index}",
+        values=[[dept, name, pin, role]], value_input_option="RAW")
+    load_accounts.clear()
 
 
-def change_account(row_number, dept, name, pin, permission):
-    doc().worksheet(SHEET_PIN).update(range_name=f"A{row_number}:D{row_number}", values=[[dept, name, pin, permission]], value_input_option="RAW")
-    fetch_accounts.clear()
+def summarize_rows(df, day_label, group_cols):
+    result = []
+    if df.empty:
+        return result
+    grouped = df.groupby(group_cols, sort=True, dropna=False)[CLINICAL_FIELDS].sum()
+    for index, values in grouped.iterrows():
+        keys = (index,) if len(group_cols) == 1 else index
+        names = dict(zip(group_cols, keys))
+        row = {"일자": day_label, "진료과": names.get("진료과", "전체"),
+               "의사명": names.get("의사명", "합계")}
+        row.update({k: 0 for k in NUMERIC})
+        row.update({k: int(values[k]) for k in CLINICAL_FIELDS})
+        row["검진포함"] = row["검진제외"]
+        result.append(row)
+    return result
 
 
-def remove_account(row_number):
-    doc().worksheet(SHEET_PIN).delete_rows(int(row_number))
-    fetch_accounts.clear()
+def total_row(rows, date_label, label, category="합계"):
+    return {"일자": date_label, "진료과": label, "의사명": category,
+            **{k: sum(int(r.get(k, 0)) for r in rows) for k in NUMERIC}}
 
 
-def row_record(day, dept, doctor, values):
-    return {"일자": day, "진료과": dept, "의사명": doctor, **{c: int(values.get(c, 0)) for c in NUMERIC}}
-
-
-def summary(clinical, exam, mode, start, end, dept_choice, doctor_choice):
-    if not clinical.empty:
-        clinical = clinical[(clinical["일자"] >= start) & (clinical["일자"] <= end)].copy()
+def report_data(clinical, exams, start, end, dept, doctor, master, user):
+    frame = clinical[(clinical["일자"] >= start) & (clinical["일자"] <= end)].copy()
+    exam = exams[(exams["일자"] >= start) & (exams["일자"] <= end)].copy()
+    label = start.isoformat() if start == end else f"{start:%Y-%m-%d} ~ {end:%Y-%m-%d}"
+    all_clinical = summarize_rows(frame, label, ["진료과", "의사명"])
+    exam_record = None
     if not exam.empty:
-        exam = exam[(exam["일자"] >= start) & (exam["일자"] <= end)].copy()
+        sums = exam[["남", "여", "계", "검진수입"]].sum()
+        exam_record = {"일자": label, "진료과": "검진", "의사명": "검진실적",
+                       **{c: 0 for c in NUMERIC}}
+        exam_record.update({"남": int(sums["남"]), "여": int(sums["여"]), "계": int(sums["계"]),
+                            "검진포함": int(sums["검진수입"])})
+    hospital_rows = all_clinical + ([exam_record] if exam_record is not None else [])
+    hospital_total = total_row(hospital_rows, label, "병원 전체", "합계")
 
-    if mode == "개인":
-        clinical = clinical[(clinical["진료과"] == dept_choice) & (clinical["의사명"] == doctor_choice)]
-        exam = exam.iloc[0:0]
-    elif mode == "진료과":
-        clinical = clinical[clinical["진료과"] == dept_choice]
-        exam = exam.iloc[0:0]
-    elif mode == "의사":
-        clinical = clinical[clinical["의사명"] == doctor_choice]
-        exam = exam.iloc[0:0]
-    elif mode == "전체" and dept_choice != "전체":
-        clinical = clinical[clinical["진료과"] == dept_choice]
-        exam = exam.iloc[0:0]
+    if master:
+        shown = [r for r in all_clinical if (dept == "전체" or r["진료과"] == dept) and
+                 (doctor == "전체" or r["의사명"] == doctor)]
+        if dept == "전체" and doctor == "전체" and exam_record is not None:
+            shown.append(exam_record)
+        return pd.DataFrame(shown, columns=FIELDS), total_row(shown, label, "전체", "합계"), []
 
-    out = []
-    if not clinical.empty:
-        grouped = clinical.groupby(["진료과", "의사명"], dropna=False, sort=True)[["외래", "입원", "퇴원", "재원", "외래수입", "입원수입", "검진제외"]].sum()
-        for (dept, doctor), vals in grouped.iterrows():
-            rec = {"남": 0, "여": 0, "계": 0, "검진포함": vals["검진제외"], **vals.to_dict()}
-            out.append(row_record("기간합계" if start != end else start.isoformat(), dept, doctor, rec))
-
-    # 검진은 의사/진료과 소속 정보가 없어 병원 전체일 때 별도 행으로 표시.
-    if mode == "전체" and dept_choice == "전체" and not exam.empty:
-        sums = exam[["남", "여", "계", "검진수입"]].sum().to_dict()
-        out.append(row_record("기간합계" if start != end else start.isoformat(), "검진", "공통", {
-            "남": sums["남"], "여": sums["여"], "계": sums["계"],
-            "검진포함": sums["검진수입"]}))
-    result = pd.DataFrame(out, columns=COLUMNS)
-    totals = {c: int(result[c].sum()) if not result.empty else 0 for c in NUMERIC}
-    return result, totals
+    # 일반 사용자: 타 의사 개인행은 어떤 경우에도 표시하지 않음.
+    own_dept, own_name = user["진료과"], user["의사"]
+    own_rows = [r for r in all_clinical if r["진료과"] == own_dept and r["의사명"] == own_name]
+    dept_rows = [r for r in all_clinical if r["진료과"] == own_dept]
+    own = total_row(own_rows, label, own_dept, own_name)
+    dept_total = total_row(dept_rows, label, own_dept, "진료과 합계")
+    own["_class"] = ""
+    dept_total["_class"] = "subtotal"
+    hospital_total["_class"] = "total"
+    return pd.DataFrame([own, dept_total, hospital_total], columns=FIELDS + ["_class"]), None, []
 
 
-def html_report(frame, totals):
-    headings = """<thead><tr><th rowspan="2">일자</th><th rowspan="2">진료과</th><th rowspan="2">의사명</th>
-<th colspan="4">환자수</th><th colspan="3">환자수(검진)</th><th colspan="4">진료수입</th></tr>
-<tr><th>외래</th><th>입원</th><th>퇴원</th><th>재원</th><th>남</th><th>여</th><th>계</th>
-<th>외래</th><th>입원</th><th>검진제외</th><th>검진포함</th></tr></thead>"""
+def format_report(df, totals):
+    head = '''<thead><tr><th rowspan="2">일자</th><th rowspan="2">진료과</th><th rowspan="2">의사명</th>
+    <th colspan="4">환자수</th><th colspan="3">환자수(검진)</th><th colspan="4">진료수입</th></tr>
+    <tr><th>외래</th><th>입원</th><th>퇴원</th><th>재원</th><th>남</th><th>여</th><th>계</th>
+    <th>외래</th><th>입원</th><th>검진제외</th><th>검진포함</th></tr></thead>'''
     body = []
-    for _, item in frame.iterrows():
-        is_exam = item["진료과"] == "검진"
-        cells = "".join(f'<td>{html.escape(str(item[c]))}</td>' for c in COLUMNS[:3])
-        cells += "".join(f'<td class="num">{int(item[c]):,}</td>' for c in NUMERIC)
-        body.append(f'<tr class="{"exam" if is_exam else ""}">{cells}</tr>')
-    values = "".join(f'<td class="num">{totals[c]:,}</td>' for c in NUMERIC)
-    body.append(f'<tr class="total"><td>합계</td><td>전체</td><td>전체</td>{values}</tr>')
-    return f'<div class="report-wrap"><table class="report-table">{headings}<tbody>{"".join(body)}</tbody></table></div>'
+    for _, row in df.iterrows():
+        kind = row.get("_class", "")
+        if not kind and row["진료과"] == "검진":
+            kind = "exam"
+        cells = "".join(f"<td>{html.escape(str(row[c]))}</td>" for c in FIELDS[:3])
+        cells += "".join(f'<td class="num">{int(row[c]):,}</td>' for c in NUMERIC)
+        body.append(f'<tr class="{kind}">{cells}</tr>')
+    if totals is not None:
+        cells = "".join(f'<td class="num">{int(totals[c]):,}</td>' for c in NUMERIC)
+        body.append(f'<tr class="total"><td>합계</td><td>전체</td><td>합계</td>{cells}</tr>')
+    return f'<div class="report-scroll"><table class="report-table">{head}<tbody>{"".join(body)}</tbody></table></div>'
 
 
-def excel_report(frame, totals):
-    buffer = BytesIO()
-    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        sheet = writer.book.create_sheet("진료현황")
-        writer.book.remove(writer.book["Sheet"]) if "Sheet" in writer.book else None
-        sheet.append(["일자", "진료과", "의사명", "환자수", None, None, None, "환자수(검진)", None, None, "진료수입", None, None, None])
-        sheet.append([None, None, None, "외래", "입원", "퇴원", "재원", "남", "여", "계", "외래", "입원", "검진제외", "검진포함"])
-        for region in ("A1:A2", "B1:B2", "C1:C2", "D1:G1", "H1:J1", "K1:N1"):
-            sheet.merge_cells(region)
-        for _, r in frame.iterrows():
-            sheet.append([r[c] for c in COLUMNS])
-        sheet.append(["합계", "전체", "전체"] + [totals[c] for c in NUMERIC])
-        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-        for row in sheet.iter_rows():
-            for cell in row:
-                cell.alignment = Alignment(horizontal="center" if cell.column <= 3 or cell.row <= 2 else "right", vertical="center")
-                if cell.row <= 2:
-                    cell.fill = PatternFill("solid", fgColor="DEE5ED")
-                    cell.font = Font(bold=True)
-                if cell.row == sheet.max_row:
-                    cell.fill = PatternFill("solid", fgColor="E8F0FC")
-                    cell.font = Font(bold=True)
-                if cell.row >= 3 and cell.column >= 4:
-                    cell.number_format = '#,##0'
-        for col in "ABCDEFGHIJKLMN":
-            sheet.column_dimensions[col].width = 15 if col not in "BC" else 18
-        sheet.freeze_panes = "D3"
-    return buffer.getvalue()
+def to_excel(df, totals):
+    # 출력 파일은 선택된 화면 내용과 동일; 단순 데이터 저장이 아닌 2단 헤더 양식
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
+    from openpyxl.utils import get_column_letter
+    book = Workbook()
+    ws = book.active
+    ws.title = "진료현황"
+    ws.append(["일자", "진료과", "의사명", "환자수", None, None, None, "환자수(검진)", None, None, "진료수입", None, None, None])
+    ws.append([None, None, None, "외래", "입원", "퇴원", "재원", "남", "여", "계", "외래", "입원", "검진제외", "검진포함"])
+    for address in ("A1:A2", "B1:B2", "C1:C2", "D1:G1", "H1:J1", "K1:N1"):
+        ws.merge_cells(address)
+    for _, row in df.iterrows():
+        ws.append([row[c] for c in FIELDS])
+    if totals is not None:
+        ws.append(["합계", "전체", "합계"] + [totals[c] for c in NUMERIC])
+    for rr in ws:
+        for cell in rr:
+            cell.alignment = Alignment(horizontal="left" if cell.column in (2, 3) and cell.row > 2 else
+                                       ("right" if cell.column > 3 and cell.row > 2 else "center"), vertical="center")
+            cell.border = Border(bottom=Side(style="hair", color="DBE3EF"))
+            if cell.row <= 2:
+                cell.fill = PatternFill("solid", fgColor="DFE9F5")
+                cell.font = Font(bold=True, color="1E334E")
+            elif cell.row == ws.max_row and totals is not None or (cell.row > 2 and str(ws.cell(cell.row, 3).value).endswith("합계")):
+                cell.fill = PatternFill("solid", fgColor="E7F0FD")
+                cell.font = Font(bold=True)
+            if cell.column >= 4 and cell.row > 2:
+                cell.number_format = '#,##0'
+        ws.row_dimensions[rr[0].row].height = 22
+    for col in range(1, 15):
+        ws.column_dimensions[get_column_letter(col)].width = 21 if col == 1 else 18 if col in (2, 3) else 15
+    ws.freeze_panes = "D3"
+    out = BytesIO()
+    book.save(out)
+    return out.getvalue()
 
 
 try:
-    accounts = fetch_accounts()
-except Exception as e:
-    st.error(f"PIN_관리 시트를 읽을 수 없습니다. 시트 이름·서비스 계정 권한을 확인하세요. ({e})")
+    accounts = load_accounts()
+except Exception as ex:
+    st.error(f"PIN_관리 시트를 불러오지 못했습니다. 시트명과 공유권한을 확인하세요. ({ex})")
     st.stop()
 
-user = authenticated_user(accounts)
+user = logged_in_account(accounts)
 if user is None:
-    left, right = st.columns([1, 2])
+    left, _ = st.columns([1, 2])
     with left:
-        if Path("Hismedi_logo.png").exists():
-            st.image("Hismedi_logo.png", width=180)
+        if Path("Hismedi_logo.png").is_file():
+            st.image("Hismedi_logo.png", width=112)
         st.title("Hismedi 진료현황")
-        st.caption("4자리 PIN 코드를 입력하고 Enter를 누르세요.")
-        with st.form("pin_login"):
-            pin = st.text_input("PIN 코드", max_chars=4, type="password", autocomplete="off")
-            submitted = st.form_submit_button("로그인", use_container_width=True)
-        if submitted:
-            matches = accounts[accounts["PIN"] == pin.strip()]
-            if not pin_valid(pin):
-                st.error("4자리 숫자를 입력해 주세요.")
-            elif len(matches) != 1:
-                st.error("PIN 코드가 올바르지 않거나 중복 등록되어 있습니다. 관리자에게 문의해 주세요.")
+        st.caption("4자리 PIN을 입력한 뒤 Enter를 누르세요.")
+        with st.form("login_form"):
+            pin = st.text_input("PIN 코드", type="password", max_chars=4, autocomplete="off")
+            login = st.form_submit_button("로그인", use_container_width=True)
+        if login:
+            matched = accounts[accounts["PIN"] == pin.strip()]
+            if not pin_valid(pin) or len(matched) != 1:
+                st.error("PIN이 올바르지 않거나 중복되어 있습니다.")
             else:
-                account = matches.iloc[0]
+                account = matched.iloc[0]
                 st.session_state["account_row"] = int(account["_row"])
                 st.session_state["login_pin"] = str(account["PIN"])
                 st.session_state["login_name"] = str(account["의사"])
@@ -298,169 +345,176 @@ if user is None:
 
 is_master = user["권한"] == "master"
 try:
-    clinical, exams = fetch_data()
-except Exception as e:
-    st.error(f"원본 데이터 연결 오류: {e}")
+    clinical, exams, sheets = load_source()
+except Exception as ex:
+    st.error(f"실적 원본을 읽지 못했습니다. ({ex})")
     st.stop()
 
-all_dates = []
-if not clinical.empty:
-    all_dates.extend(clinical["일자"].tolist())
-if not exams.empty:
-    all_dates.extend(exams["일자"].tolist())
-if not all_dates:
-    st.warning("원본 데이터가 없습니다. 20XX_Q1~Q4, RAW_검진 시트를 확인해 주세요.")
+all_days = ([] if clinical.empty else clinical["일자"].tolist()) + ([] if exams.empty else exams["일자"].tolist())
+if not all_days:
+    st.warning("원본 실적이 없습니다. 2026_Q4 및 RAW_검진 시트를 확인하세요.")
     st.stop()
-latest, earliest = max(all_dates), min(all_dates)
+
+min_day, max_day = min(all_days), max(all_days)
+yesterday = datetime.now(TZ).date() - timedelta(days=1)
+initial_day = yesterday  # 기본값은 전일, 데이터가 없어도 임의로 다른 날짜로 변경하지 않음
 
 with st.sidebar:
-    if Path("Hismedi_logo.png").exists():
-        st.image("Hismedi_logo.png", width=145)
+    if Path("Hismedi_logo.png").is_file():
+        st.image("Hismedi_logo.png", width=95)
     st.markdown("### Hismedi 진료현황")
-    st.caption(f"접속: {user['의사']} · {user['진료과']} ({'마스터' if is_master else '일반'})")
+    st.caption(f"접속: {user['의사']} · {'마스터' if is_master else user['진료과']}")
     st.divider()
-    period_type = st.radio("날짜", ["일자별", "기간별"], horizontal=True)
-    if period_type == "일자별":
-        selected = st.date_input("조회일", value=latest, min_value=earliest, max_value=max(latest, date.today()))
-        start = end = selected
-    else:
-        period = st.date_input("조회기간", value=(max(earliest, latest - timedelta(days=30)), latest),
-                               min_value=earliest, max_value=max(latest, date.today()))
-        if not isinstance(period, (tuple, list)) or len(period) != 2:
-            st.info("시작일과 종료일을 모두 선택하세요.")
-            st.stop()
-        start, end = period
-        if start > end:
-            st.error("시작일은 종료일보다 늦을 수 없습니다.")
-            st.stop()
-
-    depts = sorted(clinical["진료과"].unique().tolist()) if not clinical.empty else []
-    doctors = sorted(clinical["의사명"].unique().tolist()) if not clinical.empty else []
+    st.markdown("**조회 기간**")
+    start = st.date_input("시작일", value=initial_day, format="YYYY-MM-DD")
+    end = st.date_input("종료일", value=initial_day, format="YYYY-MM-DD")
+    if start > end:
+        st.error("시작일이 종료일보다 늦습니다.")
+        st.stop()
+    depts = sorted(set(clinical["진료과"].dropna().tolist()) | {
+        x for x in accounts["진료과"].tolist() if x and x != "전체"})
     if is_master:
-        mode = st.selectbox("조회 범위", ["전체", "진료과", "의사"])
-        if mode == "진료과":
-            dept_choice = st.selectbox("진료과", depts)
+        dept_choice = st.selectbox("진료과", ["전체"] + depts)
+        matching_doctors = clinical if dept_choice == "전체" else clinical[clinical["진료과"] == dept_choice]
+        names = sorted(set(matching_doctors["의사명"].tolist()) | {
+            str(a["의사"]) for _, a in accounts.iterrows() if a["권한"] != "master" and
+            (dept_choice == "전체" or a["진료과"] == dept_choice)})
+        if len(names) == 0:
             doctor_choice = "전체"
-        elif mode == "의사":
-            doctor_choice = st.selectbox("의사", doctors)
-            dept_choice = "전체"
+            st.caption("의사: 등록된 의사 없음")
+        elif len(names) == 1:
+            doctor_choice = "전체"
+            st.caption(f"의사: {names[0]} (1명 · 자동 표시)")
         else:
-            dept_choice = "전체"
-            doctor_choice = "전체"
+            doctor_choice = st.selectbox("의사", ["전체"] + names)
     else:
-        mode = st.selectbox("조회 범위", ["개인", "진료과", "전체"],
-                            format_func=lambda x: {"개인": "내 실적", "진료과": "소속 진료과 실적", "전체": "병원 전체 실적"}[x])
         dept_choice, doctor_choice = user["진료과"], user["의사"]
-        st.caption(f"소속: {dept_choice} / {doctor_choice}")
-
+        st.caption(f"진료과: {dept_choice}")
+        st.caption("조회: 본인 실적 / 소속 진료과 합계 / 병원 전체 합계")
     if st.button("🔄 구글시트 데이터 동기화", use_container_width=True):
-        refresh()
+        load_source.clear()
+        load_accounts.clear()
         st.rerun()
     st.divider()
-    st.markdown("**계정**")
     if st.button("로그아웃", use_container_width=True):
-        for k in ("account_row", "login_pin", "login_name"):
-            st.session_state.pop(k, None)
+        clear_session()
         st.rerun()
 
-# 메인 화면은 표를 최상단에 배치하고, 계정 메뉴는 접을 수 있는 영역으로 별도 제공
-report, totals = summary(clinical, exams, mode, start, end, dept_choice, doctor_choice)
-st.markdown(html_report(report, totals), unsafe_allow_html=True)
-st.caption(f"조회 기간: {start:%Y-%m-%d} ~ {end:%Y-%m-%d}  |  검진 실적은 병원 전체 조회에서만 합산합니다. 낮병동 제외.")
-st.download_button("⬇️ 조회 결과 엑셀 다운로드", data=excel_report(report, totals),
-                   file_name=f"Hismedi_진료현황_{start:%Y%m%d}_{end:%Y%m%d}.xlsx",
-                   mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+report, totals, _ = report_data(clinical, exams, start, end, dept_choice, doctor_choice, is_master, user)
+tabs = st.tabs(["📊 진료실적", "🔒 내 PIN 번호 변경", "⬇️ 엑셀다운로드"] + (["⚙️ 권한관리"] if is_master else []))
 
-with st.expander("🔒 내 PIN 번호 변경"):
-    with st.form("my_pin"):
-        old_pin = st.text_input("현재 PIN", max_chars=4, type="password")
-        new_pin = st.text_input("새 PIN (4자리)", max_chars=4, type="password")
-        confirm_pin = st.text_input("새 PIN 확인", max_chars=4, type="password")
-        change = st.form_submit_button("PIN 변경")
-    if change:
-        if old_pin != user["PIN"]:
+with tabs[0]:
+    st.markdown(format_report(report, totals), unsafe_allow_html=True)
+    if report.empty:
+        st.info("해당 기간에 조회되는 실적이 없습니다.")
+    st.caption(f"조회: {start:%Y-%m-%d} ~ {end:%Y-%m-%d} · 낮병동 제외 · 임상/검진 동일 표 집계")
+    if not is_master:
+        st.caption("일반 계정에는 타 의사의 개별 실적을 표시하지 않습니다.")
+
+with tabs[1]:
+    st.subheader("내 PIN 번호 변경")
+    with st.form("change_own_pin"):
+        current = st.text_input("현재 PIN", type="password", max_chars=4)
+        new = st.text_input("새 PIN (4자리)", type="password", max_chars=4)
+        verify = st.text_input("새 PIN 확인", type="password", max_chars=4)
+        submit = st.form_submit_button("PIN 변경")
+    if submit:
+        if current != user["PIN"]:
             st.error("현재 PIN이 일치하지 않습니다.")
-        elif not pin_valid(new_pin) or new_pin != confirm_pin:
-            st.error("새 PIN은 4자리 숫자이며 확인값과 일치해야 합니다.")
-        elif new_pin in accounts["PIN"].tolist():
-            st.error("이미 사용 중인 PIN입니다. 다른 PIN을 선택해 주세요.")
+        elif not pin_valid(new) or new != verify:
+            st.error("새 PIN은 4자리 숫자이며 확인 값과 일치해야 합니다.")
+        elif new in accounts["PIN"].tolist():
+            st.error("이미 등록된 PIN입니다.")
         else:
             try:
-                change_account(user["_row"], user["진료과"], user["의사"], new_pin, user["권한"])
+                update_pin_account(int(user["_row"]), user["진료과"], user["의사"], new, user["권한"])
+                clear_session()
                 st.success("PIN이 변경되었습니다. 새 PIN으로 다시 로그인하세요.")
-                for k in ("account_row", "login_pin", "login_name"):
-                    st.session_state.pop(k, None)
-            except Exception as e:
-                st.error(f"변경 실패: {e}")
+                st.rerun()
+            except Exception as ex:
+                st.error(f"PIN 변경 실패: {ex}")
+
+with tabs[2]:
+    st.subheader("엑셀다운로드")
+    st.caption("현재 화면에 표시된 행과 합계가 같은 2단 헤더 엑셀 파일로 저장됩니다.")
+    st.download_button("⬇️ 조회 결과 엑셀 다운로드", data=to_excel(report, totals),
+                       file_name=f"Hismedi_진료현황_{start:%Y%m%d}_{end:%Y%m%d}.xlsx",
+                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 if is_master:
-    with st.expander("⚙️ 마스터 권한관리 · 계정 추가/수정/삭제"):
-        st.caption("계정은 PIN_관리 시트와 동기화됩니다. 계정 삭제 시 해당 사용자는 더 이상 로그인할 수 없습니다.")
-        public = accounts[["진료과", "의사", "권한"]].copy()
-        st.dataframe(public, use_container_width=True, hide_index=True)
-        action = st.radio("작업 선택", ["계정 추가", "계정 수정", "계정 삭제"], horizontal=True)
+    with tabs[3]:
+        st.subheader("권한관리")
+        st.caption("PIN_관리 시트의 진료과 / 의사 / PIN / 권한 4개 열을 사용합니다. 계정 관리용 명단은 진료실적 원본과 별개입니다.")
+        st.dataframe(accounts[["진료과", "의사", "권한"]], use_container_width=True, hide_index=True)
+        action = st.radio("관리 작업", ["계정 추가", "계정 수정", "계정 삭제"], horizontal=True)
         if action == "계정 추가":
-            with st.form("add_account"):
-                dept = st.text_input("진료과")
-                name = st.text_input("의사/사용자 이름")
-                newp = st.text_input("4자리 PIN", type="password", max_chars=4)
+            with st.form("account_create"):
+                dept = st.selectbox("진료과", ["전체"] + depts)
+                name = st.text_input("이름")
+                pin = st.text_input("PIN (4자리)", type="password", max_chars=4)
                 role = st.selectbox("권한", ["user", "master"])
                 submitted = st.form_submit_button("계정 추가")
             if submitted:
-                if not dept.strip() or not name.strip() or not pin_valid(newp):
-                    st.error("진료과·이름과 4자리 숫자 PIN을 입력하세요.")
-                elif newp in accounts["PIN"].tolist():
-                    st.error("중복 PIN은 등록할 수 없습니다.")
-                elif not accounts[(accounts["진료과"] == dept.strip()) & (accounts["의사"] == name.strip())].empty:
-                    st.error("동일한 진료과/이름의 계정이 이미 있습니다.")
+                name = name.strip()
+                duplicate = accounts[(accounts["진료과"] == dept) & (accounts["의사"] == name)]
+                if not name or not pin_valid(pin) or (role == "user" and dept == "전체"):
+                    st.error("진료과와 이름, 4자리 PIN을 확인하세요. 일반 사용자는 소속 진료과를 지정해야 합니다.")
+                elif pin in accounts["PIN"].tolist() or not duplicate.empty:
+                    st.error("중복된 PIN 또는 계정입니다.")
                 else:
                     try:
-                        add_account(dept.strip(), name.strip(), newp, role)
-                        st.success("추가되었습니다.")
+                        spreadsheet().worksheet(SHEET_PIN).append_row([dept, name, pin, role], value_input_option="RAW")
+                        load_accounts.clear()
                         st.rerun()
-                    except Exception as e:
-                        st.error(f"추가 실패: {e}")
-        else:
-            labels = {int(r["_row"]): f"{r['진료과']} · {r['의사']} ({r['권한']})" for _, r in accounts.iterrows()}
-            target = st.selectbox("대상 계정", options=list(labels), format_func=lambda x: labels[x])
-            chosen = accounts[accounts["_row"] == target].iloc[0]
+                    except Exception as ex:
+                        st.error(f"추가 실패: {ex}")
+        elif not accounts.empty:
+            options = {int(row["_row"]): f"{row['진료과']} · {row['의사']} ({row['권한']})"
+                       for _, row in accounts.iterrows()}
+            selected = st.selectbox("계정 선택", list(options), format_func=lambda x: options[x])
+            item = accounts[accounts["_row"] == selected].iloc[0]
             if action == "계정 수정":
-                with st.form("edit_account"):
-                    dept = st.text_input("진료과", value=chosen["진료과"])
-                    name = st.text_input("이름", value=chosen["의사"])
-                    newp = st.text_input("PIN (변경 시 새 PIN)", value=chosen["PIN"], max_chars=4, type="password")
-                    role = st.selectbox("권한", ["user", "master"], index=0 if chosen["권한"] != "master" else 1)
+                with st.form("account_edit"):
+                    candidates = sorted(set(depts) | {item["진료과"]})
+                    departments = ["전체"] + [x for x in candidates if x != "전체"]
+                    dept = st.selectbox("진료과", departments, index=departments.index(item["진료과"]))
+                    name = st.text_input("이름", value=item["의사"])
+                    pin = st.text_input("새 PIN (변경하지 않으려면 빈칸)", type="password", max_chars=4)
+                    role = st.selectbox("권한", ["user", "master"], index=0 if item["권한"] != "master" else 1)
                     submitted = st.form_submit_button("수정 저장")
                 if submitted:
-                    other = accounts[accounts["_row"] != target]
-                    if not dept.strip() or not name.strip() or not pin_valid(newp):
-                        st.error("입력 내용을 확인하세요.")
-                    elif newp in other["PIN"].tolist():
-                        st.error("중복 PIN입니다.")
-                    elif chosen["권한"] == "master" and role != "master" and len(accounts[accounts["권한"] == "master"]) <= 1:
-                        st.error("마지막 마스터 계정의 권한은 해제할 수 없습니다.")
+                    new_pin = pin or item["PIN"]
+                    others = accounts[accounts["_row"] != selected]
+                    masters = accounts[accounts["권한"] == "master"]
+                    if not name.strip() or not pin_valid(new_pin) or (role == "user" and dept == "전체"):
+                        st.error("진료과, 이름, PIN을 확인하세요.")
+                    elif new_pin in others["PIN"].tolist() or not others[(others["진료과"] == dept) & (others["의사"] == name.strip())].empty:
+                        st.error("중복 PIN 또는 중복 계정입니다.")
+                    elif item["권한"] == "master" and role != "master" and len(masters) <= 1:
+                        st.error("마지막 마스터 권한은 해제할 수 없습니다.")
                     else:
                         try:
-                            change_account(target, dept.strip(), name.strip(), newp, role)
-                            st.success("수정되었습니다.")
+                            update_pin_account(selected, dept, name.strip(), new_pin, role)
+                            if selected == user["_row"]:
+                                clear_session()
                             st.rerun()
-                        except Exception as e:
-                            st.error(f"수정 실패: {e}")
+                        except Exception as ex:
+                            st.error(f"수정 실패: {ex}")
             else:
-                with st.form("delete_account"):
-                    confirm = st.checkbox("선택한 계정을 삭제하겠습니다.")
+                with st.form("account_delete"):
+                    confirmed = st.checkbox("선택 계정을 삭제합니다.")
                     submitted = st.form_submit_button("계정 삭제")
                 if submitted:
-                    if not confirm:
+                    if not confirmed:
                         st.warning("삭제 확인을 선택하세요.")
-                    elif target == user["_row"]:
-                        st.error("로그인 중인 본인 계정은 삭제할 수 없습니다.")
-                    elif chosen["권한"] == "master" and len(accounts[accounts["권한"] == "master"]) <= 1:
+                    elif selected == user["_row"]:
+                        st.error("로그인한 본인의 계정은 삭제할 수 없습니다.")
+                    elif item["권한"] == "master" and len(accounts[accounts["권한"] == "master"]) <= 1:
                         st.error("마지막 마스터 계정은 삭제할 수 없습니다.")
                     else:
                         try:
-                            remove_account(target)
-                            st.success("삭제되었습니다.")
+                            spreadsheet().worksheet(SHEET_PIN).delete_rows(selected)
+                            load_accounts.clear()
                             st.rerun()
-                        except Exception as e:
-                            st.error(f"삭제 실패: {e}")
+                        except Exception as ex:
+                            st.error(f"삭제 실패: {ex}")
