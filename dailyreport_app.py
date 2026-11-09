@@ -26,18 +26,16 @@ def load_data():
     spreadsheet_id = st.secrets["gsheet"]["spreadsheet_id"]
     spreadsheet = gc.open_by_key(spreadsheet_id)
     
-    # 1. 임상 데이터 로드 (2026_Q4) - 멀티 헤더 대응을 위해 get_all_values 사용
+    # 1. 임상 데이터 로드 (2026_Q4)
     try:
         clinical_ws = spreadsheet.worksheet("2026_Q4")
         rows = clinical_ws.get_all_values()
         if len(rows) > 2:
-            # 시트의 실제 컬럼 순서에 맞춘 명시적 헤더 지정
             columns = [
                 "일자", "진료과", 
                 "환자수_외래", "환자수_낮병동", "환자수_입원", "환자수_퇴원", "환자수_재원", 
                 "진료수입_외래", "진료수입_낮병동", "진료수입_입원", "진료수입_총수입"
             ]
-            # 3번째 행(인덱스 2)부터 데이터 추출
             df_clinical = pd.DataFrame(rows[2:], columns=columns[:len(rows[2])])
         else:
             df_clinical = pd.DataFrame()
@@ -87,7 +85,7 @@ def parse_doctor_and_dept(row_text):
         doc_raw = text[start+1:end].replace("PD", "").strip()
         doc = doc_raw if doc_raw else "공통"
     else:
-        doc = "공통n" if doc == "공통" else "공통"
+        doc = "공통"
         
     return pd.Series([dept, doc])
 
@@ -95,13 +93,11 @@ if not df_cli.empty:
     df_cli.columns = [str(c).strip() for c in df_cli.columns]
     
     if "일자" in df_cli.columns and "진료과" in df_cli.columns:
-        # 빈 값 제거 및 '합계' 행 필터링
         df_cli = df_cli[df_cli['일자'].astype(str).str.strip() != ""]
         df_cli = df_cli[~df_cli['진료과'].astype(str).str.contains("합계", na=False)]
         
         df_cli['정제_일자'] = pd.to_datetime(df_cli['일자'], errors='coerce').dt.strftime('%Y-%m-%d')
         
-        # 진료과 및 의사명 분리 적용
         parsed_df = df_cli['진료과'].apply(parse_doctor_and_dept)
         df_cli['정제_진료과'] = parsed_df[0]
         df_cli['정제_의사명'] = parsed_df[1]
@@ -144,4 +140,4 @@ if not df_cli.empty:
     else:
         st.error("시트 내에 '일자' 또는 '진료과' 컬럼을 찾을 수 없습니다.")
 else:
-    st.info("`202
+    st.info("`2026_Q4` 시트에 입력된 데이터가 없습니다.")
