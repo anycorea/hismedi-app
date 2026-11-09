@@ -35,7 +35,7 @@ st.markdown("""<style>
 [data-testid="stSidebar"] {min-width:290px;max-width:320px}
 [data-testid="stSidebar"] [data-testid="stImage"] img {object-fit:contain!important;object-position:left center!important;max-width:100%;height:auto!important}
 /* Readable sidebar; the native tabs are replaced by a radio menu. */
-[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {padding-top:22px!important}
+[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {padding-top:0px!important}
 [data-testid="stSidebar"] label, [data-testid="stSidebar"] p {font-size:15px!important}
 [data-testid="stSidebar"] .stMarkdown h3 {font-size:19px!important;font-weight:750!important}
 [data-testid="stSidebar"] [data-testid="stWidgetLabel"] p {font-weight:700!important;font-size:15px!important}
@@ -48,16 +48,20 @@ st.markdown("""<style>
 [data-baseweb="popover"] [role="listbox"] {max-height:78vh!important;}
 [data-testid="stSidebar"] .stButton button {width:100%}
 .report-scroll {overflow-x:auto;max-width:100%;border:1px solid #d5dde7;border-radius:8px;margin-top:.15rem}
-.report-table {border-collapse:collapse;width:100%;min-width:1110px;font-size:13px;text-align:center;line-height:1.4}
-.report-table th {background:#e2e9f2;color:#1e334e;border:1px solid #cbd5e1;padding:9px 7px;white-space:nowrap}
-.report-table td {border:1px solid #e4e8ef;padding:8px 8px;white-space:nowrap;color:#1b293b}
+.report-table {border-collapse:collapse;width:100%;min-width:1180px;font-size:14px;text-align:center;line-height:1.42}
+.report-table th {background:#e2e9f2;color:#1e334e;border:1px solid #cbd5e1;padding:10px 8px;white-space:nowrap;font-size:14px}
+.report-table td {border:1px solid #e4e8ef;padding:9px 9px;white-space:nowrap;color:#1b293b}
 .report-table td:nth-child(2),.report-table td:nth-child(3){text-align:left}
 .report-table tbody tr:nth-child(even):not(.total) td{background:#f8fafc}
 .report-table tbody tr.total td{background:#dfeaf9!important;font-weight:750;border-top:2px solid #769dce}
 .report-table tbody tr.subtotal td{background:#eef4fb!important;font-weight:700;border-top:1px solid #a9c2df}
 .report-table tbody tr.exam td{background:#f2f7f4}
 .report-table .num{text-align:right;font-variant-numeric:tabular-nums}
-.report-note{font-size:12px;color:#64748b;margin-top:.5rem}
+/* Center the branded sidebar section, emphasize the date values without altering other widgets. */
+[data-testid="stSidebar"] [data-testid="stDateInput"] input {font-size:16px!important;font-weight:750!important;color:#163b67!important;background:#fff!important}
+[data-testid="stSidebar"] [data-testid="stWidgetLabel"] p {font-size:16px!important;font-weight:750!important}
+[data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] {font-size:15px!important}
+.report-note{font-size:13px;color:#64748b;margin-top:.5rem}
 </style>""", unsafe_allow_html=True)
 
 
@@ -251,8 +255,17 @@ def pin_valid(pin):
 
 
 def clear_session():
-    for key in ("account_row", "login_pin", "login_name"):
+    # Date inputs have explicit keys. Remove them on logout/login so the new
+    # session starts on yesterday, and report/filter never retain old ranges.
+    for key in ("account_row", "login_pin", "login_name", "report_start_day", "report_end_day", "main_nav"):
         st.session_state.pop(key, None)
+
+
+def reset_report_dates():
+    yesterday = datetime.now(TZ).date() - timedelta(days=1)
+    st.session_state["report_start_day"] = yesterday
+    st.session_state["report_end_day"] = yesterday
+
 
 
 def logged_in_account(accounts):
@@ -432,12 +445,19 @@ except Exception as ex:
 
 user = logged_in_account(accounts)
 if user is None:
-    st.markdown('<div style="height:35px"></div>', unsafe_allow_html=True)
-    left, _ = st.columns([1.1, 1.8])
-    with left:
-        show_logo("Hismedi_logo.png", 148)
-        st.title("Hismedi 진료현황")
-        st.caption("4자리 PIN을 입력한 뒤 Enter를 누르세요.")
+    # Login: hospital mark and title aligned horizontally, with form BELOW them.
+    st.markdown('<div style="height:32px"></div>', unsafe_allow_html=True)
+    login_col, _ = st.columns([1.45, 1.25], gap="large")
+    with login_col:
+        logo_col, heading_col = st.columns([1, 4.2], gap="small", vertical_alignment="center")
+        with logo_col:
+            show_logo("Hismedi_logo.png", 148)
+        with heading_col:
+            st.markdown('<div style="font-size:clamp(25px,2.5vw,43px);font-weight:800;'
+                        'color:#242b35;line-height:1.3;white-space:nowrap">Hismedi 진료현황</div>',
+                        unsafe_allow_html=True)
+            st.caption("4자리 PIN을 입력한 뒤 Enter를 누르세요.")
+        st.markdown('<div style="height:14px"></div>', unsafe_allow_html=True)
         with st.form("login_form"):
             pin = st.text_input("PIN 코드", type="password", max_chars=4, autocomplete="off")
             login = st.form_submit_button("로그인", use_container_width=True)
@@ -447,6 +467,9 @@ if user is None:
                 st.error("PIN이 올바르지 않거나 중복되어 있습니다.")
             else:
                 account = matched.iloc[0]
+                # Clear all prior account/date/menu state, then initialize for this login.
+                clear_session()
+                reset_report_dates()
                 st.session_state["account_row"] = int(account["_row"])
                 st.session_state["login_pin"] = str(account["PIN"])
                 st.session_state["login_name"] = str(account["의사"])
@@ -470,13 +493,21 @@ yesterday = datetime.now(TZ).date() - timedelta(days=1)
 initial_day = yesterday  # 기본값은 전일, 데이터가 없어도 임의로 다른 날짜로 변경하지 않음
 
 with st.sidebar:
-    show_logo("Hismedi_logo.png", 104)
-    st.markdown("### Hismedi 진료현황")
-    st.caption(f"접속: {user['의사']} · {'마스터' if is_master else user['진료과']}")
+    st.markdown('<div style="height:0px"></div>', unsafe_allow_html=True)
+    show_logo("Hismedi_logo.png", 98, centered=True)
+    st.markdown('<div style="text-align:center;font-size:19px;font-weight:800;'
+                'margin-top:-8px">Hismedi 진료현황</div>', unsafe_allow_html=True)
+    st.markdown(f'<div style="text-align:center;font-size:14px;color:#4c607b;'
+                f'margin-top:5px;font-weight:650">접속: {html.escape(str(user["의사"]))} · '
+                f'{html.escape("마스터" if is_master else str(user["진료과"]))}</div>', unsafe_allow_html=True)
     st.divider()
     st.markdown("**조회 기간**")
-    start = st.date_input("시작일", value=initial_day, format="YYYY-MM-DD")
-    end = st.date_input("종료일", value=initial_day, format="YYYY-MM-DD")
+    if "report_start_day" not in st.session_state:
+        st.session_state["report_start_day"] = initial_day
+    if "report_end_day" not in st.session_state:
+        st.session_state["report_end_day"] = initial_day
+    start = st.date_input("시작일", format="YYYY-MM-DD", key="report_start_day")
+    end = st.date_input("종료일", format="YYYY-MM-DD", key="report_end_day")
     if start > end:
         st.error("시작일이 종료일보다 늦습니다.")
         st.stop()
