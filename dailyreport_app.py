@@ -112,7 +112,7 @@ if not st.session_state["authenticated"]:
 
 user = st.session_state["user_info"]
 
-# 4. 왼쪽 메뉴 (사이드바) 구성
+# 4. 왼쪽 메뉴 (사이드바) 구성 - PIN 변경 제거 및 필터 중심 정돈
 with st.sidebar:
     try:
         logo_img = Image.open("Hismedi_logo.png")
@@ -127,36 +127,6 @@ with st.sidebar:
         st.success("동기화 완료!")
         st.rerun()
         
-    st.markdown("---")
-    st.markdown("### 🔒 PIN 번호 변경")
-    with st.form("change_pin_form"):
-        new_pin = st.text_input("새로운 PIN (4자리)", type="password", max_chars=4)
-        change_btn = st.form_submit_button("PIN 변경", use_container_width=True)
-        if change_btn:
-            if len(new_pin.strip()) == 4:
-                try:
-                    # 구글 시트 연결하여 PIN 번호 업데이트
-                    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-                    creds_dict = dict(st.secrets["gcp_service_account"])
-                    credentials = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-                    gc = gspread.authorize(credentials)
-                    spreadsheet = gc.open_by_key(st.secrets["gsheet"]["spreadsheet_id"])
-                    pin_ws = spreadsheet.worksheet("PIN_관리")
-                    
-                    # 해당 의사 행 찾기
-                    cell = pin_ws.find(user["의사"])
-                    if cell:
-                        # C열(3번째 열)이 PIN
-                        pin_ws.update_cell(cell.row, 3, new_pin.strip())
-                        st.success("PIN 번호가 변경되었습니다!")
-                        st.cache_data.clear()
-                    else:
-                        st.error("시트에서 사용자를 찾을 수 없습니다.")
-                except Exception as ex:
-                    st.error(f"변경 실패: {ex}")
-            else:
-                st.warning("4자리 숫자를 입력해주세요.")
-
     st.markdown("---")
     st.markdown("### 🔍 조회 필터")
     
@@ -201,45 +171,81 @@ with st.sidebar:
         st.session_state["authenticated"] = False
         st.rerun()
 
-# 5. 오른쪽 메인 영역 (세련된 KPI 카드 및 테이블)
+# 5. 오른쪽 메인 영역 (상단 탭 구조로 메인 실적 / PIN 변경 분리)
 st.markdown(f"<p class='main-title'>📊 Hismedi 진료현황 리포트</p>", unsafe_allow_html=True)
 st.markdown(f"<p class='sub-title'>조회일자: <b>{selected_date}</b> | 소속/진료과: <b>{selected_dept}</b></p>", unsafe_allow_html=True)
 
-# 필터링 적용
-mask = (df_main['일자'] == selected_date)
-if user["권한"] != "master" and selected_dept != "전체":
-    mask &= (df_main['진료과'] == selected_dept)
-elif selected_dept != "전체":
-    mask &= (df_main['진료과'] == selected_dept)
+# 탭 생성 (메인 대시보드 / ⚙️ 계정 설정(PIN 변경))
+tab_dashboard, tab_settings = st.tabs(["📈 진료 실적 대시보드", "🔒 PIN 번호 변경"])
 
-if selected_doctor != "전체":
-    mask &= (df_main['의사명'] == selected_doctor)
+with tab_dashboard:
+    # 필터링 적용
+    mask = (df_main['일자'] == selected_date)
+    if user["권한"] != "master" and selected_dept != "전체":
+        mask &= (df_main['진료과'] == selected_dept)
+    elif selected_dept != "전체":
+        mask &= (df_main['진료과'] == selected_dept)
 
-view_df = df_main[mask].copy()
+    if selected_doctor != "전체":
+        mask &= (df_main['의사명'] == selected_doctor)
 
-# 숫자형 데이터 정제
-for col in view_df.columns:
-    if col not in ['일자', '진료과', '의사명']:
-        view_df[col] = pd.to_numeric(view_df[col].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
+    view_df = df_main[mask].copy()
 
-# 주요 지표 (KPI) 카드
-col1, col2, col3, col4 = st.columns(4)
-t_out = view_df['외래'].sum() if '외래' in view_df.columns else 0
-t_in = view_df['입원'].sum() if '입원' in view_df.columns else 0
-t_rev_ex = view_df['검진제외'].sum() if '검진제외' in view_df.columns else 0
-t_rev_inc = view_df['검진포함'].sum() if '검진포함' in view_df.columns else 0
+    # 숫자형 데이터 정제
+    for col in view_df.columns:
+        if col not in ['일자', '진료과', '의사명']:
+            view_df[col] = pd.to_numeric(view_df[col].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
 
-with col1:
-    st.metric(label="외래 환자수", value=f"{int(t_out):,} 명")
-with col2:
-    st.metric(label="입원 환자수", value=f"{int(t_in):,} 명")
-with col3:
-    st.metric(label="진료수입 (검진제외)", value=f"{int(t_rev_ex):,} 원")
-with col4:
-    st.metric(label="진료수입 (검진포함)", value=f"{int(t_rev_inc):,} 원")
+    # 주요 지표 (KPI) 카드
+    col1, col2, col3, col4 = st.columns(4)
+    t_out = view_df['외래'].sum() if '외래' in view_df.columns else 0
+    t_in = view_df['입원'].sum() if '입원' in view_df.columns else 0
+    t_rev_ex = view_df['검진제외'].sum() if '검진제외' in view_df.columns else 0
+    t_rev_inc = view_df['검진포함'].sum() if '검진포함' in view_df.columns else 0
 
-st.markdown("### 📋 상세 실적 데이터")
-if not view_df.empty:
-    st.dataframe(view_df, use_container_width=True, hide_index=True)
-else:
-    st.info("선택하신 조건에 해당하는 실적 데이터가 없습니다.")
+    with col1:
+        st.metric(label="외래 환자수", value=f"{int(t_out):,} 명")
+    with col2:
+        st.metric(label="입원 환자수", value=f"{int(t_in):,} 명")
+    with col3:
+        st.metric(label="진료수입 (검진제외)", value=f"{int(t_rev_ex):,} 원")
+    with col4:
+        st.metric(label="진료수입 (검진포함)", value=f"{int(t_rev_inc):,} 원")
+
+    st.markdown("### 📋 상세 실적 데이터")
+    if not view_df.empty:
+        st.dataframe(view_df, use_container_width=True, hide_index=True)
+    else:
+        st.info("선택하신 조건에 해당하는 실적 데이터가 없습니다.")
+
+with tab_settings:
+    st.markdown("### 🔒 본인 PIN 번호 변경")
+    st.markdown("접속 계정의 4자리 비밀번호를 변경할 수 있습니다. 변경된 비밀번호는 구글 시트(`PIN_관리`)에 즉시 반영됩니다.")
+    
+    col_pin_box, _ = st.columns([1, 1])
+    with col_pin_box:
+        with st.form("change_pin_form_tab"):
+            new_pin = st.text_input("새로운 PIN (4자리)", type="password", max_chars=4)
+            change_btn = st.form_submit_button("PIN 번호 변경하기", use_container_width=True)
+            
+            if change_btn:
+                if len(new_pin.strip()) == 4 and new_pin.strip().isdigit():
+                    try:
+                        scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+                        creds_dict = dict(st.secrets["gcp_service_account"])
+                        credentials = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+                        gc = gspread.authorize(credentials)
+                        spreadsheet = gc.open_by_key(st.secrets["gsheet"]["spreadsheet_id"])
+                        pin_ws = spreadsheet.worksheet("PIN_관리")
+                        
+                        cell = pin_ws.find(user["의사"])
+                        if cell:
+                            pin_ws.update_cell(cell.row, 3, new_pin.strip())
+                            st.success("PIN 번호가 성공적으로 변경되었습니다! 다음 로그인 시 새 PIN을 사용하세요.")
+                            st.cache_data.clear()
+                        else:
+                            st.error("PIN_관리 시트에서 접속자 정보를 찾을 수 없습니다.")
+                    except Exception as ex:
+                        st.error(f"변경 실패: {ex}")
+                else:
+                    st.warning("PIN 번호는 4자리 숫자로 입력해주세요.")
