@@ -1,7 +1,7 @@
 """Hismedi 진료현황 (Streamlit / Google Sheets).
 
 Secrets: [gcp_service_account], [gsheet] spreadsheet_id.
-데이터: 20YY_Q1~Q4, RAW_검진, PIN_관리(진료과/의사/PIN/권한).
+데이터: 20YY (연도별 시트; 기존 20YY_Q1~Q4도 전환기 지원), RAW_검진, PIN_관리.
 """
 from __future__ import annotations
 
@@ -26,7 +26,8 @@ SHEET_PIN = "PIN_관리"
 FIELDS = ["일자", "진료과", "의사명", "외래", "입원", "퇴원", "재원", "남", "여", "계", "외래수입", "입원수입", "검진제외", "검진포함"]
 NUMERIC = FIELDS[3:]
 CLINICAL_FIELDS = ["외래", "입원", "퇴원", "재원", "외래수입", "입원수입", "검진제외"]
-QUARTER_RE = re.compile(r"^20\d{2}_Q[1-4]$")
+QUARTER_RE = re.compile(r"^(20\d{2})_Q[1-4]$")
+YEAR_RE = re.compile(r"^20\d{2}$")
 TZ = ZoneInfo("Asia/Seoul")
 
 st.markdown("""<style>
@@ -57,6 +58,9 @@ st.markdown("""<style>
 .report-table tbody tr.subtotal td{background:#eef4fb!important;font-weight:700;border-top:1px solid #a9c2df}
 .report-table tbody tr.exam td{background:#f2f7f4}
 .report-table .num{text-align:right;font-variant-numeric:tabular-nums}
+.month-table {min-width:1300px}
+.month-table th,.month-table td {padding:10px 8px;font-size:14px}
+.month-table th:last-child,.month-table td:last-child {background:#e9f1fc;font-weight:750}
 /* Center the branded sidebar section, emphasize the date values without altering other widgets. */
 [data-testid="stSidebar"] [data-testid="stDateInput"] input {font-size:16px!important;font-weight:750!important;color:#163b67!important;background:#fff!important}
 [data-testid="stSidebar"] [data-testid="stWidgetLabel"] p {font-size:16px!important;font-weight:750!important}
@@ -194,11 +198,15 @@ def spreadsheet():
 def load_source():
     book = spreadsheet()
     clinical_rows = []
-    quarter_titles = []
-    for ws in book.worksheets():
-        if not QUARTER_RE.fullmatch(ws.title):
-            continue
-        quarter_titles.append(ws.title)
+    source_titles = []
+    worksheets = book.worksheets()
+    year_names = {ws.title for ws in worksheets if YEAR_RE.fullmatch(ws.title)}
+    # 같은 연도 시트와 기존 분기 시트가 동시에 있으면 연도 시트만 사용 (중복 방지).
+    sources = [ws for ws in worksheets if YEAR_RE.fullmatch(ws.title) or
+               (QUARTER_RE.fullmatch(ws.title) and ws.title[:4] not in year_names)]
+    sources.sort(key=lambda ws: ws.title)
+    for ws in sources:
+        source_titles.append(ws.title)
         rows = ws.get_all_values()
         # 원본 첫 2행은 병합 헤더. 3행부터 자료.
         for r in rows[2:]:
@@ -231,7 +239,7 @@ def load_source():
         pass
     return (pd.DataFrame(clinical_rows, columns=["일자", "진료과", "의사명"] + CLINICAL_FIELDS),
             pd.DataFrame(exam_rows, columns=["일자", "남", "여", "계", "검진수입"]),
-            tuple(quarter_titles))
+            tuple(source_titles))
 
 
 @st.cache_data(ttl=20, show_spinner=False)
@@ -394,6 +402,187 @@ def report_data(clinical, exams, start, end, dept, doctor, master, user):
     return pd.DataFrame(visible, columns=FIELDS + ["_class"]), None, []
 
 
+# 기간별과 무관한 자동 주간/월간 집계
+MONTH_METRICS = {
+    "외래환자수": "외래", "재원환자수": "재원", "검진환자수": "계",
+    "외래수입": "외래수입", "입원수입": "입원수입",
+    "전체수입(검진제외)": "검진제외", "전체수입(검진포함)": "검진포함",
+}
+
+
+def period_total(clinical, exams, start, end, dept="전체", doctor="전체"):
+    """집계 전용: 원본 건강검진은 병원 총합 제외, RAW_검진만 검진 실적에 포함."""
+    sub = clinical[(clinical["일자"] >= start) & (clinical["일자"] <= end)]
+    if dept != "전체":
+        sub = sub[sub["진료과"] == dept]
+    if doctor != "전체":
+        sub = sub[sub["의사명"] == doctor]
+    if dept == "전체" and doctor == "전체":
+        sub = sub[~sub["진료과"].isin(EXCLUDED_HOSPITAL_DEPTS)]
+    # 건강검진 임상 원본의 외래 환자수는 별도 RAW 검진 환자수와 혼동하지 않도록 표시 안 함
+    totals = {col: int(sub[col].sum()) if col in sub else 0 for col in CLINICAL_FIELDS}
+    if dept == "건강검진":
+        totals["외래"] = 0
+    extras = {"남": 0, "여": 0, "계": 0, "검진포함": totals["검진제외"]}
+    # 검진 환자수/검진수입은 병원 전체/건강검진 조회에만 포함
+    if (dept in ("전체", "건강검진")) and doctor == "전체":
+        e = exams[(exams["일자"] >= start) & (exams["일자"] <= end)]
+        for k in ("남", "여", "계"):
+            extras[k] = int(e[k].sum()) if k in e else 0
+        extras["검진포함"] += int(e["검진수입"].sum()) if "검진수입" in e else 0
+    return {**totals, **extras}
+
+
+def weekly_table(clinical, exams, dept, doctor, master, user, today):
+    """데이터가 존재하는 주만 최근 주부터: master는 조건별 집계 1행, 일반은 본인/과/병원."""
+    dates = list(clinical["일자"]) + list(exams["일자"])
+    if not dates:
+        return pd.DataFrame(columns=FIELDS + ["_class"])
+    first = min(dates)
+    latest = max(max(dates), today)
+    first_monday = first - timedelta(days=first.weekday())
+    last_monday = latest - timedelta(days=latest.weekday())
+    rows = []
+    current = last_monday
+    while current >= first_monday:
+        week_end = current + timedelta(days=6)
+        label = f"{current:%Y-%m-%d} ~ {week_end:%Y-%m-%d}"
+        if master:
+            values = period_total(clinical, exams, current, week_end, dept, doctor)
+            if has_any_activity(values):
+                rows.append({"일자": label, "진료과": dept if dept != "전체" else "병원 전체",
+                             "의사명": doctor if doctor != "전체" else "합계", **values, "_class": "total"})
+        else:
+            own_dept = dept_normalize(user["진료과"])
+            own_name = provider_normalize(user["의사"])
+            candidates = [
+                (own_dept, own_name, own_dept, own_name, ""),
+                (own_dept, "진료과 합계", own_dept, "전체", "subtotal"),
+                ("건강검진", "검진실적", "건강검진", "전체", "exam"),
+                ("병원 전체", "합계", "전체", "전체", "total"),
+            ]
+            for dd, nn, fdept, fdoctor, kind in candidates:
+                if dd == "건강검진" and own_dept == "건강검진":
+                    # 중복 건강검진 표시는 방지
+                    continue
+                values = period_total(clinical, exams, current, week_end, fdept, fdoctor)
+                if has_any_activity(values):
+                    rows.append({"일자": label, "진료과": dd, "의사명": nn, **values, "_class": kind})
+        current -= timedelta(days=7)
+    return pd.DataFrame(rows, columns=FIELDS + ["_class"])
+
+
+def monthly_table(clinical, exams, year, metric, dept, doctor, master, user):
+    """12개월 고정 컬럼, 실적별 행 및 연간 합계; 과거 데이터도 연도 시트에서 읽음."""
+    field = MONTH_METRICS[metric]
+    year_data = clinical[clinical["일자"].map(lambda d: d.year == year)]
+    years_exam = exams[exams["일자"].map(lambda d: d.year == year)]
+    entries = []
+    if master:
+        clinical_keys = year_data[["진료과", "의사명"]].drop_duplicates().itertuples(index=False, name=None)
+        for dep, name in clinical_keys:
+            if dept != "전체" and dep != dept:
+                continue
+            if doctor != "전체" and name != doctor:
+                continue
+            # 연도별 개인행: 일부 임상 건강검진의 외래는 제외
+            entries.append((dep, name, dep, name, ""))
+        if dept in ("전체", "건강검진") and doctor == "전체":
+            entries.append(("건강검진", "검진실적", "건강검진_RAW", "전체", "exam"))
+    else:
+        own_dept = dept_normalize(user["진료과"])
+        own_name = provider_normalize(user["의사"])
+        entries = [
+            (own_dept, own_name, own_dept, own_name, ""),
+            (own_dept, "진료과 합계", own_dept, "전체", "subtotal"),
+            ("건강검진", "검진실적", "건강검진_RAW", "전체", "exam"),
+            ("병원 전체", "합계", "전체", "전체", "total"),
+        ]
+    out = []
+    for dep, name, fdept, fdoctor, kind in entries:
+        row = {"진료과": dep, "의사명": name}
+        for month in range(1, 13):
+            first = date(year, month, 1)
+            last = date(year + 1, 1, 1) - timedelta(days=1) if month == 12 else date(year, month + 1, 1) - timedelta(days=1)
+            if fdept == "건강검진_RAW":
+                em = years_exam[(years_exam["일자"] >= first) & (years_exam["일자"] <= last)]
+                value = int(em["계"].sum()) if field == "계" else int(em["검진수입"].sum()) if field == "검진포함" else 0
+            else:
+                value = period_total(clinical, exams, first, last, fdept, fdoctor).get(field, 0)
+                if dep == "건강검진" and name != "검진실적" and field == "외래":
+                    value = 0
+            row[f"{month}월"] = value
+        row["누계"] = sum(row[f"{m}월"] for m in range(1, 13))
+        row["_class"] = kind
+        if row["누계"] != 0:
+            out.append(row)
+    # 과/의사별 행이 여러 개인 경우 진료과 합계 추가 (마스터만)
+    if master and doctor == "전체":
+        detailed = [r for r in out if r["_class"] == ""]
+        depts = order_departments({r["진료과"] for r in detailed})
+        for d in depts:
+            group = [r for r in detailed if r["진료과"] == d]
+            if group:
+                subtotal = {"진료과": d, "의사명": "진료과 합계", "_class": "subtotal"}
+                for col in [f"{m}월" for m in range(1, 13)] + ["누계"]:
+                    subtotal[col] = sum(int(r[col]) for r in group)
+                out.append(subtotal)
+    ordered = order_departments({r["진료과"] for r in out})
+    out.sort(key=lambda r: (ordered.index(r["진료과"]) if r["진료과"] in ordered else 999,
+                            r["_class"] == "subtotal", r["_class"] == "total", r["의사명"]))
+    # 선택 범위에 따른 단일 최종합계 (중복 소계 제외)
+    if master:
+        total = {"진료과": dept if dept != "전체" else "병원 전체",
+                 "의사명": "합계", "_class": "total"}
+        for month in range(1, 13):
+            first = date(year, month, 1)
+            last = date(year + 1, 1, 1) - timedelta(days=1) if month == 12 else date(year, month + 1, 1) - timedelta(days=1)
+            total[f"{month}월"] = period_total(clinical, exams, first, last, dept, doctor).get(field, 0)
+        total["누계"] = sum(total[f"{m}월"] for m in range(1, 13))
+        out.append(total)
+    return pd.DataFrame(out, columns=["진료과", "의사명"] + [f"{m}월" for m in range(1, 13)] + ["누계", "_class"])
+
+
+def format_monthly(df):
+    cols = ["진료과", "의사명"] + [f"{m}월" for m in range(1, 13)] + ["누계"]
+    head = "".join(f"<th>{html.escape(c)}</th>" for c in cols)
+    rows = []
+    for _, row in df.iterrows():
+        cls = str(row.get("_class", ""))
+        cells = "".join(f"<td>{html.escape(str(row[c]))}</td>" if c in ("진료과", "의사명")
+                        else f'<td class="num">{int(row[c]):,}</td>' for c in cols)
+        rows.append(f'<tr class="{cls}">{cells}</tr>')
+    return f'<div class="report-scroll"><table class="report-table month-table"><thead><tr>{head}</tr></thead><tbody>{"".join(rows)}</tbody></table></div>'
+
+
+def monthly_excel(df, metric, year):
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
+    wb = Workbook()
+    ws = wb.active
+    ws.title = f"{year}_{metric}"[:31]
+    cols = ["진료과", "의사명"] + [f"{m}월" for m in range(1, 13)] + ["누계"]
+    ws.append(cols)
+    for _, row in df.iterrows():
+        ws.append([row[c] for c in cols])
+    for cells in ws:
+        for cell in cells:
+            cell.alignment = Alignment(horizontal="right" if cell.column > 2 else "left")
+            if cell.row == 1:
+                cell.fill = PatternFill("solid", fgColor="DFE9F5")
+                cell.font = Font(bold=True)
+            elif cell.column > 2:
+                cell.number_format = "#,##0"
+        ws.row_dimensions[cells[0].row].height = 22
+    for i in range(1, len(cols)+1):
+        ws.column_dimensions[get_column_letter(i)].width = 21 if i <= 2 else 15
+    ws.freeze_panes = "C2"
+    data = BytesIO()
+    wb.save(data)
+    return data.getvalue()
+
+
 def format_report(df, totals):
     head = '''<thead><tr><th rowspan="2">일자</th><th rowspan="2">진료과</th><th rowspan="2">의사명</th>
     <th colspan="4">환자수</th><th colspan="3">환자수(검진)</th><th colspan="4">진료수입</th></tr>
@@ -500,7 +689,7 @@ except Exception as ex:
 
 all_days = ([] if clinical.empty else clinical["일자"].tolist()) + ([] if exams.empty else exams["일자"].tolist())
 if not all_days:
-    st.warning("원본 실적이 없습니다. 2026_Q4 및 RAW_검진 시트를 확인하세요.")
+    st.warning("원본 실적이 없습니다. 2026(연도별) 및 RAW_검진 시트를 확인하세요.")
     st.stop()
 
 min_day, max_day = min(all_days), max(all_days)
@@ -556,21 +745,44 @@ with st.sidebar:
         st.rerun()
 
 report, totals, _ = report_data(clinical, exams, start, end, dept_choice, doctor_choice, is_master, user)
-# Give the menu a deliberate vertical offset instead of using the fragile Streamlit Tabs DOM.
 st.markdown('<div style="height:48px"></div>', unsafe_allow_html=True)
-menu_items = ["📊 진료실적", "🔒 내 PIN 번호 변경", "⬇️ 엑셀다운로드"]
+menu_items = ["📊 진료실적(기간별)", "📅 진료실적(주간)", "📆 진료실적(월간/연간)",
+              "🔒 내 PIN 번호 변경", "⬇️ 엑셀다운로드"]
 if is_master:
     menu_items.append("⚙️ 권한관리")
 active_menu = st.radio("메뉴", menu_items, horizontal=True, label_visibility="collapsed", key="main_nav")
 st.markdown('<div style="height:12px"></div>', unsafe_allow_html=True)
 
-if active_menu == "📊 진료실적":
+# 전역 기간 입력과 독립적인 주간·월간 자료
+if active_menu == "📊 진료실적(기간별)":
     st.markdown(format_report(report, totals), unsafe_allow_html=True)
     if report.empty:
         st.info("해당 기간에 조회되는 실적이 없습니다.")
-    st.caption(f"조회: {start:%Y-%m-%d} ~ {end:%Y-%m-%d} · 낮병동 제외 · 임상원본 건강검진 병원 합계 제외 · RAW_검진은 건강검진으로 통합")
+    st.caption(f"조회: {start:%Y-%m-%d} ~ {end:%Y-%m-%d} · 낮병동 제외 · 임상원본 건강검진 병원 합계 제외 · RAW_검진 통합")
     if not is_master:
         st.caption("일반 계정에는 타 의사의 개별 실적을 표시하지 않습니다.")
+
+if active_menu == "📅 진료실적(주간)":
+    st.caption("월요일~일요일 · 최신 주간부터 표시 · 왼쪽 조회 기간과 무관 · 진료과/의사 필터 적용")
+    weekly = weekly_table(clinical, exams, dept_choice, doctor_choice, is_master, user, datetime.now(TZ).date())
+    st.markdown(format_report(weekly, None), unsafe_allow_html=True)
+    if weekly.empty:
+        st.info("해당 조건에 집계된 주간 실적이 없습니다.")
+
+if active_menu == "📆 진료실적(월간/연간)":
+    available_years = sorted(set([d.year for d in all_days] + [datetime.now(TZ).year]), reverse=True)
+    year_col, metric_col = st.columns([1, 2.5])
+    with year_col:
+        selected_year = st.selectbox("조회 연도", available_years, index=available_years.index(datetime.now(TZ).year))
+    with metric_col:
+        selected_metric = st.selectbox("실적 지표", list(MONTH_METRICS.keys()))
+    monthly = monthly_table(clinical, exams, selected_year, selected_metric, dept_choice, doctor_choice, is_master, user)
+    st.markdown(format_monthly(monthly), unsafe_allow_html=True)
+    if monthly.empty:
+        st.info("해당 연도의 실적이 없습니다.")
+    if selected_metric == "재원환자수":
+        st.caption("재원환자수는 원본에 기록된 일자별 재원 수를 합산한 값입니다(월말 재원 또는 고유 환자 수가 아닙니다).")
+    st.caption("1월~12월 고정 · 누계 자동 합산 · 왼쪽 조회 기간과 무관 · 진료과/의사 필터 적용")
 
 if active_menu == "🔒 내 PIN 번호 변경":
     st.subheader("내 PIN 번호 변경")
@@ -597,10 +809,27 @@ if active_menu == "🔒 내 PIN 번호 변경":
 
 if active_menu == "⬇️ 엑셀다운로드":
     st.subheader("엑셀다운로드")
-    st.caption("현재 화면에 표시된 행과 합계가 같은 2단 헤더 엑셀 파일로 저장됩니다.")
-    st.download_button("⬇️ 조회 결과 엑셀 다운로드", data=to_excel(report, totals),
-                       file_name=f"Hismedi_진료현황_{start:%Y%m%d}_{end:%Y%m%d}.xlsx",
-                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    st.caption("기간별/주간 실적은 기존 2단 헤더, 월간/연간 실적은 1~12월/누계 형태로 저장합니다.")
+    kind = st.radio("다운로드 종류", ["기간별", "주간", "월간/연간"], horizontal=True)
+    if kind == "기간별":
+        payload = to_excel(report, totals)
+        filename = f"Hismedi_기간별_{start:%Y%m%d}_{end:%Y%m%d}.xlsx"
+    elif kind == "주간":
+        weekly = weekly_table(clinical, exams, dept_choice, doctor_choice, is_master, user, datetime.now(TZ).date())
+        payload = to_excel(weekly, None)
+        filename = "Hismedi_주간실적.xlsx"
+    else:
+        ycol, mcol = st.columns([1, 2])
+        years = sorted(set([d.year for d in all_days] + [datetime.now(TZ).year]), reverse=True)
+        with ycol:
+            export_year = st.selectbox("연도", years)
+        with mcol:
+            export_metric = st.selectbox("지표", list(MONTH_METRICS))
+        monthly = monthly_table(clinical, exams, export_year, export_metric, dept_choice, doctor_choice, is_master, user)
+        payload = monthly_excel(monthly, export_metric, export_year)
+        filename = f"Hismedi_월간연간_{export_year}_{export_metric}.xlsx"
+    st.download_button("⬇️ 조회 결과 엑셀 다운로드", data=payload,
+                       file_name=filename, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 if is_master and active_menu == "⚙️ 권한관리":
         st.subheader("권한관리")
