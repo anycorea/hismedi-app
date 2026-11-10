@@ -466,11 +466,9 @@ MONTH_METRICS = {
     "전체수입(검진제외)": "검진제외", "전체수입(검진포함)": "검진포함",
 }
 
-# 일반 의사 계정은 건강검진 항목을 월간/연간 조회 및 다운로드에서 선택할 수 없습니다.
-DOCTOR_MONTH_METRICS = [
-    metric for metric in MONTH_METRICS
-    if metric not in ("검진환자수", "전체수입(검진포함)")
-]
+# 월간/연간에서는 마스터와 개인 계정 모두 7개 지표를 조회할 수 있습니다.
+# 개인별 행에는 본인 실적만, 건강검진과 병원 전체는 별도 행으로 집계됩니다.
+DOCTOR_MONTH_METRICS = list(MONTH_METRICS)
 
 
 def period_total(clinical, exams, start, end, dept="전체", doctor="전체"):
@@ -530,8 +528,8 @@ def weekly_table(clinical, exams, dept, doctor, master, user, today):
 
 def monthly_table(clinical, exams, year, metric, dept, doctor, master, user, accounts):
     """12개월 고정 컬럼, 실적별 행 및 연간 합계; 과거 데이터도 연도 시트에서 읽음."""
-    if not master and metric not in DOCTOR_MONTH_METRICS:
-        raise PermissionError("일반 의사 계정은 검진 관련 월간/연간 지표를 조회할 수 없습니다.")
+    if metric not in MONTH_METRICS:
+        raise ValueError("지원하지 않는 월간/연간 실적 지표입니다.")
     field = MONTH_METRICS[metric]
     year_mask = pd.Series([d.year == year for d in clinical["일자"]], index=clinical.index, dtype=bool)
     exam_mask = pd.Series([d.year == year for d in exams["일자"]], index=exams.index, dtype=bool)
