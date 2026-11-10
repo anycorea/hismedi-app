@@ -76,6 +76,32 @@ st.markdown("""<style>
   border-left:5px solid #2776b6;border-radius:8px;background:#f0f7ff;color:#173c65;
   font-size:17px;font-weight:800;line-height:1.6}
 .data-cutoff-detail{font-size:13px;font-weight:600;color:#52718c}
+/* Strong, clearly separated monthly/yearly report controls. */
+.st-key-monthly_report_filters {
+  background:#edf4fc;
+  border:1px solid #b9cfe8;
+  border-left:5px solid #2668ad;
+  border-radius:11px;
+  padding:16px 20px 17px;
+  margin:10px 0 18px;
+}
+.st-key-monthly_report_filters [data-testid="stWidgetLabel"] p {
+  font-size:17px!important;
+  font-weight:800!important;
+  color:#173a60!important;
+}
+.st-key-monthly_report_filters [data-baseweb="select"] > div {
+  background:#fff!important;
+  border:2px solid #89afd8!important;
+  border-radius:8px!important;
+  min-height:49px!important;
+}
+.st-key-monthly_report_filters [data-baseweb="select"] span,
+.st-key-monthly_report_filters [data-baseweb="select"] input {
+  font-size:17px!important;
+  font-weight:700!important;
+  color:#173a60!important;
+}
 /* Footer credit is independent of Streamlit Community Cloud branding. */
 .anycorea-credit {position:fixed;bottom:12px;right:16px;z-index:5;
  background:rgba(255,255,255,.94);color:#617084;font-size:12px;
@@ -813,11 +839,13 @@ if active_menu == "📅 진료실적(주간)":
 
 if active_menu == "📆 진료실적(월간/연간)":
     available_years = sorted(set([d.year for d in all_days] + [datetime.now(TZ).year]), reverse=True)
-    year_col, metric_col = st.columns([1, 2.5])
-    with year_col:
-        selected_year = st.selectbox("조회 연도", available_years, index=available_years.index(datetime.now(TZ).year))
-    with metric_col:
-        selected_metric = st.selectbox("실적 지표", list(MONTH_METRICS.keys()))
+    with st.container(key="monthly_report_filters"):
+        st.markdown("**📅 월간·연간 실적 조회 조건**")
+        year_col, metric_col = st.columns([1, 2.5], gap="medium")
+        with year_col:
+            selected_year = st.selectbox("📆 조회 연도", available_years, index=available_years.index(datetime.now(TZ).year))
+        with metric_col:
+            selected_metric = st.selectbox("📊 실적 지표 선택", list(MONTH_METRICS.keys()))
     monthly = monthly_table(clinical, exams, selected_year, selected_metric, dept_choice, doctor_choice, is_master, user, accounts)
     st.markdown(format_monthly(monthly), unsafe_allow_html=True)
     if monthly.empty:
