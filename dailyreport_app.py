@@ -20,7 +20,13 @@ import streamlit as st
 from google.oauth2.service_account import Credentials
 from gspread.exceptions import WorksheetNotFound
 
-st.set_page_config(page_title="Hismedi 진료현황", page_icon="🏥", layout="wide", initial_sidebar_state="expanded")
+# 브라우저/앱 창 제목 옆 파비콘에도 병원 로고를 적용합니다.
+ICON_FILE = Path("Hismedi_logo.png")
+try:
+    PAGE_ICON = Image.open(ICON_FILE).copy() if ICON_FILE.exists() else "🏥"
+except Exception:
+    PAGE_ICON = "🏥"
+st.set_page_config(page_title="Hismedi 진료현황", page_icon=PAGE_ICON, layout="wide", initial_sidebar_state="expanded")
 
 SHEET_PIN = "PIN_관리"
 FIELDS = ["일자", "진료과", "의사명", "외래", "입원", "퇴원", "재원", "남", "여", "계", "외래수입", "입원수입", "검진제외", "검진포함"]
@@ -109,6 +115,28 @@ st.markdown("""<style>
  background:rgba(255,255,255,.94);color:#617084;font-size:12px;
  padding:5px 10px;border:1px solid #dce3ec;border-radius:7px;
  box-shadow:0 1px 4px rgba(0,0,0,.05);pointer-events:none}
+/* 일반 사용자 실적표: 흰 바탕, 동일한 1px 선, 기본 글꼴과 굵기. */
+.report-table.personal-view tbody tr td,
+.report-table.personal-view tbody tr:nth-child(even) td,
+.report-table.personal-view tbody tr.total td,
+.report-table.personal-view tbody tr.subtotal td,
+.report-table.personal-view tbody tr.exam td,
+.report-table.personal-view.month-table tbody tr td:last-child {
+    background:#fff!important;
+    border:1px solid #d8dde5!important;
+    font-family:inherit!important;
+    font-size:14px!important;
+    font-weight:400!important;
+}
+.report-table.personal-view tbody tr.personal td {color:#111111!important}
+.report-table.personal-view tbody tr.subtotal td {color:#1357b5!important}
+.report-table.personal-view tbody tr.total td {color:#c62828!important}
+.report-table.personal-view tbody tr.exam td {color:#111111!important}
+/* 주간 2차 메뉴: 개인/진료과/병원전체 선택이 눈에 띄도록 */
+.st-key-weekly_scope_menu [role="radiogroup"] label {
+    background:#fff!important;border:1px solid #b8cce3!important;
+    padding:9px 20px!important;border-radius:8px!important;
+}
 </style>""", unsafe_allow_html=True)
 
 
@@ -311,7 +339,7 @@ def registered_roster(accounts):
 
 
 def pin_valid(pin):
-    return bool(re.fullmatch(r"\d{4}", str(pin)))
+    return bool(re.fullmatch(r"\d{6}", str(pin)))
 
 
 def clear_session():
@@ -441,6 +469,7 @@ def report_data(clinical, exams, start, end, dept, doctor, master, user, account
     own_rows = [r for r in all_clinical if r["진료과"] == own_dept and r["의사명"] == own_name]
     dept_rows = [r for r in all_clinical if r["진료과"] == own_dept]
     own = total_row(own_rows, label, own_dept, own_name)
+    own["_class"] = "personal"
     dept_total = total_row(dept_rows, label, own_dept, "진료과 합계")
     dept_total["_class"] = "subtotal"
     # 로그인한 의사에게도 병원 전체 건강검진 원본의 집계치를 독립행으로 제공합니다.
@@ -526,6 +555,37 @@ def weekly_table(clinical, exams, dept, doctor, master, user, today):
     return pd.DataFrame(rows, columns=FIELDS + ["_class"])
 
 
+def weekly_personal_scope(clinical, exams, user, today, scope):
+    """일반 사용자 주간 3단계 조회: 개인 / 진료과 합계 / 병원 전체 합계."""
+    if scope not in {"개인", "진료과", "병원전체"}:
+        raise ValueError("허용되지 않은 주간 조회 범위")
+    dates = list(clinical["일자"]) + list(exams["일자"])
+    if not dates:
+        return pd.DataFrame(columns=FIELDS + ["_class"])
+    own_dept = dept_normalize(user["진료과"])
+    own_name = provider_normalize(user["의사"])
+    first = min(dates)
+    cursor = max(max(dates), today)
+    current = cursor - timedelta(days=cursor.weekday())
+    first_monday = first - timedelta(days=first.weekday())
+    results = []
+    while current >= first_monday:
+        end_week = current + timedelta(days=6)
+        if scope == "개인":
+            dept, doctor, row_dept, row_name, kind = own_dept, own_name, own_dept, own_name, "personal"
+        elif scope == "진료과":
+            dept, doctor, row_dept, row_name, kind = own_dept, "전체", own_dept, "진료과 합계", "subtotal"
+        else:
+            dept, doctor, row_dept, row_name, kind = "전체", "전체", "병원 전체", "합계", "total"
+        values = period_total(clinical, exams, current, end_week, dept, doctor)
+        if has_any_activity(values):
+            results.append({"일자": f"{current:%Y-%m-%d} ~ {end_week:%Y-%m-%d}",
+                            "진료과": row_dept, "의사명": row_name,
+                            **values, "_class": kind})
+        current -= timedelta(days=7)
+    return pd.DataFrame(results, columns=FIELDS + ["_class"])
+
+
 def monthly_table(clinical, exams, year, metric, dept, doctor, master, user, accounts):
     """12개월 고정 컬럼, 실적별 행 및 연간 합계; 과거 데이터도 연도 시트에서 읽음."""
     if metric not in MONTH_METRICS:
@@ -553,7 +613,7 @@ def monthly_table(clinical, exams, year, metric, dept, doctor, master, user, acc
         own_dept = dept_normalize(user["진료과"])
         own_name = provider_normalize(user["의사"])
         entries = [
-            (own_dept, own_name, own_dept, own_name, ""),
+            (own_dept, own_name, own_dept, own_name, "personal"),
             (own_dept, "진료과 합계", own_dept, "전체", "subtotal"),
             ("건강검진", "검진실적", "건강검진_RAW", "전체", "exam"),
             ("병원 전체", "합계", "전체", "전체", "total"),
@@ -606,7 +666,7 @@ def monthly_table(clinical, exams, year, metric, dept, doctor, master, user, acc
     return pd.DataFrame(out, columns=["진료과", "의사명"] + [f"{m}월" for m in range(1, 13)] + ["누계", "_class"])
 
 
-def format_monthly(df):
+def format_monthly(df, table_class=""):
     cols = ["진료과", "의사명"] + [f"{m}월" for m in range(1, 13)] + ["누계"]
     head = "".join(f"<th>{html.escape(c)}</th>" for c in cols)
     rows = []
@@ -615,7 +675,7 @@ def format_monthly(df):
         cells = "".join(f"<td>{html.escape(str(row[c]))}</td>" if c in ("진료과", "의사명")
                         else f'<td class="num">{int(row[c]):,}</td>' for c in cols)
         rows.append(f'<tr class="{cls}">{cells}</tr>')
-    return f'<div class="report-scroll"><table class="report-table month-table"><thead><tr>{head}</tr></thead><tbody>{"".join(rows)}</tbody></table></div>'
+    return f'<div class="report-scroll"><table class="report-table month-table {html.escape(table_class)}"><thead><tr>{head}</tr></thead><tbody>{"".join(rows)}</tbody></table></div>'
 
 
 def monthly_excel(df, metric, year):
@@ -732,10 +792,10 @@ if user is None:
             st.markdown('<div style="font-size:clamp(25px,2.5vw,43px);font-weight:800;'
                         'color:#242b35;line-height:1.3;white-space:nowrap">Hismedi 진료현황</div>',
                         unsafe_allow_html=True)
-            st.caption("4자리 PIN을 입력한 뒤 Enter를 누르세요.")
+            st.caption("6자리 사번(PIN)을 입력한 뒤 Enter를 누르세요.")
         st.markdown('<div style="height:14px"></div>', unsafe_allow_html=True)
         with st.form("login_form"):
-            pin = st.text_input("PIN 코드", type="password", max_chars=4, autocomplete="off")
+            pin = st.text_input("PIN 코드", type="password", max_chars=6, autocomplete="off")
             login = st.form_submit_button("로그인", use_container_width=True)
         if login:
             matched = accounts[accounts["PIN"] == pin.strip()]
@@ -847,7 +907,7 @@ if primary_cutoff is not None:
 
 # 전역 기간 입력과 독립적인 주간·월간 자료
 if active_menu == "📊 진료실적(기간별)":
-    st.markdown(format_report(report, totals), unsafe_allow_html=True)
+    st.markdown(format_report(report, totals, "" if is_master else "personal-view"), unsafe_allow_html=True)
     if report.empty:
         st.info("해당 기간에 조회되는 실적이 없습니다.")
     st.caption(f"조회: {start:%Y-%m-%d} ~ {end:%Y-%m-%d} · 낮병동 제외 · 임상원본 건강검진 병원 합계 제외 · RAW_검진 통합")
@@ -856,8 +916,15 @@ if active_menu == "📊 진료실적(기간별)":
 
 if active_menu == "📅 진료실적(주간)":
     st.caption("월요일~일요일 · 최신 주간부터 표시 · 왼쪽 조회 기간과 무관 · 진료과/의사 필터 적용")
-    weekly = weekly_table(clinical, exams, dept_choice, doctor_choice, is_master, user, datetime.now(TZ).date())
-    st.markdown(format_report(weekly, None, "week-table", hide_exam_inclusive=not is_master), unsafe_allow_html=True)
+    if is_master:
+        weekly = weekly_table(clinical, exams, dept_choice, doctor_choice, True, user, datetime.now(TZ).date())
+        st.markdown(format_report(weekly, None, "week-table"), unsafe_allow_html=True)
+    else:
+        with st.container(key="weekly_scope_menu"):
+            weekly_scope = st.radio("주간 조회 범위", ["개인", "진료과", "병원전체"],
+                                    horizontal=True, key="weekly_scope_choice")
+        weekly = weekly_personal_scope(clinical, exams, user, datetime.now(TZ).date(), weekly_scope)
+        st.markdown(format_report(weekly, None, "week-table personal-view", hide_exam_inclusive=True), unsafe_allow_html=True)
     if weekly.empty:
         st.info("해당 조건에 집계된 주간 실적이 없습니다.")
 
@@ -875,7 +942,7 @@ if active_menu == "📆 진료실적(월간/연간)":
                 key="monthly_metric_selection",
             )
     monthly = monthly_table(clinical, exams, selected_year, selected_metric, dept_choice, doctor_choice, is_master, user, accounts)
-    st.markdown(format_monthly(monthly), unsafe_allow_html=True)
+    st.markdown(format_monthly(monthly, "" if is_master else "personal-view"), unsafe_allow_html=True)
     if monthly.empty:
         st.info("해당 연도의 실적이 없습니다.")
     if selected_metric == "재원환자수":
@@ -885,15 +952,15 @@ if active_menu == "📆 진료실적(월간/연간)":
 if active_menu == "🔒 내 PIN 번호 변경":
     st.subheader("내 PIN 번호 변경")
     with st.form("change_own_pin"):
-        current = st.text_input("현재 PIN", type="password", max_chars=4)
-        new = st.text_input("새 PIN (4자리)", type="password", max_chars=4)
-        verify = st.text_input("새 PIN 확인", type="password", max_chars=4)
+        current = st.text_input("현재 PIN", type="password", max_chars=6)
+        new = st.text_input("새 PIN (6자리)", type="password", max_chars=6)
+        verify = st.text_input("새 PIN 확인", type="password", max_chars=6)
         submit = st.form_submit_button("PIN 변경")
     if submit:
         if current != user["PIN"]:
             st.error("현재 PIN이 일치하지 않습니다.")
         elif not pin_valid(new) or new != verify:
-            st.error("새 PIN은 4자리 숫자이며 확인 값과 일치해야 합니다.")
+            st.error("새 PIN은 6자리 숫자이며 확인 값과 일치해야 합니다.")
         elif new in accounts["PIN"].tolist():
             st.error("이미 등록된 PIN입니다.")
         else:
@@ -913,7 +980,11 @@ if active_menu == "⬇️ 엑셀다운로드":
         payload = to_excel(report, totals)
         filename = f"Hismedi_기간별_{start:%Y%m%d}_{end:%Y%m%d}.xlsx"
     elif kind == "주간":
-        weekly = weekly_table(clinical, exams, dept_choice, doctor_choice, is_master, user, datetime.now(TZ).date())
+        if is_master:
+            weekly = weekly_table(clinical, exams, dept_choice, doctor_choice, True, user, datetime.now(TZ).date())
+        else:
+            export_scope = st.selectbox("주간 조회 범위", ["개인", "진료과", "병원전체"], key="weekly_export_scope")
+            weekly = weekly_personal_scope(clinical, exams, user, datetime.now(TZ).date(), export_scope)
         payload = to_excel(weekly, None, hide_exam_inclusive=not is_master)
         filename = "Hismedi_주간실적.xlsx"
     else:
@@ -942,7 +1013,7 @@ if is_master and active_menu == "⚙️ 권한관리":
                 dept = st.selectbox("진료과", ["전체"] + depts + ["➕ 새 진료과 추가"])
                 new_dept = st.text_input("새 진료과 이름 (새 진료과 추가 선택 시에만 입력)")
                 name = st.text_input("이름")
-                pin = st.text_input("PIN (4자리)", type="password", max_chars=4)
+                pin = st.text_input("PIN (6자리)", type="password", max_chars=6)
                 role = st.selectbox("권한", ["user", "master"])
                 submitted = st.form_submit_button("계정 추가")
             if submitted:
@@ -951,7 +1022,7 @@ if is_master and active_menu == "⚙️ 권한관리":
                     dept = dept_normalize(new_dept)
                 duplicate = accounts[(accounts["진료과"] == dept) & (accounts["의사"] == name)]
                 if not dept or not name or not pin_valid(pin) or (role == "user" and dept == "전체"):
-                    st.error("진료과와 이름, 4자리 PIN을 확인하세요. 일반 사용자는 소속 진료과를 지정해야 합니다.")
+                    st.error("진료과와 이름, 6자리 PIN을 확인하세요. 일반 사용자는 소속 진료과를 지정해야 합니다.")
                 elif pin in accounts["PIN"].tolist() or not duplicate.empty:
                     st.error("중복된 PIN 또는 계정입니다.")
                 else:
@@ -972,7 +1043,7 @@ if is_master and active_menu == "⚙️ 권한관리":
                     departments = ["전체"] + [x for x in candidates if x != "전체"]
                     dept = st.selectbox("진료과", departments, index=departments.index(item["진료과"]))
                     name = st.text_input("이름", value=item["의사"])
-                    pin = st.text_input("새 PIN (변경하지 않으려면 빈칸)", type="password", max_chars=4)
+                    pin = st.text_input("새 PIN (변경하지 않으려면 빈칸)", type="password", max_chars=6)
                     role = st.selectbox("권한", ["user", "master"], index=0 if item["권한"] != "master" else 1)
                     submitted = st.form_submit_button("수정 저장")
                 if submitted:
