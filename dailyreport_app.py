@@ -13,6 +13,11 @@ from zoneinfo import ZoneInfo
 import html
 import base64
 import re
+import hashlib
+import hmac
+import secrets
+import tempfile
+from streamlit.components.v1 import declare_component
 
 import gspread
 import pandas as pd
@@ -307,15 +312,88 @@ def load_source():
             tuple(source_titles))
 
 
+# Browser-local employee number storage. Only the 6-digit ID is persisted;
+# passwords and authenticated sessions are never persisted in localStorage.
+@st.cache_resource(show_spinner=False)
+def get_employee_remember_component():
+    directory = Path(tempfile.gettempdir()) / "hismedi_employee_remember_v1"
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "index.html").write_text(r"""<!DOCTYPE html><html><head><meta charset="utf-8"></head>
+<body style="margin:0"><script>
+const KEY='hismedi.dailyreport.employee_id.v1';
+let lastValue=undefined;
+function respond(v){
+  if(v===lastValue)return;
+  lastValue=v;
+  window.parent.postMessage({isStreamlitMessage:true,type:'streamlit:setComponentValue',value:v},'*');
+}
+window.addEventListener('message', (event)=>{
+  if(!event.data || event.data.type!=='streamlit:render')return;
+  const args=event.data.args || {};
+  try {
+    if(args.saveId && /^\d{6}$/.test(args.saveId))localStorage.setItem(KEY,args.saveId);
+    if(args.clearId)localStorage.removeItem(KEY);
+    respond(localStorage.getItem(KEY)||'');
+  } catch(e) {respond('');}
+  window.parent.postMessage({isStreamlitMessage:true,type:'streamlit:setFrameHeight',height:0},'*');
+});
+window.parent.postMessage({isStreamlitMessage:true,type:'streamlit:componentReady',apiVersion:1},'*');
+</script></body></html>""", encoding="utf-8")
+    return declare_component("hismedi_employee_remember_v1",path=str(directory))
+
+
+def employee_password_valid(password):
+    return (8 <= len(password) <= 32 and not password.isspace()
+            and any(ch.isalpha() for ch in password)
+            and any(ch.isdigit() for ch in password))
+
+
+def password_hash(password):
+    salt=secrets.token_bytes(16)
+    rounds=360000
+    digest=hashlib.pbkdf2_hmac('sha256',password.encode('utf-8'),salt,rounds)
+    return f"pbkdf2_sha256${rounds}${salt.hex()}${digest.hex()}"
+
+
+def verify_password(password,stored):
+    stored=str(stored or '0000')
+    if stored.startswith('pbkdf2_sha256$'):
+        try:
+            _,r,s,d=stored.split('$')
+            digest=hashlib.pbkdf2_hmac('sha256',password.encode('utf-8'),bytes.fromhex(s),int(r))
+            return hmac.compare_digest(digest,bytes.fromhex(d))
+        except (ValueError,OverflowError):
+            return False
+    return hmac.compare_digest(password,stored)
+
+
+def password_is_initial(stored):
+    return str(stored or '0000') == '0000'
+
+
+def update_account_fields(row_index, changes):
+    ws=spreadsheet().worksheet(SHEET_PIN)
+    headers=[str(x).strip() for x in ws.row_values(1)]
+    missing=set(changes)-set(headers)
+    if missing:
+        raise ValueError('PIN_관리 시트에 필요한 열이 없습니다: '+', '.join(sorted(missing)))
+    updates=[]
+    for name,value in changes.items():
+        col=headers.index(name)+1
+        updates.append({'range':gspread.utils.rowcol_to_a1(row_index,col), 'values':[[str(value)]]})
+    ws.batch_update(updates,value_input_option='RAW')
+    load_accounts.clear()
+
+
 @st.cache_data(ttl=20, show_spinner=False)
 def load_accounts():
     rows = spreadsheet().worksheet(SHEET_PIN).get_all_values()
     if not rows:
-        return pd.DataFrame(columns=["진료과", "의사", "PIN", "권한", "_row"])
+        return pd.DataFrame(columns=["진료과", "의사", "PIN", "권한", "PW", "_row"])
     headers = [x.strip() for x in rows[0]]
-    required = {"진료과", "의사", "PIN", "권한"}
+    required = {"진료과", "의사", "PIN", "권한", "PW"}
     if not required.issubset(headers):
-        raise ValueError("PIN_관리의 1행은 진료과, 의사, PIN, 권한이어야 합니다.")
+        raise ValueError("PIN_관리의 헤더에는 진료과, 의사, PIN, 권한, PW가 필요합니다.")
     accounts = []
     for row_index, row in enumerate(rows[1:], 2):
         obj = dict(zip(headers, row))
@@ -324,8 +402,9 @@ def load_accounts():
         accounts.append({"진료과": dept_normalize(obj.get("진료과", "")),
                          "의사": provider_normalize(obj.get("의사", "")),
                          "PIN": str(obj.get("PIN", "")).strip(),
-                         "권한": str(obj.get("권한", "user")).strip().lower(), "_row": row_index})
-    return pd.DataFrame(accounts, columns=["진료과", "의사", "PIN", "권한", "_row"])
+                         "권한": str(obj.get("권한", "user")).strip().lower(),
+                         "PW": str(obj.get("PW", "")).strip() or "0000", "_row": row_index})
+    return pd.DataFrame(accounts, columns=["진료과", "의사", "PIN", "권한", "PW", "_row"])
 
 
 def registered_roster(accounts):
@@ -345,7 +424,7 @@ def pin_valid(pin):
 def clear_session():
     # Date inputs have explicit keys. Remove them on logout/login so the new
     # session starts on yesterday, and report/filter never retain old ranges.
-    for key in ("account_row", "login_pin", "login_name", "report_start_day", "report_end_day", "main_nav"):
+    for key in ("account_row", "login_pin", "login_name", "login_pw_snapshot", "report_start_day", "report_end_day", "main_nav"):
         st.session_state.pop(key, None)
 
 
@@ -365,17 +444,15 @@ def logged_in_account(accounts):
         clear_session()
         return None
     row = matched.iloc[0].to_dict()
-    if row["PIN"] != st.session_state.get("login_pin") or row["의사"] != st.session_state.get("login_name"):
+    if (row["PIN"] != st.session_state.get("login_pin") or row["의사"] != st.session_state.get("login_name")
+            or row["PW"] != st.session_state.get("login_pw_snapshot")):
         clear_session()
         return None
     return row
 
 
 def update_pin_account(row_index, dept, name, pin, role):
-    spreadsheet().worksheet(SHEET_PIN).update(
-        range_name=f"A{row_index}:D{row_index}",
-        values=[[dept, name, pin, role]], value_input_option="RAW")
-    load_accounts.clear()
+    update_account_fields(row_index, {"진료과":dept,"의사":name,"PIN":pin,"권한":role})
 
 
 def summarize_rows(df, day_label, group_cols):
@@ -779,9 +856,18 @@ except Exception as ex:
     st.error(f"PIN_관리 시트를 불러오지 못했습니다. 시트명과 공유권한을 확인하세요. ({ex})")
     st.stop()
 
+# Persist only employee ID in this device's browser profile. The browser
+# component supplies this asynchronously and never receives the password.
+remember_component=get_employee_remember_component()
+remembered_id=remember_component(
+    saveId=st.session_state.get('save_employee_id',''),
+    clearId=st.session_state.pop('clear_employee_id',False),
+    key='hismedi_employee_id_store',default='')
+if remembered_id and not st.session_state.get('employee_login_id'):
+    st.session_state['employee_login_id']=remembered_id
+
 user = logged_in_account(accounts)
 if user is None:
-    # Login: hospital mark and title aligned horizontally, with form BELOW them.
     st.markdown('<div style="height:32px"></div>', unsafe_allow_html=True)
     login_col, _ = st.columns([1.45, 1.25], gap="large")
     with login_col:
@@ -792,25 +878,62 @@ if user is None:
             st.markdown('<div style="font-size:clamp(25px,2.5vw,43px);font-weight:800;'
                         'color:#242b35;line-height:1.3;white-space:nowrap">Hismedi 진료현황</div>',
                         unsafe_allow_html=True)
-            st.caption("6자리 사번(PIN)을 입력한 뒤 Enter를 누르세요.")
+            st.caption("6자리 사번과 비밀번호를 입력한 뒤 Enter를 누르세요.")
         st.markdown('<div style="height:14px"></div>', unsafe_allow_html=True)
         with st.form("login_form"):
-            pin = st.text_input("PIN 코드", type="password", max_chars=6, autocomplete="off")
-            login = st.form_submit_button("로그인", use_container_width=True)
+            pin=st.text_input("사번 (6자리)",max_chars=6,key='employee_login_id',autocomplete='username')
+            password=st.text_input("비밀번호",type="password",autocomplete='off')
+            login=st.form_submit_button("로그인",use_container_width=True)
         if login:
-            matched = accounts[accounts["PIN"] == pin.strip()]
-            if not pin_valid(pin) or len(matched) != 1:
-                st.error("PIN이 올바르지 않거나 중복되어 있습니다.")
+            matched=accounts[accounts['PIN']==pin.strip()]
+            locked_until=st.session_state.get('locked_until')
+            if locked_until and datetime.now(TZ)<locked_until:
+                st.error('로그인 시도 횟수가 초과됐습니다. 잠시 뒤 다시 시도하세요.')
+            elif (not pin_valid(pin) or len(matched)!=1 or
+                  not verify_password(password, matched.iloc[0]['PW'] if len(matched)==1 else '')):
+                tries=st.session_state.get('login_failures',0)+1
+                st.session_state['login_failures']=tries
+                if tries>=5:
+                    st.session_state['locked_until']=datetime.now(TZ)+timedelta(minutes=5)
+                    st.session_state['login_failures']=0
+                st.error('사번 또는 비밀번호가 올바르지 않습니다.')
             else:
-                account = matched.iloc[0]
-                # Clear all prior account/date/menu state, then initialize for this login.
+                account=matched.iloc[0]
                 clear_session()
                 reset_report_dates()
-                st.session_state["account_row"] = int(account["_row"])
-                st.session_state["login_pin"] = str(account["PIN"])
-                st.session_state["login_name"] = str(account["의사"])
+                st.session_state['account_row']=int(account['_row'])
+                st.session_state['login_pin']=str(account['PIN'])
+                st.session_state['login_name']=str(account['의사'])
+                st.session_state['login_pw_snapshot']=str(account['PW'])
+                st.session_state['save_employee_id']=str(account['PIN'])
+                st.session_state['login_failures']=0
+                st.session_state.pop('locked_until',None)
                 st.rerun()
-    st.markdown('<div class="anycorea-credit">Created by anycorea</div>', unsafe_allow_html=True)
+        if st.button('이 PC에 기억된 사번 지우기',key='forget_employee_id'):
+            st.session_state.pop('save_employee_id',None)
+            st.session_state.pop('employee_login_id',None)
+            st.session_state['clear_employee_id']=True
+            st.rerun()
+    st.markdown('<div class="anycorea-credit">Created by anycorea</div>',unsafe_allow_html=True)
+    st.stop()
+
+if password_is_initial(user['PW']):
+    st.warning('초기 비밀번호(0000)입니다. 실적을 조회하기 전에 개인 비밀번호를 설정해 주세요.')
+    with st.form('first_password_change'):
+        new_pw=st.text_input('새 비밀번호 (8~32자, 영문·숫자 포함)',type='password')
+        confirm_pw=st.text_input('새 비밀번호 확인',type='password')
+        submit=st.form_submit_button('비밀번호 설정')
+    if submit:
+        if not employee_password_valid(new_pw) or new_pw != confirm_pw:
+            st.error('비밀번호는 영문과 숫자를 포함한 8~32자로 설정하고, 확인 값과 일치해야 합니다.')
+        else:
+            try:
+                update_account_fields(int(user['_row']),{'PW':password_hash(new_pw)})
+                clear_session()
+                st.success('비밀번호를 설정했습니다. 새 비밀번호로 다시 로그인하세요.')
+                st.rerun()
+            except Exception as ex:
+                st.error(f'변경 실패: {ex}')
     st.stop()
 
 is_master = user["권한"] == "master"
@@ -877,7 +1000,7 @@ with st.sidebar:
 report, totals, _ = report_data(clinical, exams, start, end, dept_choice, doctor_choice, is_master, user, accounts)
 st.markdown('<div style="height:48px"></div>', unsafe_allow_html=True)
 menu_items = ["📊 진료실적(기간별)", "📅 진료실적(주간)", "📆 진료실적(월간/연간)",
-              "🔒 내 PIN 번호 변경", "⬇️ 엑셀다운로드"]
+              "🔒 내 비밀번호 변경", "⬇️ 엑셀다운로드"]
 if is_master:
     menu_items.append("⚙️ 권한관리")
 active_menu = st.radio("메뉴", menu_items, horizontal=True, label_visibility="collapsed", key="main_nav")
@@ -949,28 +1072,26 @@ if active_menu == "📆 진료실적(월간/연간)":
         st.caption("재원환자수는 원본에 기록된 일자별 재원 수를 합산한 값입니다(월말 재원 또는 고유 환자 수가 아닙니다).")
     st.caption("1월~12월 고정 · 누계 자동 합산 · 왼쪽 조회 기간과 무관 · 진료과/의사 필터 적용")
 
-if active_menu == "🔒 내 PIN 번호 변경":
-    st.subheader("내 PIN 번호 변경")
-    with st.form("change_own_pin"):
-        current = st.text_input("현재 PIN", type="password", max_chars=6)
-        new = st.text_input("새 PIN (6자리)", type="password", max_chars=6)
-        verify = st.text_input("새 PIN 확인", type="password", max_chars=6)
-        submit = st.form_submit_button("PIN 변경")
+if active_menu == "🔒 내 비밀번호 변경":
+    st.subheader("내 비밀번호 변경")
+    with st.form("change_own_password"):
+        current=st.text_input("현재 비밀번호",type="password")
+        new=st.text_input("새 비밀번호 (8~32자, 영문·숫자 포함)",type="password")
+        verify=st.text_input("새 비밀번호 확인",type="password")
+        submit=st.form_submit_button("비밀번호 변경")
     if submit:
-        if current != user["PIN"]:
-            st.error("현재 PIN이 일치하지 않습니다.")
-        elif not pin_valid(new) or new != verify:
-            st.error("새 PIN은 6자리 숫자이며 확인 값과 일치해야 합니다.")
-        elif new in accounts["PIN"].tolist():
-            st.error("이미 등록된 PIN입니다.")
+        if not verify_password(current,user['PW']):
+            st.error("현재 비밀번호가 일치하지 않습니다.")
+        elif not employee_password_valid(new) or new != verify:
+            st.error("새 비밀번호는 영문과 숫자를 포함한 8~32자이며 확인 값과 일치해야 합니다.")
         else:
             try:
-                update_pin_account(int(user["_row"]), user["진료과"], user["의사"], new, user["권한"])
+                update_account_fields(int(user['_row']),{'PW':password_hash(new)})
                 clear_session()
-                st.success("PIN이 변경되었습니다. 새 PIN으로 다시 로그인하세요.")
+                st.success("비밀번호가 변경되었습니다. 새 비밀번호로 다시 로그인하세요.")
                 st.rerun()
             except Exception as ex:
-                st.error(f"PIN 변경 실패: {ex}")
+                st.error(f"비밀번호 변경 실패: {ex}")
 
 if active_menu == "⬇️ 엑셀다운로드":
     st.subheader("엑셀다운로드")
@@ -1005,7 +1126,7 @@ if active_menu == "⬇️ 엑셀다운로드":
 
 if is_master and active_menu == "⚙️ 권한관리":
         st.subheader("권한관리")
-        st.caption("PIN_관리 시트의 진료과 / 의사 / PIN / 권한 4개 열을 사용합니다. 계정은 추가·삭제할 수 있고, 조회 선택 목록은 PIN_관리에 등록된 진료과·의사만 반영합니다. 미등록 의사의 원본 실적도 과별/병원 합계에는 포함됩니다.")
+        st.caption("PIN_관리의 진료과 / 의사 / PIN(사번) / 권한 / PW 열을 사용합니다. PW는 변경 후 암호화 검증값으로 보관합니다. 미등록 의사의 실적도 과별/병원 합계에는 포함됩니다.")
         st.dataframe(accounts[["진료과", "의사", "권한"]], use_container_width=True, hide_index=True)
         action = st.radio("관리 작업", ["계정 추가", "계정 수정", "계정 삭제"], horizontal=True)
         if action == "계정 추가":
@@ -1013,7 +1134,7 @@ if is_master and active_menu == "⚙️ 권한관리":
                 dept = st.selectbox("진료과", ["전체"] + depts + ["➕ 새 진료과 추가"])
                 new_dept = st.text_input("새 진료과 이름 (새 진료과 추가 선택 시에만 입력)")
                 name = st.text_input("이름")
-                pin = st.text_input("PIN (6자리)", type="password", max_chars=6)
+                pin = st.text_input("사번 (6자리)", max_chars=6)
                 role = st.selectbox("권한", ["user", "master"])
                 submitted = st.form_submit_button("계정 추가")
             if submitted:
@@ -1027,7 +1148,12 @@ if is_master and active_menu == "⚙️ 권한관리":
                     st.error("중복된 PIN 또는 계정입니다.")
                 else:
                     try:
-                        spreadsheet().worksheet(SHEET_PIN).append_row([dept, name, pin, role], value_input_option="RAW")
+                        ws=spreadsheet().worksheet(SHEET_PIN)
+                        headers=[str(x).strip() for x in ws.row_values(1)]
+                        row=['']*len(headers)
+                        for key,val in {'진료과':dept,'의사':name,'PIN':pin,'권한':role,'PW':'0000'}.items():
+                            row[headers.index(key)]=val
+                        ws.append_row(row,value_input_option="RAW")
                         load_accounts.clear()
                         st.rerun()
                     except Exception as ex:
@@ -1043,7 +1169,8 @@ if is_master and active_menu == "⚙️ 권한관리":
                     departments = ["전체"] + [x for x in candidates if x != "전체"]
                     dept = st.selectbox("진료과", departments, index=departments.index(item["진료과"]))
                     name = st.text_input("이름", value=item["의사"])
-                    pin = st.text_input("새 PIN (변경하지 않으려면 빈칸)", type="password", max_chars=6)
+                    pin = st.text_input("새 사번 (변경하지 않으려면 빈칸)", max_chars=6)
+                    reset_pw=st.checkbox("비밀번호를 초기값 0000으로 재설정 (다음 로그인 시 변경 필수)")
                     role = st.selectbox("권한", ["user", "master"], index=0 if item["권한"] != "master" else 1)
                     submitted = st.form_submit_button("수정 저장")
                 if submitted:
@@ -1059,6 +1186,8 @@ if is_master and active_menu == "⚙️ 권한관리":
                     else:
                         try:
                             update_pin_account(selected, dept, name.strip(), new_pin, role)
+                            if reset_pw:
+                                update_account_fields(selected,{'PW':'0000'})
                             if selected == user["_row"]:
                                 clear_session()
                             st.rerun()
