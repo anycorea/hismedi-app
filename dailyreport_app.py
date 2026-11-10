@@ -170,7 +170,7 @@ def padded_logo(path: str):
         return output.getvalue()
 
 
-def show_logo(path: str, width: int, *, centered: bool = False):
+def show_logo(path: str, width: int, *, centered: bool = False, top_offset: int = 0):
     """HTML image with its own explicit canvas. Avoid Streamlit image clipping/cropping."""
     if not Path(path).is_file():
         st.markdown("**HISMEDI HOSPITAL**")
@@ -180,7 +180,7 @@ def show_logo(path: str, width: int, *, centered: bool = False):
     align = "center" if centered else "left"
     st.markdown(
         f'<div style="display:flex;justify-content:{align};align-items:center;'
-        f'width:100%;min-height:{int(width*1.04)}px;margin:0 0 4px 0;overflow:visible">'
+        f'width:100%;min-height:{int(width*1.04)}px;margin:{int(top_offset)}px 0 4px 0;overflow:visible">'
         f'<img src="data:image/png;base64,{data}" alt="Hismedi Hospital" '
         f'style="width:{width}px;height:auto;max-width:100%;display:block;object-fit:contain;'
         f'overflow:visible;clip-path:none"/></div>',
@@ -764,7 +764,7 @@ initial_day = yesterday  # 기본값은 전일, 데이터가 없어도 임의로
 
 with st.sidebar:
     with st.container(key="sidebar_brand"):
-        show_logo("Hismedi_logo.png", 98, centered=True)
+        show_logo("Hismedi_logo.png", 98, centered=True, top_offset=-24)
         st.markdown('<div style="text-align:center;font-size:19px;font-weight:800;'
                     'margin-top:-8px">Hismedi 진료현황</div>', unsafe_allow_html=True)
         st.markdown(f'<div style="text-align:center;font-size:14px;color:#4c607b;'
@@ -822,7 +822,12 @@ clinical_cutoff = max(clinical["일자"]) if not clinical.empty else None
 exam_cutoff = max(exams["일자"]) if not exams.empty else None
 primary_cutoff = clinical_cutoff or exam_cutoff
 if primary_cutoff is not None:
-    cutoff_text = f"📢 {primary_cutoff:%Y년 %m월 %d일}까지 반영되었습니다."
+    # 연도별 데이터는 해당 첫 연도의 1월 1일부터 최신 원본 일자까지 안내합니다.
+    # 실제 조회 일자·현재 날짜가 아닌 원본 기록만을 기준으로 계산합니다.
+    data_start_year = min(all_days).year
+    coverage_start = date(data_start_year, 1, 1)
+    cutoff_text = (f"📢 {coverage_start:%Y년 %m월 %d일} ~ "
+                   f"{primary_cutoff:%Y년 %m월 %d일}까지 반영되었습니다.")
     details = []
     if clinical_cutoff is not None and exam_cutoff is not None and clinical_cutoff != exam_cutoff:
         details.append(f"건강검진 자료: {exam_cutoff:%Y년 %m월 %d일}까지")
