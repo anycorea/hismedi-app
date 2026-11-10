@@ -648,27 +648,32 @@ def monthly_excel(df, metric, year):
     return data.getvalue()
 
 
-def format_report(df, totals, table_class=""):
+def format_report(df, totals, table_class="", hide_exam_inclusive=False):
     """기본 실적표 HTML. 주간 표는 월간 표와 동일한 중립 배경 적용."""
     head = '''<thead><tr><th rowspan="2">일자</th><th rowspan="2">진료과</th><th rowspan="2">의사명</th>
     <th colspan="4">환자수</th><th colspan="3">환자수(검진)</th><th colspan="4">진료수입</th></tr>
     <tr><th>외래</th><th>입원</th><th>퇴원</th><th>재원</th><th>남</th><th>여</th><th>계</th>
     <th>외래</th><th>입원</th><th>검진제외</th><th>검진포함</th></tr></thead>'''
+    # 일반 의사 주간 화면에서 검진포함 수입 열 자체를 표시하지 않습니다.
+    visible_numeric = [col for col in NUMERIC if not (hide_exam_inclusive and col == "검진포함")]
+    if hide_exam_inclusive:
+        head = head.replace('<th colspan="4">진료수입</th>', '<th colspan="3">진료수입</th>')
+        head = head.replace('<th>검진제외</th><th>검진포함</th>', '<th>검진제외</th>')
     body = []
     for _, row in df.iterrows():
         kind = row.get("_class", "")
         if not kind and row["의사명"] == "검진실적":
             kind = "exam"
         cells = "".join(f"<td>{html.escape(str(row[c]))}</td>" for c in FIELDS[:3])
-        cells += "".join(f'<td class="num">{int(row[c]):,}</td>' for c in NUMERIC)
+        cells += "".join(f'<td class="num">{int(row[c]):,}</td>' for c in visible_numeric)
         body.append(f'<tr class="{kind}">{cells}</tr>')
     if totals is not None:
-        cells = "".join(f'<td class="num">{int(totals[c]):,}</td>' for c in NUMERIC)
+        cells = "".join(f'<td class="num">{int(totals[c]):,}</td>' for c in visible_numeric)
         body.append(f'<tr class="total"><td>합계</td><td>전체</td><td>합계</td>{cells}</tr>')
     return f'<div class="report-scroll"><table class="report-table {html.escape(table_class)}">{head}<tbody>{"".join(body)}</tbody></table></div>'
 
 
-def to_excel(df, totals):
+def to_excel(df, totals, hide_exam_inclusive=False):
     # 출력 파일은 선택된 화면 내용과 동일; 단순 데이터 저장이 아닌 2단 헤더 양식
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
@@ -676,14 +681,18 @@ def to_excel(df, totals):
     book = Workbook()
     ws = book.active
     ws.title = "진료현황"
-    ws.append(["일자", "진료과", "의사명", "환자수", None, None, None, "환자수(검진)", None, None, "진료수입", None, None, None])
-    ws.append([None, None, None, "외래", "입원", "퇴원", "재원", "남", "여", "계", "외래", "입원", "검진제외", "검진포함"])
-    for address in ("A1:A2", "B1:B2", "C1:C2", "D1:G1", "H1:J1", "K1:N1"):
+    visible_fields = [c for c in FIELDS if not (hide_exam_inclusive and c == "검진포함")]
+    ws.append(["일자", "진료과", "의사명", "환자수", None, None, None, "환자수(검진)", None, None,
+               "진료수입", None, None] + ([] if hide_exam_inclusive else [None]))
+    ws.append([None, None, None, "외래", "입원", "퇴원", "재원", "남", "여", "계", "외래", "입원", "검진제외"]
+              + ([] if hide_exam_inclusive else ["검진포함"]))
+    merges = ["A1:A2", "B1:B2", "C1:C2", "D1:G1", "H1:J1", "K1:M1" if hide_exam_inclusive else "K1:N1"]
+    for address in merges:
         ws.merge_cells(address)
     for _, row in df.iterrows():
-        ws.append([row[c] for c in FIELDS])
+        ws.append([row[c] for c in visible_fields])
     if totals is not None:
-        ws.append(["합계", "전체", "합계"] + [totals[c] for c in NUMERIC])
+        ws.append(["합계", "전체", "합계"] + [totals[c] for c in visible_fields[3:]])
     for rr in ws:
         for cell in rr:
             cell.alignment = Alignment(horizontal="left" if cell.column in (2, 3) and cell.row > 2 else
@@ -698,7 +707,7 @@ def to_excel(df, totals):
             if cell.column >= 4 and cell.row > 2:
                 cell.number_format = '#,##0'
         ws.row_dimensions[rr[0].row].height = 22
-    for col in range(1, 15):
+    for col in range(1, len(visible_fields) + 1):
         ws.column_dimensions[get_column_letter(col)].width = 21 if col == 1 else 18 if col in (2, 3) else 15
     ws.freeze_panes = "D3"
     out = BytesIO()
@@ -766,7 +775,7 @@ with st.sidebar:
     with st.container(key="sidebar_brand"):
         show_logo("Hismedi_logo.png", 98, centered=True, top_offset=-24)
         st.markdown('<div style="text-align:center;font-size:19px;font-weight:800;'
-                    'margin-top:-8px">Hismedi 진료현황</div>', unsafe_allow_html=True)
+                    'margin-top:2px">Hismedi 진료현황</div>', unsafe_allow_html=True)
         st.markdown(f'<div style="text-align:center;font-size:14px;color:#4c607b;'
                     f'margin-top:5px;font-weight:650">접속: {html.escape(str(user["의사"]))} · '
                     f'{html.escape("마스터" if is_master else str(user["진료과"]))}</div>', unsafe_allow_html=True)
@@ -850,7 +859,7 @@ if active_menu == "📊 진료실적(기간별)":
 if active_menu == "📅 진료실적(주간)":
     st.caption("월요일~일요일 · 최신 주간부터 표시 · 왼쪽 조회 기간과 무관 · 진료과/의사 필터 적용")
     weekly = weekly_table(clinical, exams, dept_choice, doctor_choice, is_master, user, datetime.now(TZ).date())
-    st.markdown(format_report(weekly, None, "week-table"), unsafe_allow_html=True)
+    st.markdown(format_report(weekly, None, "week-table", hide_exam_inclusive=not is_master), unsafe_allow_html=True)
     if weekly.empty:
         st.info("해당 조건에 집계된 주간 실적이 없습니다.")
 
@@ -907,7 +916,7 @@ if active_menu == "⬇️ 엑셀다운로드":
         filename = f"Hismedi_기간별_{start:%Y%m%d}_{end:%Y%m%d}.xlsx"
     elif kind == "주간":
         weekly = weekly_table(clinical, exams, dept_choice, doctor_choice, is_master, user, datetime.now(TZ).date())
-        payload = to_excel(weekly, None)
+        payload = to_excel(weekly, None, hide_exam_inclusive=not is_master)
         filename = "Hismedi_주간실적.xlsx"
     else:
         ycol, mcol = st.columns([1, 2])
