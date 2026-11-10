@@ -462,6 +462,12 @@ MONTH_METRICS = {
     "전체수입(검진제외)": "검진제외", "전체수입(검진포함)": "검진포함",
 }
 
+# 일반 의사 계정은 건강검진 항목을 월간/연간 조회 및 다운로드에서 선택할 수 없습니다.
+DOCTOR_MONTH_METRICS = [
+    metric for metric in MONTH_METRICS
+    if metric not in ("검진환자수", "전체수입(검진포함)")
+]
+
 
 def period_total(clinical, exams, start, end, dept="전체", doctor="전체"):
     """집계 전용: 원본 건강검진은 병원 총합 제외, RAW_검진만 검진 실적에 포함."""
@@ -520,6 +526,8 @@ def weekly_table(clinical, exams, dept, doctor, master, user, today):
 
 def monthly_table(clinical, exams, year, metric, dept, doctor, master, user, accounts):
     """12개월 고정 컬럼, 실적별 행 및 연간 합계; 과거 데이터도 연도 시트에서 읽음."""
+    if not master and metric not in DOCTOR_MONTH_METRICS:
+        raise PermissionError("일반 의사 계정은 검진 관련 월간/연간 지표를 조회할 수 없습니다.")
     field = MONTH_METRICS[metric]
     year_mask = pd.Series([d.year == year for d in clinical["일자"]], index=clinical.index, dtype=bool)
     exam_mask = pd.Series([d.year == year for d in exams["일자"]], index=exams.index, dtype=bool)
@@ -845,7 +853,11 @@ if active_menu == "📆 진료실적(월간/연간)":
         with year_col:
             selected_year = st.selectbox("📆 조회 연도", available_years, index=available_years.index(datetime.now(TZ).year))
         with metric_col:
-            selected_metric = st.selectbox("📊 실적 지표 선택", list(MONTH_METRICS.keys()))
+            selected_metric = st.selectbox(
+                "📊 실적 지표 선택",
+                list(MONTH_METRICS) if is_master else DOCTOR_MONTH_METRICS,
+                key="monthly_metric_selection",
+            )
     monthly = monthly_table(clinical, exams, selected_year, selected_metric, dept_choice, doctor_choice, is_master, user, accounts)
     st.markdown(format_monthly(monthly), unsafe_allow_html=True)
     if monthly.empty:
@@ -894,7 +906,10 @@ if active_menu == "⬇️ 엑셀다운로드":
         with ycol:
             export_year = st.selectbox("연도", years)
         with mcol:
-            export_metric = st.selectbox("지표", list(MONTH_METRICS))
+            export_metric = st.selectbox(
+                "지표", list(MONTH_METRICS) if is_master else DOCTOR_MONTH_METRICS,
+                key="monthly_export_metric_selection",
+            )
         monthly = monthly_table(clinical, exams, export_year, export_metric, dept_choice, doctor_choice, is_master, user, accounts)
         payload = monthly_excel(monthly, export_metric, export_year)
         filename = f"Hismedi_월간연간_{export_year}_{export_metric}.xlsx"
