@@ -65,6 +65,8 @@ st.markdown("""<style>
 .month-table {min-width:1300px}
 .month-table th,.month-table td {padding:10px 8px;font-size:14px}
 .month-table th:last-child,.month-table td:last-child {background:#e9f1fc;font-weight:750}
+/* Move the complete sidebar brand group upward without shifting date input widgets. */
+.st-key-sidebar_brand {margin-top:-15px!important;margin-bottom:-10px!important}
 /* Center the branded sidebar section, emphasize the date values without altering other widgets. */
 [data-testid="stSidebar"] [data-testid="stDateInput"] input {font-size:16px!important;font-weight:750!important;color:#163b67!important;background:#fff!important}
 [data-testid="stSidebar"] [data-testid="stWidgetLabel"] p {font-size:16px!important;font-weight:750!important}
@@ -448,7 +450,9 @@ def report_data(clinical, exams, start, end, dept, doctor, master, user, account
     visible = ([own] if has_any_activity(own) else [])
     if has_any_activity(dept_total):
         visible.append(dept_total)
-    if exam_record is not None:
+    # 개인 계정은 진료과 선택이 없습니다. 내과 소속 계정에만
+    # RAW_검진의 별도 건강검진 행을 표시합니다.
+    if own_dept == "내과" and exam_record is not None:
         exam_record["_class"] = "exam"
         visible.append(exam_record)
     visible.append(hospital_total)
@@ -759,13 +763,13 @@ yesterday = datetime.now(TZ).date() - timedelta(days=1)
 initial_day = yesterday  # 기본값은 전일, 데이터가 없어도 임의로 다른 날짜로 변경하지 않음
 
 with st.sidebar:
-    st.markdown('<div style="height:0px"></div>', unsafe_allow_html=True)
-    show_logo("Hismedi_logo.png", 98, centered=True)
-    st.markdown('<div style="text-align:center;font-size:19px;font-weight:800;'
-                'margin-top:-8px">Hismedi 진료현황</div>', unsafe_allow_html=True)
-    st.markdown(f'<div style="text-align:center;font-size:14px;color:#4c607b;'
-                f'margin-top:5px;font-weight:650">접속: {html.escape(str(user["의사"]))} · '
-                f'{html.escape("마스터" if is_master else str(user["진료과"]))}</div>', unsafe_allow_html=True)
+    with st.container(key="sidebar_brand"):
+        show_logo("Hismedi_logo.png", 98, centered=True)
+        st.markdown('<div style="text-align:center;font-size:19px;font-weight:800;'
+                    'margin-top:-8px">Hismedi 진료현황</div>', unsafe_allow_html=True)
+        st.markdown(f'<div style="text-align:center;font-size:14px;color:#4c607b;'
+                    f'margin-top:5px;font-weight:650">접속: {html.escape(str(user["의사"]))} · '
+                    f'{html.escape("마스터" if is_master else str(user["진료과"]))}</div>', unsafe_allow_html=True)
     st.divider()
     st.markdown("**조회 기간**")
     if "report_start_day" not in st.session_state:
