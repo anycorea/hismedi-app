@@ -70,6 +70,12 @@ st.markdown("""<style>
 [data-testid="stSidebar"] [data-testid="stWidgetLabel"] p {font-size:16px!important;font-weight:750!important}
 [data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] {font-size:15px!important}
 .report-note{font-size:13px;color:#64748b;margin-top:.5rem}
+/* Keep the source-data cutoff highly visible on every report tab. */
+.data-cutoff-banner{display:flex;flex-wrap:wrap;align-items:center;gap:8px;
+  margin:3px 0 15px 0;padding:11px 16px;border:1px solid #b9d5ec;
+  border-left:5px solid #2776b6;border-radius:8px;background:#f0f7ff;color:#173c65;
+  font-size:17px;font-weight:800;line-height:1.6}
+.data-cutoff-detail{font-size:13px;font-weight:600;color:#52718c}
 /* Footer credit is independent of Streamlit Community Cloud branding. */
 .anycorea-credit {position:fixed;bottom:12px;right:16px;z-index:5;
  background:rgba(255,255,255,.94);color:#617084;font-size:12px;
@@ -455,7 +461,7 @@ def period_total(clinical, exams, start, end, dept="전체", doctor="전체"):
 
 
 def weekly_table(clinical, exams, dept, doctor, master, user, today):
-    """데이터가 존재하는 주만 최근 주부터: master는 조건별 집계 1행, 일반은 본인/과/병원."""
+    """데이터가 존재하는 주만 최근 주부터: master는 조건별 합계, 일반 의사는 본인 실적만."""
     dates = list(clinical["일자"]) + list(exams["일자"])
     if not dates:
         return pd.DataFrame(columns=FIELDS + ["_class"])
@@ -476,19 +482,12 @@ def weekly_table(clinical, exams, dept, doctor, master, user, today):
         else:
             own_dept = dept_normalize(user["진료과"])
             own_name = provider_normalize(user["의사"])
-            candidates = [
-                (own_dept, own_name, own_dept, own_name, ""),
-                (own_dept, "진료과 합계", own_dept, "전체", "subtotal"),
-                ("건강검진", "검진실적", "건강검진", "전체", "exam"),
-                ("병원 전체", "합계", "전체", "전체", "total"),
-            ]
-            for dd, nn, fdept, fdoctor, kind in candidates:
-                if dd == "건강검진" and own_dept == "건강검진":
-                    # 중복 건강검진 표시는 방지
-                    continue
-                values = period_total(clinical, exams, current, week_end, fdept, fdoctor)
-                if has_any_activity(values):
-                    rows.append({"일자": label, "진료과": dd, "의사명": nn, **values, "_class": kind})
+            # 일반 의사 계정의 주간 탭은 본인 실적만 표시합니다.
+            # 진료과·병원 전체 합계 및 RAW_검진 별도 행은 주간 탭에서 제외합니다.
+            values = period_total(clinical, exams, current, week_end, own_dept, own_name)
+            if has_any_activity(values):
+                rows.append({"일자": label, "진료과": own_dept, "의사명": own_name,
+                             **values, "_class": ""})
         current -= timedelta(days=7)
     return pd.DataFrame(rows, columns=FIELDS + ["_class"])
 
@@ -778,6 +777,23 @@ if is_master:
     menu_items.append("⚙️ 권한관리")
 active_menu = st.radio("메뉴", menu_items, horizontal=True, label_visibility="collapsed", key="main_nav")
 st.markdown('<div style="height:12px"></div>', unsafe_allow_html=True)
+
+# 마지막 반영일은 왼쪽 조회 종료일이 아니라, 구글시트 원본에 존재하는
+# 가장 최근 실적 일자로 계산합니다. 임상/검진은 갱신일이 다를 수 있습니다.
+clinical_cutoff = max(clinical["일자"]) if not clinical.empty else None
+exam_cutoff = max(exams["일자"]) if not exams.empty else None
+primary_cutoff = clinical_cutoff or exam_cutoff
+if primary_cutoff is not None:
+    cutoff_text = f"📢 {primary_cutoff:%Y년 %m월 %d일}까지 반영되었습니다."
+    details = []
+    if clinical_cutoff is not None and exam_cutoff is not None and clinical_cutoff != exam_cutoff:
+        details.append(f"건강검진 자료: {exam_cutoff:%Y년 %m월 %d일}까지")
+    elif clinical_cutoff is None and exam_cutoff is not None:
+        details.append("임상실적 원본 없음 · 건강검진 자료 기준")
+    detail_html = (f'<span class="data-cutoff-detail">({html.escape(" · ".join(details))})</span>'
+                   if details else "")
+    st.markdown(f'<div class="data-cutoff-banner">{html.escape(cutoff_text)}{detail_html}</div>',
+                unsafe_allow_html=True)
 
 # 전역 기간 입력과 독립적인 주간·월간 자료
 if active_menu == "📊 진료실적(기간별)":
