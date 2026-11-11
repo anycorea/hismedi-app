@@ -424,14 +424,17 @@ def pin_valid(pin):
 def clear_session():
     # Date inputs have explicit keys. Remove them on logout/login so the new
     # session starts on yesterday, and report/filter never retain old ranges.
-    for key in ("account_row", "login_pin", "login_name", "login_pw_snapshot", "report_start_day", "report_end_day", "main_nav", "test_account_row", "weekly_scope_choice", "monthly_metric_selection"):
+    for key in ("account_row", "login_pin", "login_name", "login_pw_snapshot", "report_start_day", "report_end_day", "main_nav", "test_account_row", "weekly_scope_choice", "monthly_metric_selection", "_pending_report_date_reset"):
         st.session_state.pop(key, None)
 
 
 def reset_report_dates():
-    yesterday = datetime.now(TZ).date() - timedelta(days=1)
-    st.session_state["report_start_day"] = yesterday
-    st.session_state["report_end_day"] = yesterday
+    """Schedule a date reset on the next rerun, before date widgets exist.
+
+    Directly assigning to keyed date_input values after those widgets have been
+    instantiated triggers StreamlitWidgetAlreadyInstantiatedError.
+    """
+    st.session_state["_pending_report_date_reset"] = True
 
 
 
@@ -968,14 +971,14 @@ min_day, max_day = min(all_days), max(all_days)
 yesterday = datetime.now(TZ).date() - timedelta(days=1)
 initial_day = yesterday  # 기본값은 전일, 데이터가 없어도 임의로 다른 날짜로 변경하지 않음
 
+# The pending reset is consumed BEFORE creating either keyed date_input.
+# This also works when a master switches into or out of preview mode.
+if st.session_state.pop("_pending_report_date_reset", False):
+    reset_day = datetime.now(TZ).date() - timedelta(days=1)
+    st.session_state["report_start_day"] = reset_day
+    st.session_state["report_end_day"] = reset_day
+
 with st.sidebar:
-    if preview_active:
-        st.warning(f"🔎 관리자 테스트 모드 · {user['진료과']} / {user['의사']}")
-        if st.button("↩️ 테스트 종료 · 마스터로 돌아가기", use_container_width=True, key="preview_exit"):
-            st.session_state.pop("test_account_row", None)
-            st.session_state.pop("main_nav", None)
-            reset_report_dates()
-            st.rerun()
     with st.container(key="sidebar_brand"):
         show_logo("Hismedi_logo.png", 98, centered=True, top_offset=-24)
         st.markdown('<div style="text-align:center;font-size:19px;font-weight:800;'
@@ -983,6 +986,16 @@ with st.sidebar:
         st.markdown(f'<div style="text-align:center;font-size:14px;color:#4c607b;'
                     f'margin-top:5px;font-weight:650">접속: {html.escape(str(user["의사"]))} · '
                     f'{html.escape("마스터" if is_master else str(user["진료과"]))}</div>', unsafe_allow_html=True)
+    if preview_active:
+        # Keep preview controls in normal document flow below the logo.
+        # Short labels avoid wrapping across narrow desktop sidebars.
+        st.info("🔎 관리자 테스트 모드")
+        st.caption(f"{user['진료과']} / {user['의사']}")
+        if st.button("↩️ 마스터로 돌아가기", use_container_width=True, key="preview_exit"):
+            st.session_state.pop("test_account_row", None)
+            st.session_state.pop("main_nav", None)
+            reset_report_dates()
+            st.rerun()
     st.divider()
     st.markdown("**조회 기간**")
     if "report_start_day" not in st.session_state:
