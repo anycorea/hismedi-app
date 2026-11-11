@@ -120,7 +120,7 @@ st.markdown("""<style>
  background:rgba(255,255,255,.94);color:#617084;font-size:12px;
  padding:5px 10px;border:1px solid #dce3ec;border-radius:7px;
  box-shadow:0 1px 4px rgba(0,0,0,.05);pointer-events:none}
-/* 일반 사용자 실적표: 흰 바탕, 동일한 1px 선, 기본 글꼴과 굵기. */
+/* 모든 계정의 실적표: 흰 바탕, 동일한 1px 선, 기본 글꼴과 굵기. */
 .report-table.personal-view tbody tr td,
 .report-table.personal-view tbody tr:nth-child(even) td,
 .report-table.personal-view tbody tr.total td,
@@ -137,7 +137,7 @@ st.markdown("""<style>
 .report-table.personal-view tbody tr.subtotal td {color:#1357b5!important}
 .report-table.personal-view tbody tr.total td {color:#c62828!important}
 .report-table.personal-view tbody tr.exam td {color:#111111!important}
-/* 주간 2차 메뉴: 개인/진료과/병원전체 선택이 눈에 띄도록 */
+/* 주간 2차 메뉴: 일반 사용자 개인/진료과/병원전체, 마스터 전체/진료과 */
 .st-key-weekly_scope_menu [role="radiogroup"] label {
     background:#fff!important;border:1px solid #b8cce3!important;
     padding:9px 20px!important;border-radius:8px!important;
@@ -1030,7 +1030,7 @@ if primary_cutoff is not None:
 
 # 전역 기간 입력과 독립적인 주간·월간 자료
 if active_menu == "📊 진료실적(기간별)":
-    st.markdown(format_report(report, totals, "" if is_master else "personal-view"), unsafe_allow_html=True)
+    st.markdown(format_report(report, totals, "personal-view"), unsafe_allow_html=True)
     if report.empty:
         st.info("해당 기간에 조회되는 실적이 없습니다.")
     st.caption(f"조회: {start:%Y-%m-%d} ~ {end:%Y-%m-%d} · 낮병동 제외 · 임상원본 건강검진 병원 합계 제외 · RAW_검진 통합")
@@ -1038,10 +1038,25 @@ if active_menu == "📊 진료실적(기간별)":
         st.caption("일반 계정에는 타 의사의 개별 실적을 표시하지 않습니다.")
 
 if active_menu == "📅 진료실적(주간)":
-    st.caption("월요일~일요일 · 최신 주간부터 표시 · 왼쪽 조회 기간과 무관 · 진료과/의사 필터 적용")
+    st.caption("월요일~일요일 · 최신 주간부터 표시 · 왼쪽 조회 기간과 무관 · 아래 주간 조회 범위 선택 적용")
     if is_master:
-        weekly = weekly_table(clinical, exams, dept_choice, doctor_choice, True, user, datetime.now(TZ).date())
-        st.markdown(format_report(weekly, None, "week-table"), unsafe_allow_html=True)
+        with st.container(key="weekly_scope_menu"):
+            master_weekly_scope = st.radio(
+                "주간 조회 범위", ["전체", "진료과"], horizontal=True,
+                key="master_weekly_scope_choice",
+            )
+            if master_weekly_scope == "진료과":
+                # 계정관리 목록을 기본으로 하되 건강검진(RAW_검진)은 항상 선택 가능.
+                weekly_depts = order_departments({d for d, _ in registered_roster(accounts)} | {"건강검진"})
+                weekly_dept = st.selectbox("진료과 선택", weekly_depts, key="master_weekly_dept_choice")
+            else:
+                weekly_dept = "전체"
+        weekly = weekly_table(clinical, exams, weekly_dept, "전체", True, user, datetime.now(TZ).date())
+        if not weekly.empty and weekly_dept != "전체":
+            weekly = weekly.copy()
+            weekly["의사명"] = "진료과 합계"
+            weekly["_class"] = "subtotal"
+        st.markdown(format_report(weekly, None, "week-table personal-view"), unsafe_allow_html=True)
     else:
         with st.container(key="weekly_scope_menu"):
             weekly_scope = st.radio("주간 조회 범위", ["개인", "진료과", "병원전체"],
@@ -1065,7 +1080,7 @@ if active_menu == "📆 진료실적(월간/연간)":
                 key="monthly_metric_selection",
             )
     monthly = monthly_table(clinical, exams, selected_year, selected_metric, dept_choice, doctor_choice, is_master, user, accounts)
-    st.markdown(format_monthly(monthly, "" if is_master else "personal-view"), unsafe_allow_html=True)
+    st.markdown(format_monthly(monthly, "personal-view"), unsafe_allow_html=True)
     if monthly.empty:
         st.info("해당 연도의 실적이 없습니다.")
     if selected_metric == "재원환자수":
@@ -1102,7 +1117,17 @@ if active_menu == "⬇️ 엑셀다운로드":
         filename = f"Hismedi_기간별_{start:%Y%m%d}_{end:%Y%m%d}.xlsx"
     elif kind == "주간":
         if is_master:
-            weekly = weekly_table(clinical, exams, dept_choice, doctor_choice, True, user, datetime.now(TZ).date())
+            export_scope = st.radio("주간 조회 범위", ["전체", "진료과"], horizontal=True, key="master_weekly_export_scope")
+            if export_scope == "진료과":
+                export_depts = order_departments({d for d, _ in registered_roster(accounts)} | {"건강검진"})
+                export_dept = st.selectbox("진료과 선택", export_depts, key="master_weekly_export_dept")
+            else:
+                export_dept = "전체"
+            weekly = weekly_table(clinical, exams, export_dept, "전체", True, user, datetime.now(TZ).date())
+            if not weekly.empty and export_dept != "전체":
+                weekly = weekly.copy()
+                weekly["의사명"] = "진료과 합계"
+                weekly["_class"] = "subtotal"
         else:
             export_scope = st.selectbox("주간 조회 범위", ["개인", "진료과", "병원전체"], key="weekly_export_scope")
             weekly = weekly_personal_scope(clinical, exams, user, datetime.now(TZ).date(), export_scope)
