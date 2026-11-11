@@ -424,7 +424,7 @@ def pin_valid(pin):
 def clear_session():
     # Date inputs have explicit keys. Remove them on logout/login so the new
     # session starts on yesterday, and report/filter never retain old ranges.
-    for key in ("account_row", "login_pin", "login_name", "login_pw_snapshot", "report_start_day", "report_end_day", "main_nav"):
+    for key in ("account_row", "login_pin", "login_name", "login_pw_snapshot", "report_start_day", "report_end_day", "main_nav", "test_account_row", "weekly_scope_choice", "monthly_metric_selection"):
         st.session_state.pop(key, None)
 
 
@@ -936,7 +936,23 @@ if password_is_initial(user['PW']):
                 st.error(f'변경 실패: {ex}')
     st.stop()
 
-is_master = user["권한"] == "master"
+# The authenticated principal is always the real account. A master can preview
+# another user's read-only report, without acquiring their credentials.
+real_user = user
+real_is_master = real_user["권한"] == "master"
+preview_row = st.session_state.get("test_account_row") if real_is_master else None
+preview_target = None
+if preview_row is not None:
+    candidates = accounts[(accounts["_row"] == preview_row) & (accounts["권한"] == "user")]
+    if len(candidates) == 1:
+        preview_target = candidates.iloc[0].to_dict()
+    else:
+        # An account may have been deleted or had its role changed in Sheets.
+        st.session_state.pop("test_account_row", None)
+preview_active = preview_target is not None
+if preview_active:
+    user = preview_target
+is_master = real_is_master and not preview_active
 try:
     clinical, exams, sheets = load_source()
 except Exception as ex:
@@ -953,6 +969,13 @@ yesterday = datetime.now(TZ).date() - timedelta(days=1)
 initial_day = yesterday  # 기본값은 전일, 데이터가 없어도 임의로 다른 날짜로 변경하지 않음
 
 with st.sidebar:
+    if preview_active:
+        st.warning(f"🔎 관리자 테스트 모드 · {user['진료과']} / {user['의사']}")
+        if st.button("↩️ 테스트 종료 · 마스터로 돌아가기", use_container_width=True, key="preview_exit"):
+            st.session_state.pop("test_account_row", None)
+            st.session_state.pop("main_nav", None)
+            reset_report_dates()
+            st.rerun()
     with st.container(key="sidebar_brand"):
         show_logo("Hismedi_logo.png", 98, centered=True, top_offset=-24)
         st.markdown('<div style="text-align:center;font-size:19px;font-weight:800;'
@@ -988,7 +1011,7 @@ with st.sidebar:
         dept_choice, doctor_choice = user["진료과"], user["의사"]
         st.caption(f"진료과: {dept_choice}")
         st.caption("조회: 본인 실적 / 소속 진료과 합계 / 병원 전체 합계")
-    if st.button("🔄 데이터 동기화", use_container_width=True):
+    if not preview_active and st.button("🔄 데이터 동기화", use_container_width=True):
         load_source.clear()
         load_accounts.clear()
         st.rerun()
@@ -999,12 +1022,20 @@ with st.sidebar:
 
 report, totals, _ = report_data(clinical, exams, start, end, dept_choice, doctor_choice, is_master, user, accounts)
 st.markdown('<div style="height:48px"></div>', unsafe_allow_html=True)
-menu_items = ["📊 진료실적(기간별)", "📅 진료실적(주간)", "📆 진료실적(월간/연간)",
-              "🔒 내 비밀번호 변경", "⬇️ 엑셀다운로드"]
+menu_items = ["📊 진료실적(기간별)", "📅 진료실적(주간)", "📆 진료실적(월간/연간)"]
+if not preview_active:
+    menu_items += ["🔒 내 비밀번호 변경", "⬇️ 엑셀다운로드"]
 if is_master:
     menu_items.append("⚙️ 권한관리")
+# A previous tab selection (e.g. account admin) must never remain active
+# after switching into the restricted preview.
+if st.session_state.get("main_nav") not in menu_items:
+    st.session_state["main_nav"] = menu_items[0]
 active_menu = st.radio("메뉴", menu_items, horizontal=True, label_visibility="collapsed", key="main_nav")
 st.markdown('<div style="height:12px"></div>', unsafe_allow_html=True)
+if preview_active:
+    st.warning(f"🔎 **관리자 테스트 모드 — {user['진료과']} / {user['의사']}** · 실제 로그인은 마스터 계정입니다. \n"
+               "이 화면은 읽기 전용이며 비밀번호 변경·계정 수정·엑셀 다운로드가 제한됩니다.")
 
 # 마지막 반영일은 왼쪽 조회 종료일이 아니라, 구글시트 원본에 존재하는
 # 가장 최근 실적 일자로 계산합니다. 임상/검진은 갱신일이 다를 수 있습니다.
@@ -1087,7 +1118,7 @@ if active_menu == "📆 진료실적(월간/연간)":
         st.caption("재원환자수는 원본에 기록된 일자별 재원 수를 합산한 값입니다(월말 재원 또는 고유 환자 수가 아닙니다).")
     st.caption("1월~12월 고정 · 누계 자동 합산 · 왼쪽 조회 기간과 무관 · 진료과/의사 필터 적용")
 
-if active_menu == "🔒 내 비밀번호 변경":
+if not preview_active and active_menu == "🔒 내 비밀번호 변경":
     st.subheader("내 비밀번호 변경")
     with st.form("change_own_password"):
         current=st.text_input("현재 비밀번호",type="password")
@@ -1108,7 +1139,7 @@ if active_menu == "🔒 내 비밀번호 변경":
             except Exception as ex:
                 st.error(f"비밀번호 변경 실패: {ex}")
 
-if active_menu == "⬇️ 엑셀다운로드":
+if not preview_active and active_menu == "⬇️ 엑셀다운로드":
     st.subheader("엑셀다운로드")
     st.caption("기간별/주간 실적은 기존 2단 헤더, 월간/연간 실적은 1~12월/누계 형태로 저장합니다.")
     kind = st.radio("다운로드 종류", ["기간별", "주간", "월간/연간"], horizontal=True)
@@ -1149,10 +1180,33 @@ if active_menu == "⬇️ 엑셀다운로드":
     st.download_button("⬇️ 조회 결과 엑셀 다운로드", data=payload,
                        file_name=filename, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
-if is_master and active_menu == "⚙️ 권한관리":
+if real_is_master and not preview_active and active_menu == "⚙️ 권한관리":
         st.subheader("권한관리")
         st.caption("PIN_관리의 진료과 / 의사 / PIN(사번) / 권한 / PW 열을 사용합니다. PW는 변경 후 암호화 검증값으로 보관합니다. 미등록 의사의 실적도 과별/병원 합계에는 포함됩니다.")
         st.dataframe(accounts[["진료과", "의사", "권한"]], use_container_width=True, hide_index=True)
+        st.divider()
+        st.markdown("#### 🔎 사용자 화면 테스트 (마스터 전용)")
+        st.caption("직원 비밀번호를 입력하거나 변경하지 않고, 해당 직원의 실적 화면과 조회 권한을 확인합니다. 테스트 중에는 모든 변경·다운로드 기능이 비활성화됩니다.")
+        test_accounts = accounts[accounts["권한"] == "user"].copy()
+        if test_accounts.empty:
+            st.info("테스트할 일반 사용자 계정이 없습니다.")
+        else:
+            target_options = {
+                int(row["_row"]): f"{row['진료과']} · {row['의사']} (사번 {row['PIN']})"
+                for _, row in test_accounts.iterrows()
+            }
+            test_col, start_col = st.columns([3, 1], vertical_alignment="bottom")
+            with test_col:
+                selected_test_row = st.selectbox(
+                    "테스트할 직원", list(target_options),
+                    format_func=lambda key: target_options[key], key="preview_target_selection")
+            with start_col:
+                if st.button("사용자 화면 테스트", type="primary", use_container_width=True):
+                    st.session_state["test_account_row"] = int(selected_test_row)
+                    st.session_state.pop("main_nav", None)
+                    reset_report_dates()
+                    st.rerun()
+        st.divider()
         action = st.radio("관리 작업", ["계정 추가", "계정 수정", "계정 삭제"], horizontal=True)
         if action == "계정 추가":
             with st.form("account_create"):
