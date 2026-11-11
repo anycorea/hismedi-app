@@ -1086,20 +1086,35 @@ if active_menu == "📅 진료실적(주간)":
     if is_master:
         with st.container(key="weekly_scope_menu"):
             master_weekly_scope = st.radio(
-                "주간 조회 범위", ["전체", "진료과"], horizontal=True,
+                "주간 조회 범위", ["전체", "진료과", "개인"], horizontal=True,
                 key="master_weekly_scope_choice",
             )
+            weekly_dept, weekly_doctor = "전체", "전체"
             if master_weekly_scope == "진료과":
                 # 계정관리 목록을 기본으로 하되 건강검진(RAW_검진)은 항상 선택 가능.
                 weekly_depts = order_departments({d for d, _ in registered_roster(accounts)} | {"건강검진"})
                 weekly_dept = st.selectbox("진료과 선택", weekly_depts, key="master_weekly_dept_choice")
-            else:
-                weekly_dept = "전체"
-        weekly = weekly_table(clinical, exams, weekly_dept, "전체", True, user, datetime.now(TZ).date())
-        if not weekly.empty and weekly_dept != "전체":
-            weekly = weekly.copy()
-            weekly["의사명"] = "진료과 합계"
-            weekly["_class"] = "subtotal"
+            elif master_weekly_scope == "개인":
+                weekly_roster = registered_roster(accounts)  # PIN_관리 등록 의사만 선택
+                weekly_depts = order_departments({d for d, _ in weekly_roster})
+                if weekly_depts:
+                    weekly_dept = st.selectbox("진료과 선택", weekly_depts, key="master_weekly_personal_dept")
+                    weekly_names = sorted({n for d, n in weekly_roster if d == weekly_dept})
+                    weekly_doctor = st.selectbox("의사 선택", weekly_names, key="master_weekly_personal_doctor")
+                else:
+                    st.info("PIN_관리 시트에 등록된 의사가 없습니다.")
+                    weekly_doctor = None
+        if weekly_doctor is None:
+            weekly = pd.DataFrame(columns=FIELDS + ["_class"])
+        else:
+            weekly = weekly_table(clinical, exams, weekly_dept, weekly_doctor, True, user, datetime.now(TZ).date())
+            if not weekly.empty and master_weekly_scope == "진료과":
+                weekly = weekly.copy()
+                weekly["의사명"] = "진료과 합계"
+                weekly["_class"] = "subtotal"
+            elif not weekly.empty and master_weekly_scope == "개인":
+                weekly = weekly.copy()
+                weekly["_class"] = "personal"
         st.markdown(format_report(weekly, None, "week-table personal-view"), unsafe_allow_html=True)
     else:
         with st.container(key="weekly_scope_menu"):
@@ -1161,17 +1176,32 @@ if not preview_active and active_menu == "⬇️ 엑셀다운로드":
         filename = f"Hismedi_기간별_{start:%Y%m%d}_{end:%Y%m%d}.xlsx"
     elif kind == "주간":
         if is_master:
-            export_scope = st.radio("주간 조회 범위", ["전체", "진료과"], horizontal=True, key="master_weekly_export_scope")
+            export_scope = st.radio("주간 조회 범위", ["전체", "진료과", "개인"], horizontal=True, key="master_weekly_export_scope")
+            export_dept, export_doctor = "전체", "전체"
             if export_scope == "진료과":
                 export_depts = order_departments({d for d, _ in registered_roster(accounts)} | {"건강검진"})
                 export_dept = st.selectbox("진료과 선택", export_depts, key="master_weekly_export_dept")
+            elif export_scope == "개인":
+                export_roster = registered_roster(accounts)
+                export_depts = order_departments({d for d, _ in export_roster})
+                if export_depts:
+                    export_dept = st.selectbox("진료과 선택", export_depts, key="master_weekly_export_personal_dept")
+                    export_names = sorted({n for d, n in export_roster if d == export_dept})
+                    export_doctor = st.selectbox("의사 선택", export_names, key="master_weekly_export_personal_doctor")
+                else:
+                    st.info("PIN_관리 시트에 등록된 의사가 없습니다.")
+                    export_doctor = None
+            if export_doctor is None:
+                weekly = pd.DataFrame(columns=FIELDS + ["_class"])
             else:
-                export_dept = "전체"
-            weekly = weekly_table(clinical, exams, export_dept, "전체", True, user, datetime.now(TZ).date())
-            if not weekly.empty and export_dept != "전체":
-                weekly = weekly.copy()
-                weekly["의사명"] = "진료과 합계"
-                weekly["_class"] = "subtotal"
+                weekly = weekly_table(clinical, exams, export_dept, export_doctor, True, user, datetime.now(TZ).date())
+                if not weekly.empty and export_scope == "진료과":
+                    weekly = weekly.copy()
+                    weekly["의사명"] = "진료과 합계"
+                    weekly["_class"] = "subtotal"
+                elif not weekly.empty and export_scope == "개인":
+                    weekly = weekly.copy()
+                    weekly["_class"] = "personal"
         else:
             export_scope = st.selectbox("주간 조회 범위", ["개인", "진료과", "병원전체"], key="weekly_export_scope")
             weekly = weekly_personal_scope(clinical, exams, user, datetime.now(TZ).date(), export_scope)
