@@ -39,6 +39,7 @@ jobs:
           from playwright.async_api import async_playwright
 
           APPS = [
+              ("히즈메디진료현황", "https://hismedi-app-dailyreport.streamlit.app/"),
               ("인증", "https://hismedi-app-nlyfdy5m68hfmnafchqbrr.streamlit.app/"),
               ("모바일진료예약", "https://hismedi-app-2tjy6mrzdvuu2ohmb6cihq.streamlit.app/"),
               ("주요업무보고", "https://hismedi-app-akdbdih2rgeo5pzzkvj2ig.streamlit.app/"),
