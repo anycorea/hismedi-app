@@ -14,6 +14,7 @@ import hashlib
 import hmac
 import re
 import secrets
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -35,7 +36,6 @@ DEFAULT_DEPARTMENTS = [
     "소아청소년과", "내과", "외과", "정형외과", "마취통증의학과", "진단검사의학과", "영상의학과",
     "진단검사의학팀", "영상의학팀", "물리치료팀", "외래1팀", "외래2팀", "6병동", "7병동",
     "8병동", "수술실", "내시경실", "건강검진팀", "주사실(성인)", "주사실(소아)", "약제팀",
-    "내시경실", "내시경실",  # removed by set below; kept list easy to extend
 ]
 DEFAULT_DEPARTMENTS = list(dict.fromkeys(DEFAULT_DEPARTMENTS))
 
@@ -199,9 +199,39 @@ def valid_id(identifier: str) -> bool:
     return bool(re.fullmatch(r"\d{6}", identifier))
 
 
+
+def render_header():
+    """Compact hospital-branded header; reuse repository logo."""
+    st.markdown("""
+    <style>
+    .block-container {padding-top: 1.25rem; padding-bottom: 2rem;}
+    div[data-testid="stAlert"] {font-size: .93rem;}
+    </style>
+    """, unsafe_allow_html=True)
+    logo_paths = [
+        Path(__file__).resolve().parent / "Hismedi_logo.png",
+        Path(__file__).resolve().parent / "hismedi_logo.png",
+    ]
+    logo = next((path for path in logo_paths if path.is_file()), None)
+    left, right = st.columns([1, 11], gap="medium", vertical_alignment="center")
+    with left:
+        if logo:
+            st.image(str(logo), width=72)
+        else:
+            st.markdown("🏥")
+    with right:
+        st.markdown("""
+        <div style="font-size:1.55rem; font-weight:750; line-height:1.25; color:var(--text-color);">
+        HISMEDI 치료재료 관리
+        </div>
+        <div style="font-size:.84rem; color:gray; margin-top:.24rem;">
+        직원 인증 · 관리부서 설정
+        </div>
+        """, unsafe_allow_html=True)
+    st.divider()
+
 def main():
-    st.title("🏥 HISMEDI 치료재료 관리")
-    st.caption("직원 인증 및 관리부서 설정 · 1차 버전")
+    render_header()
     try:
         data = employees()
         get_ws("Auth", AUTH_HEADERS)
@@ -215,9 +245,9 @@ def main():
     masters = [r for r in data if r["권한"].upper() == "MASTER" and is_active(r)]
     initialized_master = any(r["사번"] in {a["사번"] for a in auth_rows()} for r in masters)
     if not initialized_master:
-        st.info("최초 설치: MASTER 계정의 PIN을 먼저 설정합니다. 최초 설정키가 필요합니다.")
+        st.info("최초 사용: MASTER 계정의 PIN을 설정해 주세요.")
         if not st.secrets["treatments"].get("admin_setup_key", ""):
-            st.warning("Streamlit Secrets의 [treatments]에 admin_setup_key를 추가해 주세요.")
+            st.warning("현재 실행 중인 앱에서 admin_setup_key를 찾지 못했습니다. 치료재료 앱의 Streamlit Cloud → Settings → Secrets에서 [treatments] 아래에 admin_setup_key = \"숫자8자리\"가 있는지 확인하고 저장해 주세요.")
             st.stop()
         if not masters:
             st.error("Emp 시트에 사용여부 Y인 Master 계정이 없습니다.")
@@ -397,4 +427,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
