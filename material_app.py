@@ -13,6 +13,10 @@ from __future__ import annotations
 import hashlib
 import base64
 from io import BytesIO
+from collections import Counter, defaultdict
+from concurrent.futures import ThreadPoolExecutor
+import requests
+from google.auth.transport.requests import AuthorizedSession
 from PIL import Image
 import hmac
 import re
@@ -436,6 +440,391 @@ def render_employee_admin(emp: dict, data: list[dict]):
             st.info("사용 중인 직원이 없습니다.")
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# HIRA master catalog import: Drive XLSX -> validated staging -> Google Sheets.
+# This code intentionally does not alter Emp/Auth or departmental stock tables.
+# ─────────────────────────────────────────────────────────────────────────────
+HIRA_HEADERS = [
+    "코드", "급여구분", "현재상태", "중분류", "중분류코드", "품명", "규격", "단위",
+    "상한금액", "제조회사", "제조수입업소", "최초등재일", "적용일", "종료일",
+    "고시번호", "분류파일탭", "기준일", "비고",
+]
+HIRA_LOG_HEADERS = ["반영일시", "담당사번", "기준일", "등록건수", "신규", "변경", "제외", "출처파일"]
+HIRA_TYPES = ("급여", "비급여", "정액수가", "분류")
+HIRA_DATE = "2026-11-01"  # 최초 2026-11-01 파일 기준. 다음 달은 파일명에서 추출.
+
+
+def hira_drive_session():
+    # 기존 Google 서비스 계정의 새 자격 증명으로 Drive 읽기 전용 스코프만 사용.
+    credentials = Credentials.from_service_account_info(
+        dict(st.secrets["gcp_service_account"]),
+        scopes=["https://www.googleapis.com/auth/drive.readonly"],
+    )
+    return AuthorizedSession(credentials)
+
+
+def drive_hira_files(folder_id: str):
+    session = hira_drive_session()
+    items, page_token = [], None
+    while True:
+        params = {
+            "q": "'" + folder_id + "' in parents and trashed = false",
+            "fields": "nextPageToken,files(id,name,mimeType,size,modifiedTime)",
+            "page_size": 1000,
+            "supportsAllDrives": "true", "includeItemsFromAllDrives": "true",
+        }
+        if page_token:
+            params["page_token"] = page_token
+        response = session.get("https://www.googleapis.com/drive/v3/files", params=params, timeout=45)
+        response.raise_for_status()
+        payload = response.json()
+        items.extend(payload.get("files", []))
+        page_token = payload.get("nextPageToken")
+        if not page_token:
+            break
+    return items
+
+
+def detect_hira_files(files):
+    matched = defaultdict(list)
+    for f in files:
+        name = f["name"]
+        if not name.lower().endswith(".xlsx"):
+            continue
+        if "MEDICAL_DEVICE_PRICE_LIST" in name.upper():
+            kind = "분류"
+        elif "비급여" in name:
+            kind = "비급여"
+        elif "정액수가" in name:
+            kind = "정액수가"
+        elif "급여" in name:
+            kind = "급여"
+        else:
+            continue
+        matched[kind].append(f)
+    wrong = [k for k in HIRA_TYPES if len(matched[k]) != 1]
+    if wrong:
+        raise ValueError("원본 4개가 종류별로 정확히 1개씩 필요합니다. 확인할 파일: " + ", ".join(
+            f"{k}({len(matched[k])}개)" for k in wrong))
+    return {k: matched[k][0] for k in HIRA_TYPES}
+
+
+def download_hira_bytes(file_id: str):
+    session = hira_drive_session()
+    response = session.get(
+        f"https://www.googleapis.com/drive/v3/files/{file_id}",
+        params={"alt": "media", "supportsAllDrives": "true"}, timeout=180,
+    )
+    response.raise_for_status()
+    if len(response.content) > 50 * 1024 * 1024:
+        raise ValueError("원본 파일이 50MB를 초과합니다. 관리자에게 문의해 주세요.")
+    return response.content
+
+
+def tidy_cell(value):
+    if pd.isna(value):
+        return ""
+    return str(value).strip().replace("\x00", "")
+
+
+def normalize_date(value):
+    if pd.isna(value) or str(value).strip() in ("", "-", "9999-12-31"):
+        return "" if str(value).strip() != "9999-12-31" else "9999-12-31"
+    if isinstance(value, (datetime, pd.Timestamp)):
+        return value.strftime("%Y-%m-%d")
+    text = str(value).strip()
+    # Excel may mix serial dates, ISO strings and strings including 00:00:00.
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}(?: 00:00:00)?", text):
+        return text[:10]
+    if re.fullmatch(r"\d{5}(?:\.0+)?", text):
+        try:
+            return (datetime(1899, 12, 30) + timedelta(days=int(float(text)))).strftime("%Y-%m-%d")
+        except (ValueError, OverflowError):
+            pass
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+        return text
+    return text
+
+
+def hira_extract_date(files):
+    # 기준일이 발견되지 않으면 사용자에게 보여줄 기본값을 사용한다.
+    candidates = []
+    for item in files.values():
+        m = re.search(r"(20\d{2})[._-](\d{1,2})[._-](\d{1,2})", item["name"])
+        if m:
+            try:
+                candidates.append(datetime(int(m[1]), int(m[2]), int(m[3])).strftime("%Y-%m-%d"))
+            except ValueError:
+                pass
+    if candidates and len(set(candidates)) != 1:
+        raise ValueError("원본 파일들의 기준일이 서로 다릅니다. 같은 월 자료 4개를 올려주세요.")
+    return candidates[0] if candidates else HIRA_DATE
+
+
+def state_of_sheet(title):
+    if "급여중지" in title:
+        return "급여중지/예정"
+    if "삭제" in title:
+        return "삭제/예정"
+    return "등재"
+
+
+def row_from_record(raw, category, state, snapshot):
+    code = tidy_cell(raw.get("코드", "")).upper()
+    if not code or not re.fullmatch(r"[A-Z0-9][A-Z0-9_-]{4,19}", code):
+        return None
+    note = tidy_cell(raw.get("비고", ""))
+    data = {
+        "코드": code, "급여구분": category, "현재상태": state,
+        "중분류": tidy_cell(raw.get("중분류", "")),
+        "중분류코드": tidy_cell(raw.get("중분류코드", "")),
+        "품명": tidy_cell(raw.get("품명", "")), "규격": tidy_cell(raw.get("규격", "")),
+        "단위": tidy_cell(raw.get("단위", "")), "상한금액": tidy_cell(raw.get("상한금액", "")),
+        "제조회사": tidy_cell(raw.get("제조회사", "")),
+        "제조수입업소": tidy_cell(raw.get("제조·수입업소", raw.get("수입(판매)업소", ""))),
+        "최초등재일": normalize_date(raw.get("최초등재일", "")),
+        "적용일": normalize_date(raw.get("적용일자", "")),
+        "종료일": normalize_date(raw.get("종료일자", "")),
+        "고시번호": tidy_cell(raw.get("고시번호", "")),
+        "분류파일탭": "", "기준일": snapshot, "비고": note,
+    }
+    return data
+
+
+def parse_hira_documents(file_bytes, filenames, snapshot):
+    """Three authoritative datasets + group classification from price-list.
+
+    Source status records are kept, with explicitly documented priority. Repeated
+    code across sources is never silently counted as separate unique items.
+    """
+    records, duplicates, source_counts = {}, [], Counter()
+    # Prefer active and higher-detail records if a code occurs in multiple sheets.
+    priority = {"등재": 3, "급여중지/예정": 2, "삭제/예정": 1}
+    for category in HIRA_TYPES[:3]:
+        with pd.ExcelFile(BytesIO(file_bytes[category]), engine="openpyxl") as xls:
+            for sheet_name in xls.sheet_names:
+                frame = pd.read_excel(xls, sheet_name=sheet_name, dtype=str, keep_default_na=False)
+                frame.columns = [str(x).strip() for x in frame.columns]
+                if "코드" not in frame.columns:
+                    continue
+                state = state_of_sheet(sheet_name)
+                for raw in frame.to_dict(orient="records"):
+                    record = row_from_record(raw, category, state, snapshot)
+                    if not record:
+                        continue
+                    code = record["코드"]
+                    source_counts[category] += 1
+                    if code in records:
+                        old = records[code]
+                        duplicates.append((code, old["급여구분"], category, old["현재상태"], state))
+                        if priority[state] > priority[old["현재상태"]]:
+                            records[code] = record
+                    else:
+                        records[code] = record
+    # The classification workbook contains duplicates of item lists and group
+    # headings. We enrich by exact code; never append it as a second item feed.
+    classified = {}
+    with pd.ExcelFile(BytesIO(file_bytes["분류"]), engine="openpyxl") as xls:
+        for sheet_name in xls.sheet_names:
+            if sheet_name == "별도산정불가":
+                continue   # no stable reimbursement code in this worksheet
+            frame = pd.read_excel(xls, sheet_name=sheet_name, header=None, dtype=str, keep_default_na=False)
+            # A column generally contains codes; non-code heading rows ignored.
+            for col_value in frame.iloc[:, 0].tolist():
+                code = str(col_value).strip().upper()
+                if code in records and code not in classified:
+                    classified[code] = sheet_name
+    for code, group in classified.items():
+        records[code]["분류파일탭"] = group
+    data = [records[key] for key in sorted(records)]
+    if not data:
+        raise ValueError("품목코드가 추출되지 않았습니다. 원본 엑셀의 헤더를 확인하세요.")
+    overview = {
+        "원본품목행": sum(source_counts.values()), "고유코드": len(data),
+        "중복코드발견": len(duplicates), "분류연결": len(classified),
+        "구분별": dict(Counter(v["급여구분"] for v in data)),
+        "상태별": dict(Counter(v["현재상태"] for v in data)),
+        "중복예시": duplicates[:25], "파일명": filenames, "기준일": snapshot,
+    }
+    return data, overview
+
+
+def load_existing_hira():
+    try:
+        ws = get_ws("HIRA_Items")
+    except WorksheetNotFound:
+        return {}
+    rows = api_action(ws.get_all_values)
+    if not rows:
+        return {}
+    if rows[0][:len(HIRA_HEADERS)] != HIRA_HEADERS:
+        raise ValueError("기존 HIRA_Items의 열 구조가 다릅니다. 자동 덮어쓰기를 중단합니다.")
+    return {r[0]: tuple((r + [""]*len(HIRA_HEADERS))[:len(HIRA_HEADERS)]) for r in rows[1:] if r and r[0]}
+
+
+def diff_hira(rows, existing):
+    # Compare excluding snapshot date / status-derived import metadata to avoid
+    # treating every unchanged item as modified each month.
+    column_idxs = [i for i, h in enumerate(HIRA_HEADERS) if h != "기준일"]
+    current = {r["코드"]: tuple(str(r[h]) for h in HIRA_HEADERS) for r in rows}
+    added = sorted(set(current) - set(existing))
+    removed = sorted(set(existing) - set(current))
+    changed = sorted(k for k in set(existing) & set(current)
+                     if tuple(current[k][i] for i in column_idxs) != tuple(existing[k][i] for i in column_idxs))
+    return {"신규": added, "변경": changed, "기준목록제외": removed}
+
+
+def publish_hira(rows, overview, changes):
+    """Two-phase staged import; never erase current HIRA_Items before validation."""
+    book = get_book()
+    stage_name = "HIRA_Stage_" + datetime.now(KST).strftime("%m%d_%H%M%S")
+    if len(rows) > 120000:
+        raise ValueError("파일이 예상 크기를 벗어나 자동 반영을 중단했습니다.")
+    stage = api_action(book.add_worksheet, title=stage_name, rows=len(rows) + 1, cols=len(HIRA_HEADERS))
+    batch_size = 750
+    bar = st.progress(0, text="Google Sheets 임시 시트에 분할 저장 중입니다.")
+    api_action(stage.update, range_name="A1:R1", values=[HIRA_HEADERS])
+    for start in range(0, len(rows), batch_size):
+        block = [[str(r[h]) for h in HIRA_HEADERS] for r in rows[start:start+batch_size]]
+        endrow = start + len(block) + 1
+        api_action(stage.update, range_name=f"A{start+2}:R{endrow}", values=block, value_input_option="RAW")
+        bar.progress(min(1., (start+len(block))/len(rows)), text=f"저장 중: {start+len(block):,} / {len(rows):,}건")
+    # Confirm count in the server's used-range metadata without downloading 50k rows.
+    actual = api_action(stage.get, f"A1:A{len(rows)+1}")
+    if len(actual) != len(rows) + 1:
+        raise ValueError(f"저장 검증 실패: 예상 {len(rows):,}, 실제 {len(actual)-1:,}건. 현재 자료는 유지됩니다.")
+    old = None
+    try:
+        old = api_action(book.worksheet, "HIRA_Items")
+    except WorksheetNotFound:
+        pass
+    backup = None
+    if old:
+        backup = "HIRA_Backup_" + datetime.now(KST).strftime("%m%d_%H%M%S")
+        api_action(old.update_title, backup)
+    try:
+        api_action(stage.update_title, "HIRA_Items")
+    except Exception:
+        if old and backup:
+            try:
+                api_action(old.update_title, "HIRA_Items")
+            except Exception:
+                LOGGER.exception("Failed to restore original HIRA_Items title")
+        raise
+    # Import log is best-effort. Never report failure after successful publication.
+    try:
+        log_ws = get_ws("HIRA_Imports", HIRA_LOG_HEADERS)
+        api_action(log_ws.append_row, [now(), st.session_state.get("employee_id", ""),
+                 overview["기준일"], str(len(rows)), str(len(changes["신규"])),
+                 str(len(changes["변경"])), str(len(changes["기준목록제외"])),
+                 " | ".join(overview["파일명"].values())], value_input_option="RAW")
+    except Exception:
+        LOGGER.exception("HIRA import published but history append failed")
+    bar.empty()
+    st.cache_data.clear()
+
+
+def render_hira_import():
+    st.subheader("심평원 DB 업데이트")
+    st.caption("Google Drive 원본파일(급여·비급여·정액수가·분류) 확인 → 비교 → 관리자 승인")
+    st.warning("최초 대량 등록은 Google Sheets 호출량이 많습니다. 진행 중에는 버튼을 다시 누르지 마세요.")
+    folder_id = st.secrets["treatments"].get("drive_folder_id", "").strip()
+    if not folder_id:
+        st.error("Streamlit Secrets의 [treatments]에 drive_folder_id 설정이 없습니다.")
+        return
+    if st.button("① Google Drive 파일 확인", use_container_width=False):
+        try:
+            files = detect_hira_files(drive_hira_files(folder_id))
+            st.session_state["hira_files"] = files
+            st.session_state.pop("hira_import_preview", None)
+        except Exception as exc:
+            LOGGER.exception("Drive list failed")
+            st.error(f"Drive 원본 조회 실패: {type(exc).__name__}. 403이면 Drive API 활성화/공유권한을 확인하세요.")
+    files = st.session_state.get("hira_files")
+    if not files:
+        return
+    st.dataframe(pd.DataFrame([{"유형":k,"파일명":v["name"],"크기(KB)":round(int(v.get("size") or 0)/1024)}
+                               for k,v in files.items()]), hide_index=True, use_container_width=True)
+    if st.button("② 원본 분석 및 변경사항 비교", type="primary"):
+        try:
+            with st.spinner("4개 엑셀을 다운로드·통합·비교하는 중입니다..."):
+                by_kind = {k: download_hira_bytes(v["id"]) for k,v in files.items()}
+                date = hira_extract_date(files)
+                rows, overview = parse_hira_documents(by_kind, {k:v["name"] for k,v in files.items()}, date)
+                existing = load_existing_hira()
+                changes = diff_hira(rows, existing)
+            st.session_state["hira_import_preview"] = (rows, overview, changes)
+        except Exception as exc:
+            LOGGER.exception("HIRA parse/compare failed")
+            st.error(f"분석 실패: {type(exc).__name__}: {str(exc)[:250] if isinstance(exc, ValueError) else 'Streamlit 로그를 확인하세요.'}")
+    preview = st.session_state.get("hira_import_preview")
+    if not preview:
+        return
+    rows, overview, changes = preview
+    a,b,c,d=st.columns(4)
+    a.metric("통합 고유 품목", f"{len(rows):,}")
+    b.metric("신규", f"{len(changes['신규']):,}")
+    c.metric("변경", f"{len(changes['변경']):,}")
+    d.metric("기준목록 제외", f"{len(changes['기준목록제외']):,}")
+    st.caption(f"기준일 {overview['기준일']} · 원본 품목행 {overview['원본품목행']:,} · 중복코드 {overview['중복코드발견']:,} · 분류연결 {overview['분류연결']:,}")
+    if overview["중복코드발견"]:
+        st.warning("동일 코드가 여러 시트에 존재합니다. 등재를 우선한 1개 코드로 통합합니다. 오류 의심 시 업로드를 중단하세요.")
+        st.dataframe(pd.DataFrame(overview["중복예시"], columns=["코드","기존급여구분","새급여구분","기존상태","새상태"]), hide_index=True)
+    st.dataframe(pd.DataFrame(rows[:30], columns=HIRA_HEADERS), hide_index=True, use_container_width=True)
+    st.caption("'기준목록 제외'는 삭제 확정이 아니라 이번 원본에서 미검출된 코드입니다. 병원 사용품목과 재고기록은 수정하지 않습니다.")
+    confirmed = st.checkbox("변경사항을 확인했고, 심평원 기준품목 DB만 교체하는 데 동의합니다.")
+    if st.button("③ HIRA_Items에 최종 반영", type="primary", disabled=not confirmed):
+        try:
+            publish_hira(rows, overview, changes)
+            st.session_state.pop("hira_import_preview", None)
+            st.success("심평원 품목 DB 반영을 완료했습니다. 기존 Emp·Auth·재고정보는 변경하지 않았습니다.")
+        except Exception as exc:
+            LOGGER.exception("HIRA publish failed")
+            st.error(f"반영 실패: {type(exc).__name__}. 기존 품목 DB가 유지되는지 확인해 주세요. Streamlit 로그에 상세 오류가 기록됩니다.")
+
+
+@st.cache_data(ttl=240, show_spinner=False)
+def hira_search_cached(sheet_id: str):
+    try:
+        raw = api_action(get_ws("HIRA_Items").get_all_values)
+    except WorksheetNotFound:
+        return pd.DataFrame(columns=HIRA_HEADERS)
+    if not raw or raw[0][:len(HIRA_HEADERS)] != HIRA_HEADERS:
+        return pd.DataFrame(columns=HIRA_HEADERS)
+    data = [(r + [""]*len(HIRA_HEADERS))[:len(HIRA_HEADERS)] for r in raw[1:] if r and r[0]]
+    return pd.DataFrame(data, columns=HIRA_HEADERS)
+
+
+def render_hira_search():
+    st.subheader("심평원 치료재료 품목검색")
+    st.caption("심평원 기준정보 조회 전용 · 병원 사용품목 등록과 입출고는 추후 연결")
+    try:
+        frame = hira_search_cached(str(st.secrets["treatments"]["spreadsheet_id"]))
+    except Exception as exc:
+        st.error(safe_spreadsheet_error(exc))
+        return
+    if frame.empty:
+        st.info("아직 품목 DB가 없습니다. MASTER가 '심평원 DB 업데이트' 메뉴에서 먼저 등록해 주세요.")
+        return
+    a,b,c=st.columns([3,1,1])
+    with a:q=st.text_input("품목 검색", placeholder="코드 · 품명 · 중분류 · 제조사")
+    with b:kind=st.selectbox("급여구분", ["전체"]+sorted(frame["급여구분"].unique().tolist()))
+    with c:state=st.selectbox("품목상태", ["전체"]+sorted(frame["현재상태"].unique().tolist()))
+    result=frame
+    if kind!="전체":result=result[result["급여구분"]==kind]
+    if state!="전체":result=result[result["현재상태"]==state]
+    if q.strip():
+        pattern=re.escape(q.strip())
+        mask = pd.Series(False, index=result.index)
+        for col in ["코드","품명","중분류","제조회사","제조수입업소"]:
+            mask = mask | result[col].str.contains(pattern, case=False, na=False, regex=True)
+        result=result[mask]
+    st.caption(f"검색 결과: {len(result):,}건 / 전체 {len(frame):,}건")
+    st.dataframe(result.head(2000), hide_index=True, use_container_width=True, height=620)
+    if len(result)>2000:
+        st.caption("화면에는 처음 2,000건만 표시합니다. 검색 조건을 좁혀 주세요.")
+
+
 def main():
     render_style()
     try:
@@ -540,7 +929,7 @@ def main():
         st.divider()
         menu = ["물품관리 현황", "품목정보", "입고관리", "출고관리", "재고관리", "재고실사", "통계 및 보고서", "내 정보", "PIN 변경"]
         if role == "MASTER":
-            menu += ["직원 관리"]
+            menu += ["직원 관리", "심평원 DB 업데이트"]
         choice = st.radio("업무 메뉴", menu, label_visibility="collapsed")
         st.divider()
         if st.button("로그아웃", use_container_width=True):
@@ -559,7 +948,7 @@ def main():
             st.markdown("**관리 가능한 부서**")
             st.write(" · ".join(allowed_departments(emp, data)) or "설정되지 않음")
     elif choice == "품목정보":
-        show_pending_area(choice, ["심평원 치료재료 검색", "병원 사용품목 등록", "월별 변경사항 확인"])
+        render_hira_search()
     elif choice == "입고관리":
         show_pending_area(choice, ["신규 입고", "입고 이력", "반품"])
     elif choice == "출고관리":
@@ -576,8 +965,10 @@ def main():
         render_pin_change(emp)
     elif choice == "직원 관리" and role == "MASTER":
         render_employee_admin(emp, data)
+    elif choice == "심평원 DB 업데이트" and role == "MASTER":
+        render_hira_import()
 
-    st.caption("HISMEDI · 치료재료 관리 | PC용 1차 화면")
+    st.caption("HISMEDI · 치료재료 관리 | PC용")
 
 
 if __name__ == "__main__":
