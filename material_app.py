@@ -727,66 +727,155 @@ def diff_hira(rows, existing):
     return {"신규": added, "변경": changed, "기준목록제외": removed}
 
 
+def hira_import_api(fn, *args, **kwargs):
+    """Exponential cooldown for Sheets API read/write quota (safe for idempotent calls only)."""
+    delays = (0, 20, 40, 65, 90)
+    for attempt, delay in enumerate(delays):
+        if delay:
+            time.sleep(delay)
+        try:
+            return fn(*args, **kwargs)
+        except APIError as exc:
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            detail = str(exc).lower()
+            retry = status in (429, 500, 502, 503, 504) or (status == 403 and ("quota" in detail or "ratelimit" in detail))
+            LOGGER.warning("HIRA staged import request failed: HTTP %s, retry=%s, attempt=%s", status, retry, attempt+1)
+            if not retry or attempt == len(delays)-1:
+                raise
+
+
+def hira_expected_row(row):
+    return [str(row.get(col, "")) for col in HIRA_HEADERS]
+
+
+def hira_normalize_cells(cells):
+    return (list(map(str, cells)) + [""] * len(HIRA_HEADERS))[:len(HIRA_HEADERS)]
+
+
+def hira_resume_stage(book, rows):
+    """Reuse a prior incomplete stage only when its full code column and sampled data match."""
+    try:
+        all_sheets = hira_import_api(book.worksheets)
+    except Exception:
+        LOGGER.exception("Cannot enumerate HIRA stage sheets")
+        raise
+    candidates = sorted((ws for ws in all_sheets if ws.title.startswith("HIRA_Stage_")),
+                        key=lambda ws: ws.title, reverse=True)
+    expected_codes = [str(r["코드"]) for r in rows]
+    for ws in candidates[:8]:
+        try:
+            # A single column read locates the precise safe resume position.
+            code_cells = hira_import_api(ws.get, f"A1:A{len(rows)+1}")
+            codes = [str(row[0]) if row else "" for row in code_cells]
+            if not codes or codes[0] != HIRA_HEADERS[0]:
+                continue
+            data_codes = codes[1:]
+            if len(data_codes) > len(expected_codes):
+                continue
+            first_mismatch = next((i for i, (a,b) in enumerate(zip(data_codes, expected_codes)) if a != b), None)
+            if first_mismatch is not None:
+                # Existing stage is from a different snapshot or damaged; never overwrite it.
+                continue
+            # Verify the already-written rows against current source content at spaced checkpoints.
+            count = len(data_codes)
+            if count:
+                sample = sorted({0, count//4, count//2, (3*count)//4, count-1})
+                if any(hira_normalize_cells((hira_import_api(ws.get, f"A{idx+2}:R{idx+2}") or [[]])[0]) != hira_expected_row(rows[idx])
+                       for idx in sample):
+                    continue
+            return ws, count
+        except APIError:
+            raise
+        except Exception:
+            LOGGER.exception("Invalid reusable HIRA stage: %s", ws.title)
+    return None, 0
+
+
 def publish_hira(rows, overview, changes):
-    """Two-phase staged import; never erase current HIRA_Items before validation."""
+    """Resume incomplete import, rate limit uploads, then publish atomically by sheet rename."""
     book = get_book()
-    stage_name = "HIRA_Stage_" + datetime.now(KST).strftime("%m%d_%H%M%S")
     if len(rows) > 120000:
         raise ValueError("파일이 예상 크기를 벗어나 자동 반영을 중단했습니다.")
-    stage = api_action(book.add_worksheet, title=stage_name, rows=len(rows) + 1, cols=len(HIRA_HEADERS))
+    if len({str(r["코드"]) for r in rows}) != len(rows):
+        raise ValueError("통합 목록 내 중복 품목코드가 존재해 반영을 중단했습니다.")
+    # Google Sheets rejects cells containing over 50,000 characters.
+    for idx, row in enumerate(rows):
+        if any(len(str(row.get(h, ""))) > 49000 for h in HIRA_HEADERS):
+            raise ValueError(f"{idx+1}번째 품목의 텍스트가 Google Sheets 셀 한도를 초과했습니다.")
+    stage, resume_count = hira_resume_stage(book, rows)
+    if stage is None:
+        stage_name = "HIRA_Stage_" + datetime.now(KST).strftime("%m%d_%H%M%S")
+        stage = hira_import_api(book.add_worksheet, title=stage_name, rows=len(rows)+1, cols=len(HIRA_HEADERS))
+        hira_import_api(stage.update, range_name="A1:R1", values=[HIRA_HEADERS], value_input_option="RAW")
+    else:
+        st.info(f"이전 저장 임시시트에서 {resume_count:,}건을 확인했습니다. 나머지만 이어서 저장합니다.")
+    bar = st.progress(resume_count / max(len(rows), 1), text=f"저장 중: {resume_count:,} / {len(rows):,}건")
+    # 750 rows per call: ~67 write calls for 50k rows. Slow enough to stay below
+    # the Sheets 60-writes-per-minute service-account quota including other app traffic.
     batch_size = 750
-    bar = st.progress(0, text="Google Sheets 임시 시트에 분할 저장 중입니다.")
-    api_action(stage.update, range_name="A1:R1", values=[HIRA_HEADERS])
-    for start in range(0, len(rows), batch_size):
-        block = [[str(r[h]) for h in HIRA_HEADERS] for r in rows[start:start+batch_size]]
-        endrow = start + len(block) + 1
-        api_action(stage.update, range_name=f"A{start+2}:R{endrow}", values=block, value_input_option="RAW")
-        bar.progress(min(1., (start+len(block))/len(rows)), text=f"저장 중: {start+len(block):,} / {len(rows):,}건")
-    # Confirm count in the server's used-range metadata without downloading 50k rows.
-    actual = api_action(stage.get, f"A1:A{len(rows)+1}")
-    if len(actual) != len(rows) + 1:
-        raise ValueError(f"저장 검증 실패: 예상 {len(rows):,}, 실제 {len(actual)-1:,}건. 현재 자료는 유지됩니다.")
+    current = resume_count
+    while current < len(rows):
+        block = [hira_expected_row(row) for row in rows[current:current+batch_size]]
+        start = current + 2
+        end = current + len(block) + 1
+        try:
+            hira_import_api(stage.update, range_name=f"A{start}:R{end}", values=block, value_input_option="RAW")
+        except APIError as exc:
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            raise RuntimeError(f"임시시트 {stage.title}에서 {current:,}건까지 저장됨; Google Sheets HTTP {status}. 다음 실행 시 이어서 저장할 수 있습니다.") from exc
+        current += len(block)
+        bar.progress(current/len(rows), text=f"저장 중: {current:,} / {len(rows):,}건")
+        if current < len(rows):
+            time.sleep(1.6)
+    # Verify actual populated codes rather than preallocated row_count.
+    code_cells = hira_import_api(stage.get, f"A1:A{len(rows)+1}")
+    actual_codes = [str(r[0]) if r else "" for r in code_cells]
+    expected_codes = ["코드"] + [str(r["코드"]) for r in rows]
+    if actual_codes != expected_codes:
+        raise ValueError("임시시트 저장 후 코드 검증이 실패했습니다. 기존 운영 DB는 유지됩니다.")
+    # Compare selected complete rows to catch accidental truncation or column shifting.
+    for idx in sorted({0, len(rows)//4, len(rows)//2, 3*len(rows)//4, len(rows)-1}):
+        actual = hira_normalize_cells((hira_import_api(stage.get, f"A{idx+2}:R{idx+2}") or [[]])[0])
+        if actual != hira_expected_row(rows[idx]):
+            raise ValueError(f"{idx+1}번째 행 데이터 검증에 실패했습니다. 기존 운영 DB는 유지됩니다.")
     old = None
     try:
-        old = api_action(book.worksheet, "HIRA_Items")
+        old = hira_import_api(book.worksheet, "HIRA_Items")
     except WorksheetNotFound:
         pass
     backup = None
     if old:
         backup = "HIRA_Backup_" + datetime.now(KST).strftime("%m%d_%H%M%S")
-        api_action(old.update_title, backup)
+        hira_import_api(old.update_title, backup)
     try:
-        api_action(stage.update_title, "HIRA_Items")
+        hira_import_api(stage.update_title, "HIRA_Items")
     except Exception:
         if old and backup:
             try:
-                api_action(old.update_title, "HIRA_Items")
+                hira_import_api(old.update_title, "HIRA_Items")
             except Exception:
-                LOGGER.exception("Failed to restore original HIRA_Items title")
+                LOGGER.exception("Failed to restore original HIRA_Items")
         raise
-    # Store collision detail for audit. This is independent of the current item
-    # catalog and keeps the historical deleted description discoverable.
     try:
         conflict_rows = overview.get("충돌상세", [])
         if conflict_rows:
             headers = ["기준일"] + list(conflict_rows[0].keys())
             ws = get_ws("HIRA_Conflicts", headers)
-            old_rows = api_action(ws.get_all_values)
-            existing_keys = {(r[0], r[1]) for r in old_rows[1:] if len(r) >= 2}
+            old_rows = hira_import_api(ws.get_all_values)
+            existing = {(r[0], r[1]) for r in old_rows[1:] if len(r)>=2}
             for row in conflict_rows:
-                if (overview["기준일"], row["코드"]) not in existing_keys:
-                    api_action(ws.append_row, [overview["기준일"]] + [str(row[k]) for k in conflict_rows[0]], value_input_option="RAW")
+                if (overview["기준일"], row["코드"]) not in existing:
+                    ws.append_row([overview["기준일"]] + [str(row[k]) for k in conflict_rows[0]], value_input_option="RAW")
     except Exception:
-        LOGGER.exception("HIRA publish completed, but collision archive write failed")
-    # Import log is best-effort. Never report failure after successful publication.
+        LOGGER.exception("HIRA published but collision archive failed")
     try:
         log_ws = get_ws("HIRA_Imports", HIRA_LOG_HEADERS)
-        api_action(log_ws.append_row, [now(), st.session_state.get("employee_id", ""),
+        log_ws.append_row([now(), st.session_state.get("employee_id", ""),
                  overview["기준일"], str(len(rows)), str(len(changes["신규"])),
                  str(len(changes["변경"])), str(len(changes["기준목록제외"])),
                  " | ".join(overview["파일명"].values())], value_input_option="RAW")
     except Exception:
-        LOGGER.exception("HIRA import published but history append failed")
+        LOGGER.exception("HIRA published but history append failed")
     bar.empty()
     st.cache_data.clear()
 
@@ -857,7 +946,7 @@ def render_hira_import():
             st.success("심평원 품목 DB 반영을 완료했습니다. 기존 Emp·Auth·재고정보는 변경하지 않았습니다.")
         except Exception as exc:
             LOGGER.exception("HIRA publish failed")
-            st.error(f"반영 실패: {type(exc).__name__}. 기존 품목 DB가 유지되는지 확인해 주세요. Streamlit 로그에 상세 오류가 기록됩니다.")
+            st.error(f"반영 실패: {str(exc)[:350] if isinstance(exc, (ValueError, RuntimeError)) else type(exc).__name__}. 기존 품목 DB는 그대로 유지됩니다. 임시 시트를 삭제하지 마세요.")
 
 
 @st.cache_data(ttl=240, show_spinner=False)
