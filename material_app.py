@@ -307,7 +307,7 @@ BUILDING_FILE = BASE_DIR / "Hismedi_building.jpg"
 def render_style():
     st.markdown("""
     <style>
-    .block-container {max-width: 1760px; padding-top: 2.1rem; padding-bottom: 1.8rem;}
+    .block-container {max-width: 1760px; padding-top: 3.6rem!important; padding-bottom: 1.8rem;}
     h1 {font-size: 1.45rem !important; margin-bottom: .35rem !important;}
     [data-testid="stDataFrame"] {font-size:12px!important;}
     [data-testid="stMain"] [role="radiogroup"] label p{font-size:13px!important;}
@@ -323,6 +323,12 @@ def render_style():
     [data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {padding-top:0!important;}
     [data-testid="stSidebar"] [data-testid="stDivider"] {margin: .35rem 0!important;}
     [data-testid="stMain"] [data-testid="stVerticalBlock"] {scroll-margin-top:1.5rem;}
+    /* Keep section navigation clear of Streamlit's floating toolbar. */
+    [data-testid="stMain"] [class*="st-key-hm_section_tab_"] {
+        scroll-margin-top:5rem!important;
+        padding-top:2px!important;
+        overflow:visible!important;
+    }
     /* Consistent high-contrast, spaced tab-style navigation buttons. */
     [data-testid="stMain"] [class*="st-key-hm_section_tab_"] button {
         width:100%!important;min-height:57px!important;
@@ -379,7 +385,7 @@ def render_style():
     .hm-login-label {font-weight:750;font-size:15px;white-space:nowrap;}
     .hm-login-help {font-size:12px;color:#718096;}
     @media (max-width:1000px) {
-        .block-container {padding-left:1.1rem;padding-right:1.1rem;padding-top:1.65rem;}
+        .block-container {padding-left:1.1rem;padding-right:1.1rem;padding-top:3.3rem!important;}
         .hm-login-photo img {max-height:42vh;}
     }
     .hm-head-title {font-size:1.45rem;font-weight:730;line-height:1.3;letter-spacing:-.035em;}
@@ -2725,6 +2731,8 @@ def section_tab_buttons(section: str, labels: list[str]) -> str:
     state_key = f"hm_section_choice_{section}"
     if st.session_state.get(state_key) not in labels:
         st.session_state[state_key] = labels[0]
+    # Leave a small safety gap above tabs on monitors with different scaling.
+    st.markdown('<div style="height:16px;" aria-hidden="true"></div>', unsafe_allow_html=True)
     cols = st.columns(len(labels), gap="large")
     for index, (label, col) in enumerate(zip(labels, cols)):
         selected = st.session_state[state_key] == label
@@ -2733,8 +2741,9 @@ def section_tab_buttons(section: str, labels: list[str]) -> str:
                 if st.button(label, key=f"hm_section_btn_{section}_{index}",
                              use_container_width=True):
                     if not selected:
+                        # A Streamlit button already causes a rerun. Avoid a second
+                        # rerun that can preserve a stale, clipped scroll position.
                         st.session_state[state_key] = label
-                        st.rerun()
     st.divider()
     return st.session_state[state_key]
 
