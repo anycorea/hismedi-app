@@ -11,6 +11,9 @@ admin_setup_key = "a-long-unique-random-secret"  # only for initializing first M
 from __future__ import annotations
 
 import hashlib
+import base64
+from io import BytesIO
+from PIL import Image
 import hmac
 import re
 import secrets
@@ -26,7 +29,13 @@ import streamlit as st
 from google.oauth2.service_account import Credentials
 from gspread.exceptions import WorksheetNotFound, APIError
 
-st.set_page_config(page_title="HISMEDI | 치료재료 관리", page_icon="🏥", layout="wide")
+BASE_PATH = Path(__file__).resolve().parent
+ICON_PATH = BASE_PATH / "Hismedi_logo.png"
+try:
+    page_icon = Image.open(ICON_PATH).copy() if ICON_PATH.is_file() else "🏥"
+except Exception:
+    page_icon = "🏥"
+st.set_page_config(page_title="HISMEDI | 치료재료 관리", page_icon=page_icon, layout="wide")
 KST = timezone(timedelta(hours=9))
 EMP_HEADERS = ["사번", "소속부서", "이름", "관리부서", "PIN", "권한", "사용여부"]
 AUTH_HEADERS = ["사번", "PIN해시", "솔트", "반복횟수", "변경필요", "실패횟수", "잠금종료", "수정일시"]
@@ -232,38 +241,203 @@ def valid_id(identifier: str) -> bool:
 
 
 
-def render_header():
-    """Compact hospital-branded header; reuse repository logo."""
+BASE_DIR = Path(__file__).resolve().parent
+LOGO_FILE = BASE_DIR / "Hismedi_logo.png"
+BUILDING_FILE = BASE_DIR / "Hismedi_building.jpg"
+
+
+def render_style():
     st.markdown("""
     <style>
-    .block-container {padding-top: 1.25rem; padding-bottom: 2rem;}
-    div[data-testid="stAlert"] {font-size: .93rem;}
+    .block-container {max-width: 1760px; padding-top: 1.15rem; padding-bottom: 1.8rem;}
+    h1 {font-size: 1.45rem !important; margin-bottom: .35rem !important;}
+    h2 {font-size: 1.18rem !important;}
+    h3 {font-size: 1.03rem !important;}
+    div[data-testid="stAlert"] {font-size: .94rem;}
+    div[data-testid="stSidebar"] div[data-testid="stVerticalBlock"] {gap: .55rem;}
+    [data-testid="stSidebar"] [data-testid="stImage"] img {object-fit:contain!important;object-position:center center!important;max-width:100%!important;height:auto!important;}
+    [data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {padding-top:.4rem!important;}
+    .hm-head-title {font-size:1.45rem;font-weight:730;line-height:1.3;letter-spacing:-.035em;}
+    .hm-head-note {font-size:.87rem;color:gray;margin-top:.25rem;}
+    .hm-caption {font-size:.85rem;color:gray;}
     </style>
     """, unsafe_allow_html=True)
-    logo_paths = [
-        Path(__file__).resolve().parent / "Hismedi_logo.png",
-        Path(__file__).resolve().parent / "hismedi_logo.png",
-    ]
-    logo = next((path for path in logo_paths if path.is_file()), None)
-    left, right = st.columns([1, 11], gap="medium", vertical_alignment="center")
+
+
+@st.cache_data(show_spinner=False)
+def padded_logo(path: str) -> bytes:
+    """진료현황 앱과 동일한 로고 보호 여백. 원본 픽셀은 자르지 않습니다."""
+    with Image.open(path) as image:
+        image = image.convert("RGBA")
+        margin = round(max(image.size) * .16)
+        canvas = Image.new("RGBA", (image.width + 2 * margin, image.height + 2 * margin), (255, 255, 255, 255))
+        canvas.alpha_composite(image, (margin, margin))
+        buffer = BytesIO()
+        canvas.convert("RGB").save(buffer, format="PNG")
+        return buffer.getvalue()
+
+
+def show_logo(path: Path, width: int, *, centered: bool = False):
+    """고정 캔버스 안에 contain 비율로 표시해 상하단 잘림 방지."""
+    if not path.is_file():
+        st.markdown("**HISMEDI HOSPITAL**")
+        return
+    encoded = base64.b64encode(padded_logo(str(path))).decode("ascii")
+    align = "center" if centered else "left"
+    st.markdown(
+        f'<div style="display:flex;justify-content:{align};align-items:center;'
+        f'width:100%;min-height:{int(width*1.05)}px;overflow:visible;margin:0 0 4px 0">'
+        f'<img alt="HISMEDI HOSPITAL" src="data:image/png;base64,{encoded}" '
+        f'style="width:{int(width)}px;max-width:100%;height:auto;display:block;'
+        f'object-fit:contain;overflow:visible;clip-path:none"></div>',
+        unsafe_allow_html=True,
+    )
+
+
+def render_header(subtitle: str = "병원 치료재료 · 부서별 물품관리"):
+    left, right = st.columns([.8, 11.2], gap="medium", vertical_alignment="center")
     with left:
-        if logo:
-            st.image(str(logo), width=72)
+        if LOGO_FILE.is_file():
+            show_logo(LOGO_FILE, 88)
         else:
             st.markdown("🏥")
     with right:
-        st.markdown("""
-        <div style="font-size:1.55rem; font-weight:750; line-height:1.25; color:var(--text-color);">
-        HISMEDI 치료재료 관리
-        </div>
-        <div style="font-size:.84rem; color:gray; margin-top:.24rem;">
-        직원 인증 · 관리부서 설정
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown('<div class="hm-head-title">HISMEDI 치료재료 관리</div>'
+                    f'<div class="hm-head-note">{subtitle}</div>', unsafe_allow_html=True)
     st.divider()
 
+
+def render_login_visual():
+    if BUILDING_FILE.is_file():
+        with st.container():
+            image_col, form_col = st.columns([1.05, 1], gap="large", vertical_alignment="center")
+            with image_col:
+                st.image(str(BUILDING_FILE), use_container_width=True)
+                st.caption("히즈메디병원")
+            return form_col
+    return st.container()
+
+
+def show_pending_area(title: str, features: list[str]):
+    st.subheader(title)
+    st.info("이 메뉴는 다음 개발 단계에서 연결됩니다. 아직 데이터를 등록하거나 재고를 변경하지 않습니다.")
+    st.caption("예정 기능: " + " · ".join(features))
+
+
+def render_personal_info(emp: dict, data: list[dict]):
+    st.subheader("내 정보")
+    a, b, c = st.columns([1, 1, 2])
+    a.metric("이름", emp["이름"])
+    b.metric("권한", emp["권한"].upper())
+    c.metric("소속부서", emp["소속부서"])
+    st.markdown("**관리 가능한 부서**")
+    departments = allowed_departments(emp, data)
+    st.write(" · ".join(departments) if departments else "관리부서가 지정되지 않았습니다.")
+
+
+def render_pin_change(emp: dict):
+    st.subheader("내 PIN 변경")
+    with st.form("change_pin"):
+        old_pin = st.text_input("현재 PIN", type="password")
+        new_pin = st.text_input("새 PIN (숫자 6~12자리)", type="password")
+        new_pin_check = st.text_input("새 PIN 확인", type="password")
+        pressed = st.form_submit_button("PIN 변경", type="primary")
+    if pressed:
+        if new_pin != new_pin_check:
+            st.error("새 PIN이 일치하지 않습니다.")
+        elif new_pin == old_pin:
+            st.error("기존 PIN과 다른 번호를 사용하세요.")
+        else:
+            try:
+                good, _ = verify_auth(emp["사번"], old_pin)
+                if not good:
+                    st.error("현재 PIN이 일치하지 않습니다.")
+                else:
+                    write_auth(emp["사번"], new_pin, False)
+                    audit("CHANGE_PIN", emp["사번"])
+                    st.session_state.forced_change = False
+                    st.success("PIN이 변경되었습니다.")
+                    st.rerun()
+            except ValueError as exc:
+                st.error(str(exc))
+            except Exception as exc:
+                st.error(safe_spreadsheet_error(exc))
+
+
+def render_employee_admin(emp: dict, data: list[dict]):
+    st.subheader("직원 관리")
+    lookup_tab, edit_tab, issue_tab = st.tabs(["직원 조회", "직원 추가·수정", "PIN 발급·초기화"])
+    with lookup_tab:
+        view_rows = [{
+            "사번": x["사번"], "소속부서": x["소속부서"], "이름": x["이름"],
+            "관리부서": x["관리부서"], "권한": x["권한"], "사용여부": x["사용여부"]
+        } for x in data]
+        st.dataframe(pd.DataFrame(view_rows), hide_index=True, use_container_width=True, height=580)
+    with edit_tab:
+        choices = ["[신규 직원]"] + [f"{x['사번']} | {x['이름']}" for x in data]
+        selected = st.selectbox("대상 직원", choices)
+        target = None if selected == "[신규 직원]" else next(
+            x for x in data if x["사번"] == selected.split(" | ")[0]
+        )
+        departments = department_list(data)
+        with st.form("edit_emp"):
+            left, right = st.columns(2)
+            with left:
+                eid = st.text_input("사번 (6자리)", value=target["사번"] if target else "", disabled=target is not None)
+                person_name = st.text_input("이름", value=target["이름"] if target else "")
+                owned = st.text_input("소속부서", value=target["소속부서"] if target else "")
+            with right:
+                current = [i.strip() for i in target["관리부서"].split(",") if i.strip()] if target else []
+                managed = st.multiselect("관리부서 (복수 선택)", options=departments,
+                                         default=[x for x in current if x in departments])
+                permission = st.selectbox("권한", ["User", "Master"],
+                                          index=0 if not target or target["권한"].upper() == "USER" else 1)
+                enabled = st.selectbox("사용여부", ["Y", "N"], index=0 if not target or is_active(target) else 1)
+            save = st.form_submit_button("직원정보 저장", type="primary")
+        if save:
+            if not valid_id(eid):
+                st.error("사번은 숫자 6자리여야 합니다.")
+            elif not person_name.strip() or not owned.strip():
+                st.error("이름과 소속부서를 입력해 주세요.")
+            elif target is None and any(x["사번"] == eid for x in data):
+                st.error("이미 존재하는 사번입니다.")
+            elif target and target["사번"] == emp["사번"] and (permission != "Master" or enabled == "N"):
+                st.error("로그인 중인 MASTER 자신의 권한을 해제하거나 사용중지할 수 없습니다.")
+            else:
+                row = [eid, owned.strip(), person_name.strip(), ", ".join(managed), "", permission, enabled]
+                try:
+                    save_emp(row, target["_row"] if target else None)
+                    audit("UPDATE_EMP" if target else "ADD_EMP", eid, "권한:" + permission)
+                    st.success("저장했습니다.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(safe_spreadsheet_error(exc))
+    with issue_tab:
+        candidate_list = [x for x in data if is_active(x)]
+        if candidate_list:
+            target_option = st.selectbox("대상 직원", [f"{x['사번']} | {x['이름']}" for x in candidate_list])
+            target_id = target_option.split(" | ")[0]
+            if st.button("임시 PIN 발급", type="primary"):
+                try:
+                    temp_pin = f"{secrets.randbelow(90000000) + 10000000:08d}"
+                    write_auth(target_id, temp_pin, True)
+                    audit("ISSUE_TEMP_PIN", target_id)
+                    st.session_state.issued_pin = (target_id, temp_pin)
+                except Exception as exc:
+                    st.error(safe_spreadsheet_error(exc))
+            if "issued_pin" in st.session_state:
+                issued_id, issued_pin = st.session_state.issued_pin
+                st.warning("임시 PIN은 대상 직원에게 직접 전달하세요. 로그인 후 반드시 변경해야 합니다.")
+                st.code(f"사번: {issued_id}  /  임시 PIN: {issued_pin}")
+                if st.button("임시 PIN 표시 지우기"):
+                    st.session_state.pop("issued_pin", None)
+                    st.rerun()
+        else:
+            st.info("사용 중인 직원이 없습니다.")
+
+
 def main():
-    render_header()
+    render_style()
     try:
         data = employees()
         get_ws("Auth", AUTH_HEADERS)
@@ -282,6 +456,7 @@ def main():
         st.stop()
     initialized_master = any(r["사번"] in configured_ids for r in masters)
     if not initialized_master:
+        render_header("최초 관리자 설정")
         st.info("최초 사용: MASTER 계정의 PIN을 설정해 주세요.")
         if not st.secrets["treatments"].get("admin_setup_key", ""):
             st.warning("현재 실행 중인 앱에서 admin_setup_key를 찾지 못했습니다. 치료재료 앱의 Streamlit Cloud → Settings → Secrets에서 [treatments] 아래에 admin_setup_key = \"숫자8자리\"가 있는지 확인하고 저장해 주세요.")
@@ -314,10 +489,13 @@ def main():
         st.stop()
 
     if "employee_id" not in st.session_state:
-        with st.form("login"):
-            identifier = st.text_input("사번 (6자리)", max_chars=6)
-            pin = st.text_input("PIN", type="password")
-            submitted = st.form_submit_button("로그인", type="primary", use_container_width=True)
+        render_header("직원 로그인")
+        with render_login_visual():
+            st.markdown("#### 직원 로그인")
+            with st.form("login"):
+                identifier = st.text_input("사번 (6자리)", max_chars=6)
+                pin = st.text_input("PIN", type="password")
+                submitted = st.form_submit_button("로그인", type="primary", use_container_width=True)
         if submitted:
             emp = next((r for r in data if r["사번"] == normalize_employee_id(identifier)), None)
             if emp is None or not is_active(emp):
@@ -346,120 +524,60 @@ def main():
         st.error("Emp의 권한은 Master 또는 User여야 합니다.")
         sign_out()
 
+    if st.session_state.get("forced_change"):
+        render_header("임시 PIN 변경")
+        st.warning("임시 PIN으로 로그인했습니다. 새로운 PIN으로 변경한 후 이용할 수 있습니다.")
+        render_pin_change(emp)
+        st.stop()
+
     with st.sidebar:
-        st.subheader(f"{emp['이름']} 님")
-        st.write(f"소속: {emp['소속부서']}")
-        st.write(f"권한: **{role}**")
+        if LOGO_FILE.is_file():
+            show_logo(LOGO_FILE, 128, centered=True)
+        st.markdown("**HISMEDI 치료재료 관리**")
+        if BUILDING_FILE.is_file():
+            st.image(str(BUILDING_FILE), use_container_width=True)
+        st.caption(f"{emp['이름']} · {emp['소속부서']} · {role}")
+        st.divider()
+        menu = ["물품관리 현황", "품목정보", "입고관리", "출고관리", "재고관리", "재고실사", "통계 및 보고서", "내 정보", "PIN 변경"]
+        if role == "MASTER":
+            menu += ["직원 관리"]
+        choice = st.radio("업무 메뉴", menu, label_visibility="collapsed")
+        st.divider()
         if st.button("로그아웃", use_container_width=True):
             sign_out()
 
-    if st.session_state.get("forced_change"):
-        st.warning("임시 PIN으로 로그인했습니다. 새 PIN으로 변경해야 이용할 수 있습니다.")
-        tabs = ["PIN 변경"]
-    else:
-        tabs = ["내 정보", "PIN 변경"] + (["직원 관리"] if role == "MASTER" else [])
+    render_header(f"{choice}  ·  {emp['이름']} ({role})")
+    if choice == "물품관리 현황":
+        st.subheader("물품관리 현황")
+        st.info("로그인이 완료되었습니다. 품목·입출고·재고 데이터는 다음 개발 단계에서 연결됩니다.")
+        a, b = st.columns([1, 2], gap="large")
+        with a:
+            st.markdown("**현재 로그인**")
+            st.write(f"{emp['이름']}  |  {emp['소속부서']}")
+            st.write(f"권한: {role}")
+        with b:
+            st.markdown("**관리 가능한 부서**")
+            st.write(" · ".join(allowed_departments(emp, data)) or "설정되지 않음")
+    elif choice == "품목정보":
+        show_pending_area(choice, ["심평원 치료재료 검색", "병원 사용품목 등록", "월별 변경사항 확인"])
+    elif choice == "입고관리":
+        show_pending_area(choice, ["신규 입고", "입고 이력", "반품"])
+    elif choice == "출고관리":
+        show_pending_area(choice, ["부서별 출고", "부서 사용량", "부서 간 이동"])
+    elif choice == "재고관리":
+        show_pending_area(choice, ["부서별 보유량", "전체 재고", "부족 품목"])
+    elif choice == "재고실사":
+        show_pending_area(choice, ["실사 입력", "차이 확인", "재고 조정"])
+    elif choice == "통계 및 보고서":
+        show_pending_area(choice, ["기간별", "부서별", "품목별", "엑셀 다운로드"])
+    elif choice == "내 정보":
+        render_personal_info(emp, data)
+    elif choice == "PIN 변경":
+        render_pin_change(emp)
+    elif choice == "직원 관리" and role == "MASTER":
+        render_employee_admin(emp, data)
 
-    tab_objects = st.tabs(tabs)
-    for name, tab in zip(tabs, tab_objects):
-        with tab:
-            if name == "내 정보":
-                st.subheader("나의 관리부서")
-                st.write(" · ".join(allowed_departments(emp, data)) or "설정된 관리부서가 없습니다.")
-                st.info("현재는 로그인·직원관리 1차 버전입니다. 품목/입출고/재고 기능은 다음 단계에서 추가됩니다.")
-            elif name == "PIN 변경":
-                with st.form("change_pin"):
-                    old_pin = st.text_input("현재 PIN", type="password")
-                    new_pin = st.text_input("새 PIN (숫자 6~12자리)", type="password")
-                    new_pin_check = st.text_input("새 PIN 확인", type="password")
-                    pressed = st.form_submit_button("PIN 변경", type="primary")
-                if pressed:
-                    if new_pin != new_pin_check:
-                        st.error("새 PIN이 일치하지 않습니다.")
-                    elif new_pin == old_pin:
-                        st.error("기존 PIN과 다른 번호를 사용하세요.")
-                    else:
-                        try:
-                            good, _ = verify_auth(emp["사번"], old_pin)
-                            if not good:
-                                st.error("현재 PIN이 일치하지 않습니다.")
-                            else:
-                                write_auth(emp["사번"], new_pin, False)
-                                audit("CHANGE_PIN", emp["사번"])
-                                st.session_state.forced_change = False
-                                st.success("PIN이 변경되었습니다.")
-                                st.rerun()
-                        except ValueError as exc:
-                            st.error(str(exc))
-                        except Exception as exc:
-                            st.error(safe_spreadsheet_error(exc))
-            elif name == "직원 관리":
-                st.subheader("직원 조회")
-                view_rows = [{
-                    "사번": x["사번"], "소속부서": x["소속부서"], "이름": x["이름"],
-                    "관리부서": x["관리부서"], "권한": x["권한"], "사용여부": x["사용여부"]
-                } for x in data]
-                st.dataframe(pd.DataFrame(view_rows), hide_index=True, use_container_width=True)
-                st.divider()
-                left, right = st.columns(2)
-                with left:
-                    st.markdown("#### 직원 추가 / 수정")
-                    choices = ["[신규 직원]"] + [f"{x['사번']} | {x['이름']}" for x in data]
-                    selected = st.selectbox("대상 직원", choices)
-                    target = None if selected == "[신규 직원]" else next(
-                        x for x in data if x["사번"] == selected.split(" | ")[0]
-                    )
-                    departments = department_list(data)
-                    with st.form("edit_emp"):
-                        eid = st.text_input("사번 (6자리)", value=target["사번"] if target else "", disabled=target is not None)
-                        person_name = st.text_input("이름", value=target["이름"] if target else "")
-                        owned = st.text_input("소속부서", value=target["소속부서"] if target else "")
-                        current = [i.strip() for i in target["관리부서"].split(",") if i.strip()] if target else []
-                        managed = st.multiselect("관리부서 (복수 선택 가능)", options=departments, default=[x for x in current if x in departments])
-                        permission = st.selectbox("권한", ["User", "Master"], index=0 if not target or target["권한"].upper() == "USER" else 1)
-                        enabled = st.selectbox("사용여부", ["Y", "N"], index=0 if not target or is_active(target) else 1)
-                        save = st.form_submit_button("직원정보 저장", type="primary")
-                    if save:
-                        if not valid_id(eid):
-                            st.error("사번은 숫자 6자리여야 합니다.")
-                        elif not person_name.strip() or not owned.strip():
-                            st.error("이름과 소속부서를 입력해 주세요.")
-                        elif target is None and any(x["사번"] == eid for x in data):
-                            st.error("이미 존재하는 사번입니다.")
-                        elif target and target["사번"] == emp["사번"] and (permission != "Master" or enabled == "N"):
-                            st.error("로그인 중인 MASTER 자신의 권한을 해제하거나 사용중지할 수 없습니다.")
-                        else:
-                            row = [eid, owned.strip(), person_name.strip(), ", ".join(managed), "", permission, enabled]
-                            try:
-                                save_emp(row, target["_row"] if target else None)
-                                audit("UPDATE_EMP" if target else "ADD_EMP", eid, "권한:" + permission)
-                                st.success("저장했습니다.")
-                                st.rerun()
-                            except Exception as exc:
-                                st.error(safe_spreadsheet_error(exc))
-                with right:
-                    st.markdown("#### 초기 PIN 발급 / 재발급")
-                    candidate_list = [x for x in data if x["사용여부"].upper() == "Y"]
-                    if candidate_list:
-                        target_option = st.selectbox("대상 직원", [f"{x['사번']} | {x['이름']}" for x in candidate_list])
-                        target_id = target_option.split(" | ")[0]
-                        if st.button("임시 PIN 발급", type="secondary"):
-                            try:
-                                temp_pin = f"{secrets.randbelow(90000000) + 10000000:08d}"
-                                write_auth(target_id, temp_pin, True)
-                                audit("ISSUE_TEMP_PIN", target_id)
-                                st.session_state.issued_pin = (target_id, temp_pin)
-                            except Exception as exc:
-                                st.error(safe_spreadsheet_error(exc))
-                        if "issued_pin" in st.session_state:
-                            issued_id, issued_pin = st.session_state.issued_pin
-                            st.warning("임시 PIN은 아래에서 한 번 확인 후 대상 직원에게 직접 전달하세요. 직원은 로그인 후 PIN을 변경해야 합니다.")
-                            st.code(f"사번: {issued_id}  /  임시 PIN: {issued_pin}")
-                            if st.button("임시 PIN 표시 지우기"):
-                                st.session_state.pop("issued_pin", None)
-                                st.rerun()
-                    else:
-                        st.info("사용 중인 직원이 없습니다.")
-    st.caption("HISMEDI · 치료재료 관리 / 로그인 및 직원관리 1차")
+    st.caption("HISMEDI · 치료재료 관리 | PC용 1차 화면")
 
 
 if __name__ == "__main__":
