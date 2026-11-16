@@ -58,7 +58,11 @@ LOGGER = logging.getLogger("hismedi.material")
 
 
 def api_action(fn, *args, **kwargs):
-    """Retry transient Google Sheets quota/server failures, not permission failures."""
+    """Retry transient Google API read failures and quota issues, with longer 429 cooldown.
+
+    CAUTION: do not use automatic retries for non-idempotent appends unless a
+    request identifier and reconciliation have been implemented.
+    """
     for attempt in range(4):
         try:
             return fn(*args, **kwargs)
@@ -72,7 +76,14 @@ def api_action(fn, *args, **kwargs):
             if not retryable or attempt == 3:
                 LOGGER.exception("Google Sheets API request failed: HTTP %s", status)
                 raise
-            time.sleep(min(2 ** attempt, 6))
+            # A 429 after batch uploads usually needs a quota-window reset,
+            # not the 1-2 second wait used for normal transient failures.
+            if status == 429 or (status == 403 and "quota" in detail):
+                delay = (15, 25, 35)[attempt]
+            else:
+                delay = (2, 4, 8)[attempt]
+            LOGGER.warning("Google API %s; retry in %s seconds", status, delay)
+            time.sleep(delay)
 
 
 
@@ -111,18 +122,24 @@ def get_book():
     return client.open_by_key(st.secrets["treatments"]["spreadsheet_id"])
 
 
+@st.cache_resource(show_spinner=False)
+def existing_ws(name: str):
+    """Reuse worksheet metadata across Streamlit reruns and open browser sessions."""
+    return api_action(get_book().worksheet, name)
+
+
 def get_ws(name: str, headers: list[str] | None = None):
-    book = get_book()
     try:
-        sheet = api_action(book.worksheet, name)
+        return existing_ws(name)
     except WorksheetNotFound:
         if headers is None:
             raise
+        book = get_book()
+        # Only create a new worksheet when it is genuinely absent.
         sheet = api_action(book.add_worksheet, title=name, rows=500, cols=max(len(headers), 8))
         api_action(sheet.update, range_name="A1", values=[headers])
-    # Header check is performed using the same get_all_values request below,
-    # not an extra row_values API call on every Streamlit rerun.
-    return sheet
+        existing_ws.clear()
+        return sheet
 
 
 def rows_as_dicts(ws, columns: list[str]) -> list[dict]:
@@ -140,12 +157,22 @@ def rows_as_dicts(ws, columns: list[str]) -> list[dict]:
     return output
 
 
-def employees() -> list[dict]:
+def employees_fresh() -> list[dict]:
     return rows_as_dicts(get_ws(st.secrets["treatments"].get("emp_worksheet", "Emp"), EMP_HEADERS), EMP_HEADERS)
 
 
-def auth_rows() -> list[dict]:
+@st.cache_data(ttl=20, show_spinner=False)
+def employees() -> list[dict]:
+    return employees_fresh()
+
+
+def auth_rows_fresh() -> list[dict]:
     return rows_as_dicts(get_ws("Auth", AUTH_HEADERS), AUTH_HEADERS)
+
+
+@st.cache_data(ttl=20, show_spinner=False)
+def auth_rows() -> list[dict]:
+    return auth_rows_fresh()
 
 
 def write_auth(employee_id: str, password: str, must_change: bool):
@@ -155,11 +182,12 @@ def write_auth(employee_id: str, password: str, must_change: bool):
     hashed = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), bytes.fromhex(salt), ITERATIONS).hex()
     record = [employee_id, hashed, salt, str(ITERATIONS), "Y" if must_change else "N", "0", "", now()]
     ws = get_ws("Auth", AUTH_HEADERS)
-    match = next((r for r in auth_rows() if r["사번"] == employee_id), None)
+    match = next((r for r in auth_rows_fresh() if r["사번"] == employee_id), None)
     if match:
         ws.update(range_name=f"A{match['_row']}:H{match['_row']}", values=[record])
     else:
         ws.append_row(record, value_input_option="RAW")
+    auth_rows.clear()
 
 
 def update_auth_attempt(record: dict, count: int, locked_until: str = ""):
@@ -167,6 +195,7 @@ def update_auth_attempt(record: dict, count: int, locked_until: str = ""):
         range_name=f"F{record['_row']}:G{record['_row']}",
         values=[[str(count), locked_until]],
     )
+    auth_rows.clear()
 
 
 def verify_auth(employee_id: str, pin: str) -> tuple[bool, str]:
@@ -235,6 +264,7 @@ def save_emp(fields: list[str], existing_row: int | None = None):
         ws.update(range_name=f"F{existing_row}:G{existing_row}", values=[fields[5:7]])
     else:
         ws.append_row(fields, value_input_option="RAW")
+    employees.clear()
 
 
 def is_active(emp: dict) -> bool:
@@ -849,6 +879,8 @@ def publish_hira(rows, overview, changes):
         hira_import_api(old.update_title, backup)
     try:
         hira_import_api(stage.update_title, "HIRA_Items")
+        # Worksheet ID changes when the stage sheet replaces the active catalog.
+        existing_ws.clear()
     except Exception:
         if old and backup:
             try:
@@ -1000,10 +1032,12 @@ REQ_HEADERS = ["요청ID", "신청일시", "신청사번", "신청자", "수령�
 STOCK_HEADERS = ["거래ID", "일시", "부서", "품목코드", "품명", "유형", "증감수량", "작업사번", "메모", "관련요청ID"]
 
 
+@st.cache_resource(show_spinner=False)
 def ensure_material_sheets():
-    # Google Sheets already has employee/auth sheets. Do not modify them.
+    # One-time initialization. Worksheet handles are also cached.
     get_ws("Material_Requests", REQ_HEADERS)
     get_ws("Material_StockEvents", STOCK_HEADERS)
+    return True
 
 
 @st.cache_data(ttl=12, show_spinner=False)
@@ -1088,8 +1122,8 @@ def material_save_requests(emp, department, cart, memo):
     if not cart:
         raise ValueError('신청할 품목을 추가해 주세요.')
     # Re-check role + allowed departments on the server before saving.
-    fresh_emp = next((r for r in employees() if r['사번'] == emp['사번'] and is_active(r)), None)
-    if fresh_emp is None or department not in allowed_departments(fresh_emp, employees()):
+    fresh_emp = next((r for r in employees_fresh() if r['사번'] == emp['사번'] and is_active(r)), None)
+    if fresh_emp is None or department not in allowed_departments(fresh_emp, employees_fresh()):
         raise PermissionError('신청할 부서에 대한 관리 권한이 없습니다.')
     created = now()
     group_id = uuid.uuid4().hex[:12].upper()
@@ -1108,8 +1142,8 @@ def material_set_request_status(request, new_status, actor, delivered_qty=None):
     if actor['권한'].upper() != 'MASTER' and new_status in ('출고', '반려'):
         raise PermissionError('출고 승인 및 반려는 MASTER만 가능합니다.')
     if new_status == '수령완료' and actor['권한'].upper() != 'MASTER':
-        fresh = next((x for x in employees() if x['사번'] == actor['사번'] and is_active(x)), None)
-        if fresh is None or request['수령부서'] not in allowed_departments(fresh, employees()):
+        fresh = next((x for x in employees_fresh() if x['사번'] == actor['사번'] and is_active(x)), None)
+        if fresh is None or request['수령부서'] not in allowed_departments(fresh, employees_fresh()):
             raise PermissionError('수령 부서에 대한 권한이 없습니다.')
     expected = {'출고':'신청', '반려':'신청', '수령완료':'출고'}[new_status]
     ws = get_ws('Material_Requests', REQ_HEADERS)
@@ -1138,7 +1172,7 @@ def material_set_request_status(request, new_status, actor, delivered_qty=None):
 
 
 def save_stock_event(emp, department, code, action, quantity, memo, *, target_total=None):
-    fresh_data = employees()
+    fresh_data = employees_fresh()
     fresh_emp = next((r for r in fresh_data if r['사번'] == emp['사번'] and is_active(r)), None)
     if fresh_emp is None or department not in allowed_departments(fresh_emp, fresh_data):
         raise PermissionError('해당 부서의 재고를 관리할 권한이 없습니다.')
@@ -1393,7 +1427,7 @@ def render_initial_stock_bulk(emp, data):
         st.caption('입력 수량을 현재 실물 총수량으로 취급합니다. 예: 기존 수령재고 10개, 실제 15개 → +5개만 조정')
         confirmed=st.checkbox('해당 부서의 실제 보유량을 확인했습니다.',key='bulk_confirm')
         if st.button('초기재고 일괄 저장',type='primary',disabled=not confirmed):
-            fresh=employees()
+            fresh=employees_fresh()
             fresh_emp=next((x for x in fresh if x['사번']==emp['사번'] and is_active(x)),None)
             if fresh_emp is None or dept not in allowed_departments(fresh_emp,fresh):
                 raise PermissionError('부서 관리 권한이 변경되었습니다.')
@@ -1476,21 +1510,28 @@ def main():
     render_style()
     try:
         data = employees()
-        get_ws("Auth", AUTH_HEADERS)
-        get_ws("Audit_Log", LOG_HEADERS)
     except Exception as exc:
         st.error(safe_spreadsheet_error(exc))
-        st.caption(str(exc) if isinstance(exc, ValueError) else "Google Sheets 제목행과 공유 설정을 확인하세요.")
+        if isinstance(exc, ValueError):
+            st.caption(str(exc))
+        elif isinstance(exc, APIError) and getattr(getattr(exc, "response", None), "status_code", None) == 429:
+            st.caption("Google Sheets 요청 한도가 회복될 때까지 자동 재시도를 진행했지만 실패했습니다. 대량 DB 업로드와 동시 사용 시 발생할 수 있습니다.")
+        else:
+            st.caption("Google Sheets 연결 상태와 Streamlit 로그의 실제 오류번호를 확인하세요.")
         st.stop()
 
-    # A MASTER cannot self-register solely using their employee ID.
+    # Bootstrap check is only necessary before login, not on every widget rerun.
     masters = [r for r in data if r["권한"].upper() == "MASTER" and is_active(r)]
-    try:
-        configured_ids = {row["사번"] for row in auth_rows()}
-    except Exception as exc:
-        st.error(safe_spreadsheet_error(exc))
-        st.stop()
-    initialized_master = any(r["사번"] in configured_ids for r in masters)
+    initialized_master = True
+    if "employee_id" not in st.session_state:
+        try:
+            get_ws("Auth", AUTH_HEADERS)
+            get_ws("Audit_Log", LOG_HEADERS)
+            configured_ids = {row["사번"] for row in auth_rows()}
+        except Exception as exc:
+            st.error(safe_spreadsheet_error(exc))
+            st.stop()
+        initialized_master = any(r["사번"] in configured_ids for r in masters)
     if not initialized_master:
         render_header("최초 관리자 설정")
         st.info("최초 사용: MASTER 계정의 PIN을 설정해 주세요.")
@@ -1590,6 +1631,8 @@ def main():
         if st.button("🔄 데이터 동기화", use_container_width=True, help="Google Sheets의 최신 직원·품목자료를 다시 읽습니다."):
             # Refresh of cache only; never pushes Google Drive source files automatically.
             material_refresh()
+            employees.clear()
+            auth_rows.clear()
             st.session_state.pop("hira_files", None)
             st.session_state.pop("hira_import_preview", None)
             st.toast("동기화를 요청했습니다. 최신 Google Sheets 자료를 다시 읽습니다.")
