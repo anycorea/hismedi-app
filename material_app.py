@@ -1403,6 +1403,129 @@ def visible_requests(emp, data, statuses=None):
     return sorted(visible, key=lambda r: r['신청일시'], reverse=True)
 
 
+# MASTER의 거래내역 즉시 수정 기능: Sheets 직접 편집 대신 화면에서 편집/저장.
+# 수령완료 후 재고 수량은 수령 기록을 바꾸지 않고 재고실사/조정으로 수정합니다.
+MASTER_EDIT_FIELDS = {
+    '신청': ('수령부서', '신청수량', '신청단위', '단위환산수량', '비고'),
+    '출고': ('출고수량', '비고'),
+    '수령완료': ('비고',),
+    '반려': ('비고',),
+}
+
+
+def save_master_request_edits(before, after, edit_status, actor):
+    """Validate current request rows before batching edits. Keep IDs/status/official HIRA fields immutable."""
+    if actor['권한'].upper() != 'MASTER' or test_context():
+        raise PermissionError('실제 MASTER 계정에서만 신청내역을 수정할 수 있습니다.')
+    if edit_status not in MASTER_EDIT_FIELDS:
+        raise ValueError('잘못된 편집 상태입니다.')
+    allowed = MASTER_EDIT_FIELDS[edit_status]
+    originals = {str(r['요청ID']): r for r in before}
+    edits = []
+    for obj in after:
+        rid = str(obj['요청ID'])
+        old = originals.get(rid)
+        if not old or old['상태'] != edit_status:
+            raise ValueError('편집할 신청번호 또는 상태가 일치하지 않습니다.')
+        changed = {}
+        for field in allowed:
+            raw = obj.get(field, '')
+            value = str(raw).strip()
+            if value != str(old.get(field, '')).strip():
+                changed[field] = value
+        if not changed:
+            continue
+        final = {**old, **changed}
+        if edit_status == '신청':
+            if not final['수령부서'] or final['수령부서'] not in department_list(employees_fresh()):
+                raise ValueError(f'{rid}: 등록된 부서를 선택해 주세요.')
+            material_qty(final['신청수량'])
+            if '신청단위' in changed or '단위환산수량' in changed:
+                validate_request_unit(final['신청단위'], final['단위환산수량'], final.get('심평원단위', ''))
+        if edit_status == '출고':
+            qty = material_qty(final['출고수량'])
+            if qty > int(final['신청수량']):
+                raise ValueError(f'{rid}: 출고수량은 신청수량을 초과할 수 없습니다.')
+        if '비고' in changed:
+            if len(final['비고']) > 300:
+                raise ValueError(f'{rid}: 비고는 300자 이내여야 합니다.')
+            if old.get('요청ID', '').startswith('TEST-') and '[TEST MASTER:' in str(old.get('비고','')) and '[TEST MASTER:' not in final['비고']:
+                raise ValueError(f'{rid}: 테스트 기록의 TEST 표시를 제거할 수 없습니다.')
+        edits.append((old, changed))
+    if not edits:
+        return 0
+    if len(edits) > 20:
+        raise ValueError('한 번에 최대 20건까지 수정할 수 있습니다.')
+    # A single live read lowers API usage and checks changes made by another browser.
+    ws = get_ws('Material_Requests', REQ_HEADERS)
+    live_rows = api_action(ws.get_all_values)
+    if not live_rows or live_rows[0][:len(REQ_HEADERS)] != REQ_HEADERS:
+        raise ValueError('신청내역 시트 제목행이 변경되었습니다. 수정하지 않았습니다.')
+    changeset = []
+    audit_details = []
+    for old, changes in edits:
+        ix = int(old['_row']) - 1
+        if ix < 1 or ix >= len(live_rows):
+            raise ValueError('신청 행이 이동되었습니다. 데이터 동기화 후 다시 시도하세요.')
+        current = (live_rows[ix] + [''] * len(REQ_HEADERS))[:len(REQ_HEADERS)]
+        previous = [str(old.get(col, '')) for col in REQ_HEADERS]
+        if current != previous:
+            raise ValueError(f"{old['요청ID']}: 다른 사용자에 의해 정보가 변경되었습니다. 동기화 후 재시도하세요.")
+        for field, value in changes.items():
+            col = REQ_HEADERS.index(field) + 1
+            pos = gspread.utils.rowcol_to_a1(int(old['_row']), col)
+            changeset.append({'range': pos, 'values': [[value]]})
+            audit_details.append((old['요청ID'], field, old.get(field, ''), value))
+    # Batch API update writes only modified cells; no re-writing the whole dataset.
+    api_action(ws.batch_update, changeset, value_input_option='RAW')
+    material_refresh()
+    for rid, field, original, changed in audit_details:
+        try:
+            audit('MASTER_REQUEST_EDIT', rid, f'{field}: {original} -> {changed}'[:300])
+        except Exception:
+            LOGGER.exception('MASTER 수정 이력 기록 실패: %s %s', rid, field)
+    return len(edits)
+
+
+def render_master_inline_editor(emp, visible):
+    """Inline editable grid for MASTER; official HIRA data remains read-only."""
+    if emp['권한'].upper() != 'MASTER' or test_context():
+        return
+    with st.expander('✏️ MASTER 신청내역 바로 수정', expanded=False):
+        st.caption('상태별로 선택하여 표에서 직접 수정하고 저장하세요. 코드·품명·규격·심평원 단위·상한금액은 원본정보이므로 변경할 수 없습니다.')
+        state = st.selectbox('수정할 신청 상태', list(MASTER_EDIT_FIELDS), key='master_edit_state')
+        records = [r for r in visible if r['상태'] == state][:100]
+        if not records:
+            st.info('선택한 상태의 신청내역이 없습니다.')
+            return
+        columns = ['요청ID', '수령부서','품목코드','품명','규격','신청수량','신청단위','단위환산수량','출고수량','상태','비고']
+        view = pd.DataFrame([{c: r.get(c,'') for c in columns} for r in records])
+        permitted = set(MASTER_EDIT_FIELDS[state])
+        edited = st.data_editor(view, hide_index=True, use_container_width=True, num_rows='fixed',
+            disabled=[c for c in columns if c not in permitted],
+            column_config={
+                '요청ID': st.column_config.TextColumn('요청ID', width='medium'),
+                '수령부서': st.column_config.TextColumn('수령부서'),
+                '신청수량': st.column_config.TextColumn('신청수량 (정수)'),
+                '신청단위': st.column_config.TextColumn('신청단위'),
+                '단위환산수량': st.column_config.TextColumn('1단위당 환산수량'),
+                '출고수량': st.column_config.TextColumn('출고수량 (정수)'),
+                '비고': st.column_config.TextColumn('비고', width='large'),
+            }, key='master_request_editor_' + state)
+        if state == '수령완료':
+            st.info('수령완료 건의 수량을 고치면 재고가 함께 변경되므로 여기서는 비고만 수정합니다. 수량 정정은 재고관리 → 실사조정을 사용하세요.')
+        if st.button('변경사항 저장', type='primary', key='master_request_save_' + state):
+            try:
+                result = save_master_request_edits(records, edited.to_dict('records'), state, emp)
+                if result:
+                    st.success(f'{result}건을 저장했습니다. 수정 이력은 Audit_Log에 기록됩니다.')
+                    st.rerun()
+                else:
+                    st.info('변경된 내용이 없습니다.')
+            except Exception as exc:
+                st.error(str(exc) if isinstance(exc, (ValueError, PermissionError)) else safe_spreadsheet_error(exc))
+
+
 def render_request_history(emp,data):
     st.markdown('#### 신청·출고·수령 현황')
     items=visible_requests(emp,data)
@@ -1415,6 +1538,7 @@ def render_request_history(emp,data):
     if dept_choice!='전체':frame=frame[frame['수령부서']==dept_choice]
     if status_choice!='전체':frame=frame[frame['상태']==status_choice]
     st.dataframe(frame[columns].head(1000),hide_index=True,use_container_width=True,height=460)
+    render_master_inline_editor(emp, items)
     st.caption('신청 → MASTER 출고 → 부서 수령확인 후 해당 부서 재고에 반영됩니다.')
 
 
