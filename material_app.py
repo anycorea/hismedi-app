@@ -1025,7 +1025,7 @@ def render_hira_search():
     st.subheader("심평원 치료재료 품목검색")
     st.caption("심평원 기준정보 검색 · 물품 신청은 왼쪽 ‘물품 신청’ 메뉴에서 진행합니다.")
     try:
-        frame = hira_search_cached(str(st.secrets["treatments"]["spreadsheet_id"]))
+        frame = combined_catalog()
     except Exception as exc:
         st.error(safe_spreadsheet_error(exc))
         return
@@ -1050,6 +1050,186 @@ def render_hira_search():
     if len(result)>2000:
         st.caption("화면에는 처음 2,000건만 표시합니다. 검색 조건을 좁혀 주세요.")
 
+
+
+
+# Hospital-only items: never overwrite the HIRA master catalog.
+HOSPITAL_HEADERS = ["등록요청ID", "품목코드", "품명", "규격", "중분류", "기준단위", "신청단위", "단위환산수량", "제조수입업소", "상한금액", "비고", "상태", "요청사번", "요청일시", "승인사번", "승인일시"]
+
+
+@st.cache_data(ttl=20, show_spinner=False)
+def hospital_item_rows(_sheet_id):
+    try:
+        return rows_as_dicts(get_ws('Hospital_Items', HOSPITAL_HEADERS), HOSPITAL_HEADERS)
+    except WorksheetNotFound:
+        return []
+
+
+def hospital_items_fresh():
+    return rows_as_dicts(get_ws('Hospital_Items', HOSPITAL_HEADERS), HOSPITAL_HEADERS)
+
+
+def hospital_catalog():
+    approved = [r for r in hospital_item_rows(str(st.secrets['treatments']['spreadsheet_id'])) if r['상태'] == '승인' and r['품목코드']]
+    records = []
+    for r in approved:
+        records.append({
+            '코드': r['품목코드'], '급여구분': '병원자체', '현재상태': '등재',
+            '중분류': r['중분류'] or '병원 자체품목', '중분류코드': '',
+            '품명': r['품명'], '규격': r['규격'], '단위': r['기준단위'],
+            '상한금액': r['상한금액'], '제조회사': r['제조수입업소'],
+            '제조수입업소': r['제조수입업소'], '_병원신청단위': r['신청단위'],
+            '_병원환산수량': r['단위환산수량'],
+        })
+    return pd.DataFrame(records)
+
+
+def combined_catalog():
+    hra = hira_search_cached(str(st.secrets['treatments']['spreadsheet_id']))
+    hosp = hospital_catalog()
+    if hosp.empty:
+        return hra
+    return pd.concat([hra, hosp], ignore_index=True).fillna('')
+
+
+def hospital_duplicate_warning(name, spec, hira, own):
+    def norm(v): return re.sub(r'[^a-z0-9가-힣]', '', str(v).casefold())
+    query = norm(name)
+    if not query:
+        return []
+    matches = []
+    for df in (hira, own):
+        if df.empty: continue
+        for _, row in df.iterrows():
+            title = norm(row.get('품명',''))
+            if title and (title == query or (len(query) >= 5 and (query in title or title in query))):
+                matches.append((row.get('코드',''), row.get('품명',''), row.get('규격','')))
+                if len(matches) >= 12: return matches
+    return matches
+
+
+def render_hospital_register(emp, data):
+    st.subheader('병원 자체품목 등록')
+    st.caption('산정불가 물품, 장갑, 소모품 등 심평원 코드가 없는 품목을 관리합니다. 먼저 심평원 및 병원 품목을 검색해야 등록 요청할 수 있습니다.')
+    catalog = combined_catalog()
+    query = st.text_input('① 필수 사전검색 — 품명·코드·규격', key='hosp_search', placeholder='예: Latex glove / 라텍스 장갑')
+    if not query.strip():
+        st.info('품목명 또는 규격을 검색한 후 등록 요청을 진행해 주세요.')
+        return
+    tokens = [x.casefold() for x in query.split()]
+    if not catalog.empty:
+        cols = [c for c in ['코드','품명','규격','중분류','단위','급여구분'] if c in catalog.columns]
+        masked = catalog[cols].fillna('').astype(str).agg(' '.join,axis=1).str.casefold()
+        found = catalog.loc[masked.map(lambda x: all(t in x for t in tokens))].head(70)
+        if not found.empty:
+            st.warning(f'기존 품목이 {len(found)}건 검색되었습니다. 중복 등록을 피하고 기존 품목을 먼저 확인하세요.')
+            st.dataframe(found[cols], use_container_width=True, hide_index=True, height=240)
+        else:
+            st.success('입력한 검색어와 일치하는 품목을 찾지 못했습니다. 유사한 명칭도 검색해 보세요.')
+    is_master = emp['권한'].upper() == 'MASTER' and not test_context()
+    with st.form('hospital_register_form'):
+        st.markdown('**② 신규 품목 등록 요청**' + (' (MASTER 직접 승인 가능)' if is_master else ''))
+        a,b = st.columns(2)
+        name = a.text_input('품명 *', value=query[:120], max_chars=150)
+        spec = b.text_input('규격 *', max_chars=150)
+        a,b,c=st.columns(3)
+        category=a.text_input('중분류',value='병원 일반소모품',max_chars=100)
+        base=b.selectbox('재고 기준단위 *',['EA','BOX','PACK','SET','KIT','UNIT','PAIR','ROLL','BOTTLE','기타'])
+        real_base=c.text_input('기타 기준단위',max_chars=24) if base=='기타' else ''
+        a,b,c=st.columns(3)
+        req_unit=a.selectbox('기본 신청단위',['EA','BOX','PACK','SET','KIT','UNIT','PAIR','ROLL','BOTTLE','기타'])
+        req_custom=b.text_input('기타 신청단위',max_chars=24) if req_unit=='기타' else ''
+        factor=c.number_input('신청단위 1개당 기준수량',min_value=1,max_value=1000000,value=1,step=1)
+        manufacturer=st.text_input('제조·수입업소 (선택)',max_chars=150)
+        memo=st.text_input('비고·등록사유',max_chars=300)
+        checked=st.checkbox('기존 품목을 검색했고 같은 제품이 등록되지 않았음을 확인했습니다.')
+        submitted=st.form_submit_button('병원 자체품목 등록' if is_master else 'MASTER에게 신규등록 요청', type='primary')
+    if submitted:
+        try:
+            name=name.strip();spec=spec.strip()
+            base = (real_base if base=='기타' else base).strip().upper()
+            req_unit = (req_custom if req_unit=='기타' else req_unit).strip().upper()
+            validate_request_unit(req_unit, factor, base)
+            if not checked or len(name)<2 or not spec or not base:
+                raise ValueError('품명·규격·기준단위·기존품목 검색확인을 모두 입력해 주세요.')
+            fresh_data=employees_fresh()
+            fresh_emp=next((x for x in fresh_data if x['사번']==emp['사번'] and is_active(x)),None)
+            if fresh_emp is None:
+                raise PermissionError('사용자 정보가 변경되었습니다. 다시 로그인해 주세요.')
+            # Recheck latest registry plus catalog immediately before registration.
+            existing=hospital_items_fresh()
+            norm=lambda t:re.sub(r'[^a-z0-9가-힣]','',str(t).casefold())
+            if any(norm(r['품명'])==norm(name) and norm(r['규격'])==norm(spec) and r['상태']!='반려' for r in existing):
+                raise ValueError('같은 품명·규격의 자체품목이 이미 등록 또는 승인대기 중입니다.')
+            hra=get_hira_items()
+            exact=hospital_duplicate_warning(name,spec,hra,pd.DataFrame())
+            if any(norm(t)==norm(name) and norm(sp)==norm(spec) for _,t,sp in exact):
+                raise ValueError('심평원에 동일한 품명·규격이 있습니다. 기존 품목을 신청해 주세요.')
+            code=''; status='요청';approver=''; approved_at=''
+            if is_master:
+                used={r['품목코드'] for r in existing if r['품목코드']}
+                used.update(set(hra['코드'].astype(str)))
+                number=max([int(c[1:]) for c in used if re.fullmatch(r'H\d{6}',c)] or [0])+1
+                code=f'H{number:06d}'
+                status='승인';approver=emp['사번'];approved_at=now()
+            record=[uuid.uuid4().hex,code,name,spec,category,base,req_unit,str(int(factor)),manufacturer,'',test_mark(memo),status,emp['사번'],now(),approver,approved_at]
+            # Never retry append writes automatically; an unknown server outcome may create duplicates.
+            get_ws('Hospital_Items',HOSPITAL_HEADERS).append_row(record,value_input_option='RAW')
+            hospital_item_rows.clear()
+            if is_master: st.success(f'품목 등록 완료: {code} · 물품신청에서 검색할 수 있습니다.')
+            else: st.success('신규등록 요청을 저장했습니다. MASTER 승인 후 물품 신청이 가능합니다.')
+            test_audit('HOSPITAL_ITEM',f'{name}/{spec} 상태:{status} 코드:{code}')
+        except Exception as exc:
+            st.error(str(exc) if isinstance(exc,(ValueError,PermissionError)) else safe_spreadsheet_error(exc))
+    if is_master:
+        st.divider();st.markdown('#### 승인 대기 / 등록된 병원 품목')
+        pending=[r for r in hospital_item_rows(str(st.secrets['treatments']['spreadsheet_id'])) if r['상태']=='요청']
+        if pending:
+            pending_df=pd.DataFrame(pending)
+            st.dataframe(pending_df[['요청일시','품명','규격','기준단위','신청단위','단위환산수량','요청사번']],hide_index=True,use_container_width=True)
+            opts={r['등록요청ID']:f"{r['품명']} / {r['규격']} ({r['요청사번']})" for r in pending}
+            request_id=st.selectbox('처리할 등록요청',list(opts),format_func=lambda x:opts[x])
+            approve, reject=st.columns(2)
+            def change_status(new_status):
+                ws=get_ws('Hospital_Items',HOSPITAL_HEADERS)
+                fresh=hospital_items_fresh()
+                target=next((r for r in fresh if r['등록요청ID']==request_id),None)
+                if not target or target['상태']!='요청':
+                    raise ValueError('이미 처리되었거나 삭제된 요청입니다. 동기화해 주세요.')
+                valid=next((x for x in employees_fresh() if x['사번']==emp['사번'] and x['권한'].upper()=='MASTER' and is_active(x)),None)
+                if valid is None: raise PermissionError('MASTER 권한이 없습니다.')
+                code=''
+                if new_status=='승인':
+                    hira=get_hira_items()
+                    conflicts=hospital_duplicate_warning(target['품명'],target['규격'],hira,pd.DataFrame())
+                    norm=lambda t:re.sub(r'[^a-z0-9가-힣]','',str(t).casefold())
+                    if any(norm(t)==norm(target['품명']) and norm(sp)==norm(target['규격']) for _,t,sp in conflicts):
+                        raise ValueError('심평원 동일 품목이 확인됩니다. 승인 전에 검토하세요.')
+                    used={r['품목코드'] for r in fresh if r['품목코드']}
+                    used.update(set(hira['코드'].astype(str)))
+                    number=max([int(c[1:]) for c in used if re.fullmatch(r'H\d{6}',c)] or [0])+1
+                    code=f'H{number:06d}'
+                # Apply code and approval status in a single Sheets batch update.
+                ops=[{'range':f'L{target["_row"]}:P{target["_row"]}',
+                      'values':[[new_status,target['요청사번'],target['요청일시'],emp['사번'],now()]]}]
+                if code:
+                    ops.insert(0,{'range':f'B{target["_row"]}', 'values':[[code]]})
+                ws.batch_update(ops, value_input_option='RAW')
+                hospital_item_rows.clear()
+                test_audit('HOSPITAL_ITEM_APPROVAL',f"{request_id}: {new_status}, {code}")
+            with approve:
+                if st.button('선택 품목 승인',type='primary',use_container_width=True):
+                    try: change_status('승인');st.success('승인되었습니다.');st.rerun()
+                    except Exception as exc: st.error(str(exc) if isinstance(exc,(ValueError,PermissionError)) else safe_spreadsheet_error(exc))
+            with reject:
+                if st.button('선택 품목 반려',use_container_width=True):
+                    try: change_status('반려');st.success('반려 처리했습니다.');st.rerun()
+                    except Exception as exc: st.error(str(exc) if isinstance(exc,(ValueError,PermissionError)) else safe_spreadsheet_error(exc))
+        else:
+            st.info('신규등록 승인 대기 품목이 없습니다.')
+        approved=[r for r in hospital_item_rows(str(st.secrets['treatments']['spreadsheet_id'])) if r['상태']=='승인']
+        if approved:
+            st.dataframe(pd.DataFrame(approved)[['품목코드','품명','규격','중분류','기준단위','신청단위','단위환산수량']],hide_index=True,use_container_width=True,height=220)
 
 
 # ================================================================
@@ -1168,6 +1348,7 @@ def material_refresh():
     load_requests_cached.clear()
     load_stock_events_cached.clear()
     hira_search_cached.clear()
+    hospital_item_rows.clear()
 
 
 def all_requests():
@@ -1186,7 +1367,7 @@ def material_depts(emp, employee_data):
 
 
 def get_hira_items():
-    return hira_search_cached(str(st.secrets['treatments']['spreadsheet_id']))
+    return combined_catalog()
 
 
 def material_catalog_lookup(code):
@@ -1389,7 +1570,8 @@ def render_request_entry(emp, data):
         st.caption(f'심평원 등록단위: {official_unit or "미등록"} · 신청단위는 별도로 지정할 수 있습니다.')
         col2,col3 = st.columns([1.35,2.5])
         with col2:
-            choices = list(dict.fromkeys(([official_unit] if official_unit else []) + REQUEST_UNIT_CHOICES))
+            preferred = str(item.get('_병원신청단위','')).strip().upper()
+            choices = list(dict.fromkeys(([preferred] if preferred else []) + ([official_unit] if official_unit else []) + REQUEST_UNIT_CHOICES))
             selected_unit = st.selectbox('신청단위', choices, key='req_selected_unit')
             unit = st.text_input('직접 입력할 단위', max_chars=24, key='req_other_unit') if selected_unit == '기타(직접입력)' else selected_unit
         with col3:
@@ -1566,10 +1748,13 @@ def render_master_inline_editor(emp, visible):
         edited = st.data_editor(view, hide_index=True, use_container_width=True, num_rows='fixed',
             disabled=[c for c in columns if c not in permitted],
             column_config={
-                '요청ID': st.column_config.TextColumn('요청ID', width='medium'),
+                '신청일시': st.column_config.TextColumn('신청일', width='small'),
+                '수령부서': st.column_config.TextColumn('부서', width='small'),
+                '품목코드': st.column_config.TextColumn('코드', width='small'),
+                '심평원단위': st.column_config.TextColumn('기준단위', width='small'),
                 '수령부서': st.column_config.TextColumn('수령부서'),
                 '신청수량': st.column_config.TextColumn('신청수량 (정수)'),
-                '신청단위': st.column_config.TextColumn('신청단위'),
+                '신청단위': st.column_config.TextColumn('신청단위', width='small'),
                 '단위환산수량': st.column_config.TextColumn('1단위당 환산수량'),
                 '출고수량': st.column_config.TextColumn('출고수량 (정수)'),
                 '비고': st.column_config.TextColumn('비고', width='large'),
@@ -1639,33 +1824,51 @@ def render_request_history(emp,data):
     if not rows:
         st.info('선택한 조건에 해당하는 신청내역이 없습니다.')
         return
-    columns = ['신청일시','요청ID','수령부서','중분류','품목코드','품명','규격',
-               '심평원단위','상한금액','제조수입업소','신청단위','단위환산수량',
-               '신청수량','출고수량','상태','신청자','출고담당','수령담당','비고']
+    # Compact everyday columns: detailed reference fields remain available in the expander.
+    columns = ['신청일시','수령부서','중분류','품목코드','품명','규격',
+               '심평원단위','신청단위','신청수량','출고수량','상태','비고']
+    all_columns = ['신청일시','요청ID','수령부서','중분류','품목코드','품명','규격',
+                   '심평원단위','상한금액','제조수입업소','신청단위','단위환산수량',
+                   '신청수량','출고수량','상태','신청자','출고담당','수령담당','비고']
+    original_catalog=get_hira_items()
+    code_info=original_catalog.drop_duplicates('코드').set_index('코드').to_dict('index') if not original_catalog.empty else {}
+    def show_value(r, col):
+        if col=='신청일시': return str(r.get(col,''))[:10]
+        value=str(r.get(col,''))
+        if not value and col in ('중분류','심평원단위','상한금액','제조수입업소'):
+            source=code_info.get(r.get('품목코드',''),{})
+            return str(source.get('단위' if col=='심평원단위' else col,''))
+        return value
+    st.caption('기존 신청건의 빈 품목정보는 현재 품목DB를 참고해 표시합니다. 과거 저장값은 바꾸지 않습니다.')
     if master_edit and status_choice != '전체':
         # The main management grid itself is editable. No separate expander.
         editable = set(MASTER_EDIT_FIELDS[status_choice])
         can_delete = status_choice in ('신청', '반려')
         visible_columns = (['_삭제'] if can_delete else []) + columns
+        internal_columns = visible_columns + ['요청ID']
         display_rows = []
         for r in rows:
-            obj = {col: str(r.get(col, '')) for col in columns}
+            obj = {col: show_value(r,col) for col in columns}
+            obj['요청ID'] = r['요청ID']
             if can_delete:
                 obj['_삭제'] = False
             display_rows.append(obj)
-        table = pd.DataFrame(display_rows, columns=visible_columns)
+        table = pd.DataFrame(display_rows, columns=internal_columns)
         st.caption('✏️ 수정 가능한 칸을 표에서 직접 바꾸고 저장하세요. 수령완료된 수량은 재고 조정으로 정정합니다.'
                    + (' 삭제할 신청행은 왼쪽 체크박스를 선택하세요.' if can_delete else ''))
         edited = st.data_editor(
             table, use_container_width=True, height=500, hide_index=True, num_rows='fixed',
-            disabled=[c for c in visible_columns if c not in editable and c != '_삭제'],
+            column_order=visible_columns,
+            disabled=[c for c in internal_columns if c not in editable and c != '_삭제'],
             column_config={
-                '_삭제': st.column_config.CheckboxColumn('삭제 선택', help='신청 또는 반려 상태의 한 행만 삭제 가능'),
-                '요청ID': st.column_config.TextColumn('요청ID', width='medium'),
-                '품명': st.column_config.TextColumn('품명', width='large'),
-                '중분류': st.column_config.TextColumn('중분류', width='medium'),
-                '신청수량': st.column_config.TextColumn('신청수량'),
-                '출고수량': st.column_config.TextColumn('출고수량'),
+                '_삭제': st.column_config.CheckboxColumn('삭제', help='신청 또는 반려 상태의 한 행만 삭제 가능'),
+                '신청일시': st.column_config.TextColumn('신청일', width='small'),
+                '수령부서': st.column_config.TextColumn('부서', width='small'),
+                '심평원단위': st.column_config.TextColumn('기준단위', width='small'),
+                '품명': st.column_config.TextColumn('품명', width='medium'),
+                '중분류': st.column_config.TextColumn('중분류', width='small'),
+                '신청수량': st.column_config.TextColumn('신청수량', width='small'),
+                '출고수량': st.column_config.TextColumn('출고수량', width='small'),
                 '신청단위': st.column_config.TextColumn('신청단위'),
                 '단위환산수량': st.column_config.TextColumn('환산수량'),
                 '비고': st.column_config.TextColumn('비고', width='large'),
@@ -1717,7 +1920,12 @@ def render_request_history(emp,data):
     else:
         if master_edit and status_choice == '전체':
             st.caption('전체 이력은 조회용입니다. 위 상태 필터를 선택하면 같은 표에서 수량을 바로 수정할 수 있습니다.')
-        st.dataframe(frame[columns].head(1000), hide_index=True, use_container_width=True, height=500)
+        compact=pd.DataFrame([{c:show_value(r,c) for c in columns} for r in rows])
+        compact=compact.rename(columns={'신청일시':'신청일','심평원단위':'기준단위','수령부서':'부서'})
+        st.dataframe(compact, hide_index=True, use_container_width=True, height=410)
+    with st.expander('품목 상세·상한금액·제조수입업소·신청 이력 전체보기'):
+        details=pd.DataFrame([{c:show_value(r,c) for c in all_columns} for r in rows]).rename(columns={'신청일시':'신청일'})
+        st.dataframe(details,hide_index=True,use_container_width=True,height=340)
     st.caption('신청 → MASTER 출고 → 부서 수령확인 후 해당 부서 재고에 반영됩니다.')
 
 def render_master_issue(emp,data):
@@ -2161,12 +2369,12 @@ def main():
         st.caption(f"{principal['이름']} · {principal['소속부서']} · {role}")
         if preview_active:
             st.caption(f"USER 테스트: {shown_emp['이름']} · {shown_emp['소속부서']}")
-        menu = ['물품관리 현황', '품목정보', '물품 신청', '물품 수령', '재고관리',
+        menu = ['물품관리 현황', '품목정보', '병원 자체품목 등록', '물품 신청', '물품 수령', '재고관리',
                 '통계 및 보고서', '내 정보']
         if not preview_active:
             menu += ['PIN 변경']
         if is_master and not preview_active:
-            menu.insert(3, '출고관리')
+            menu.insert(4, '출고관리')
             menu += ['직원 관리', '심평원 DB 업데이트']
         if st.session_state.get('material_nav') not in menu:
             st.session_state['material_nav'] = menu[0]
@@ -2186,6 +2394,7 @@ def main():
             auth_rows.clear()
             st.session_state.pop('hira_files', None)
             st.session_state.pop('hira_import_preview', None)
+            hospital_item_rows.clear()
             st.rerun()
         if st.button('로그아웃', use_container_width=True):
             st.session_state.pop('material_preview_user', None)
@@ -2232,6 +2441,8 @@ def main():
             st.error(str(exc) if isinstance(exc, (ValueError, PermissionError)) else safe_spreadsheet_error(exc))
     elif choice == '품목정보':
         render_hira_search()
+    elif choice == '병원 자체품목 등록':
+        render_hospital_register(shown_emp if preview_active else principal, data)
     elif choice == '내 정보':
         render_personal_info(shown_emp if preview_active else principal, data)
     elif choice == 'PIN 변경':
