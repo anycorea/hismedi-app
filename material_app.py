@@ -11,6 +11,7 @@ admin_setup_key = "a-long-unique-random-secret"  # only for initializing first M
 from __future__ import annotations
 
 import hashlib
+import uuid
 import base64
 from io import BytesIO
 from collections import Counter, defaultdict
@@ -873,7 +874,7 @@ def hira_search_cached(sheet_id: str):
 
 def render_hira_search():
     st.subheader("심평원 치료재료 품목검색")
-    st.caption("심평원 기준정보 조회 전용 · 병원 사용품목 등록과 입출고는 추후 연결")
+    st.caption("심평원 기준정보 검색 · 물품 신청은 왼쪽 ‘물품 신청’ 메뉴에서 진행합니다.")
     try:
         frame = hira_search_cached(str(st.secrets["treatments"]["spreadsheet_id"]))
     except Exception as exc:
@@ -900,6 +901,487 @@ def render_hira_search():
     if len(result)>2000:
         st.caption("화면에는 처음 2,000건만 표시합니다. 검색 조건을 좁혀 주세요.")
 
+
+
+# ================================================================
+# 치료재료 신청 -> 출고 -> 수령 및 부서별 수동 재고
+# 초기사용 시 필요한 시트만 만들며 기존 Emp/Auth/HIRA_Items는 보존합니다.
+# ================================================================
+REQ_HEADERS = ["요청ID", "신청일시", "신청사번", "신청자", "수령부서", "품목코드", "품명", "규격", "신청수량", "상태", "출고수량", "출고일시", "출고담당", "수령일시", "수령담당", "비고"]
+STOCK_HEADERS = ["거래ID", "일시", "부서", "품목코드", "품명", "유형", "증감수량", "작업사번", "메모", "관련요청ID"]
+
+
+def ensure_material_sheets():
+    # Google Sheets already has employee/auth sheets. Do not modify them.
+    get_ws("Material_Requests", REQ_HEADERS)
+    get_ws("Material_StockEvents", STOCK_HEADERS)
+
+
+@st.cache_data(ttl=12, show_spinner=False)
+def load_requests_cached(_sheet_id: str):
+    return rows_as_dicts(get_ws("Material_Requests", REQ_HEADERS), REQ_HEADERS)
+
+
+@st.cache_data(ttl=12, show_spinner=False)
+def load_stock_events_cached(_sheet_id: str):
+    return rows_as_dicts(get_ws("Material_StockEvents", STOCK_HEADERS), STOCK_HEADERS)
+
+
+def material_refresh():
+    load_requests_cached.clear()
+    load_stock_events_cached.clear()
+    hira_search_cached.clear()
+
+
+def all_requests():
+    return load_requests_cached(str(st.secrets['treatments']['spreadsheet_id']))
+
+
+def all_stock_events():
+    return load_stock_events_cached(str(st.secrets['treatments']['spreadsheet_id']))
+
+
+def material_depts(emp, employee_data):
+    depts = allowed_departments(emp, employee_data)
+    if not depts:
+        st.warning("관리 가능한 부서가 지정되지 않았습니다. MASTER에게 관리부서 등록을 요청하세요.")
+    return depts
+
+
+def get_hira_items():
+    return hira_search_cached(str(st.secrets['treatments']['spreadsheet_id']))
+
+
+def material_catalog_lookup(code):
+    frame = get_hira_items()
+    match = frame[frame['코드'] == str(code).strip().upper()]
+    if len(match) != 1:
+        raise ValueError('선택한 코드가 심평원 기준 DB에 없거나 중복되어 있습니다. 최신 품목목록을 다시 확인하세요.')
+    return match.iloc[0].to_dict()
+
+
+def material_qty(value):
+    try:
+        number = int(str(value).replace(',', '').strip())
+    except ValueError:
+        raise ValueError('수량은 정수로 입력해 주세요.')
+    if not 1 <= number <= 1000000:
+        raise ValueError('수량은 1~1,000,000 사이여야 합니다.')
+    return number
+
+
+def stock_by_department(events=None, requests=None):
+    # 부서별 현재고 = 기초/사용/조정 이벤트 + 수령 확정 수량
+    events = all_stock_events() if events is None else events
+    requests = all_requests() if requests is None else requests
+    balances = defaultdict(int)
+    names = {}
+    for row in events:
+        key = (row['부서'], row['품목코드'])
+        try:
+            balances[key] += int(row['증감수량'])
+        except ValueError:
+            raise ValueError('재고 거래기록의 증감수량에 숫자가 아닌 값이 있습니다.')
+        names[key] = row['품명']
+    for row in requests:
+        if row['상태'] != '수령완료':
+            continue
+        key = (row['수령부서'], row['품목코드'])
+        try:
+            balances[key] += int(row['출고수량'])
+        except ValueError:
+            raise ValueError('수령완료 자료의 출고수량을 확인하세요.')
+        names[key] = row['품명']
+    return balances, names
+
+
+def material_save_requests(emp, department, cart, memo):
+    if not cart:
+        raise ValueError('신청할 품목을 추가해 주세요.')
+    # Re-check role + allowed departments on the server before saving.
+    fresh_emp = next((r for r in employees() if r['사번'] == emp['사번'] and is_active(r)), None)
+    if fresh_emp is None or department not in allowed_departments(fresh_emp, employees()):
+        raise PermissionError('신청할 부서에 대한 관리 권한이 없습니다.')
+    created = now()
+    group_id = uuid.uuid4().hex[:12].upper()
+    rows = []
+    for item in cart:
+        source = material_catalog_lookup(item['코드'])
+        rows.append([group_id + '-' + str(len(rows) + 1).zfill(3), created, emp['사번'], emp['이름'], department,
+                     source['코드'], source['품명'], source['규격'], str(material_qty(item['수량'])),
+                     '신청', '', '', '', '', '', str(memo)[:300]])
+    api_action(get_ws('Material_Requests', REQ_HEADERS).append_rows, rows, value_input_option='RAW')
+    material_refresh()
+    return group_id
+
+
+def material_set_request_status(request, new_status, actor, delivered_qty=None):
+    if actor['권한'].upper() != 'MASTER' and new_status in ('출고', '반려'):
+        raise PermissionError('출고 승인 및 반려는 MASTER만 가능합니다.')
+    if new_status == '수령완료' and actor['권한'].upper() != 'MASTER':
+        fresh = next((x for x in employees() if x['사번'] == actor['사번'] and is_active(x)), None)
+        if fresh is None or request['수령부서'] not in allowed_departments(fresh, employees()):
+            raise PermissionError('수령 부서에 대한 권한이 없습니다.')
+    expected = {'출고':'신청', '반려':'신청', '수령완료':'출고'}[new_status]
+    ws = get_ws('Material_Requests', REQ_HEADERS)
+    # Re-fetch live row and compare request ID, state and quantity before any update.
+    raw = api_action(ws.row_values, request['_row'])
+    current = (raw + ['']*len(REQ_HEADERS))[:len(REQ_HEADERS)]
+    if current[0] != request['요청ID'] or current[9] != expected:
+        raise ValueError('신청 상태가 다른 사용자에 의해 변경되었습니다. 데이터 동기화 후 다시 확인하세요.')
+    if new_status == '출고':
+        qty = material_qty(delivered_qty)
+        if qty > int(current[8]):
+            raise ValueError('출고수량은 신청수량을 초과할 수 없습니다.')
+        # J: M: 상태 / 출고수량 / 일시 / 담당
+        api_action(ws.update, range_name=f'J{request["_row"]}:M{request["_row"]}',
+                   values=[['출고', str(qty), now(), actor['사번']]], value_input_option='RAW')
+    elif new_status == '반려':
+        api_action(ws.update, range_name=f'J{request["_row"]}', values=[['반려']], value_input_option='RAW')
+    else:
+        if int(current[10]) < 1:
+            raise ValueError('출고수량이 확인되지 않습니다.')
+        # One row status update = stock increases only once after receipt.
+        api_action(ws.update, range_name=f'J{request["_row"]}', values=[['수령완료']], value_input_option='RAW')
+        api_action(ws.update, range_name=f'N{request["_row"]}:O{request["_row"]}',
+                   values=[[now(), actor['사번']]], value_input_option='RAW')
+    material_refresh()
+
+
+def save_stock_event(emp, department, code, action, quantity, memo, *, target_total=None):
+    fresh_data = employees()
+    fresh_emp = next((r for r in fresh_data if r['사번'] == emp['사번'] and is_active(r)), None)
+    if fresh_emp is None or department not in allowed_departments(fresh_emp, fresh_data):
+        raise PermissionError('해당 부서의 재고를 관리할 권한이 없습니다.')
+    item = material_catalog_lookup(code)
+    before = stock_by_department()[0].get((department, code), 0)
+    if action == '초기재고':
+        if target_total is None or target_total < 0:
+            raise ValueError('초기재고는 0 이상이어야 합니다.')
+        # Initial stock registration allowed only once per dept/item to avoid accidental overwrite.
+        if any(r['부서'] == department and r['품목코드'] == code and r['유형'] == '초기재고' for r in all_stock_events()):
+            raise ValueError('초기재고가 이미 등록되었습니다. 실사·조정 기능을 이용하세요.')
+        delta = target_total - before
+    elif action == '사용':
+        delta = -material_qty(quantity)
+    elif action == '실사조정':
+        if target_total is None or target_total < 0:
+            raise ValueError('실사 수량은 0 이상이어야 합니다.')
+        delta = target_total - before
+        if not memo.strip():
+            raise ValueError('실사조정 사유를 입력해 주세요.')
+    else:
+        raise ValueError('허용되지 않는 재고 처리 방식입니다.')
+    if before + delta < 0:
+        raise ValueError(f'현재 재고 {before:,}개를 초과하여 차감할 수 없습니다.')
+    if delta == 0:
+        raise ValueError('현재고와 입력 수량이 같아 변경할 내용이 없습니다.')
+    record = [uuid.uuid4().hex, now(), department, code, item['품명'], action, str(delta),
+              emp['사번'], str(memo)[:300], '']
+    api_action(get_ws('Material_StockEvents', STOCK_HEADERS).append_row, record, value_input_option='RAW')
+    material_refresh()
+    return before + delta
+
+
+def material_selector(key_prefix, *, label='품목 검색'):
+    catalog = get_hira_items()
+    if catalog.empty:
+        st.warning('심평원 품목 DB가 아직 없습니다. MASTER가 먼저 심평원 DB를 등록해 주세요.')
+        return None
+    keyword = st.text_input(label, key=key_prefix+'_term', placeholder='품목코드 · 품명 · 규격 · 분류 (일부 입력)')
+    if not keyword.strip():
+        st.caption('품목코드나 품명의 일부를 입력하면 목록에서 선택할 수 있습니다.')
+        return None
+    terms = [x.casefold() for x in keyword.split() if x]
+    fields = ['코드','품명','규격','중분류']
+    matrix = catalog[fields].fillna('').astype(str).agg(' '.join, axis=1).str.casefold()
+    found = catalog.loc[matrix.map(lambda text: all(t in text for t in terms))].head(150)
+    if found.empty:
+        st.info('검색된 품목이 없습니다.')
+        return None
+    ids = found['코드'].tolist()
+    selected_code = st.selectbox('검색 결과 선택 (최대 150건)', ids,
+        format_func=lambda x: f"{x} | {str(found.loc[found['코드']==x, '품명'].iloc[0])[:65]}",
+        key=key_prefix+'_selected')
+    record = found.loc[found['코드'] == selected_code].iloc[0].to_dict()
+    st.caption(f"{record['급여구분']} · {record['현재상태']} · {record['규격']}")
+    if record['현재상태'] != '등재':
+        st.warning('이 품목은 현재 등재 상태가 아닙니다. 실제 구매·청구 가능 여부를 확인하세요.')
+    return record
+
+
+def render_request_entry(emp, data):
+    st.markdown('#### 물품 신청')
+    depts = material_depts(emp, data)
+    if not depts: return
+    department = st.selectbox('신청·수령 부서', depts, key='req_department')
+    item = material_selector('req_item')
+    if item is not None:
+        a,b = st.columns([1,2])
+        with a: qty = st.number_input('신청 수량', min_value=1, max_value=1000000, value=1, step=1, key='req_qty')
+        with b: st.write(''); st.write('')
+        if st.button('선택 품목 신청목록에 추가', use_container_width=False):
+            cart = st.session_state.setdefault('material_cart', [])
+            found = next((r for r in cart if r['코드'] == item['코드']), None)
+            if found: found['수량'] += int(qty)
+            else: cart.append({'코드':item['코드'], '품명':item['품명'], '규격':item['규격'], '수량':int(qty)})
+            st.rerun()
+    cart = st.session_state.get('material_cart', [])
+    if cart:
+        st.markdown('**신청목록**')
+        display = pd.DataFrame(cart)
+        edited = st.data_editor(display, hide_index=True, use_container_width=True, num_rows='fixed',
+            disabled=['코드','품명','규격'], column_config={'수량': st.column_config.NumberColumn('신청 수량',min_value=1, max_value=1000000,step=1)},key='material_cart_editor')
+        st.session_state.material_cart = edited.to_dict('records')
+        rem = st.selectbox('목록에서 제거할 품목', ['선택 안 함']+[r['코드'] for r in cart])
+        if st.button('선택 품목 제거') and rem!='선택 안 함':
+            st.session_state.material_cart = [r for r in cart if r['코드'] != rem]
+            st.rerun()
+        memo = st.text_input('신청 메모', max_chars=300)
+        if st.button(f'물품 {len(cart)}종 신청 확정', type='primary'):
+            try:
+                group = material_save_requests(emp, department, st.session_state.material_cart, memo)
+                st.session_state.material_cart = []
+                st.success(f'신청 완료 · 신청번호 {group}')
+                st.rerun()
+            except Exception as exc: st.error(str(exc) if isinstance(exc,(ValueError, PermissionError)) else safe_spreadsheet_error(exc))
+
+
+def visible_requests(emp, data, statuses=None):
+    requests = all_requests()
+    allowed = set(material_depts(emp,data))
+    visible = [r for r in requests if emp['권한'].upper()=='MASTER' or r['수령부서'] in allowed]
+    if statuses: visible = [r for r in visible if r['상태'] in statuses]
+    return sorted(visible, key=lambda r: r['신청일시'], reverse=True)
+
+
+def render_request_history(emp,data):
+    st.markdown('#### 신청·출고·수령 현황')
+    items=visible_requests(emp,data)
+    if not items:
+        st.info('현재 표시할 신청내역이 없습니다.'); return
+    frame=pd.DataFrame(items)
+    columns=['신청일시','요청ID','수령부서','품목코드','품명','신청수량','출고수량','상태','신청자','출고담당','수령담당']
+    dept_choice=st.selectbox('부서 필터', ['전체']+sorted(set(frame['수령부서'])),key='history_dept')
+    status_choice=st.selectbox('상태 필터', ['전체','신청','출고','수령완료','반려'],key='history_status')
+    if dept_choice!='전체':frame=frame[frame['수령부서']==dept_choice]
+    if status_choice!='전체':frame=frame[frame['상태']==status_choice]
+    st.dataframe(frame[columns].head(1000),hide_index=True,use_container_width=True,height=460)
+    st.caption('신청 → MASTER 출고 → 부서 수령확인 후 해당 부서 재고에 반영됩니다.')
+
+
+def render_master_issue(emp,data):
+    st.markdown('#### 신청 승인·출고 (MASTER)')
+    items=visible_requests(emp,data, ['신청'])
+    if not items:
+        st.info('출고 대기 신청이 없습니다.'); return
+    labels={r['요청ID']:f"{r['요청ID']} | {r['수령부서']} | {r['품명'][:45]} | {r['신청수량']}개" for r in items}
+    rid=st.selectbox('출고 처리할 신청',list(labels),format_func=lambda x:labels[x],key='issue_id')
+    row=next(r for r in items if r['요청ID']==rid)
+    qty=st.number_input('실제 출고수량',min_value=1,max_value=max(1,int(row['신청수량'])),value=int(row['신청수량']),key='issue_qty')
+    a,b=st.columns(2)
+    with a:
+        if st.button('출고 확정',type='primary',use_container_width=True):
+            try:
+                material_set_request_status(row,'출고',emp,int(qty))
+                st.success('출고 처리했습니다. 해당 부서의 수령 확인을 기다립니다.'); st.rerun()
+            except Exception as exc: st.error(str(exc) if isinstance(exc,(ValueError, PermissionError)) else safe_spreadsheet_error(exc))
+    with b:
+        if st.button('신청 반려',use_container_width=True):
+            try:
+                material_set_request_status(row,'반려',emp)
+                st.success('신청을 반려했습니다.');st.rerun()
+            except Exception as exc: st.error(str(exc) if isinstance(exc,(ValueError, PermissionError)) else safe_spreadsheet_error(exc))
+
+
+def render_receipt(emp,data):
+    st.markdown('#### 부서 물품 수령확인')
+    items=visible_requests(emp,data,['출고'])
+    if not items:
+        st.info('수령 확인 대기 물품이 없습니다.');return
+    labels={r['요청ID']:f"{r['수령부서']} | {r['품명'][:50]} | 출고 {r['출고수량']}개 | {r['요청ID']}" for r in items}
+    rid=st.selectbox('수령할 물품',list(labels),format_func=lambda x:labels[x],key='receive_id')
+    row=next(r for r in items if r['요청ID']==rid)
+    st.info('실제 수량을 확인하고 수령 완료를 누르면 해당 부서 재고가 증가합니다.')
+    if st.button('수령 완료 · 재고 반영',type='primary',use_container_width=True):
+        try:
+            material_set_request_status(row,'수령완료',emp)
+            st.success('수령완료 · 부서 재고에 반영되었습니다.'); st.rerun()
+        except Exception as exc:st.error(str(exc) if isinstance(exc,(ValueError,PermissionError)) else safe_spreadsheet_error(exc))
+
+
+def render_stock_overview(emp,data):
+    depts=material_depts(emp,data)
+    if not depts:return
+    balances,names=stock_by_department()
+    show=[{'부서':dept,'품목코드':code,'품명':names.get((dept,code),''),'현재고':qty}
+          for (dept,code),qty in balances.items() if dept in depts]
+    if not show:
+        st.info('등록된 재고가 없습니다. 재고관리에서 최초 재고를 입력하거나 물품을 수령하세요.');return
+    frame=pd.DataFrame(show)
+    dept=st.selectbox('재고 조회 부서',['전체']+depts,key='stock_filter_dept')
+    if dept!='전체': frame=frame[frame['부서']==dept]
+    q=st.text_input('재고 품명·코드 검색',key='stock_filter_term')
+    if q:
+        frame=frame[frame[['품목코드','품명']].astype(str).agg(' '.join,axis=1).str.contains(re.escape(q),case=False,regex=True)]
+    a,b=st.columns(2)
+    a.metric('조회 품목 수',f'{len(frame):,}')
+    b.metric('현재고 합계',f'{int(frame["현재고"].sum()):,}')
+    st.dataframe(frame.sort_values(['부서','품목코드']),hide_index=True,use_container_width=True,height=490)
+    st.download_button('재고현황 CSV 다운로드',frame.to_csv(index=False).encode('utf-8-sig'),'HISMEDI_재고현황.csv','text/csv')
+
+
+def render_stock_entry(emp,data):
+    st.markdown('#### 초기재고 · 사용등록 · 실사조정')
+    depts=material_depts(emp,data)
+    if not depts:return
+    dept=st.selectbox('관리 부서',depts,key='stock_entry_dept')
+    item=material_selector('stock_item')
+    if item is None:return
+    code=item['코드']
+    balances,_=stock_by_department()
+    before=balances.get((dept,code),0)
+    st.metric('현재 등록 재고',f'{before:,}개')
+    action=st.radio('작업 선택',['초기재고','사용','실사조정'],horizontal=True,key='stock_action')
+    if action=='초기재고':
+        st.caption('처음 시스템을 도입할 때 각 부서에서 실제 보유한 수량을 한 번 등록합니다.')
+        qty=st.number_input('초기 보유 수량',min_value=0,max_value=1000000,value=0,step=1,key='initial_qty')
+    elif action=='사용':
+        qty=st.number_input('실제 사용 수량',min_value=1,max_value=1000000,value=1,step=1,key='used_qty')
+    else:
+        qty=st.number_input('실사 후 실제 보유 수량',min_value=0,max_value=1000000,value=max(0,before),step=1,key='count_qty')
+    memo=st.text_input('사유 / 메모 (실사조정 시 필수)',max_chars=300,key='stock_note')
+    if st.button('재고 변경 저장',type='primary',key='stock_write'):
+        try:
+            new=save_stock_event(emp,dept,code,action,qty,memo,target_total=int(qty) if action!='사용' else None)
+            st.success(f'저장 완료 · 변경 후 재고 {new:,}개');st.rerun()
+        except Exception as exc:st.error(str(exc) if isinstance(exc,(ValueError,PermissionError)) else safe_spreadsheet_error(exc))
+
+
+def render_initial_stock_bulk(emp, data):
+    st.markdown('#### 초기재고 일괄 등록')
+    st.caption('구글시트에서 품목코드·수량 두 열을 작성해 엑셀(xlsx) 또는 CSV로 업로드할 수 있습니다. 기존 거래이력은 삭제하지 않습니다.')
+    departments = material_depts(emp, data)
+    if not departments: return
+    dept = st.selectbox('초기재고 등록 부서', departments, key='bulk_stock_dept')
+    template = pd.DataFrame(columns=['품목코드','수량'])
+    st.download_button('빈 양식 CSV 다운로드', template.to_csv(index=False).encode('utf-8-sig'),
+                       'HISMEDI_초기재고양식.csv', 'text/csv', key='bulk_template')
+    file = st.file_uploader('초기재고 파일', type=['csv','xlsx'], key='bulk_stock_upload')
+    if file is None: return
+    try:
+        if file.name.lower().endswith('.xlsx'):
+            incoming = pd.read_excel(file, dtype={'품목코드':str})
+        else:
+            try: incoming = pd.read_csv(file, encoding='utf-8-sig', dtype={'품목코드':str})
+            except UnicodeDecodeError:
+                file.seek(0)
+                incoming = pd.read_csv(file, encoding='cp949', dtype={'품목코드':str})
+        if not {'품목코드','수량'}.issubset(incoming.columns):
+            raise ValueError('품목코드, 수량 열이 필요합니다.')
+        if len(incoming)>1000 or not len(incoming):
+            raise ValueError('한 번에 1~1,000개 품목을 입력하세요.')
+        incoming = incoming[['품목코드','수량']].copy()
+        incoming['품목코드'] = incoming['품목코드'].astype(str).str.strip().str.upper()
+        if incoming['품목코드'].duplicated().any():
+            raise ValueError('파일에 중복 품목코드가 있습니다.')
+        incoming['수량'] = pd.to_numeric(incoming['수량'], errors='coerce')
+        if incoming['수량'].isna().any() or ((incoming['수량']%1)!=0).any() or (incoming['수량']<0).any():
+            raise ValueError('수량은 0 이상의 정수만 입력하세요.')
+        catalog = get_hira_items()
+        if catalog.empty: raise ValueError('심평원 기준 품목 DB가 없습니다.')
+        index = catalog.drop_duplicates('코드').set_index('코드')
+        missing = sorted(set(incoming['품목코드'])-set(index.index))
+        if missing: raise ValueError('심평원 DB에 없는 품목코드: '+', '.join(missing[:15]))
+        existing_initial = {(r['부서'],r['품목코드']) for r in all_stock_events() if r['유형']=='초기재고'}
+        duplicates=[c for c in incoming['품목코드'] if (dept,c) in existing_initial]
+        if duplicates: raise ValueError('이미 초기재고 등록됨: '+', '.join(duplicates[:15]))
+        balances,_=stock_by_department()
+        incoming['품명'] = incoming['품목코드'].map(index['품명'])
+        incoming['기존재고'] = incoming['품목코드'].map(lambda c: balances.get((dept,c),0))
+        incoming['증감'] = incoming['수량']-incoming['기존재고']
+        st.dataframe(incoming[['품목코드','품명','기존재고','수량','증감']],hide_index=True,use_container_width=True,height=280)
+        st.caption('입력 수량을 현재 실물 총수량으로 취급합니다. 예: 기존 수령재고 10개, 실제 15개 → +5개만 조정')
+        confirmed=st.checkbox('해당 부서의 실제 보유량을 확인했습니다.',key='bulk_confirm')
+        if st.button('초기재고 일괄 저장',type='primary',disabled=not confirmed):
+            fresh=employees()
+            fresh_emp=next((x for x in fresh if x['사번']==emp['사번'] and is_active(x)),None)
+            if fresh_emp is None or dept not in allowed_departments(fresh_emp,fresh):
+                raise PermissionError('부서 관리 권한이 변경되었습니다.')
+            latest_events = all_stock_events_cached_fresh()
+            latest_req = all_requests_cached_fresh()
+            fresh_initial={(r['부서'],r['품목코드']) for r in latest_events if r['유형']=='초기재고'}
+            if any((dept,c) in fresh_initial for c in incoming['품목코드']):
+                raise ValueError('초기재고가 다른 사용자에 의해 등록되었습니다. 다시 확인하세요.')
+            fresh_balance,_=stock_by_department(latest_events,latest_req)
+            records=[]
+            for r in incoming.itertuples(index=False):
+                before=fresh_balance.get((dept,r.품목코드),0)
+                delta=int(r.수량)-before
+                if delta:
+                    records.append([uuid.uuid4().hex,now(),dept,r.품목코드,r.품명,'초기재고',str(delta),emp['사번'],'초기재고 일괄등록',''])
+            if records:
+                api_action(get_ws('Material_StockEvents',STOCK_HEADERS).append_rows,records,value_input_option='RAW')
+            material_refresh()
+            st.success(f'초기재고 입력 완료: {len(incoming):,}개 품목 (실제 수량 변경 {len(records):,}건)')
+    except Exception as exc:
+        st.error(str(exc) if isinstance(exc,(ValueError,PermissionError)) else safe_spreadsheet_error(exc))
+
+
+def all_stock_events_cached_fresh():
+    return rows_as_dicts(get_ws('Material_StockEvents',STOCK_HEADERS),STOCK_HEADERS)
+
+
+def all_requests_cached_fresh():
+    return rows_as_dicts(get_ws('Material_Requests',REQ_HEADERS),REQ_HEADERS)
+
+
+def render_stock_history(emp,data):
+    depts=set(material_depts(emp,data))
+    frame=pd.DataFrame([e for e in all_stock_events() if e['부서'] in depts])
+    if frame.empty:
+        st.info('등록된 재고 변경이력이 없습니다.');return
+    st.dataframe(frame[['일시','부서','품목코드','품명','유형','증감수량','작업사번','메모']].iloc[::-1].head(1000),hide_index=True,use_container_width=True)
+
+
+def render_work_summary(emp,data):
+    st.subheader('물품관리 현황')
+    depts=set(material_depts(emp,data))
+    requests=[r for r in all_requests() if emp['권한'].upper()=='MASTER' or r['수령부서'] in depts]
+    balances,_=stock_by_department()
+    a,b,c,d=st.columns(4)
+    a.metric('신청 대기',sum(r['상태']=='신청' for r in requests))
+    b.metric('수령 대기',sum(r['상태']=='출고' for r in requests))
+    c.metric('수령 완료',sum(r['상태']=='수령완료' for r in requests))
+    d.metric('부서별 재고 품목',sum(dept in depts and amount!=0 for (dept,_),amount in balances.items()))
+    st.caption('실제 재고는 부서별 최초 수량·사용·실사조정 및 수령완료 자료로 계산됩니다. 중앙창고 보유량을 가정하지 않습니다.')
+    render_request_history(emp,data)
+
+
+def render_material_menu(choice, emp, data):
+    ensure_material_sheets()
+    if choice=='물품관리 현황':render_work_summary(emp,data)
+    elif choice=='물품 신청':
+        tabs=st.tabs(['신규 신청','신청·처리 현황'])
+        with tabs[0]:render_request_entry(emp,data)
+        with tabs[1]:render_request_history(emp,data)
+    elif choice=='출고관리':
+        if emp['권한'].upper()!='MASTER':
+            st.error('출고 승인은 MASTER만 가능합니다.');return
+        tabs=st.tabs(['출고 대기','전체 신청 이력'])
+        with tabs[0]:render_master_issue(emp,data)
+        with tabs[1]:render_request_history(emp,data)
+    elif choice=='물품 수령':render_receipt(emp,data)
+    elif choice=='재고관리':
+        tabs=st.tabs(['부서별 재고현황','초기재고·사용·실사조정','초기재고 일괄등록','재고 변경이력'])
+        with tabs[0]:render_stock_overview(emp,data)
+        with tabs[1]:render_stock_entry(emp,data)
+        with tabs[2]:render_initial_stock_bulk(emp,data)
+        with tabs[3]:render_stock_history(emp,data)
+    elif choice=='통계 및 보고서':
+        tabs=st.tabs(['신청·출고 현황','재고 현황'])
+        with tabs[0]:render_request_history(emp,data)
+        with tabs[1]:render_stock_overview(emp,data)
 
 def main():
     render_style()
@@ -1009,14 +1491,16 @@ def main():
                 st.image(str(BUILDING_FILE), use_container_width=True)
         st.caption(f"{emp['이름']} · {emp['소속부서']} · {role}")
         st.divider()
-        menu = ["물품관리 현황", "품목정보", "입고관리", "출고관리", "재고관리", "재고실사", "통계 및 보고서", "내 정보", "PIN 변경"]
+        menu = ["물품관리 현황", "품목정보", "물품 신청", "물품 수령", "재고관리", "통계 및 보고서", "내 정보", "PIN 변경"]
+        if role == "MASTER":
+            menu.insert(3, "출고관리")
         if role == "MASTER":
             menu += ["직원 관리", "심평원 DB 업데이트"]
         choice = st.radio("업무 메뉴", menu, label_visibility="collapsed", key="material_nav")
         st.divider()
         if st.button("🔄 데이터 동기화", use_container_width=True, help="Google Sheets의 최신 직원·품목자료를 다시 읽습니다."):
-            # Read-only cache refresh; does not alter the underlying Sheets records.
-            hira_search_cached.clear()
+            # Refresh of cache only; never pushes Google Drive source files automatically.
+            material_refresh()
             st.session_state.pop("hira_files", None)
             st.session_state.pop("hira_import_preview", None)
             st.toast("동기화를 요청했습니다. 최신 Google Sheets 자료를 다시 읽습니다.")
@@ -1025,29 +1509,14 @@ def main():
             sign_out()
 
     # 로그인 후 오른쪽 작업영역에는 로고·제목 헤더를 넣지 않습니다.
-    if choice == "물품관리 현황":
-        st.subheader("물품관리 현황")
-        st.info("로그인이 완료되었습니다. 품목·입출고·재고 데이터는 다음 개발 단계에서 연결됩니다.")
-        a, b = st.columns([1, 2], gap="large")
-        with a:
-            st.markdown("**현재 로그인**")
-            st.write(f"{emp['이름']}  |  {emp['소속부서']}")
-            st.write(f"권한: {role}")
-        with b:
-            st.markdown("**관리 가능한 부서**")
-            st.write(" · ".join(allowed_departments(emp, data)) or "설정되지 않음")
+    if choice in ("물품관리 현황", "물품 신청", "물품 수령", "재고관리", "출고관리", "통계 및 보고서"):
+        try:
+            render_material_menu(choice, emp, data)
+        except Exception as exc:
+            LOGGER.exception('Material workflow failed')
+            st.error(str(exc) if isinstance(exc, (ValueError, PermissionError)) else safe_spreadsheet_error(exc))
     elif choice == "품목정보":
         render_hira_search()
-    elif choice == "입고관리":
-        show_pending_area(choice, ["신규 입고", "입고 이력", "반품"])
-    elif choice == "출고관리":
-        show_pending_area(choice, ["부서별 출고", "부서 사용량", "부서 간 이동"])
-    elif choice == "재고관리":
-        show_pending_area(choice, ["부서별 보유량", "전체 재고", "부족 품목"])
-    elif choice == "재고실사":
-        show_pending_area(choice, ["실사 입력", "차이 확인", "재고 조정"])
-    elif choice == "통계 및 보고서":
-        show_pending_area(choice, ["기간별", "부서별", "품목별", "엑셀 다운로드"])
     elif choice == "내 정보":
         render_personal_info(emp, data)
     elif choice == "PIN 변경":
@@ -1057,7 +1526,7 @@ def main():
     elif choice == "심평원 DB 업데이트" and role == "MASTER":
         render_hira_import()
 
-    st.caption("HISMEDI · 치료재료 관리 | PC용")
+    st.caption("HISMEDI · 치료재료 관리 | PC용 · Google Sheets 기록 기반")
 
 
 if __name__ == "__main__":
