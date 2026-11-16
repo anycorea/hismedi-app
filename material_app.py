@@ -323,48 +323,41 @@ def render_style():
     [data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {padding-top:0!important;}
     [data-testid="stSidebar"] [data-testid="stDivider"] {margin: .35rem 0!important;}
     [data-testid="stMain"] [data-testid="stVerticalBlock"] {scroll-margin-top:1.5rem;}
-    /* Main-area tabs: visually distinct from sections without tabs. */
-    [data-testid="stMain"] [data-testid="stTabs"] [data-baseweb="tab-list"],
+    /* Three-dimensional file-folder tabs: legible at 100% and 125% scaling. */
     [data-testid="stMain"] [data-testid="stTabs"] [role="tablist"] {
-        display:flex!important;flex-wrap:wrap!important;align-items:stretch!important;
-        gap:13px!important;padding:12px 14px 0!important;
-        margin:5px 0 20px!important;background:#edf3fb!important;
-        border:1px solid #d9e3f0!important;border-radius:10px!important;
-        overflow:visible!important;
+        display:flex!important;align-items:flex-end!important;flex-wrap:wrap!important;
+        gap:12px!important;padding:15px 16px 0!important;margin:6px 0 20px!important;
+        background:#f0f4fa!important;border:1px solid #d4dfeb!important;
+        border-bottom:3px solid #3879b7!important;border-radius:11px 11px 0 0!important;
+        height:auto!important;min-height:76px!important;overflow:visible!important;
     }
-    [data-testid="stMain"] [data-testid="stTabs"] button[role="tab"],
-    [data-testid="stMain"] [data-testid="stTabs"] [data-baseweb="tab"] {
-        flex:0 1 auto!important;min-height:54px!important;white-space:normal!important;
-        line-height:1.35!important;text-align:center!important;
-        padding:13px 24px!important;margin:0!important;
-        border:1px solid #d3dfec!important;border-radius:8px 8px 0 0!important;
-        background:#fff!important;color:#274460!important;
-        font-size:17px!important;font-weight:700!important;
-        box-shadow:none!important;
-    }
-    [data-testid="stMain"] [data-testid="stTabs"] button[role="tab"][aria-selected="true"],
-    [data-testid="stMain"] [data-testid="stTabs"] [data-baseweb="tab"][aria-selected="true"] {
-        background:#ffffff!important;color:#0a4e90!important;
-        font-weight:850!important;border-color:#3b80c1!important;
-        border-bottom:3px solid #ffffff!important;
-        box-shadow:0 -2px 0 #3b80c1!important;
+    [data-testid="stMain"] [data-testid="stTabs"] [role="tablist"] button[role="tab"] {
+        min-width:145px!important;min-height:59px!important;max-width:100%!important;
+        padding:13px 23px!important;background:#e0e9f4!important;
+        border:1px solid #aebfd3!important;border-bottom:0!important;
+        border-radius:11px 11px 0 0!important;color:#263b53!important;
+        white-space:normal!important;overflow:visible!important;
+        flex:0 1 auto!important;line-height:1.4!important;box-shadow:0 2px 4px #163b5811!important;
     }
     [data-testid="stMain"] [data-testid="stTabs"] button[role="tab"] p,
     [data-testid="stMain"] [data-testid="stTabs"] button[role="tab"] span {
-        font-size:17px!important;font-weight:750!important;line-height:1.4!important;
+        font-size:18px!important;font-weight:750!important;color:inherit!important;
+        white-space:normal!important;word-break:keep-all!important;line-height:1.45!important;
     }
-    [data-testid="stMain"] [data-testid="stTabs"] button[role="tab"][aria-selected="true"] p,
-    [data-testid="stMain"] [data-testid="stTabs"] button[role="tab"][aria-selected="true"] span {
-        color:#0a4e90!important;font-weight:850!important;
+    [data-testid="stMain"] [data-testid="stTabs"] [role="tablist"] button[role="tab"][aria-selected="true"] {
+        background:#fff!important;color:#154d7f!important;border:2px solid #3879b7!important;
+        border-bottom:3px solid #fff!important;margin-bottom:-3px!important;
+        box-shadow:0 -3px 0 #3879b7!important;
+    }
+    [data-testid="stMain"] [data-testid="stTabs"] [role="tablist"] button[role="tab"][aria-selected="true"] p {
+        font-weight:850!important;color:#154d7f!important;
     }
     [data-testid="stMain"] [data-testid="stTabs"] [data-baseweb="tab-highlight"],
     [data-testid="stMain"] [data-testid="stTabs"] [data-baseweb="tab-border"] {display:none!important;}
-    [data-testid="stMain"] [data-testid="stTabs"] [role="tabpanel"] {
-        padding-top:6px!important;
-    }
-    @media(max-width:1200px) {
-      [data-testid="stMain"] [data-testid="stTabs"] button[role="tab"],
-      [data-testid="stMain"] [data-testid="stTabs"] [data-baseweb="tab"] {font-size:15px!important;padding:10px 13px!important;}
+    [data-testid="stMain"] [data-testid="stTabs"] [role="tabpanel"] {padding-top:4px!important;}
+    @media(max-width:1200px){
+      [data-testid="stMain"] [data-testid="stTabs"] button[role="tab"] p{font-size:16px!important;}
+      [data-testid="stMain"] [data-testid="stTabs"] [role="tablist"] button[role="tab"] {padding:11px 15px!important;min-width:115px!important;}
     }
     /* Desktop left menu: full-width real buttons, same dimensions as logout. */
     [data-testid="stSidebar"] [class*="st-key-hm_nav_normal_"] button,
@@ -1246,7 +1239,7 @@ def hospital_used_search(query, department='전체', *, limit=150):
 
 
 def render_hospital_used_admin(emp, data):
-    st.markdown('#### 병원 사용품목 개별 등록')
+    st.markdown('#### 심평원 등재품목 개별 등록')
     st.caption('심평원에 등록된 품목만 병원 사용품목으로 연결합니다. 산정불가 물품은 병원 자체품목 등록을 이용하세요.')
     if emp['권한'].upper()!='MASTER' or test_context():
         st.info('병원 사용품목 등록은 MASTER 권한에서만 가능합니다.');return
@@ -1356,7 +1349,7 @@ def validate_used_import(df: pd.DataFrame, current: list[dict]):
 
 
 def render_used_bulk(emp):
-    st.markdown('#### 병원 사용품목 CSV 일괄 등록')
+    st.markdown('#### 심평원 등재품목 CSV 일괄 등록')
     st.caption('심평원에 이미 등록된 제품을 병원 사용품목으로 등록합니다. 원본 심평원 DB 및 기존 신청·재고내역은 변경되지 않습니다.')
     if emp['권한'].upper() != 'MASTER' or test_context():
         st.info('MASTER 기본 화면에서만 등록할 수 있습니다.')
@@ -1408,15 +1401,6 @@ def render_used_bulk(emp):
                 st.error(str(exc) if isinstance(exc,(ValueError,PermissionError)) else safe_spreadsheet_error(exc))
 
 
-def render_used_item_management(emp, data):
-    st.markdown('### 병원 사용품목 등록')
-    st.caption('심평원 등재품목 중 병원에서 사용하는 제품에 업체코드와 포장단위를 연결합니다. 심평원에 없는 제품은 왼쪽 「심평원 미등록품목 등록」 메뉴를 이용하세요.')
-    tab1, tab2 = st.tabs(['개별 등록', 'CSV 일괄 등록'])
-    with tab1:
-        render_hospital_used_admin(emp, data)
-    with tab2:
-        render_used_bulk(emp)
-
 def hospital_duplicate_warning(name, spec, hira, own):
     def norm(v): return re.sub(r'[^a-z0-9가-힣]', '', str(v).casefold())
     query = norm(name)
@@ -1434,7 +1418,7 @@ def hospital_duplicate_warning(name, spec, hira, own):
 
 
 def render_hospital_register(emp, data):
-    st.subheader('병원 자체품목 등록')
+    st.markdown('#### 심평원 미등재품목 개별 등록')
     st.caption('산정불가 물품, 장갑, 소모품 등 심평원 코드가 없는 품목을 관리합니다. 먼저 심평원 및 병원 품목을 검색해야 등록 요청할 수 있습니다.')
     catalog = combined_catalog()
     query = st.text_input('① 필수 사전검색 — 품명·코드·규격', key='hosp_search', placeholder='예: Latex glove / 라텍스 장갑')
@@ -2605,6 +2589,140 @@ def render_material_menu(choice, emp, data):
         with tabs[0]:render_request_history(emp,data)
         with tabs[1]:render_stock_overview(emp,data)
 
+def render_used_lookup():
+    q = st.text_input('검색', placeholder='업체코드 · 업체명 · 품명 · 규격 · 심평원코드', key='used_search_main')
+    # This page displays HIRA-listed hospital products only; hospital-made
+    # catalog items have a separate menu, though requests search both.
+    catalog = hospital_preferred_catalog()
+    if '_관리구분' in catalog.columns:
+        catalog = catalog[catalog['_관리구분'] == '병원 사용 치료재료']
+    if q.strip() and not catalog.empty:
+        fields = [c for c in ['코드', '품명', '규격', '중분류', '업체코드', '업체명', '제조수입업소'] if c in catalog]
+        text = catalog[fields].fillna('').astype(str).agg(' '.join, axis=1).str.casefold()
+        tokens = q.casefold().split()
+        catalog = catalog[text.map(lambda x: all(t in x for t in tokens))]
+    found = catalog.head(150)
+    if found.empty:
+        st.info('등록된 병원 사용품목이 없습니다. 「개별 등록」에서 심평원 품목을 선택해 등록하세요.')
+        return
+    columns = [c for c in ['업체코드', '업체명'] + DETAIL_FIELDS if c in found]
+    display = found[columns].copy()
+    if '단위' in display:
+        display['단위'] = display['단위'].map(display_unit)
+    st.dataframe(display, hide_index=True, use_container_width=True, height=460)
+
+
+def render_unlisted_lookup():
+    query = st.text_input('검색', placeholder='자체코드 · 품명 · 규격', key='unlisted_lookup')
+    records = hospital_item_rows(str(st.secrets['treatments']['spreadsheet_id']))
+    frame = pd.DataFrame(records)
+    if frame.empty:
+        st.info('등록된 심평원 미등재품목이 없습니다.')
+        return
+    if query.strip():
+        tokens = query.casefold().split()
+        cols = [c for c in ['품목코드','품명','규격','중분류','제조수입업소'] if c in frame]
+        texts = frame[cols].fillna('').astype(str).agg(' '.join, axis=1).str.casefold()
+        frame = frame.loc[texts.map(lambda t: all(token in t for token in tokens))]
+    cols = [c for c in ['품목코드','품명','규격','중분류','기준단위','신청단위','단위환산수량','제조수입업소','상태'] if c in frame]
+    st.dataframe(frame[cols].head(500), hide_index=True, use_container_width=True, height=440)
+
+
+UNLISTED_CSV_HEADERS = ['품명', '규격', '중분류', '기준단위', '신청단위', '단위환산수량', '제조수입업소', '비고']
+
+
+def render_unlisted_bulk(emp):
+    st.caption('심평원에 없는 병원 자체품목만 등록합니다. USER는 개별 등록에서 MASTER 승인 요청을 사용합니다.')
+    if emp['권한'].upper() != 'MASTER' or test_context():
+        st.info('CSV 일괄 등록은 MASTER 기본 화면에서만 가능합니다.')
+        return
+    st.download_button('CSV 양식 다운로드', (','.join(UNLISTED_CSV_HEADERS) + '\n').encode('utf-8-sig'),
+                       file_name='HISMEDI_미등재품목_등록양식.csv', mime='text/csv', key='unlisted_template')
+    upload = st.file_uploader('미등재품목 CSV 업로드 (최대 200건)', type=['csv'], key='unlisted_upload')
+    if upload is None:
+        return
+    try:
+        import io
+        content = upload.getvalue()
+        if len(content) > 2_000_000: raise ValueError('CSV 파일은 2MB 이하여야 합니다.')
+        try: df = pd.read_csv(io.BytesIO(content), encoding='utf-8-sig', dtype=str, keep_default_na=False)
+        except UnicodeDecodeError: df = pd.read_csv(io.BytesIO(content), encoding='cp949', dtype=str, keep_default_na=False)
+        df.columns = [str(c).strip().lstrip('\ufeff') for c in df.columns]
+        required = ['품명','규격','기준단위','신청단위','단위환산수량']
+        if any(c not in df.columns for c in required):
+            raise ValueError('필수 열: '+', '.join(required))
+        if not (1 <= len(df) <= 200): raise ValueError('한 번에 1~200건을 등록하세요.')
+        for col in UNLISTED_CSV_HEADERS:
+            if col not in df: df[col] = ''
+            df[col] = df[col].astype(str).str.strip()
+        if df[UNLISTED_CSV_HEADERS].apply(lambda c:c.str.startswith(('=','+','-','@'))).any().any():
+            raise ValueError('수식으로 인식될 수 있는 입력값이 있습니다.')
+        old = hospital_items_fresh()
+        hira = get_hira_items()
+        def normalize(value): return re.sub(r'[^a-z0-9가-힣]','',str(value).casefold())
+        existing={(normalize(r['품명']),normalize(r['규격'])) for r in old if r['상태']!='반려'}
+        seen=set(); validated=[]; errors=[]
+        hira_pairs={(normalize(r['품명']),normalize(r['규격'])) for r in hira[['품명','규격']].to_dict('records')} if not hira.empty else set()
+        for num,record in enumerate(df.to_dict('records'),start=2):
+            try:
+                name,spec=record['품명'],record['규격']
+                if len(name)<2 or not spec:raise ValueError('품명·규격은 필수입니다.')
+                key=(normalize(name),normalize(spec))
+                if key in existing or key in seen:raise ValueError('기존 자체품목 또는 CSV 내부 중복')
+                if key in hira_pairs:raise ValueError('심평원에 동일 품명·규격 존재')
+                base=normalized_unit(record['기준단위']);unit=normalized_unit(record['신청단위'])
+                factor=material_qty(record['단위환산수량'])
+                if not base or not unit:raise ValueError('기준단위·신청단위 필수')
+                validate_request_unit(unit,factor,base)
+                validated.append({**record,'기준단위':base,'신청단위':unit,'단위환산수량':factor})
+                seen.add(key)
+            except (ValueError,TypeError) as exc:
+                errors.append({'행':num,'품명':record['품명'],'사유':str(exc)})
+        st.write(f'검사 결과: 정상 {len(validated)}건 · 오류 {len(errors)}건')
+        if errors:
+            st.dataframe(pd.DataFrame(errors),hide_index=True,use_container_width=True)
+            st.error('일부 품목만 저장하지 않도록, CSV 오류를 모두 수정해야 등록할 수 있습니다.')
+        if validated:
+            st.dataframe(pd.DataFrame(validated).head(30),hide_index=True,use_container_width=True)
+        agreed=st.checkbox('심평원에 없는 품목이며 기존 중복이 없음을 확인했습니다.',disabled=bool(errors) or not validated,key='unlisted_bulk_agree')
+        if st.button(f'{len(validated)}건 등록 확정',type='primary',disabled=not agreed or bool(errors) or not validated,key='unlisted_bulk_save'):
+            current = hospital_items_fresh()
+            fresh = next((e for e in employees_fresh() if e['사번']==emp['사번'] and is_active(e) and e['권한'].upper()=='MASTER'),None)
+            if fresh is None:raise PermissionError('MASTER 권한이 없습니다.')
+            check={(normalize(r['품명']),normalize(r['규격'])) for r in current if r['상태']!='반려'}
+            if any((normalize(r['품명']),normalize(r['규격'])) in check for r in validated):
+                raise ValueError('등록 직전에 동일 품목이 발견되었습니다. 다시 확인해 주세요.')
+            used={r['품목코드'] for r in current if r['품목코드']}
+            if not hira.empty:used.update(set(hira['코드'].astype(str)))
+            seq=max([int(c[1:]) for c in used if re.fullmatch(r'H\d{6}',c)] or [0])
+            stamp=now();rows=[]
+            for rec in validated:
+                seq+=1;code=f'H{seq:06d}'
+                rows.append([uuid.uuid4().hex,code,rec['품명'],rec['규격'],rec['중분류'] or '병원 일반소모품',
+                             rec['기준단위'],rec['신청단위'],str(rec['단위환산수량']),rec['제조수입업소'],
+                             '',test_mark(rec['비고']),'승인',emp['사번'],stamp,emp['사번'],stamp])
+            # A single append avoids partial per-batch commits; failures must still be reconciled.
+            get_ws('Hospital_Items',HOSPITAL_HEADERS).append_rows(rows,value_input_option='RAW')
+            hospital_item_rows.clear();test_audit('HOSPITAL_ITEM_BULK',f'CSV {len(rows)}건')
+            st.success(f'{len(rows)}건 저장했습니다. 미등재 병원품목 조회에서 확인하세요.')
+    except Exception as exc:
+        st.error(str(exc) if isinstance(exc,(ValueError,PermissionError)) else safe_spreadsheet_error(exc))
+
+
+def render_listed_management(emp, data):
+    tab_view, tab_one, tab_bulk = st.tabs(['조회', '개별 등록', 'CSV 일괄 등록'])
+    with tab_view:render_used_lookup()
+    with tab_one:render_hospital_used_admin(emp,data)
+    with tab_bulk:render_used_bulk(emp)
+
+
+def render_unlisted_management(emp, data):
+    tab_view, tab_one, tab_bulk=st.tabs(['조회','개별 등록','CSV 일괄 등록'])
+    with tab_view:render_unlisted_lookup()
+    with tab_one:render_hospital_register(emp,data)
+    with tab_bulk:render_unlisted_bulk(emp)
+
+
 def main():
     render_style()
     try:
@@ -2733,13 +2851,13 @@ def main():
         st.caption(f"{principal['이름']} · {principal['소속부서']} · {role}")
         if preview_active:
             st.caption(f"USER 테스트: {shown_emp['이름']} · {shown_emp['소속부서']}")
-        menu = ['물품관리 현황', '품목정보', '심평원 미등록품목 등록', '물품 신청', '물품 수령', '재고관리',
+        menu = ['물품관리 현황', '심평원 전체품목 조회', '병원사용(심평원 등재) 등록·조회',
+                '병원사용(심평원 미등재) 등록·조회', '물품 신청', '물품 수령', '재고관리',
                 '통계 및 보고서', '내 정보']
         if not preview_active:
             menu += ['PIN 변경']
         if is_master and not preview_active:
-            menu.insert(2, '병원 사용품목 등록')
-            menu.insert(5, '출고관리')
+            menu.insert(6, '출고관리')
             menu += ['직원 관리', '심평원 DB 업데이트']
         if st.session_state.get('material_nav') not in menu:
             st.session_state['material_nav'] = menu[0]
@@ -2805,23 +2923,12 @@ def main():
         except Exception as exc:
             LOGGER.exception('Material workflow failed')
             st.error(str(exc) if isinstance(exc, (ValueError, PermissionError)) else safe_spreadsheet_error(exc))
-    elif choice == '품목정보':
-        tabs=st.tabs(['병원 사용품목 조회','심평원 전체품목 조회'])
-        with tabs[0]:
-            st.markdown('#### 병원 사용품목 검색')
-            q=st.text_input('검색',placeholder='업체코드 · 품명 · 규격 · 코드',key='used_search_main')
-            found=hospital_used_search(q) if q else hospital_preferred_catalog().head(100)
-            if found.empty:st.info('등록된 병원 사용품목이 없습니다. MASTER가 사용품목 등록을 진행해 주세요.')
-            else:
-                columns=[c for c in ['업체코드','업체명']+DETAIL_FIELDS if c in found]
-                show=found[columns].copy()
-                if '단위' in show:show['단위']=show['단위'].map(display_unit)
-                st.dataframe(show,hide_index=True,use_container_width=True,height=470)
-        with tabs[1]:render_hira_search()
-    elif choice == '병원 사용품목 등록' and is_master and not preview_active:
-        render_used_item_management(principal, data)
-    elif choice == '심평원 미등록품목 등록':
-        render_hospital_register(shown_emp if preview_active else principal, data)
+    elif choice == '심평원 전체품목 조회':
+        render_hira_search()
+    elif choice == '병원사용(심평원 등재) 등록·조회':
+        render_listed_management(shown_emp if preview_active else principal, data)
+    elif choice == '병원사용(심평원 미등재) 등록·조회':
+        render_unlisted_management(shown_emp if preview_active else principal, data)
     elif choice == '내 정보':
         render_personal_info(shown_emp if preview_active else principal, data)
     elif choice == 'PIN 변경':
