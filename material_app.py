@@ -14,6 +14,8 @@ import hashlib
 import hmac
 import re
 import secrets
+import time
+import logging
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -22,7 +24,7 @@ import gspread
 import pandas as pd
 import streamlit as st
 from google.oauth2.service_account import Credentials
-from gspread.exceptions import WorksheetNotFound
+from gspread.exceptions import WorksheetNotFound, APIError
 
 st.set_page_config(page_title="HISMEDI | 치료재료 관리", page_icon="🏥", layout="wide")
 KST = timezone(timedelta(hours=9))
@@ -38,6 +40,27 @@ DEFAULT_DEPARTMENTS = [
     "8병동", "수술실", "내시경실", "건강검진팀", "주사실(성인)", "주사실(소아)", "약제팀",
 ]
 DEFAULT_DEPARTMENTS = list(dict.fromkeys(DEFAULT_DEPARTMENTS))
+LOGGER = logging.getLogger("hismedi.material")
+
+
+def api_action(fn, *args, **kwargs):
+    """Retry transient Google Sheets quota/server failures, not permission failures."""
+    for attempt in range(4):
+        try:
+            return fn(*args, **kwargs)
+        except APIError as exc:
+            response = getattr(exc, "response", None)
+            status = getattr(response, "status_code", None)
+            detail = str(exc).lower()
+            retryable = status in (429, 500, 502, 503, 504) or (
+                status == 403 and ("ratelimitexceeded" in detail or "quota" in detail)
+            )
+            if not retryable or attempt == 3:
+                LOGGER.exception("Google Sheets API request failed: HTTP %s", status)
+                raise
+            time.sleep(min(2 ** attempt, 6))
+
+
 
 
 def now() -> str:
@@ -52,6 +75,15 @@ def normalize_employee_id(value: Any) -> str:
 
 
 def safe_spreadsheet_error(exc: Exception) -> str:
+    if isinstance(exc, APIError):
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        if status == 429:
+            return "Google Sheets API 요청 한도를 초과했습니다(429). 잠시 후 다시 시도해 주세요."
+        if status == 403:
+            return "Google Sheets API 접근이 거부되었습니다(403). API 사용 설정·할당량·서비스 계정 권한을 확인하세요."
+        if status == 404:
+            return "Google Sheets 문서를 찾지 못했습니다(404). 스프레드시트 ID와 공유 권한을 확인하세요."
+        return f"Google Sheets API 오류(HTTP {status or '알 수 없음'}). Streamlit 로그에서 상세 원인을 확인하세요."
     return f"Google Sheets 연결 또는 처리 오류: {type(exc).__name__}. 서비스 계정 공유 권한, Secrets, 시트 구조를 확인해 주세요."
 
 
@@ -68,26 +100,26 @@ def get_book():
 def get_ws(name: str, headers: list[str] | None = None):
     book = get_book()
     try:
-        sheet = book.worksheet(name)
+        sheet = api_action(book.worksheet, name)
     except WorksheetNotFound:
         if headers is None:
             raise
-        sheet = book.add_worksheet(title=name, rows=500, cols=max(len(headers), 8))
-        sheet.update(range_name="A1", values=[headers])
-    if headers:
-        actual = sheet.row_values(1)
-        if actual[:len(headers)] != headers:
-            raise ValueError(f"'{name}' 시트의 제목행이 예상 구조와 다릅니다: {actual}")
+        sheet = api_action(book.add_worksheet, title=name, rows=500, cols=max(len(headers), 8))
+        api_action(sheet.update, range_name="A1", values=[headers])
+    # Header check is performed using the same get_all_values request below,
+    # not an extra row_values API call on every Streamlit rerun.
     return sheet
 
 
 def rows_as_dicts(ws, columns: list[str]) -> list[dict]:
-    values = ws.get_all_values()
+    values = api_action(ws.get_all_values)
+    if not values or values[0][:len(columns)] != columns:
+        raise ValueError(f"'{ws.title}' 시트의 제목행이 예상 구조와 다릅니다: {values[0] if values else []}")
     output = []
     for index, cells in enumerate(values[1:], start=2):
         if not any(str(v).strip() for v in cells):
             continue
-        expanded = (cells + [""] * len(columns))[: len(columns)]
+        expanded = (cells + [""] * len(columns))[:len(columns)]
         entry = dict(zip(columns, [str(v).strip() for v in expanded]))
         entry["_row"] = index
         output.append(entry)
@@ -243,7 +275,12 @@ def main():
 
     # A MASTER cannot self-register solely using their employee ID.
     masters = [r for r in data if r["권한"].upper() == "MASTER" and is_active(r)]
-    initialized_master = any(r["사번"] in {a["사번"] for a in auth_rows()} for r in masters)
+    try:
+        configured_ids = {row["사번"] for row in auth_rows()}
+    except Exception as exc:
+        st.error(safe_spreadsheet_error(exc))
+        st.stop()
+    initialized_master = any(r["사번"] in configured_ids for r in masters)
     if not initialized_master:
         st.info("최초 사용: MASTER 계정의 PIN을 설정해 주세요.")
         if not st.secrets["treatments"].get("admin_setup_key", ""):
