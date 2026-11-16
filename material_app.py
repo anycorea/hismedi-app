@@ -249,7 +249,7 @@ BUILDING_FILE = BASE_DIR / "Hismedi_building.jpg"
 def render_style():
     st.markdown("""
     <style>
-    .block-container {max-width: 1760px; padding-top: 1.15rem; padding-bottom: 1.8rem;}
+    .block-container {max-width: 1760px; padding-top: .8rem; padding-bottom: 1.8rem;}
     h1 {font-size: 1.45rem !important; margin-bottom: .35rem !important;}
     h2 {font-size: 1.18rem !important;}
     h3 {font-size: 1.03rem !important;}
@@ -531,11 +531,11 @@ def main():
         st.stop()
 
     with st.sidebar:
-        if LOGO_FILE.is_file():
-            show_logo(LOGO_FILE, 128, centered=True)
-        st.markdown("**HISMEDI 치료재료 관리**")
         if BUILDING_FILE.is_file():
-            st.image(str(BUILDING_FILE), use_container_width=True)
+            # PC 사이드바 상단에 건물 사진만 작게 표시합니다.
+            photo_left, photo, photo_right = st.columns([0.22, 1, 0.22])
+            with photo:
+                st.image(str(BUILDING_FILE), use_container_width=True)
         st.caption(f"{emp['이름']} · {emp['소속부서']} · {role}")
         st.divider()
         menu = ["물품관리 현황", "품목정보", "입고관리", "출고관리", "재고관리", "재고실사", "통계 및 보고서", "내 정보", "PIN 변경"]
@@ -546,7 +546,7 @@ def main():
         if st.button("로그아웃", use_container_width=True):
             sign_out()
 
-    render_header(f"{choice}  ·  {emp['이름']} ({role})")
+    # 로그인 후 오른쪽 작업영역에는 로고·제목 헤더를 넣지 않습니다.
     if choice == "물품관리 현황":
         st.subheader("물품관리 현황")
         st.info("로그인이 완료되었습니다. 품목·입출고·재고 데이터는 다음 개발 단계에서 연결됩니다.")
