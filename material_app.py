@@ -1102,14 +1102,53 @@ def ensure_request_schema():
     api_action(ws.update, range_name="Q1:W1", values=[REQ_HEADERS_EXTRA], value_input_option="RAW")
     return True
 
-STOCK_HEADERS = ["거래ID", "일시", "부서", "품목코드", "품명", "유형", "증감수량", "작업사번", "메모", "관련요청ID"]
+STOCK_HEADERS_BASE = ["거래ID", "일시", "부서", "품목코드", "품명", "유형", "증감수량", "작업사번", "메모", "관련요청ID"]
+STOCK_HEADERS_EXTRA = ["입력BOX수량", "입력낱개수량", "BOX당기준수량", "입력방식"]
+STOCK_HEADERS = STOCK_HEADERS_BASE + STOCK_HEADERS_EXTRA
+
+
+@st.cache_resource(show_spinner=False)
+def ensure_stock_schema():
+    """Append-only upgrade for earlier stock transaction records (A:J preserved)."""
+    ws = get_ws('Material_StockEvents', STOCK_HEADERS)
+    header = api_action(ws.row_values, 1)
+    if header[:len(STOCK_HEADERS_BASE)] != STOCK_HEADERS_BASE:
+        raise ValueError('Material_StockEvents의 기존 제목행이 예상 구조와 다릅니다. 수정을 중단했습니다.')
+    if header[len(STOCK_HEADERS_BASE):len(STOCK_HEADERS)] == STOCK_HEADERS_EXTRA:
+        return True
+    if any(str(x).strip() for x in header[len(STOCK_HEADERS_BASE):]):
+        raise ValueError('Material_StockEvents K열 이후 다른 항목이 있어 자동 변경하지 않았습니다.')
+    if ws.col_count < len(STOCK_HEADERS):
+        api_action(ws.resize, cols=len(STOCK_HEADERS))
+    api_action(ws.update, range_name='K1:N1', values=[STOCK_HEADERS_EXTRA], value_input_option='RAW')
+    return True
+
+
+def box_conversion_for(code: str, stock_rows: list[dict], request_rows: list[dict]) -> int | None:
+    """Show BOX breakdown only for a confirmed, unambiguous recorded factor."""
+    saved = [r for r in stock_rows if r['품목코드'] == code and str(r.get('BOX당기준수량', '')).isdigit()]
+    if saved:
+        return int(sorted(saved, key=lambda r: (r['일시'], r['_row']))[-1]['BOX당기준수량'])
+    factors = {int(r['단위환산수량']) for r in request_rows
+               if r['품목코드'] == code and str(r.get('신청단위', '')).upper() == 'BOX'
+               and str(r.get('단위환산수량', '')).isdigit()}
+    return next(iter(factors)) if len(factors) == 1 else None
+
+
+def format_box_remainder(total: int, factor: int, unit: str) -> str:
+    if factor < 1:
+        raise ValueError('BOX당 환산수량은 1 이상이어야 합니다.')
+    sign = '-' if total < 0 else ''
+    boxes, each = divmod(abs(int(total)), factor)
+    return f'{sign}{boxes:,} BOX + {each:,} {unit}'
+
 
 
 @st.cache_resource(show_spinner=False)
 def ensure_material_sheets():
     # One-time initialization. Worksheet handles are also cached.
     ensure_request_schema()
-    get_ws("Material_StockEvents", STOCK_HEADERS)
+    ensure_stock_schema()
     return True
 
 
@@ -1121,6 +1160,7 @@ def load_requests_cached(_sheet_id: str):
 
 @st.cache_data(ttl=12, show_spinner=False)
 def load_stock_events_cached(_sheet_id: str):
+    ensure_stock_schema()
     return rows_as_dicts(get_ws("Material_StockEvents", STOCK_HEADERS), STOCK_HEADERS)
 
 
@@ -1253,7 +1293,8 @@ def material_set_request_status(request, new_status, actor, delivered_qty=None):
     test_audit("REQUEST_STATUS", f"요청ID:{request['요청ID']}, 상태:{new_status}")
 
 
-def save_stock_event(emp, department, code, action, quantity, memo, *, target_total=None):
+def save_stock_event(emp, department, code, action, quantity, memo, *, target_total=None,
+                     box_qty=None, each_qty=None, box_factor=None, input_mode='기준단위'):
     fresh_data = employees_fresh()
     fresh_emp = next((r for r in fresh_data if r['사번'] == emp['사번'] and is_active(r)), None)
     if fresh_emp is None or department not in allowed_departments(fresh_emp, fresh_data):
@@ -1281,8 +1322,21 @@ def save_stock_event(emp, department, code, action, quantity, memo, *, target_to
         raise ValueError(f'현재 재고 {before:,}개를 초과하여 차감할 수 없습니다.')
     if delta == 0:
         raise ValueError('현재고와 입력 수량이 같아 변경할 내용이 없습니다.')
+    # Store the human-entered BOX + remainder values separately from canonical delta.
+    # Historic inventory rows remain valid and retain their original 10 columns.
+    extra = ['', '', '', '기준단위']
+    if input_mode == 'BOX+낱개':
+        if any(v is None for v in (box_qty, each_qty, box_factor)):
+            raise ValueError('BOX 및 낱개 수량을 확인해 주세요.')
+        boxes, each, factor = int(box_qty), int(each_qty), int(box_factor)
+        if boxes < 0 or each < 0 or factor < 1 or each >= factor:
+            raise ValueError('낱개는 BOX당 수량보다 작아야 합니다. 수량과 환산값을 확인하세요.')
+        if boxes * factor + each != int(quantity):
+            raise ValueError('BOX+낱개 수량과 저장 수량이 일치하지 않습니다.')
+        extra = [str(boxes), str(each), str(factor), 'BOX+낱개']
     record = [uuid.uuid4().hex, now(), department, code, item['품명'], action, str(delta),
-              emp['사번'], test_mark(memo), '']
+              emp['사번'], test_mark(memo), ''] + extra
+    ensure_stock_schema()
     api_action(get_ws('Material_StockEvents', STOCK_HEADERS).append_row, record, value_input_option='RAW')
     material_refresh()
     test_audit("STOCK", f"부서:{department}, 코드:{code}, 유형:{action}, 증감:{delta}")
@@ -1325,12 +1379,15 @@ def render_request_entry(emp, data):
     item = material_selector('req_item', label='① 기존 품목 검색 (필수)')
     if item is not None:
         detail = {k: item.get(k, '') for k in ['중분류','코드','품명','규격','단위','상한금액','제조수입업소']}
-        st.dataframe(pd.DataFrame([detail]), hide_index=True, use_container_width=True)
+        item_table, qty_box = st.columns([6.2, 1.1], gap='small', vertical_alignment='bottom')
+        with item_table:
+            st.dataframe(pd.DataFrame([detail]), hide_index=True, use_container_width=True, height=88)
+        with qty_box:
+            qty = st.number_input('신청수량', min_value=1, max_value=1000000,
+                                  value=1, step=1, key='req_qty')
         official_unit = str(item.get('단위', '')).strip().upper()
         st.caption(f'심평원 등록단위: {official_unit or "미등록"} · 신청단위는 별도로 지정할 수 있습니다.')
-        col1,col2,col3 = st.columns([1.05,1.45,1.5])
-        with col1:
-            qty = st.number_input('신청 수량', min_value=1, max_value=1000000, value=1, step=1, key='req_qty')
+        col2,col3 = st.columns([1.35,2.5])
         with col2:
             choices = list(dict.fromkeys(([official_unit] if official_unit else []) + REQUEST_UNIT_CHOICES))
             selected_unit = st.selectbox('신청단위', choices, key='req_selected_unit')
@@ -1364,6 +1421,11 @@ def render_request_entry(emp, data):
     if cart:
         st.markdown('**② 신청목록 — 신청단위와 환산수량을 확인한 뒤 저장**')
         display = pd.DataFrame(cart)
+        # Keep editable quantity immediately after middle-category, not far right.
+        ordered = ['중분류', '수량', '코드', '품명', '규격', '단위', '상한금액',
+                   '제조수입업소', '신청단위', '단위환산수량']
+        display = display[[c for c in ordered if c in display.columns] +
+                          [c for c in display.columns if c not in ordered]]
         edited = st.data_editor(display, hide_index=True, use_container_width=True, num_rows='fixed',
             disabled=['중분류','코드','품명','규격','단위','상한금액','제조수입업소'],
             column_config={
@@ -1590,8 +1652,21 @@ def render_stock_overview(emp,data):
     balances,names=stock_by_department()
     catalog = get_hira_items()
     unit_map = dict(zip(catalog['코드'], catalog['단위']))
-    show=[{'부서':dept,'품목코드':code,'품명':names.get((dept,code),''),'현재고':qty, '재고기준단위':unit_map.get(code,'')}
-          for (dept,code),qty in balances.items() if dept in depts]
+    stock_events = all_stock_events()
+    requests = all_requests()
+    factor_cache = {}
+    show=[]
+    for (dept,code),qty in balances.items():
+        if dept not in depts:
+            continue
+        unit = str(unit_map.get(code, '') or 'EA').upper()
+        if code not in factor_cache:
+            factor_cache[code] = box_conversion_for(code, stock_events, requests)
+        factor = factor_cache[code]
+        show.append({'부서':dept,'품목코드':code,'품명':names.get((dept,code),''),
+                     '현재고':qty,'재고기준단위':unit,
+                     'BOX당 수량':factor if factor else '',
+                     'BOX+낱개 표시':format_box_remainder(qty,factor,unit) if factor else '환산 미설정'})
     if not show:
         st.info('등록된 재고가 없습니다. 재고관리에서 최초 재고를 입력하거나 물품을 수령하세요.');return
     frame=pd.DataFrame(show)
@@ -1618,22 +1693,63 @@ def render_stock_entry(emp,data):
     code=item['코드']
     balances,_=stock_by_department()
     before=balances.get((dept,code),0)
-    st.metric('현재 등록 재고',f"{before:,} {str(item.get('단위') or '개')}")
-    st.caption('초기재고·사용·실사 입력은 심평원 기준단위로 입력합니다. BOX 등 포장단위 신청은 물품 신청에서 별도 환산합니다.')
+    base_unit=str(item.get('단위') or 'EA').strip().upper()
+    existing_factor=box_conversion_for(code,all_stock_events(),all_requests())
+    st.metric('현재 등록 재고',f'{before:,} {base_unit}')
+    if existing_factor:
+        st.caption('포장환산 표시: '+format_box_remainder(before,existing_factor,base_unit)+
+                   f' (1 BOX = {existing_factor:,} {base_unit})')
     action=st.radio('작업 선택',['초기재고','사용','실사조정'],horizontal=True,key='stock_action')
-    if action=='초기재고':
-        st.caption('처음 시스템을 도입할 때 각 부서에서 실제 보유한 수량을 한 번 등록합니다.')
-        qty=st.number_input('초기 보유 수량',min_value=0,max_value=1000000,value=0,step=1,key='initial_qty')
-    elif action=='사용':
-        qty=st.number_input('실제 사용 수량',min_value=1,max_value=1000000,value=1,step=1,key='used_qty')
+    mode=st.radio('수량 입력 방식',['기준단위 직접입력','BOX + 낱개'],horizontal=True,
+                  key='stock_quantity_mode',help='BOX와 낱개 모두 같은 기준단위 수량으로 환산해 저장합니다.')
+    box_qty=each_qty=box_factor=None
+    if mode=='BOX + 낱개':
+        c1,c2,c3=st.columns(3)
+        with c1:
+            box_qty=st.number_input('BOX 수량',min_value=0,max_value=1000000,value=0,step=1,key='stock_boxes')
+        with c2:
+            each_qty=st.number_input(f'낱개 수량 ({base_unit})',min_value=0,max_value=1000000,
+                                     value=0,step=1,key='stock_eaches')
+        with c3:
+            box_factor=st.number_input(f'1 BOX당 {base_unit} 수량',min_value=1,max_value=1000000,
+                                       value=existing_factor or 100,step=1,key='stock_box_factor')
+        qty=int(box_qty)*int(box_factor)+int(each_qty)
+        if each_qty >= box_factor:
+            st.error('낱개 수량은 BOX당 수량보다 작게 입력하세요. (예: 1 BOX=100 EA → 낱개 0~99 EA)')
+        st.info(f'입력: {box_qty:,} BOX + {each_qty:,} {base_unit} = 합계 {qty:,} {base_unit}')
     else:
-        qty=st.number_input('실사 후 실제 보유 수량',min_value=0,max_value=1000000,value=max(0,before),step=1,key='count_qty')
+        if action=='초기재고':
+            label='초기 보유 수량'
+            initial=0
+            floor=0
+        elif action=='사용':
+            label='실제 사용 수량'
+            initial=1
+            floor=1
+        else:
+            label='실사 후 실제 보유 수량'
+            initial=max(0,before)
+            floor=0
+        qty=st.number_input(f'{label} ({base_unit})',min_value=floor,max_value=1000000,
+                            value=initial,step=1,key='stock_direct_qty')
+    if action in ('초기재고','실사조정'):
+        st.caption('입력값은 변경 후의 실제 보유 총량입니다. 기존 재고에 무조건 더하지 않습니다.')
+    elif qty>before:
+        st.warning('사용량이 현재 재고보다 많습니다.')
     memo=st.text_input('사유 / 메모 (실사조정 시 필수)',max_chars=300,key='stock_note')
-    if st.button('재고 변경 저장',type='primary',key='stock_write'):
+    invalid = mode=='BOX + 낱개' and each_qty >= box_factor
+    invalid = invalid or (action=='사용' and qty<1)
+    invalid = invalid or qty>1000000
+    if st.button('재고 변경 저장',type='primary',key='stock_write',disabled=invalid):
         try:
-            new=save_stock_event(emp,dept,code,action,qty,memo,target_total=int(qty) if action!='사용' else None)
-            st.success(f'저장 완료 · 변경 후 재고 {new:,}개');st.rerun()
-        except Exception as exc:st.error(str(exc) if isinstance(exc,(ValueError,PermissionError)) else safe_spreadsheet_error(exc))
+            new=save_stock_event(emp,dept,code,action,qty,memo,
+                                 target_total=int(qty) if action!='사용' else None,
+                                 box_qty=box_qty,each_qty=each_qty,box_factor=box_factor,
+                                 input_mode='BOX+낱개' if mode=='BOX + 낱개' else '기준단위')
+            st.success(f'저장 완료 · 변경 후 재고 {new:,} {base_unit}')
+            st.rerun()
+        except Exception as exc:
+            st.error(str(exc) if isinstance(exc,(ValueError,PermissionError)) else safe_spreadsheet_error(exc))
 
 
 def render_initial_stock_bulk(emp, data):
@@ -1708,6 +1824,7 @@ def render_initial_stock_bulk(emp, data):
 
 
 def all_stock_events_cached_fresh():
+    ensure_stock_schema()
     return rows_as_dicts(get_ws('Material_StockEvents',STOCK_HEADERS),STOCK_HEADERS)
 
 
