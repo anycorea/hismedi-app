@@ -1046,7 +1046,12 @@ def render_hira_search():
             mask = mask | result[col].str.contains(pattern, case=False, na=False, regex=True)
         result=result[mask]
     st.caption(f"검색 결과: {len(result):,}건 / 전체 {len(frame):,}건")
-    st.dataframe(result.head(2000), hide_index=True, use_container_width=True, height=620)
+    display = result.head(2000).copy()
+    if '단위' in display:
+        display['단위'] = display['단위'].map(display_unit)
+    order = [c for c in DETAIL_FIELDS if c in display.columns]
+    display = display[order + [c for c in display.columns if c not in order]]
+    st.dataframe(display, hide_index=True, use_container_width=True, height=620)
     if len(result)>2000:
         st.caption("화면에는 처음 2,000건만 표시합니다. 검색 조건을 좁혀 주세요.")
 
@@ -1118,7 +1123,7 @@ def render_hospital_register(emp, data):
         return
     tokens = [x.casefold() for x in query.split()]
     if not catalog.empty:
-        cols = [c for c in ['코드','품명','규격','중분류','단위','급여구분'] if c in catalog.columns]
+        cols = [c for c in DETAIL_FIELDS if c in catalog.columns]
         masked = catalog[cols].fillna('').astype(str).agg(' '.join,axis=1).str.casefold()
         found = catalog.loc[masked.map(lambda x: all(t in x for t in tokens))].head(70)
         if not found.empty:
@@ -1524,31 +1529,98 @@ def save_stock_event(emp, department, code, action, quantity, memo, *, target_to
     return before + delta
 
 
+DETAIL_FIELDS = ['중분류', '코드', '품명', '규격', '단위', '상한금액', '제조수입업소', '급여구분', '현재상태']
+
+
+def display_unit(value):
+    """Display a unit as EA rather than 1EA; do not modify source or quantity."""
+    raw = str(value or '').strip()
+    match = re.fullmatch(r'1\s*(EA|BOX|PACK|SET|KIT|UNIT|PAIR|ROLL|BOTTLE)', raw, flags=re.I)
+    return match.group(1).upper() if match else raw
+
+
+def pick_detail_row(frame, key, *, height=260, message='표에서 품목 한 행을 클릭하여 선택하세요.'):
+    """One consistent detailed, single-row selector for all material workflows."""
+    if frame.empty:
+        st.info('검색 결과가 없습니다.')
+        return None
+    columns = [col for col in DETAIL_FIELDS if col in frame.columns]
+    display = frame[columns].copy().fillna('')
+    if '단위' in display:
+        display['단위'] = display['단위'].map(display_unit)
+    display = display.rename(columns={'단위': '기준단위'})
+    # Original index is reset only on the view; selection maps to the same position in frame.
+    event = st.dataframe(
+        display.reset_index(drop=True), on_select='rerun', selection_mode='single-row',
+        key=key, hide_index=True, use_container_width=True, height=height,
+        column_config={
+            '중분류': st.column_config.TextColumn('중분류', width='medium'),
+            '코드': st.column_config.TextColumn('품목코드', width='small'),
+            '품명': st.column_config.TextColumn('품명', width='large'),
+            '규격': st.column_config.TextColumn('규격', width='medium'),
+            '기준단위': st.column_config.TextColumn('단위', width='small'),
+            '상한금액': st.column_config.TextColumn('상한금액', width='small'),
+            '제조수입업소': st.column_config.TextColumn('제조수입업소', width='medium'),
+        },
+    )
+    positions = event.selection.rows
+    if not positions:
+        st.caption(message)
+        return None
+    position = positions[0]
+    if position < 0 or position >= len(frame):
+        return None
+    return frame.iloc[position].to_dict()
+
+
 def material_selector(key_prefix, *, label='품목 검색'):
     catalog = get_hira_items()
     if catalog.empty:
         st.warning('심평원 품목 DB가 아직 없습니다. MASTER가 먼저 심평원 DB를 등록해 주세요.')
         return None
-    keyword = st.text_input(label, key=key_prefix+'_term', placeholder='품목코드 · 품명 · 규격 · 분류 (일부 입력)')
+    keyword = st.text_input(label, key=key_prefix+'_term', placeholder='품목코드 · 품명 · 규격 · 중분류 · 제조수입업소')
     if not keyword.strip():
-        st.caption('품목코드나 품명의 일부를 입력하면 목록에서 선택할 수 있습니다.')
+        st.caption('검색어를 입력한 후 아래 상세 표에서 해당 품목의 행을 클릭하세요.')
         return None
     terms = [x.casefold() for x in keyword.split() if x]
-    fields = ['코드','품명','규격','중분류']
+    fields = [col for col in ['코드','품명','규격','중분류','제조수입업소'] if col in catalog]
     matrix = catalog[fields].fillna('').astype(str).agg(' '.join, axis=1).str.casefold()
-    found = catalog.loc[matrix.map(lambda text: all(t in text for t in terms))].head(150)
+    found = catalog.loc[matrix.map(lambda value: all(term in value for term in terms))].head(150)
     if found.empty:
         st.info('검색된 품목이 없습니다.')
         return None
-    ids = found['코드'].tolist()
-    selected_code = st.selectbox('검색 결과 선택 (최대 150건)', ids,
-        format_func=lambda x: f"{x} | {str(found.loc[found['코드']==x, '품명'].iloc[0])[:65]}",
-        key=key_prefix+'_selected')
-    record = found.loc[found['코드'] == selected_code].iloc[0].to_dict()
-    st.caption(f"{record['급여구분']} · {record['현재상태']} · {record['규격']}")
+    st.caption(f'검색 결과 최대 150건 표시 · 실제 검색 {len(found):,}건')
+    search_key = hashlib.sha256(keyword.strip().casefold().encode()).hexdigest()[:12]
+    record = pick_detail_row(found, f'{key_prefix}_details_{search_key}', height=300)
+    if record is None:
+        return None
+    st.success(f"선택: {record['코드']} · {record['품명']} · {record['규격']}")
     if record['현재상태'] != '등재':
         st.warning('이 품목은 현재 등재 상태가 아닙니다. 실제 구매·청구 가능 여부를 확인하세요.')
     return record
+
+
+def request_detail_selector(items, key, caption):
+    """Show complete item information for issue/receive decisions, not code/name only."""
+    frame = pd.DataFrame(items)
+    if frame.empty:
+        return None
+    show = pd.DataFrame([{
+        '부서': r.get('수령부서',''), '중분류': r.get('중분류',''),
+        '코드': r.get('품목코드',''), '품명': r.get('품명',''),
+        '규격': r.get('규격',''), '단위': r.get('심평원단위',''),
+        '상한금액': r.get('상한금액',''), '제조수입업소': r.get('제조수입업소',''),
+        '신청단위': r.get('신청단위',''), '신청수량': r.get('신청수량',''),
+        '출고수량': r.get('출고수량',''), '요청ID': r.get('요청ID',''),
+    } for r in items])
+    show['단위'] = show['단위'].map(display_unit)
+    event = st.dataframe(show, hide_index=True, use_container_width=True, height=285,
+                         on_select='rerun', selection_mode='single-row', key=key)
+    selected = event.selection.rows
+    if not selected:
+        st.caption(caption)
+        return None
+    return items[selected[0]] if selected[0] < len(items) else None
 
 
 def render_request_entry(emp, data):
@@ -1560,6 +1632,7 @@ def render_request_entry(emp, data):
     item = material_selector('req_item', label='① 기존 품목 검색 (필수)')
     if item is not None:
         detail = {k: item.get(k, '') for k in ['중분류','코드','품명','규격','단위','상한금액','제조수입업소']}
+        detail['단위'] = display_unit(detail['단위'])
         item_table, qty_box = st.columns([6.2, 1.1], gap='small', vertical_alignment='bottom')
         with item_table:
             st.dataframe(pd.DataFrame([detail]), hide_index=True, use_container_width=True, height=88)
@@ -1567,7 +1640,7 @@ def render_request_entry(emp, data):
             qty = st.number_input('신청수량', min_value=1, max_value=1000000,
                                   value=1, step=1, key='req_qty')
         official_unit = str(item.get('단위', '')).strip().upper()
-        st.caption(f'심평원 등록단위: {official_unit or "미등록"} · 신청단위는 별도로 지정할 수 있습니다.')
+        st.caption(f'심평원 등록단위: {display_unit(official_unit) or "미등록"} · 신청단위는 별도로 지정할 수 있습니다.')
         col2,col3 = st.columns([1.35,2.5])
         with col2:
             preferred = str(item.get('_병원신청단위','')).strip().upper()
@@ -1581,7 +1654,7 @@ def render_request_entry(emp, data):
         if unit and official_unit and unit.upper() != official_unit:
             st.info(f'신청: {qty:,} {unit} / 기준재고 반영 예상: {qty * factor:,} {official_unit} (환산은 실제 포장규격 확인 후 입력)')
         else:
-            st.caption(f'기준재고 반영 예상: {qty * factor:,} {official_unit or unit}')
+            st.caption(f'기준재고 반영 예상: {qty * factor:,} {display_unit(official_unit or unit)}')
         if st.button('선택 품목 신청목록에 추가', use_container_width=False):
             try:
                 unit, factor = validate_request_unit(unit, factor, official_unit)
@@ -1603,6 +1676,8 @@ def render_request_entry(emp, data):
     if cart:
         st.markdown('**② 신청목록 — 신청단위와 환산수량을 확인한 뒤 저장**')
         display = pd.DataFrame(cart)
+        if '단위' in display:
+            display['단위'] = display['단위'].map(display_unit)
         # Keep editable quantity immediately after middle-category, not far right.
         ordered = ['중분류', '수량', '코드', '품명', '규격', '단위', '상한금액',
                    '제조수입업소', '신청단위', '단위환산수량']
@@ -1838,7 +1913,7 @@ def render_request_history(emp,data):
         if not value and col in ('중분류','심평원단위','상한금액','제조수입업소'):
             source=code_info.get(r.get('품목코드',''),{})
             return str(source.get('단위' if col=='심평원단위' else col,''))
-        return value
+        return display_unit(value) if col == '심평원단위' else value
     st.caption('기존 신청건의 빈 품목정보는 현재 품목DB를 참고해 표시합니다. 과거 저장값은 바꾸지 않습니다.')
     if master_edit and status_choice != '전체':
         # The main management grid itself is editable. No separate expander.
@@ -1933,9 +2008,9 @@ def render_master_issue(emp,data):
     items=visible_requests(emp,data, ['신청'])
     if not items:
         st.info('출고 대기 신청이 없습니다.'); return
-    labels={r['요청ID']:f"{r['요청ID']} | {r['수령부서']} | {r['품명'][:45]} | {r['신청수량']} {request_unit_label(r)}" for r in items}
-    rid=st.selectbox('출고 처리할 신청',list(labels),format_func=lambda x:labels[x],key='issue_id')
-    row=next(r for r in items if r['요청ID']==rid)
+    row = request_detail_selector(items, 'issue_detail_selection', '출고할 신청 행을 클릭하세요.')
+    if row is None:
+        return
     qty=st.number_input(f'실제 출고수량 ({request_unit_label(row)})',min_value=1,max_value=max(1,int(row['신청수량'])),value=int(row['신청수량']),key='issue_qty')
     a,b=st.columns(2)
     with a:
@@ -1959,9 +2034,9 @@ def render_receipt(emp,data):
         items = [r for r in items if r['요청ID'].startswith('TEST-')]
     if not items:
         st.info('수령 확인 대기 물품이 없습니다.');return
-    labels={r['요청ID']:f"{r['수령부서']} | {r['품명'][:50]} | 출고 {r['출고수량']} {request_unit_label(r)} | {r['요청ID']}" for r in items}
-    rid=st.selectbox('수령할 물품',list(labels),format_func=lambda x:labels[x],key='receive_id')
-    row=next(r for r in items if r['요청ID']==rid)
+    row = request_detail_selector(items, 'receipt_detail_selection', '수령할 물품 행을 클릭하세요.')
+    if row is None:
+        return
     st.info(f"실제 출고 {row['출고수량']} {request_unit_label(row)} · 수령 시 기준재고 {int(row['출고수량']) * request_conversion(row):,} {row.get('재고기준단위') or row.get('심평원단위') or '개'} 증가 · 포장규격을 확인하세요.")
     if st.button('수령 완료 · 재고 반영',type='primary',use_container_width=True):
         try:
@@ -2032,7 +2107,7 @@ def render_stock_entry(emp,data):
         with c1:
             box_qty=st.number_input('BOX 수량',min_value=0,max_value=1000000,value=0,step=1,key='stock_boxes')
         with c2:
-            each_qty=st.number_input(f'낱개 수량 ({base_unit})',min_value=0,max_value=1000000,
+            each_qty=st.number_input(f'낱개 수량 ({display_unit(base_unit)})',min_value=0,max_value=1000000,
                                      value=0,step=1,key='stock_eaches')
         with c3:
             box_factor=st.number_input(f'1 BOX당 {base_unit} 수량',min_value=1,max_value=1000000,
