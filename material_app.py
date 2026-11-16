@@ -1056,20 +1056,66 @@ def render_hira_search():
 # 치료재료 신청 -> 출고 -> 수령 및 부서별 수동 재고
 # 초기사용 시 필요한 시트만 만들며 기존 Emp/Auth/HIRA_Items는 보존합니다.
 # ================================================================
-REQ_HEADERS = ["요청ID", "신청일시", "신청사번", "신청자", "수령부서", "품목코드", "품명", "규격", "신청수량", "상태", "출고수량", "출고일시", "출고담당", "수령일시", "수령담당", "비고"]
+REQ_HEADERS_BASE = ["요청ID", "신청일시", "신청사번", "신청자", "수령부서", "품목코드", "품명", "규격", "신청수량", "상태", "출고수량", "출고일시", "출고담당", "수령일시", "수령담당", "비고"]
+# 기존 A:P 칼럼의 순서는 절대 변경하지 않습니다. 신규 정보만 Q:W에 추가합니다.
+REQ_HEADERS_EXTRA = ["중분류", "심평원단위", "상한금액", "제조수입업소", "신청단위", "단위환산수량", "재고기준단위"]
+REQ_HEADERS = REQ_HEADERS_BASE + REQ_HEADERS_EXTRA
+REQUEST_UNIT_CHOICES = ["EA", "BOX", "PACK", "SET", "KIT", "UNIT", "ROLL", "BAG", "BOTTLE", "PAIR", "기타(직접입력)"]
+
+
+def validate_request_unit(unit, factor, official_unit):
+    unit = str(unit or "").strip().upper()
+    official_unit = str(official_unit or "").strip().upper()
+    if not unit or len(unit) > 24 or not re.fullmatch(r"[A-Z0-9가-힣_./() -]+", unit):
+        raise ValueError("신청단위를 24자 이내로 정확하게 입력해 주세요.")
+    factor = material_qty(factor)
+    if not official_unit and factor != 1:
+        raise ValueError("심평원 기준단위가 비어 있습니다. 관리자에게 기준단위 확인을 요청해 주세요.")
+    return unit, factor
+
+
+def request_conversion(row):
+    """Legacy requests have no saved factor: they use their historic 1:1 behavior."""
+    factor = str(row.get("단위환산수량", "")).strip()
+    if not factor:
+        return 1
+    return material_qty(factor)
+
+
+def request_unit_label(row):
+    return str(row.get("신청단위", "")).strip() or str(row.get("심평원단위", "")).strip() or "개"
+
+
+@st.cache_resource(show_spinner=False)
+def ensure_request_schema():
+    """One-time backwards-compatible migration of the existing request tab."""
+    ws = get_ws("Material_Requests", REQ_HEADERS)
+    headers = api_action(ws.row_values, 1)
+    if headers[:len(REQ_HEADERS_BASE)] != REQ_HEADERS_BASE:
+        raise ValueError("Material_Requests의 기존 A:P 제목행이 예상 구조와 다릅니다. 자동 변경하지 않았습니다.")
+    if headers[len(REQ_HEADERS_BASE):len(REQ_HEADERS)] == REQ_HEADERS_EXTRA:
+        return True
+    if any(str(v).strip() for v in headers[len(REQ_HEADERS_BASE):]):
+        raise ValueError("Material_Requests의 Q열 이후에 다른 항목이 있습니다. 덮어쓰지 않고 중단했습니다.")
+    if ws.col_count < len(REQ_HEADERS):
+        api_action(ws.resize, cols=len(REQ_HEADERS))
+    api_action(ws.update, range_name="Q1:W1", values=[REQ_HEADERS_EXTRA], value_input_option="RAW")
+    return True
+
 STOCK_HEADERS = ["거래ID", "일시", "부서", "품목코드", "품명", "유형", "증감수량", "작업사번", "메모", "관련요청ID"]
 
 
 @st.cache_resource(show_spinner=False)
 def ensure_material_sheets():
     # One-time initialization. Worksheet handles are also cached.
-    get_ws("Material_Requests", REQ_HEADERS)
+    ensure_request_schema()
     get_ws("Material_StockEvents", STOCK_HEADERS)
     return True
 
 
 @st.cache_data(ttl=12, show_spinner=False)
 def load_requests_cached(_sheet_id: str):
+    ensure_request_schema()
     return rows_as_dicts(get_ws("Material_Requests", REQ_HEADERS), REQ_HEADERS)
 
 
@@ -1139,7 +1185,7 @@ def stock_by_department(events=None, requests=None):
             continue
         key = (row['수령부서'], row['품목코드'])
         try:
-            balances[key] += int(row['출고수량'])
+            balances[key] += int(row['출고수량']) * request_conversion(row)
         except ValueError:
             raise ValueError('수령완료 자료의 출고수량을 확인하세요.')
         names[key] = row['품명']
@@ -1158,9 +1204,13 @@ def material_save_requests(emp, department, cart, memo):
     rows = []
     for item in cart:
         source = material_catalog_lookup(item['코드'])
+        unit, factor = validate_request_unit(item.get('신청단위'), item.get('단위환산수량'), source['단위'])
         rows.append([group_id + '-' + str(len(rows) + 1).zfill(3), created, emp['사번'], emp['이름'], department,
                      source['코드'], source['품명'], source['규격'], str(material_qty(item['수량'])),
-                     '신청', '', '', '', '', '', test_mark(memo)])
+                     '신청', '', '', '', '', '', test_mark(memo),
+                     source['중분류'], source['단위'], source['상한금액'], source['제조수입업소'],
+                     unit, str(factor), source['단위']])
+    ensure_request_schema()
     api_action(get_ws('Material_Requests', REQ_HEADERS).append_rows, rows, value_input_option='RAW')
     material_refresh()
     test_audit("REQUEST", f"신청번호:{group_id}, 부서:{department}, 품목수:{len(cart)}")
@@ -1269,38 +1319,80 @@ def material_selector(key_prefix, *, label='품목 검색'):
 def render_request_entry(emp, data):
     st.markdown('#### 물품 신청')
     depts = material_depts(emp, data)
-    if not depts: return
+    if not depts:
+        return
     department = st.selectbox('신청·수령 부서', depts, key='req_department')
-    item = material_selector('req_item')
+    item = material_selector('req_item', label='① 기존 품목 검색 (필수)')
     if item is not None:
-        a,b = st.columns([1,2])
-        with a: qty = st.number_input('신청 수량', min_value=1, max_value=1000000, value=1, step=1, key='req_qty')
-        with b: st.write(''); st.write('')
+        detail = {k: item.get(k, '') for k in ['중분류','코드','품명','규격','단위','상한금액','제조수입업소']}
+        st.dataframe(pd.DataFrame([detail]), hide_index=True, use_container_width=True)
+        official_unit = str(item.get('단위', '')).strip().upper()
+        st.caption(f'심평원 등록단위: {official_unit or "미등록"} · 신청단위는 별도로 지정할 수 있습니다.')
+        col1,col2,col3 = st.columns([1.05,1.45,1.5])
+        with col1:
+            qty = st.number_input('신청 수량', min_value=1, max_value=1000000, value=1, step=1, key='req_qty')
+        with col2:
+            choices = list(dict.fromkeys(([official_unit] if official_unit else []) + REQUEST_UNIT_CHOICES))
+            selected_unit = st.selectbox('신청단위', choices, key='req_selected_unit')
+            unit = st.text_input('직접 입력할 단위', max_chars=24, key='req_other_unit') if selected_unit == '기타(직접입력)' else selected_unit
+        with col3:
+            factor = st.number_input(f'신청단위 1개당 기준단위({official_unit or "미등록"}) 수량',
+                                      min_value=1, max_value=1000000, value=1, step=1, key='req_factor',
+                                      help='예: 1 BOX=100 EA라면 100. 단위가 같으면 1.')
+        if unit and official_unit and unit.upper() != official_unit:
+            st.info(f'신청: {qty:,} {unit} / 기준재고 반영 예상: {qty * factor:,} {official_unit} (환산은 실제 포장규격 확인 후 입력)')
+        else:
+            st.caption(f'기준재고 반영 예상: {qty * factor:,} {official_unit or unit}')
         if st.button('선택 품목 신청목록에 추가', use_container_width=False):
-            cart = st.session_state.setdefault('material_cart', [])
-            found = next((r for r in cart if r['코드'] == item['코드']), None)
-            if found: found['수량'] += int(qty)
-            else: cart.append({'코드':item['코드'], '품명':item['품명'], '규격':item['규격'], '수량':int(qty)})
-            st.rerun()
+            try:
+                unit, factor = validate_request_unit(unit, factor, official_unit)
+                if unit != official_unit and factor == 1:
+                    st.warning('단위가 다르지만 환산수량이 1입니다. 실제 포장수량을 확인해 주세요.')
+                cart = st.session_state.setdefault('material_cart', [])
+                found = next((r for r in cart if r['코드'] == item['코드'] and r['신청단위'] == unit and int(r['단위환산수량']) == factor), None)
+                if found:
+                    found['수량'] += int(qty)
+                else:
+                    cart.append({'중분류':item['중분류'], '코드':item['코드'], '품명':item['품명'],
+                        '규격':item['규격'], '단위':official_unit, '상한금액':item['상한금액'],
+                        '제조수입업소':item['제조수입업소'], '신청단위':unit,
+                        '단위환산수량':factor, '수량':int(qty)})
+                st.rerun()
+            except ValueError as exc:
+                st.error(str(exc))
     cart = st.session_state.get('material_cart', [])
     if cart:
-        st.markdown('**신청목록**')
+        st.markdown('**② 신청목록 — 신청단위와 환산수량을 확인한 뒤 저장**')
         display = pd.DataFrame(cart)
         edited = st.data_editor(display, hide_index=True, use_container_width=True, num_rows='fixed',
-            disabled=['코드','품명','규격'], column_config={'수량': st.column_config.NumberColumn('신청 수량',min_value=1, max_value=1000000,step=1)},key='material_cart_editor')
+            disabled=['중분류','코드','품명','규격','단위','상한금액','제조수입업소'],
+            column_config={
+                '수량': st.column_config.NumberColumn('신청 수량',min_value=1,max_value=1000000,step=1,required=True),
+                '신청단위': st.column_config.TextColumn('신청단위',required=True,help='EA / BOX / PACK / SET / KIT 등'),
+                '단위환산수량': st.column_config.NumberColumn('1 신청단위당 기준단위 수량',min_value=1,max_value=1000000,step=1,required=True)
+            }, key='material_cart_editor')
         st.session_state.material_cart = edited.to_dict('records')
-        rem = st.selectbox('목록에서 제거할 품목', ['선택 안 함']+[r['코드'] for r in cart])
+        cart = st.session_state.material_cart
+        st.caption('예: 심평원 단위 EA / 신청단위 BOX / 환산수량 100 → 신청수량 5 = 수령 시 재고 500 EA')
+        choices = {str(i): f"{r['코드']} · {r['품명'][:35]} · {r['신청단위']}" for i,r in enumerate(cart)}
+        rem = st.selectbox('목록에서 제거할 품목', ['선택 안 함']+list(choices), format_func=lambda x: choices.get(x,x))
         if st.button('선택 품목 제거') and rem!='선택 안 함':
-            st.session_state.material_cart = [r for r in cart if r['코드'] != rem]
+            st.session_state.material_cart.pop(int(rem))
             st.rerun()
         memo = st.text_input('신청 메모', max_chars=300)
-        if st.button(f'물품 {len(cart)}종 신청 확정', type='primary'):
+        confirmed = st.checkbox('신청단위와 포장당 환산수량을 확인했습니다.', key='request_unit_confirm')
+        if st.button(f'물품 {len(cart)}종 신청 확정', type='primary', disabled=not confirmed):
             try:
-                group = material_save_requests(emp, department, st.session_state.material_cart, memo)
+                for r in cart:
+                    source = material_catalog_lookup(r['코드'])
+                    validate_request_unit(r['신청단위'], r['단위환산수량'], source['단위'])
+                    material_qty(r['수량'])
+                group = material_save_requests(emp, department, cart, memo)
                 st.session_state.material_cart = []
                 st.success(f'신청 완료 · 신청번호 {group}')
                 st.rerun()
-            except Exception as exc: st.error(str(exc) if isinstance(exc,(ValueError, PermissionError)) else safe_spreadsheet_error(exc))
+            except Exception as exc:
+                st.error(str(exc) if isinstance(exc,(ValueError, PermissionError)) else safe_spreadsheet_error(exc))
 
 
 def visible_requests(emp, data, statuses=None):
@@ -1317,7 +1409,7 @@ def render_request_history(emp,data):
     if not items:
         st.info('현재 표시할 신청내역이 없습니다.'); return
     frame=pd.DataFrame(items)
-    columns=['신청일시','요청ID','수령부서','품목코드','품명','신청수량','출고수량','상태','신청자','출고담당','수령담당']
+    columns=['신청일시','요청ID','수령부서','중분류','품목코드','품명','규격','심평원단위','상한금액','제조수입업소','신청단위','단위환산수량','신청수량','출고수량','상태','신청자','출고담당','수령담당']
     dept_choice=st.selectbox('부서 필터', ['전체']+sorted(set(frame['수령부서'])),key='history_dept')
     status_choice=st.selectbox('상태 필터', ['전체','신청','출고','수령완료','반려'],key='history_status')
     if dept_choice!='전체':frame=frame[frame['수령부서']==dept_choice]
@@ -1331,10 +1423,10 @@ def render_master_issue(emp,data):
     items=visible_requests(emp,data, ['신청'])
     if not items:
         st.info('출고 대기 신청이 없습니다.'); return
-    labels={r['요청ID']:f"{r['요청ID']} | {r['수령부서']} | {r['품명'][:45]} | {r['신청수량']}개" for r in items}
+    labels={r['요청ID']:f"{r['요청ID']} | {r['수령부서']} | {r['품명'][:45]} | {r['신청수량']} {request_unit_label(r)}" for r in items}
     rid=st.selectbox('출고 처리할 신청',list(labels),format_func=lambda x:labels[x],key='issue_id')
     row=next(r for r in items if r['요청ID']==rid)
-    qty=st.number_input('실제 출고수량',min_value=1,max_value=max(1,int(row['신청수량'])),value=int(row['신청수량']),key='issue_qty')
+    qty=st.number_input(f'실제 출고수량 ({request_unit_label(row)})',min_value=1,max_value=max(1,int(row['신청수량'])),value=int(row['신청수량']),key='issue_qty')
     a,b=st.columns(2)
     with a:
         if st.button('출고 확정',type='primary',use_container_width=True):
@@ -1357,10 +1449,10 @@ def render_receipt(emp,data):
         items = [r for r in items if r['요청ID'].startswith('TEST-')]
     if not items:
         st.info('수령 확인 대기 물품이 없습니다.');return
-    labels={r['요청ID']:f"{r['수령부서']} | {r['품명'][:50]} | 출고 {r['출고수량']}개 | {r['요청ID']}" for r in items}
+    labels={r['요청ID']:f"{r['수령부서']} | {r['품명'][:50]} | 출고 {r['출고수량']} {request_unit_label(r)} | {r['요청ID']}" for r in items}
     rid=st.selectbox('수령할 물품',list(labels),format_func=lambda x:labels[x],key='receive_id')
     row=next(r for r in items if r['요청ID']==rid)
-    st.info('실제 수량을 확인하고 수령 완료를 누르면 해당 부서 재고가 증가합니다.')
+    st.info(f"실제 출고 {row['출고수량']} {request_unit_label(row)} · 수령 시 기준재고 {int(row['출고수량']) * request_conversion(row):,} {row.get('재고기준단위') or row.get('심평원단위') or '개'} 증가 · 포장규격을 확인하세요.")
     if st.button('수령 완료 · 재고 반영',type='primary',use_container_width=True):
         try:
             material_set_request_status(row,'수령완료',emp)
@@ -1372,7 +1464,9 @@ def render_stock_overview(emp,data):
     depts=material_depts(emp,data)
     if not depts:return
     balances,names=stock_by_department()
-    show=[{'부서':dept,'품목코드':code,'품명':names.get((dept,code),''),'현재고':qty}
+    catalog = get_hira_items()
+    unit_map = dict(zip(catalog['코드'], catalog['단위']))
+    show=[{'부서':dept,'품목코드':code,'품명':names.get((dept,code),''),'현재고':qty, '재고기준단위':unit_map.get(code,'')}
           for (dept,code),qty in balances.items() if dept in depts]
     if not show:
         st.info('등록된 재고가 없습니다. 재고관리에서 최초 재고를 입력하거나 물품을 수령하세요.');return
@@ -1384,7 +1478,8 @@ def render_stock_overview(emp,data):
         frame=frame[frame[['품목코드','품명']].astype(str).agg(' '.join,axis=1).str.contains(re.escape(q),case=False,regex=True)]
     a,b=st.columns(2)
     a.metric('조회 품목 수',f'{len(frame):,}')
-    b.metric('현재고 합계',f'{int(frame["현재고"].sum()):,}')
+    b.metric('조회 부서 수',f'{frame["부서"].nunique():,}')
+    st.caption('서로 다른 재고단위(EA, SET, KIT 등)는 합산하지 않습니다. 현재고는 품목별 기준단위로 표시합니다.')
     st.dataframe(frame.sort_values(['부서','품목코드']),hide_index=True,use_container_width=True,height=490)
     st.download_button('재고현황 CSV 다운로드',frame.to_csv(index=False).encode('utf-8-sig'),'HISMEDI_재고현황.csv','text/csv')
 
@@ -1399,7 +1494,8 @@ def render_stock_entry(emp,data):
     code=item['코드']
     balances,_=stock_by_department()
     before=balances.get((dept,code),0)
-    st.metric('현재 등록 재고',f'{before:,}개')
+    st.metric('현재 등록 재고',f"{before:,} {str(item.get('단위') or '개')}")
+    st.caption('초기재고·사용·실사 입력은 심평원 기준단위로 입력합니다. BOX 등 포장단위 신청은 물품 신청에서 별도 환산합니다.')
     action=st.radio('작업 선택',['초기재고','사용','실사조정'],horizontal=True,key='stock_action')
     if action=='초기재고':
         st.caption('처음 시스템을 도입할 때 각 부서에서 실제 보유한 수량을 한 번 등록합니다.')
@@ -1492,6 +1588,7 @@ def all_stock_events_cached_fresh():
 
 
 def all_requests_cached_fresh():
+    ensure_request_schema()
     return rows_as_dicts(get_ws('Material_Requests',REQ_HEADERS),REQ_HEADERS)
 
 
