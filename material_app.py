@@ -2583,28 +2583,44 @@ def render_work_summary(emp,data):
 
 def render_material_menu(choice, emp, data):
     ensure_material_sheets()
-    if choice=='물품관리 현황':render_work_summary(emp,data)
-    elif choice=='물품 신청':
-        tabs=st.tabs(['신규 신청','신청·처리 현황'])
-        with tabs[0]:render_request_entry(emp,data)
-        with tabs[1]:render_request_history(emp,data)
-    elif choice=='출고관리':
-        if emp['권한'].upper()!='MASTER':
-            st.error('출고 승인은 MASTER만 가능합니다.');return
-        tabs=st.tabs(['출고 대기','전체 신청 이력'])
-        with tabs[0]:render_master_issue(emp,data)
-        with tabs[1]:render_request_history(emp,data)
-    elif choice=='물품 수령':render_receipt(emp,data)
-    elif choice=='재고관리':
-        tabs=st.tabs(['부서별 재고현황','초기재고·사용·실사조정','초기재고 일괄등록','재고 변경이력'])
-        with tabs[0]:render_stock_overview(emp,data)
-        with tabs[1]:render_stock_entry(emp,data)
-        with tabs[2]:render_initial_stock_bulk(emp,data)
-        with tabs[3]:render_stock_history(emp,data)
-    elif choice=='통계 및 보고서':
-        tabs=st.tabs(['신청·출고 현황','재고 현황'])
-        with tabs[0]:render_request_history(emp,data)
-        with tabs[1]:render_stock_overview(emp,data)
+    if choice == '물품관리 현황':
+        render_work_summary(emp, data)
+    elif choice == '물품 신청':
+        selected = section_tab_buttons('material_request', ['신규 신청', '신청·처리 현황'])
+        if selected == '신규 신청':
+            render_request_entry(emp, data)
+        else:
+            render_request_history(emp, data)
+    elif choice == '출고관리':
+        if emp['권한'].upper() != 'MASTER':
+            st.error('출고 승인은 MASTER만 가능합니다.')
+            return
+        selected = section_tab_buttons('material_issue', ['출고 대기', '전체 신청 이력'])
+        if selected == '출고 대기':
+            render_master_issue(emp, data)
+        else:
+            render_request_history(emp, data)
+    elif choice == '물품 수령':
+        render_receipt(emp, data)
+    elif choice == '재고관리':
+        selected = section_tab_buttons('material_stock', [
+            '부서별 재고현황', '초기재고·사용·실사조정',
+            '초기재고 일괄등록', '재고 변경이력'])
+        if selected == '부서별 재고현황':
+            render_stock_overview(emp, data)
+        elif selected == '초기재고·사용·실사조정':
+            render_stock_entry(emp, data)
+        elif selected == '초기재고 일괄등록':
+            render_initial_stock_bulk(emp, data)
+        else:
+            render_stock_history(emp, data)
+    elif choice == '통계 및 보고서':
+        selected = section_tab_buttons('material_reports', ['신청·출고 현황', '재고 현황'])
+        if selected == '신청·출고 현황':
+            render_request_history(emp, data)
+        else:
+            render_stock_overview(emp, data)
+
 
 def render_used_lookup():
     q = st.text_input('검색', placeholder='업체코드 · 업체명 · 품명 · 규격 · 심평원코드', key='used_search_main')
