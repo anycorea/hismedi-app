@@ -284,8 +284,11 @@ def render_style():
     [data-testid="stSidebar"] {min-width:250px!important;max-width:290px!important;}
     /* Constrain login photo independently of the visitor's display resolution. */
     .hm-login-photo {width:100%;display:flex;justify-content:center;align-items:center;min-height:200px;}
-    .hm-login-photo img {display:block;max-width:100%;width:auto;height:auto;max-height:min(62vh,580px);object-fit:contain;border-radius:8px;}
-    .hm-login-heading {font-size:clamp(20px,1.7vw,27px);font-weight:750;margin-bottom:12px;}
+    .hm-login-photo img {display:block;max-width:100%;width:auto;height:auto;max-height:min(58vh,520px);object-fit:contain;border-radius:8px;}
+    .hm-login-heading {font-size:clamp(20px,1.6vw,26px);font-weight:750;margin:0 0 10px;}
+    .hm-login-description {display:flex;flex-wrap:wrap;align-items:baseline;gap:7px 18px;margin:0 0 11px;line-height:1.5;}
+    .hm-login-label {font-weight:750;font-size:15px;white-space:nowrap;}
+    .hm-login-help {font-size:12px;color:#718096;}
     @media (max-width:1000px) {
         .block-container {padding-left:1.1rem;padding-right:1.1rem;}
         .hm-login-photo img {max-height:42vh;}
@@ -635,7 +638,10 @@ def parse_hira_documents(file_bytes, filenames, snapshot):
     code across sources is never silently counted as separate unique items.
     """
     records, duplicates, source_counts = {}, [], Counter()
-    # Prefer active and higher-detail records if a code occurs in multiple sheets.
+    conflicts = []
+    # For the current catalog only: prefer a listed item to a historical deletion.
+    # A shared code can refer to different product descriptions. Keep BOTH source
+    # records in the conflict review, never silently discard that history.
     priority = {"등재": 3, "급여중지/예정": 2, "삭제/예정": 1}
     for category in HIRA_TYPES[:3]:
         with pd.ExcelFile(BytesIO(file_bytes[category]), engine="openpyxl") as xls:
@@ -654,6 +660,14 @@ def parse_hira_documents(file_bytes, filenames, snapshot):
                     if code in records:
                         old = records[code]
                         duplicates.append((code, old["급여구분"], category, old["현재상태"], state))
+                        conflicts.append({
+                            "코드": code,
+                            "첫품명": old["품명"], "첫상태": old["현재상태"],
+                            "첫적용일": old["적용일"], "첫종료일": old["종료일"],
+                            "다음품명": record["품명"], "다음상태": state,
+                            "다음적용일": record["적용일"], "다음종료일": record["종료일"],
+                            "내용상이": "Y" if old["품명"] != record["품명"] else "N",
+                        })
                         if priority[state] > priority[old["현재상태"]]:
                             records[code] = record
                     else:
@@ -681,7 +695,8 @@ def parse_hira_documents(file_bytes, filenames, snapshot):
         "중복코드발견": len(duplicates), "분류연결": len(classified),
         "구분별": dict(Counter(v["급여구분"] for v in data)),
         "상태별": dict(Counter(v["현재상태"] for v in data)),
-        "중복예시": duplicates[:25], "파일명": filenames, "기준일": snapshot,
+        "중복예시": duplicates[:25], "충돌상세": conflicts,
+        "파일명": filenames, "기준일": snapshot,
     }
     return data, overview
 
@@ -748,6 +763,20 @@ def publish_hira(rows, overview, changes):
             except Exception:
                 LOGGER.exception("Failed to restore original HIRA_Items title")
         raise
+    # Store collision detail for audit. This is independent of the current item
+    # catalog and keeps the historical deleted description discoverable.
+    try:
+        conflict_rows = overview.get("충돌상세", [])
+        if conflict_rows:
+            headers = ["기준일"] + list(conflict_rows[0].keys())
+            ws = get_ws("HIRA_Conflicts", headers)
+            old_rows = api_action(ws.get_all_values)
+            existing_keys = {(r[0], r[1]) for r in old_rows[1:] if len(r) >= 2}
+            for row in conflict_rows:
+                if (overview["기준일"], row["코드"]) not in existing_keys:
+                    api_action(ws.append_row, [overview["기준일"]] + [str(row[k]) for k in conflict_rows[0]], value_input_option="RAW")
+    except Exception:
+        LOGGER.exception("HIRA publish completed, but collision archive write failed")
     # Import log is best-effort. Never report failure after successful publication.
     try:
         log_ws = get_ws("HIRA_Imports", HIRA_LOG_HEADERS)
@@ -805,12 +834,22 @@ def render_hira_import():
     d.metric("기준목록 제외", f"{len(changes['기준목록제외']):,}")
     st.caption(f"기준일 {overview['기준일']} · 원본 품목행 {overview['원본품목행']:,} · 중복코드 {overview['중복코드발견']:,} · 분류연결 {overview['분류연결']:,}")
     if overview["중복코드발견"]:
-        st.warning("동일 코드가 여러 시트에 존재합니다. 등재를 우선한 1개 코드로 통합합니다. 오류 의심 시 업로드를 중단하세요.")
-        st.dataframe(pd.DataFrame(overview["중복예시"], columns=["코드","기존급여구분","새급여구분","기존상태","새상태"]), hide_index=True)
+        st.warning("동일 코드가 다른 품명이나 상태로 여러 시트에 존재합니다. 현재 기준목록에는 등재를 우선한 1개 행만 저장하지만, 삭제·과거이력의 품명은 다를 수 있으므로 아래 내용을 반드시 검토하세요.")
+        conflict_rows = overview.get("충돌상세", [])
+        if conflict_rows:
+            st.dataframe(pd.DataFrame(conflict_rows), hide_index=True, use_container_width=True)
+            st.download_button(
+                "중복코드 원본 비교 CSV 다운로드",
+                data=pd.DataFrame(conflict_rows).to_csv(index=False).encode("utf-8-sig"),
+                file_name="HIRA_중복코드_검토.csv", mime="text/csv",
+            )
     st.dataframe(pd.DataFrame(rows[:30], columns=HIRA_HEADERS), hide_index=True, use_container_width=True)
     st.caption("'기준목록 제외'는 삭제 확정이 아니라 이번 원본에서 미검출된 코드입니다. 병원 사용품목과 재고기록은 수정하지 않습니다.")
     confirmed = st.checkbox("변경사항을 확인했고, 심평원 기준품목 DB만 교체하는 데 동의합니다.")
-    if st.button("③ HIRA_Items에 최종 반영", type="primary", disabled=not confirmed):
+    reviewed = True
+    if overview["중복코드발견"]:
+        reviewed = st.checkbox("동일 코드의 서로 다른 품명·상태를 확인했으며, 등재 품목을 현재목록으로 사용하고 중복 이력은 별도로 보관하는 데 동의합니다.")
+    if st.button("③ HIRA_Items에 최종 반영", type="primary", disabled=not (confirmed and reviewed)):
         try:
             publish_hira(rows, overview, changes)
             st.session_state.pop("hira_import_preview", None)
@@ -916,10 +955,15 @@ def main():
 
     if "employee_id" not in st.session_state:
         # 로그인 화면에서는 상단 로고/제목 반복 없이 간결하게 표시합니다.
-        st.markdown('<div style="height:clamp(8px,3vh,32px)"></div>', unsafe_allow_html=True)
+        st.markdown('<div style="height:clamp(8px,2vh,24px)"></div>', unsafe_allow_html=True)
         with render_login_visual():
             st.markdown('<div class="hm-login-heading">HISMEDI 치료재료 관리</div>', unsafe_allow_html=True)
-            st.markdown("**직원 로그인**")
+            st.markdown(
+                '<div class="hm-login-description">'
+                '<span class="hm-login-label">직원 로그인</span>'
+                '<span class="hm-login-help">PIN을 발급받지 않은 직원은 MASTER에게 초기 PIN 발급을 요청하세요.</span>'
+                '</div>', unsafe_allow_html=True,
+            )
             with st.form("login"):
                 identifier = st.text_input("사번 (6자리)", max_chars=6)
                 pin = st.text_input("PIN", type="password")
@@ -941,7 +985,6 @@ def main():
                     st.error(status)
                 except Exception as exc:
                     st.error(safe_spreadsheet_error(exc))
-        st.caption("PIN을 발급받지 않은 직원은 MASTER에게 초기 PIN 발급을 요청하세요.")
         st.stop()
 
     emp = next((r for r in data if r["사번"] == st.session_state.employee_id), None)
