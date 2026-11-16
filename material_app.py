@@ -233,8 +233,31 @@ def audit(action: str, target: str = "", detail: str = ""):
     get_ws("Audit_Log", LOG_HEADERS).append_row([now(), actor, action, target, detail], value_input_option="RAW")
 
 
+def test_context():
+    """Returns actual MASTER and selected USER only in live test mode."""
+    master_id = st.session_state.get("employee_id", "")
+    user_id = st.session_state.get("material_preview_user", "")
+    return (master_id, user_id) if master_id and user_id else None
+
+
+def test_mark(memo: str) -> str:
+    context = test_context()
+    label = f"[TEST MASTER:{context[0]} USER:{context[1]}] " if context else ""
+    return (label + str(memo or ""))[:300]
+
+
+def test_audit(action: str, detail: str = ""):
+    context = test_context()
+    if not context:
+        return
+    try:
+        audit("TEST_" + action, context[1], f"실제 작업자 MASTER:{context[0]} / USER 화면:{context[1]} / {detail}"[:300])
+    except Exception:
+        LOGGER.exception("테스트 작업이력 기록 실패: %s", action)
+
+
 def sign_out():
-    for key in ["employee_id", "forced_change", "issued_pin"]:
+    for key in ["employee_id", "forced_change", "issued_pin", "material_preview_user", "material_cart"]:
         st.session_state.pop(key, None)
     st.rerun()
 
@@ -295,26 +318,28 @@ def render_style():
     [data-testid="stSidebar"] [data-testid="stDivider"] {margin: .35rem 0!important;}
     [data-testid="stMain"] [data-testid="stVerticalBlock"] {scroll-margin-top:1.5rem;}
     [data-testid="stMain"] [data-baseweb="tab-list"] {padding-top:5px!important; overflow:visible!important;}
-    /* Desktop navigation: entire row is a clearly clickable rectangular button. */
-    [data-testid="stSidebar"] [role="radiogroup"] {display:flex!important;flex-direction:column!important;gap:6px!important;width:100%!important;}
-    [data-testid="stSidebar"] [role="radiogroup"] label {
-        display:flex!important;align-items:center!important;width:100%!important;
-        min-height:39px!important;padding:8px 12px!important;
-        border:1px solid #d5deea!important;border-radius:7px!important;
-        background:#fff!important;cursor:pointer!important;box-sizing:border-box!important;
-        transition:background-color .12s,border-color .12s!important;
+    /* Desktop left menu: full-width real buttons, same dimensions as logout. */
+    [data-testid="stSidebar"] [class*="st-key-hm_nav_normal_"] button,
+    [data-testid="stSidebar"] [class*="st-key-hm_nav_selected_"] button {
+        width:100%!important;min-height:40px!important;
+        justify-content:flex-start!important;text-align:left!important;
+        padding:8px 14px!important;border-radius:8px!important;
+        border:1px solid #d8e1eb!important;background:#ffffff!important;
+        color:#203850!important;font-size:14px!important;font-weight:600!important;
+        box-shadow:none!important;transition:all .12s ease!important;
     }
-    [data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) {
-        border-color:#2876b8!important;background:#eaf3fc!important;
-        box-shadow:inset 3px 0 0 #2876b8!important;
+    [data-testid="stSidebar"] [class*="st-key-hm_nav_normal_"] button:hover {
+        background:#f3f7fc!important;border-color:#9fbcd9!important;
     }
-    [data-testid="stSidebar"] [role="radiogroup"] label:hover {background:#f1f6fc!important;}
-    [data-testid="stSidebar"] [role="radiogroup"] label p {
-        font-size:14px!important;font-weight:650!important;color:#183753!important;
-        white-space:normal!important;line-height:1.35!important;
+    [data-testid="stSidebar"] [class*="st-key-hm_nav_selected_"] button {
+        background:#eaf3ff!important;border:1px solid #367cba!important;
+        color:#17466f!important;font-weight:750!important;
+        box-shadow:inset 3px 0 0 #367cba!important;
     }
-    [data-testid="stSidebar"] [role="radiogroup"] label [data-testid="stMarkdownContainer"] {width:100%!important;}
-    [data-testid="stSidebar"] [role="radiogroup"] label [data-baseweb="radio"] {display:none!important;}
+    [data-testid="stSidebar"] [class*="st-key-hm_nav_normal_"] button p,
+    [data-testid="stSidebar"] [class*="st-key-hm_nav_selected_"] button p {
+        text-align:left!important;font-size:14px!important;
+    }
     [data-testid="stSidebar"] {min-width:250px!important;max-width:290px!important;}
     /* Constrain login photo independently of the visitor's display resolution. */
     .hm-login-photo {width:100%;display:flex;justify-content:center;align-items:center;min-height:200px;}
@@ -1129,21 +1154,24 @@ def material_save_requests(emp, department, cart, memo):
     if fresh_emp is None or department not in allowed_departments(fresh_emp, employees_fresh()):
         raise PermissionError('신청할 부서에 대한 관리 권한이 없습니다.')
     created = now()
-    group_id = uuid.uuid4().hex[:12].upper()
+    group_id = ("TEST-" if test_context() else "") + uuid.uuid4().hex[:12].upper()
     rows = []
     for item in cart:
         source = material_catalog_lookup(item['코드'])
         rows.append([group_id + '-' + str(len(rows) + 1).zfill(3), created, emp['사번'], emp['이름'], department,
                      source['코드'], source['품명'], source['규격'], str(material_qty(item['수량'])),
-                     '신청', '', '', '', '', '', str(memo)[:300]])
+                     '신청', '', '', '', '', '', test_mark(memo)])
     api_action(get_ws('Material_Requests', REQ_HEADERS).append_rows, rows, value_input_option='RAW')
     material_refresh()
+    test_audit("REQUEST", f"신청번호:{group_id}, 부서:{department}, 품목수:{len(cart)}")
     return group_id
 
 
 def material_set_request_status(request, new_status, actor, delivered_qty=None):
     if actor['권한'].upper() != 'MASTER' and new_status in ('출고', '반려'):
         raise PermissionError('출고 승인 및 반려는 MASTER만 가능합니다.')
+    if new_status == '수령완료' and test_context() and not request['요청ID'].startswith('TEST-'):
+        raise PermissionError('USER 테스트 중에는 테스트 신청건만 수령할 수 있습니다.')
     if new_status == '수령완료' and actor['권한'].upper() != 'MASTER':
         fresh = next((x for x in employees_fresh() if x['사번'] == actor['사번'] and is_active(x)), None)
         if fresh is None or request['수령부서'] not in allowed_departments(fresh, employees_fresh()):
@@ -1172,6 +1200,7 @@ def material_set_request_status(request, new_status, actor, delivered_qty=None):
         api_action(ws.update, range_name=f'N{request["_row"]}:O{request["_row"]}',
                    values=[[now(), actor['사번']]], value_input_option='RAW')
     material_refresh()
+    test_audit("REQUEST_STATUS", f"요청ID:{request['요청ID']}, 상태:{new_status}")
 
 
 def save_stock_event(emp, department, code, action, quantity, memo, *, target_total=None):
@@ -1203,9 +1232,10 @@ def save_stock_event(emp, department, code, action, quantity, memo, *, target_to
     if delta == 0:
         raise ValueError('현재고와 입력 수량이 같아 변경할 내용이 없습니다.')
     record = [uuid.uuid4().hex, now(), department, code, item['품명'], action, str(delta),
-              emp['사번'], str(memo)[:300], '']
+              emp['사번'], test_mark(memo), '']
     api_action(get_ws('Material_StockEvents', STOCK_HEADERS).append_row, record, value_input_option='RAW')
     material_refresh()
+    test_audit("STOCK", f"부서:{department}, 코드:{code}, 유형:{action}, 증감:{delta}")
     return before + delta
 
 
@@ -1323,6 +1353,8 @@ def render_master_issue(emp,data):
 def render_receipt(emp,data):
     st.markdown('#### 부서 물품 수령확인')
     items=visible_requests(emp,data,['출고'])
+    if test_context():
+        items = [r for r in items if r['요청ID'].startswith('TEST-')]
     if not items:
         st.info('수령 확인 대기 물품이 없습니다.');return
     labels={r['요청ID']:f"{r['수령부서']} | {r['품명'][:50]} | 출고 {r['출고수량']}개 | {r['요청ID']}" for r in items}
@@ -1445,10 +1477,11 @@ def render_initial_stock_bulk(emp, data):
                 before=fresh_balance.get((dept,r.품목코드),0)
                 delta=int(r.수량)-before
                 if delta:
-                    records.append([uuid.uuid4().hex,now(),dept,r.품목코드,r.품명,'초기재고',str(delta),emp['사번'],'초기재고 일괄등록',''])
+                    records.append([uuid.uuid4().hex,now(),dept,r.품목코드,r.품명,'초기재고',str(delta),emp['사번'],test_mark('초기재고 일괄등록'),''])
             if records:
                 api_action(get_ws('Material_StockEvents',STOCK_HEADERS).append_rows,records,value_input_option='RAW')
             material_refresh()
+            test_audit('BULK_STOCK', f'부서:{dept}, 품목수:{len(records)}')
             st.success(f'초기재고 입력 완료: {len(incoming):,}개 품목 (실제 수량 변경 {len(records):,}건)')
     except Exception as exc:
         st.error(str(exc) if isinstance(exc,(ValueError,PermissionError)) else safe_spreadsheet_error(exc))
@@ -1668,12 +1701,12 @@ def main():
     with st.sidebar:
         if BUILDING_FILE.is_file():
             # The photo is compact so the entire menu fits typical laptop displays.
-            photo_left, photo, photo_right = st.columns([.53, 1, .53])
+            photo_left, photo, photo_right = st.columns([.7, 1, .7])
             with photo:
                 st.image(str(BUILDING_FILE), use_container_width=True)
         st.caption(f"{principal['이름']} · {principal['소속부서']} · {role}")
         if preview_active:
-            st.info(f"테스트 중: {shown_emp['이름']} · {shown_emp['소속부서']}")
+            st.caption(f"USER 테스트: {shown_emp['이름']} · {shown_emp['소속부서']}")
         menu = ['물품관리 현황', '품목정보', '물품 신청', '물품 수령', '재고관리',
                 '통계 및 보고서', '내 정보']
         if not preview_active:
@@ -1683,7 +1716,14 @@ def main():
             menu += ['직원 관리', '심평원 DB 업데이트']
         if st.session_state.get('material_nav') not in menu:
             st.session_state['material_nav'] = menu[0]
-        choice = st.radio('업무 메뉴', menu, label_visibility='collapsed', key='material_nav')
+        choice = st.session_state['material_nav']
+        for i, item in enumerate(menu):
+            style_key = ('hm_nav_selected_' if choice == item else 'hm_nav_normal_') + str(i)
+            with st.container(key=style_key):
+                if st.button(item, key=f'mat_menu_{i}', use_container_width=True):
+                    st.session_state['material_nav'] = item
+                    st.rerun()
+
         st.divider()
         if st.button('🔄 데이터 동기화', use_container_width=True,
                      help='Google Sheets의 최신 직원·품목정보를 다시 읽습니다.'):
@@ -1698,7 +1738,8 @@ def main():
             sign_out()
         if is_master:
             st.divider()
-            st.markdown('**USER 화면 테스트**')
+            st.markdown('**USER 화면 테스트 (실제 저장)**')
+            st.caption('MASTER 로그인 유지 · 선택한 USER 권한으로 저장 · TEST 표시 기록')
             if targets:
                 choices = {r['사번']: f"{r['이름']} · {r['소속부서']} ({r['사번']})" for r in targets}
                 options = list(choices)
@@ -1707,35 +1748,38 @@ def main():
                                              format_func=lambda key: choices[key], key='material_preview_pick')
                 if st.button('USER 화면으로 보기', use_container_width=True,
                              disabled=preview_active and selected_user == preview_id):
+                    st.session_state.pop('material_cart', None)
                     st.session_state['material_preview_user'] = selected_user
                     st.session_state['material_nav'] = '물품관리 현황'
                     st.rerun()
                 if preview_active and st.button('↩ MASTER 화면으로 복귀', use_container_width=True,
                                                 type='primary'):
                     st.session_state.pop('material_preview_user', None)
+                    st.session_state.pop('material_cart', None)
                     st.session_state['material_nav'] = '물품관리 현황'
                     st.rerun()
             else:
                 st.caption('테스트할 USER가 없습니다.')
 
-    # The top padding applies to EVERY right-side menu including receiving.
+    # MASTER can execute actual USER workflow without logging out. Every
+    # record created by this mode carries a TEST marker and an audit entry.
     if preview_active:
+        st.warning(
+            f"USER 실저장 테스트: {shown_emp['이름']} · {shown_emp['소속부서']} "
+            "— 실제 저장됩니다. 신청·수령·재고에 TEST 표시를 남깁니다. "
+            "테스트 데이터는 운영 시작 전에 별도로 정리해야 합니다."
+        )
+    if choice in ('물품관리 현황', '물품 신청', '물품 수령', '재고관리',
+                  '출고관리', '통계 및 보고서'):
         try:
-            render_user_preview(choice, shown_emp, data)
-        except Exception as exc:
-            LOGGER.exception('Preview read failed')
-            st.error(safe_spreadsheet_error(exc))
-    elif choice in ('물품관리 현황', '물품 신청', '물품 수령', '재고관리',
-                    '출고관리', '통계 및 보고서'):
-        try:
-            render_material_menu(choice, principal, data)
+            render_material_menu(choice, shown_emp if preview_active else principal, data)
         except Exception as exc:
             LOGGER.exception('Material workflow failed')
             st.error(str(exc) if isinstance(exc, (ValueError, PermissionError)) else safe_spreadsheet_error(exc))
     elif choice == '품목정보':
         render_hira_search()
     elif choice == '내 정보':
-        render_personal_info(principal, data)
+        render_personal_info(shown_emp if preview_active else principal, data)
     elif choice == 'PIN 변경':
         render_pin_change(principal)
     elif choice == '직원 관리' and is_master:
