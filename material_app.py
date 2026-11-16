@@ -1588,21 +1588,137 @@ def render_master_inline_editor(emp, visible):
                 st.error(str(exc) if isinstance(exc, (ValueError, PermissionError)) else safe_spreadsheet_error(exc))
 
 
+def delete_master_request_row(request, actor):
+    """Delete exactly one not-yet-received request after a live, full-row comparison.
+
+    Fulfilled/issued stock movements are never hard-deleted; those require
+    reversal/stock adjustment to maintain an auditable inventory ledger.
+    """
+    if actor['권한'].upper() != 'MASTER' or test_context():
+        raise PermissionError('실제 MASTER 계정에서만 요청행을 삭제할 수 있습니다.')
+    if request['상태'] not in ('신청', '반려'):
+        raise ValueError('출고 또는 수령된 품목은 삭제할 수 없습니다. 상태 정정 및 재고조정을 사용하세요.')
+    ws = get_ws('Material_Requests', REQ_HEADERS)
+    live = api_action(ws.get_all_values)
+    row_number = int(request['_row'])
+    if row_number <= 1 or row_number > len(live):
+        raise ValueError('신청행이 이동되었으므로 삭제를 중단했습니다. 동기화 후 다시 시도하세요.')
+    current = (live[row_number - 1] + [''] * len(REQ_HEADERS))[:len(REQ_HEADERS)]
+    expected = [str(request.get(col, '')) for col in REQ_HEADERS]
+    if current != expected:
+        raise ValueError('다른 직원이 해당 행을 변경했습니다. 동기화 후 다시 시도하세요.')
+    if current[9] not in ('신청', '반려') or current[10].strip() or current[13].strip():
+        raise ValueError('이미 출고 또는 수령된 기록은 삭제할 수 없습니다.')
+    # A deliberate single delete, not an automatically retried request.
+    ws.delete_rows(row_number)
+    material_refresh()
+    try:
+        audit('MASTER_REQUEST_DELETE', request['요청ID'],
+              f"부서:{request['수령부서']} 품목:{request['품목코드']} 수량:{request['신청수량']} 단위:{request.get('신청단위','')} 내용:{str(dict(zip(REQ_HEADERS, expected)))[:450]}")
+    except Exception:
+        LOGGER.exception('신청행 삭제 후 감사기록 저장에 실패했습니다: %s', request['요청ID'])
+    return request['요청ID']
+
+
 def render_request_history(emp,data):
     st.markdown('#### 신청·출고·수령 현황')
-    items=visible_requests(emp,data)
+    items = visible_requests(emp, data)
     if not items:
-        st.info('현재 표시할 신청내역이 없습니다.'); return
-    frame=pd.DataFrame(items)
-    columns=['신청일시','요청ID','수령부서','중분류','품목코드','품명','규격','심평원단위','상한금액','제조수입업소','신청단위','단위환산수량','신청수량','출고수량','상태','신청자','출고담당','수령담당']
-    dept_choice=st.selectbox('부서 필터', ['전체']+sorted(set(frame['수령부서'])),key='history_dept')
-    status_choice=st.selectbox('상태 필터', ['전체','신청','출고','수령완료','반려'],key='history_status')
-    if dept_choice!='전체':frame=frame[frame['수령부서']==dept_choice]
-    if status_choice!='전체':frame=frame[frame['상태']==status_choice]
-    st.dataframe(frame[columns].head(1000),hide_index=True,use_container_width=True,height=460)
-    render_master_inline_editor(emp, items)
+        st.info('현재 표시할 신청내역이 없습니다.')
+        return
+    frame = pd.DataFrame(items)
+    master_edit = emp['권한'].upper() == 'MASTER' and not test_context()
+    dept_choice = st.selectbox('부서 필터', ['전체'] + sorted(set(frame['수령부서'])), key='history_dept')
+    status_options = ['신청','출고','수령완료','반려','전체'] if master_edit else ['전체','신청','출고','수령완료','반려']
+    status_choice = st.selectbox('상태 필터', status_options, key='history_status')
+    if dept_choice != '전체':
+        frame = frame[frame['수령부서'] == dept_choice]
+    if status_choice != '전체':
+        frame = frame[frame['상태'] == status_choice]
+    rows = frame.head(1000).to_dict('records')
+    if not rows:
+        st.info('선택한 조건에 해당하는 신청내역이 없습니다.')
+        return
+    columns = ['신청일시','요청ID','수령부서','중분류','품목코드','품명','규격',
+               '심평원단위','상한금액','제조수입업소','신청단위','단위환산수량',
+               '신청수량','출고수량','상태','신청자','출고담당','수령담당','비고']
+    if master_edit and status_choice != '전체':
+        # The main management grid itself is editable. No separate expander.
+        editable = set(MASTER_EDIT_FIELDS[status_choice])
+        can_delete = status_choice in ('신청', '반려')
+        visible_columns = (['_삭제'] if can_delete else []) + columns
+        display_rows = []
+        for r in rows:
+            obj = {col: str(r.get(col, '')) for col in columns}
+            if can_delete:
+                obj['_삭제'] = False
+            display_rows.append(obj)
+        table = pd.DataFrame(display_rows, columns=visible_columns)
+        st.caption('✏️ 수정 가능한 칸을 표에서 직접 바꾸고 저장하세요. 수령완료된 수량은 재고 조정으로 정정합니다.'
+                   + (' 삭제할 신청행은 왼쪽 체크박스를 선택하세요.' if can_delete else ''))
+        edited = st.data_editor(
+            table, use_container_width=True, height=500, hide_index=True, num_rows='fixed',
+            disabled=[c for c in visible_columns if c not in editable and c != '_삭제'],
+            column_config={
+                '_삭제': st.column_config.CheckboxColumn('삭제 선택', help='신청 또는 반려 상태의 한 행만 삭제 가능'),
+                '요청ID': st.column_config.TextColumn('요청ID', width='medium'),
+                '품명': st.column_config.TextColumn('품명', width='large'),
+                '중분류': st.column_config.TextColumn('중분류', width='medium'),
+                '신청수량': st.column_config.TextColumn('신청수량'),
+                '출고수량': st.column_config.TextColumn('출고수량'),
+                '신청단위': st.column_config.TextColumn('신청단위'),
+                '단위환산수량': st.column_config.TextColumn('환산수량'),
+                '비고': st.column_config.TextColumn('비고', width='large'),
+            }, key='request_history_inline_' + status_choice + '_' + dept_choice
+        )
+        col_save, col_delete = st.columns([1, 1])
+        with col_save:
+            if st.button('변경사항 저장', type='primary', use_container_width=True,
+                         key='request_history_save_' + status_choice):
+                try:
+                    count = save_master_request_edits(rows, edited.to_dict('records'), status_choice, emp)
+                    if count:
+                        st.success(f'{count}건의 변경사항을 저장했습니다.')
+                        st.rerun()
+                    else:
+                        st.info('수정된 항목이 없습니다.')
+                except Exception as exc:
+                    st.error(str(exc) if isinstance(exc,(ValueError, PermissionError)) else safe_spreadsheet_error(exc))
+        with col_delete:
+            if can_delete:
+                marked = edited[edited['_삭제'] == True]
+                label = '선택한 1행 삭제' if len(marked) == 1 else '삭제할 1행 선택'
+                if st.button(label, use_container_width=True, disabled=len(marked) != 1,
+                             key='request_history_delete_' + status_choice):
+                    st.session_state['pending_request_delete'] = str(marked.iloc[0]['요청ID'])
+            else:
+                st.caption('출고·수령완료 행은 삭제할 수 없습니다.')
+        pending = st.session_state.get('pending_request_delete')
+        if pending:
+            target = next((r for r in rows if r['요청ID'] == pending), None)
+            if target is None or target['상태'] not in ('신청', '반려'):
+                st.session_state.pop('pending_request_delete', None)
+            else:
+                st.warning(f"요청ID {pending} · {target['품명']} · {target['신청수량']} {request_unit_label(target)} 삭제 확인")
+                yes, no = st.columns(2)
+                with yes:
+                    if st.button('이 1행 삭제 확정', type='primary', use_container_width=True):
+                        try:
+                            delete_master_request_row(target, emp)
+                            st.session_state.pop('pending_request_delete', None)
+                            st.success('선택한 신청행을 삭제했습니다.')
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(str(exc) if isinstance(exc,(ValueError, PermissionError)) else safe_spreadsheet_error(exc))
+                with no:
+                    if st.button('삭제 취소', use_container_width=True):
+                        st.session_state.pop('pending_request_delete', None)
+                        st.rerun()
+    else:
+        if master_edit and status_choice == '전체':
+            st.caption('전체 이력은 조회용입니다. 위 상태 필터를 선택하면 같은 표에서 수량을 바로 수정할 수 있습니다.')
+        st.dataframe(frame[columns].head(1000), hide_index=True, use_container_width=True, height=500)
     st.caption('신청 → MASTER 출고 → 부서 수령확인 후 해당 부서 재고에 반영됩니다.')
-
 
 def render_master_issue(emp,data):
     st.markdown('#### 신청 승인·출고 (MASTER)')
