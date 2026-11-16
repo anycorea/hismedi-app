@@ -323,41 +323,30 @@ def render_style():
     [data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {padding-top:0!important;}
     [data-testid="stSidebar"] [data-testid="stDivider"] {margin: .35rem 0!important;}
     [data-testid="stMain"] [data-testid="stVerticalBlock"] {scroll-margin-top:1.5rem;}
-    /* Three-dimensional file-folder tabs: legible at 100% and 125% scaling. */
-    [data-testid="stMain"] [data-testid="stTabs"] [role="tablist"] {
-        display:flex!important;align-items:flex-end!important;flex-wrap:wrap!important;
-        gap:12px!important;padding:15px 16px 0!important;margin:6px 0 20px!important;
-        background:#f0f4fa!important;border:1px solid #d4dfeb!important;
-        border-bottom:3px solid #3879b7!important;border-radius:11px 11px 0 0!important;
-        height:auto!important;min-height:76px!important;overflow:visible!important;
+    /* Consistent high-contrast, spaced tab-style navigation buttons. */
+    [data-testid="stMain"] [class*="st-key-hm_section_tab_"] button {
+        width:100%!important;min-height:57px!important;
+        font-size:18px!important;font-weight:750!important;
+        line-height:1.35!important;white-space:normal!important;
+        word-break:keep-all!important;padding:12px 18px!important;
+        border-radius:12px!important;border:2px solid #cbd8e7!important;
+        background:#f0f5fb!important;color:#264766!important;
+        box-shadow:0 2px 5px rgba(20,52,90,.06)!important;
     }
-    [data-testid="stMain"] [data-testid="stTabs"] [role="tablist"] button[role="tab"] {
-        min-width:145px!important;min-height:59px!important;max-width:100%!important;
-        padding:13px 23px!important;background:#e0e9f4!important;
-        border:1px solid #aebfd3!important;border-bottom:0!important;
-        border-radius:11px 11px 0 0!important;color:#263b53!important;
-        white-space:normal!important;overflow:visible!important;
-        flex:0 1 auto!important;line-height:1.4!important;box-shadow:0 2px 4px #163b5811!important;
+    [data-testid="stMain"] [class*="st-key-hm_section_tab_active_"] button {
+        background:#e7f1ff!important;color:#144f83!important;
+        border-color:#2475b8!important;box-shadow:inset 0 -4px 0 #2475b8!important;
     }
-    [data-testid="stMain"] [data-testid="stTabs"] button[role="tab"] p,
-    [data-testid="stMain"] [data-testid="stTabs"] button[role="tab"] span {
+    [data-testid="stMain"] [class*="st-key-hm_section_tab_"] button:hover {
+        border-color:#2879bc!important;background:#e7f1fc!important;
+    }
+    [data-testid="stMain"] [class*="st-key-hm_section_tab_"] button p {
         font-size:18px!important;font-weight:750!important;color:inherit!important;
-        white-space:normal!important;word-break:keep-all!important;line-height:1.45!important;
+        white-space:normal!important;word-break:keep-all!important;
     }
-    [data-testid="stMain"] [data-testid="stTabs"] [role="tablist"] button[role="tab"][aria-selected="true"] {
-        background:#fff!important;color:#154d7f!important;border:2px solid #3879b7!important;
-        border-bottom:3px solid #fff!important;margin-bottom:-3px!important;
-        box-shadow:0 -3px 0 #3879b7!important;
-    }
-    [data-testid="stMain"] [data-testid="stTabs"] [role="tablist"] button[role="tab"][aria-selected="true"] p {
-        font-weight:850!important;color:#154d7f!important;
-    }
-    [data-testid="stMain"] [data-testid="stTabs"] [data-baseweb="tab-highlight"],
-    [data-testid="stMain"] [data-testid="stTabs"] [data-baseweb="tab-border"] {display:none!important;}
-    [data-testid="stMain"] [data-testid="stTabs"] [role="tabpanel"] {padding-top:4px!important;}
-    @media(max-width:1200px){
-      [data-testid="stMain"] [data-testid="stTabs"] button[role="tab"] p{font-size:16px!important;}
-      [data-testid="stMain"] [data-testid="stTabs"] [role="tablist"] button[role="tab"] {padding:11px 15px!important;min-width:115px!important;}
+    @media(max-width:1100px) {
+      [data-testid="stMain"] [class*="st-key-hm_section_tab_"] button,
+      [data-testid="stMain"] [class*="st-key-hm_section_tab_"] button p {font-size:15px!important;}
     }
     /* Desktop left menu: full-width real buttons, same dimensions as logout. */
     [data-testid="stSidebar"] [class*="st-key-hm_nav_normal_"] button,
@@ -1883,17 +1872,27 @@ def pick_detail_row(frame, key, *, height=260, message='표에서 품목 한 행
 
 def material_selector(key_prefix, *, label='품목 검색', source='hospital', department='전체'):
     """Hospital favorites first, optional HIRA search only when user explicitly switches."""
-    catalog = (hospital_preferred_catalog() if source=='hospital'
-               else get_hira_items())
+    if source in ('listed', 'unlisted'):
+        catalog = hospital_preferred_catalog()
+        if not catalog.empty and '_관리구분' in catalog.columns:
+            group = '병원 사용 치료재료' if source == 'listed' else '병원 자체품목'
+            catalog = catalog.loc[catalog['_관리구분'] == group].copy()
+    elif source == 'hospital':
+        catalog = hospital_preferred_catalog()
+    else:
+        catalog = get_hira_items()
     if catalog.empty:
-        st.info('검색 가능한 품목이 없습니다.' + (' 먼저 심평원 DB를 등록하세요.' if source=='hira' else ' 병원 사용품목 등록을 확인하세요.'))
+        st.info('검색 가능한 품목이 없습니다.' + (' 먼저 심평원 DB를 등록하세요.' if source=='hira' else ' 병원 등록품목이 아직 없습니다. 해당 등록 메뉴에서 먼저 등록해 주세요.'))
         return None
     keyword = st.text_input(label, key=key_prefix+'_term', placeholder='업체코드 · 심평원코드 · 품명 · 규격 · 제조수입업소')
     if not keyword.strip():
         st.caption('검색어를 입력하면 상세정보 표가 표시됩니다. 원하는 행을 클릭하세요.')
         return None
-    if source == 'hospital':
-        found = hospital_used_search(keyword,department)
+    if source in ('hospital', 'listed', 'unlisted'):
+        found = hospital_used_search(keyword, department)
+        if source != 'hospital' and not found.empty and '_관리구분' in found.columns:
+            group = '병원 사용 치료재료' if source == 'listed' else '병원 자체품목'
+            found = found.loc[found['_관리구분'] == group]
     else:
         terms = [x.casefold() for x in keyword.split() if x]
         fields = [col for col in ['코드','품명','규격','중분류','제조수입업소'] if col in catalog]
@@ -1942,9 +1941,21 @@ def render_request_entry(emp, data):
         return
     department = st.selectbox('신청·수령 부서', depts, key='req_department')
     st.markdown('**① 기존 품목부터 검색 (필수)**')
-    source_choice=st.radio('검색 범위', ['병원 사용품목·자체품목','심평원 전체품목'],horizontal=True,key='req_source')
-    source='hospital' if source_choice=='병원 사용품목·자체품목' else 'hira'
-    item = material_selector('req_item', label='품목 검색', source=source, department=department if source=='hospital' else '전체')
+    source_choice = section_tab_buttons('request_source', [
+        '① 병원사용(심평원 등재)',
+        '② 병원사용(심평원 미등재)',
+        '③ 심평원 전체품목 검색',
+    ])
+    source = ('listed' if source_choice.startswith('①') else
+              'unlisted' if source_choice.startswith('②') else 'hira')
+    if source == 'listed':
+        st.caption('기본 검색: 병원에서 등록한 심평원 등재제품을 업체코드·업체명·품명·규격으로 검색합니다.')
+    elif source == 'unlisted':
+        st.caption('심평원 미등재 병원 자체품목을 검색합니다.')
+    else:
+        st.caption('기존 병원품목에서 찾지 못했을 때 심평원 전체품목을 검색하세요.')
+    item = material_selector('req_item', label='품목 검색', source=source,
+                             department=department if source != 'hira' else '전체')
     if item is not None:
         detail = {k: item.get(k, '') for k in ['중분류','코드','품명','규격','단위','상한금액','제조수입업소']}
         detail['단위'] = display_unit(detail['단위'])
@@ -2709,18 +2720,43 @@ def render_unlisted_bulk(emp):
         st.error(str(exc) if isinstance(exc,(ValueError,PermissionError)) else safe_spreadsheet_error(exc))
 
 
+def section_tab_buttons(section: str, labels: list[str]) -> str:
+    """Clear, fully separated tabs using real Streamlit buttons (not fragile st.tabs CSS)."""
+    state_key = f"hm_section_choice_{section}"
+    if st.session_state.get(state_key) not in labels:
+        st.session_state[state_key] = labels[0]
+    cols = st.columns(len(labels), gap="large")
+    for index, (label, col) in enumerate(zip(labels, cols)):
+        selected = st.session_state[state_key] == label
+        with col:
+            with st.container(key=f"hm_section_tab_{'active_' if selected else ''}{section}_{index}"):
+                if st.button(label, key=f"hm_section_btn_{section}_{index}",
+                             use_container_width=True):
+                    if not selected:
+                        st.session_state[state_key] = label
+                        st.rerun()
+    st.divider()
+    return st.session_state[state_key]
+
+
 def render_listed_management(emp, data):
-    tab_view, tab_one, tab_bulk = st.tabs(['조회', '개별 등록', 'CSV 일괄 등록'])
-    with tab_view:render_used_lookup()
-    with tab_one:render_hospital_used_admin(emp,data)
-    with tab_bulk:render_used_bulk(emp)
+    selected = section_tab_buttons('listed', ['품목 조회', '개별 등록', 'CSV 일괄 등록'])
+    if selected == '품목 조회':
+        render_used_lookup()
+    elif selected == '개별 등록':
+        render_hospital_used_admin(emp, data)
+    else:
+        render_used_bulk(emp)
 
 
 def render_unlisted_management(emp, data):
-    tab_view, tab_one, tab_bulk=st.tabs(['조회','개별 등록','CSV 일괄 등록'])
-    with tab_view:render_unlisted_lookup()
-    with tab_one:render_hospital_register(emp,data)
-    with tab_bulk:render_unlisted_bulk(emp)
+    selected = section_tab_buttons('unlisted', ['품목 조회', '개별 등록', 'CSV 일괄 등록'])
+    if selected == '품목 조회':
+        render_unlisted_lookup()
+    elif selected == '개별 등록':
+        render_hospital_register(emp, data)
+    else:
+        render_unlisted_bulk(emp)
 
 
 def main():
