@@ -284,14 +284,17 @@ BUILDING_FILE = BASE_DIR / "Hismedi_building.jpg"
 def render_style():
     st.markdown("""
     <style>
-    .block-container {max-width: 1760px; padding-top: .8rem; padding-bottom: 1.8rem;}
+    .block-container {max-width: 1760px; padding-top: 2.1rem; padding-bottom: 1.8rem;}
     h1 {font-size: 1.45rem !important; margin-bottom: .35rem !important;}
     h2 {font-size: 1.18rem !important;}
     h3 {font-size: 1.03rem !important;}
     div[data-testid="stAlert"] {font-size: .94rem;}
-    div[data-testid="stSidebar"] div[data-testid="stVerticalBlock"] {gap: .55rem;}
+    div[data-testid="stSidebar"] div[data-testid="stVerticalBlock"] {gap: .27rem;}
     [data-testid="stSidebar"] [data-testid="stImage"] img {object-fit:contain!important;object-position:center center!important;max-width:100%!important;height:auto!important;}
-    [data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {padding-top:.4rem!important;}
+    [data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {padding-top:0!important;}
+    [data-testid="stSidebar"] [data-testid="stDivider"] {margin: .35rem 0!important;}
+    [data-testid="stMain"] [data-testid="stVerticalBlock"] {scroll-margin-top:1.5rem;}
+    [data-testid="stMain"] [data-baseweb="tab-list"] {padding-top:5px!important; overflow:visible!important;}
     /* Desktop navigation: entire row is a clearly clickable rectangular button. */
     [data-testid="stSidebar"] [role="radiogroup"] {display:flex!important;flex-direction:column!important;gap:6px!important;width:100%!important;}
     [data-testid="stSidebar"] [role="radiogroup"] label {
@@ -321,7 +324,7 @@ def render_style():
     .hm-login-label {font-weight:750;font-size:15px;white-space:nowrap;}
     .hm-login-help {font-size:12px;color:#718096;}
     @media (max-width:1000px) {
-        .block-container {padding-left:1.1rem;padding-right:1.1rem;}
+        .block-container {padding-left:1.1rem;padding-right:1.1rem;padding-top:1.65rem;}
         .hm-login-photo img {max-height:42vh;}
     }
     .hm-head-title {font-size:1.45rem;font-weight:730;line-height:1.3;letter-spacing:-.035em;}
@@ -1506,6 +1509,43 @@ def render_material_menu(choice, emp, data):
         with tabs[0]:render_request_history(emp,data)
         with tabs[1]:render_stock_overview(emp,data)
 
+def render_user_preview(choice, emp, data):
+    """Safe read-only UI of an actual USER's authorized departments.
+
+    The real session remains authenticated as MASTER; no workflow write control
+    is ever rendered in this mode.
+    """
+    st.info(f"🔎 USER 화면 테스트 — {emp['이름']} / {emp['소속부서']} · 읽기 전용 (실제 MASTER 로그인 유지)")
+    st.caption("신청·출고·수령·재고변경·PIN 변경은 테스트 중 저장되지 않습니다.")
+    if choice == '내 정보':
+        st.write({'사번': emp['사번'], '이름': emp['이름'], '소속부서': emp['소속부서'],
+                  '관리부서': ', '.join(material_depts(emp, data)), '권한': 'USER'})
+    elif choice == '품목정보':
+        render_hira_search()
+    elif choice == '물품관리 현황':
+        render_work_summary(emp, data)
+    elif choice in ('물품 신청', '물품 수령'):
+        if choice == '물품 수령':
+            st.markdown('#### 부서 물품 수령 대기 (조회 전용)')
+            items = visible_requests(emp, data, ['출고'])
+        else:
+            st.markdown('#### 물품 신청 현황 (조회 전용)')
+            items = visible_requests(emp, data)
+        if items:
+            columns = ['신청일시', '요청ID', '수령부서', '품목코드', '품명', '신청수량', '출고수량', '상태']
+            st.dataframe(pd.DataFrame(items)[columns].head(1000), hide_index=True, use_container_width=True)
+        else:
+            st.info('조회할 신청 내역이 없습니다.')
+        st.caption('실제 신청·수령 동작 테스트는 USER 본인 계정에서 진행합니다.')
+    elif choice == '재고관리':
+        st.markdown('#### 관리부서 재고현황 (조회 전용)')
+        render_stock_overview(emp, data)
+    elif choice == '통계 및 보고서':
+        render_work_summary(emp, data)
+    else:
+        st.info('해당 작업은 읽기 전용 테스트에서 수행하지 않습니다.')
+
+
 def main():
     render_style()
     try:
@@ -1613,49 +1653,94 @@ def main():
         render_pin_change(emp)
         st.stop()
 
+    # Never modify the authenticated principal when previewing another account.
+    principal = emp
+    is_master = role == 'MASTER'
+    preview_id = st.session_state.get('material_preview_user') if is_master else None
+    targets = [r for r in data if is_active(r) and r['권한'].upper() == 'USER']
+    target = next((r for r in targets if r['사번'] == preview_id), None)
+    if preview_id and target is None:
+        st.session_state.pop('material_preview_user', None)
+    preview_active = target is not None
+    shown_emp = target if preview_active else principal
+    shown_role = 'USER' if preview_active else role
+
     with st.sidebar:
         if BUILDING_FILE.is_file():
-            # 병원 외관 사진은 작은 크기로만 표시하며 업무 메뉴 공간을 확보합니다.
-            photo_left, photo, photo_right = st.columns([0.28, 1, 0.28])
+            # The photo is compact so the entire menu fits typical laptop displays.
+            photo_left, photo, photo_right = st.columns([.53, 1, .53])
             with photo:
                 st.image(str(BUILDING_FILE), use_container_width=True)
-        st.caption(f"{emp['이름']} · {emp['소속부서']} · {role}")
+        st.caption(f"{principal['이름']} · {principal['소속부서']} · {role}")
+        if preview_active:
+            st.info(f"테스트 중: {shown_emp['이름']} · {shown_emp['소속부서']}")
+        menu = ['물품관리 현황', '품목정보', '물품 신청', '물품 수령', '재고관리',
+                '통계 및 보고서', '내 정보']
+        if not preview_active:
+            menu += ['PIN 변경']
+        if is_master and not preview_active:
+            menu.insert(3, '출고관리')
+            menu += ['직원 관리', '심평원 DB 업데이트']
+        if st.session_state.get('material_nav') not in menu:
+            st.session_state['material_nav'] = menu[0]
+        choice = st.radio('업무 메뉴', menu, label_visibility='collapsed', key='material_nav')
         st.divider()
-        menu = ["물품관리 현황", "품목정보", "물품 신청", "물품 수령", "재고관리", "통계 및 보고서", "내 정보", "PIN 변경"]
-        if role == "MASTER":
-            menu.insert(3, "출고관리")
-        if role == "MASTER":
-            menu += ["직원 관리", "심평원 DB 업데이트"]
-        choice = st.radio("업무 메뉴", menu, label_visibility="collapsed", key="material_nav")
-        st.divider()
-        if st.button("🔄 데이터 동기화", use_container_width=True, help="Google Sheets의 최신 직원·품목자료를 다시 읽습니다."):
-            # Refresh of cache only; never pushes Google Drive source files automatically.
+        if st.button('🔄 데이터 동기화', use_container_width=True,
+                     help='Google Sheets의 최신 직원·품목정보를 다시 읽습니다.'):
             material_refresh()
             employees.clear()
             auth_rows.clear()
-            st.session_state.pop("hira_files", None)
-            st.session_state.pop("hira_import_preview", None)
-            st.toast("동기화를 요청했습니다. 최신 Google Sheets 자료를 다시 읽습니다.")
+            st.session_state.pop('hira_files', None)
+            st.session_state.pop('hira_import_preview', None)
             st.rerun()
-        if st.button("로그아웃", use_container_width=True):
+        if st.button('로그아웃', use_container_width=True):
+            st.session_state.pop('material_preview_user', None)
             sign_out()
+        if is_master:
+            st.divider()
+            st.markdown('**USER 화면 테스트**')
+            if targets:
+                choices = {r['사번']: f"{r['이름']} · {r['소속부서']} ({r['사번']})" for r in targets}
+                options = list(choices)
+                selected_user = st.selectbox('테스트 직원', options,
+                                             index=options.index(preview_id) if preview_id in options else 0,
+                                             format_func=lambda key: choices[key], key='material_preview_pick')
+                if st.button('USER 화면으로 보기', use_container_width=True,
+                             disabled=preview_active and selected_user == preview_id):
+                    st.session_state['material_preview_user'] = selected_user
+                    st.session_state['material_nav'] = '물품관리 현황'
+                    st.rerun()
+                if preview_active and st.button('↩ MASTER 화면으로 복귀', use_container_width=True,
+                                                type='primary'):
+                    st.session_state.pop('material_preview_user', None)
+                    st.session_state['material_nav'] = '물품관리 현황'
+                    st.rerun()
+            else:
+                st.caption('테스트할 USER가 없습니다.')
 
-    # 로그인 후 오른쪽 작업영역에는 로고·제목 헤더를 넣지 않습니다.
-    if choice in ("물품관리 현황", "물품 신청", "물품 수령", "재고관리", "출고관리", "통계 및 보고서"):
+    # The top padding applies to EVERY right-side menu including receiving.
+    if preview_active:
         try:
-            render_material_menu(choice, emp, data)
+            render_user_preview(choice, shown_emp, data)
+        except Exception as exc:
+            LOGGER.exception('Preview read failed')
+            st.error(safe_spreadsheet_error(exc))
+    elif choice in ('물품관리 현황', '물품 신청', '물품 수령', '재고관리',
+                    '출고관리', '통계 및 보고서'):
+        try:
+            render_material_menu(choice, principal, data)
         except Exception as exc:
             LOGGER.exception('Material workflow failed')
             st.error(str(exc) if isinstance(exc, (ValueError, PermissionError)) else safe_spreadsheet_error(exc))
-    elif choice == "품목정보":
+    elif choice == '품목정보':
         render_hira_search()
-    elif choice == "내 정보":
-        render_personal_info(emp, data)
-    elif choice == "PIN 변경":
-        render_pin_change(emp)
-    elif choice == "직원 관리" and role == "MASTER":
-        render_employee_admin(emp, data)
-    elif choice == "심평원 DB 업데이트" and role == "MASTER":
+    elif choice == '내 정보':
+        render_personal_info(principal, data)
+    elif choice == 'PIN 변경':
+        render_pin_change(principal)
+    elif choice == '직원 관리' and is_master:
+        render_employee_admin(principal, data)
+    elif choice == '심평원 DB 업데이트' and is_master:
         render_hira_import()
 
     st.caption("HISMEDI · 치료재료 관리 | PC용 · Google Sheets 기록 기반")
