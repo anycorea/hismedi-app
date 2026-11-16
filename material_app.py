@@ -261,6 +261,35 @@ def render_style():
     div[data-testid="stSidebar"] div[data-testid="stVerticalBlock"] {gap: .55rem;}
     [data-testid="stSidebar"] [data-testid="stImage"] img {object-fit:contain!important;object-position:center center!important;max-width:100%!important;height:auto!important;}
     [data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {padding-top:.4rem!important;}
+    /* Desktop navigation: entire row is a clearly clickable rectangular button. */
+    [data-testid="stSidebar"] [role="radiogroup"] {display:flex!important;flex-direction:column!important;gap:6px!important;width:100%!important;}
+    [data-testid="stSidebar"] [role="radiogroup"] label {
+        display:flex!important;align-items:center!important;width:100%!important;
+        min-height:39px!important;padding:8px 12px!important;
+        border:1px solid #d5deea!important;border-radius:7px!important;
+        background:#fff!important;cursor:pointer!important;box-sizing:border-box!important;
+        transition:background-color .12s,border-color .12s!important;
+    }
+    [data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) {
+        border-color:#2876b8!important;background:#eaf3fc!important;
+        box-shadow:inset 3px 0 0 #2876b8!important;
+    }
+    [data-testid="stSidebar"] [role="radiogroup"] label:hover {background:#f1f6fc!important;}
+    [data-testid="stSidebar"] [role="radiogroup"] label p {
+        font-size:14px!important;font-weight:650!important;color:#183753!important;
+        white-space:normal!important;line-height:1.35!important;
+    }
+    [data-testid="stSidebar"] [role="radiogroup"] label [data-testid="stMarkdownContainer"] {width:100%!important;}
+    [data-testid="stSidebar"] [role="radiogroup"] label [data-baseweb="radio"] {display:none!important;}
+    [data-testid="stSidebar"] {min-width:250px!important;max-width:290px!important;}
+    /* Constrain login photo independently of the visitor's display resolution. */
+    .hm-login-photo {width:100%;display:flex;justify-content:center;align-items:center;min-height:200px;}
+    .hm-login-photo img {display:block;max-width:100%;width:auto;height:auto;max-height:min(62vh,580px);object-fit:contain;border-radius:8px;}
+    .hm-login-heading {font-size:clamp(20px,1.7vw,27px);font-weight:750;margin-bottom:12px;}
+    @media (max-width:1000px) {
+        .block-container {padding-left:1.1rem;padding-right:1.1rem;}
+        .hm-login-photo img {max-height:42vh;}
+    }
     .hm-head-title {font-size:1.45rem;font-weight:730;line-height:1.3;letter-spacing:-.035em;}
     .hm-head-note {font-size:.87rem;color:gray;margin-top:.25rem;}
     .hm-caption {font-size:.85rem;color:gray;}
@@ -311,14 +340,22 @@ def render_header(subtitle: str = "병원 치료재료 · 부서별 물품관리
     st.divider()
 
 
+@st.cache_data(show_spinner=False)
+def encoded_building(path: str) -> str:
+    return base64.b64encode(Path(path).read_bytes()).decode("ascii")
+
+
 def render_login_visual():
+    """Responsive desktop login: the photo stays bounded on smaller monitors."""
     if BUILDING_FILE.is_file():
-        with st.container():
-            image_col, form_col = st.columns([1.05, 1], gap="large", vertical_alignment="center")
-            with image_col:
-                st.image(str(BUILDING_FILE), use_container_width=True)
-                st.caption("히즈메디병원")
-            return form_col
+        image_col, form_col = st.columns([1, 1.05], gap="large", vertical_alignment="center")
+        with image_col:
+            st.markdown(
+                '<div class="hm-login-photo"><img alt="히즈메디병원 외관" '
+                'src="data:image/jpeg;base64,' + encoded_building(str(BUILDING_FILE)) + '"></div>',
+                unsafe_allow_html=True,
+            )
+        return form_col
     return st.container()
 
 
@@ -878,9 +915,11 @@ def main():
         st.stop()
 
     if "employee_id" not in st.session_state:
-        render_header("직원 로그인")
+        # 로그인 화면에서는 상단 로고/제목 반복 없이 간결하게 표시합니다.
+        st.markdown('<div style="height:clamp(8px,3vh,32px)"></div>', unsafe_allow_html=True)
         with render_login_visual():
-            st.markdown("#### 직원 로그인")
+            st.markdown('<div class="hm-login-heading">HISMEDI 치료재료 관리</div>', unsafe_allow_html=True)
+            st.markdown("**직원 로그인**")
             with st.form("login"):
                 identifier = st.text_input("사번 (6자리)", max_chars=6)
                 pin = st.text_input("PIN", type="password")
@@ -921,8 +960,8 @@ def main():
 
     with st.sidebar:
         if BUILDING_FILE.is_file():
-            # PC 사이드바 상단에 건물 사진만 작게 표시합니다.
-            photo_left, photo, photo_right = st.columns([0.22, 1, 0.22])
+            # 병원 외관 사진은 작은 크기로만 표시하며 업무 메뉴 공간을 확보합니다.
+            photo_left, photo, photo_right = st.columns([0.28, 1, 0.28])
             with photo:
                 st.image(str(BUILDING_FILE), use_container_width=True)
         st.caption(f"{emp['이름']} · {emp['소속부서']} · {role}")
@@ -930,8 +969,15 @@ def main():
         menu = ["물품관리 현황", "품목정보", "입고관리", "출고관리", "재고관리", "재고실사", "통계 및 보고서", "내 정보", "PIN 변경"]
         if role == "MASTER":
             menu += ["직원 관리", "심평원 DB 업데이트"]
-        choice = st.radio("업무 메뉴", menu, label_visibility="collapsed")
+        choice = st.radio("업무 메뉴", menu, label_visibility="collapsed", key="material_nav")
         st.divider()
+        if st.button("🔄 데이터 동기화", use_container_width=True, help="Google Sheets의 최신 직원·품목자료를 다시 읽습니다."):
+            # Read-only cache refresh; does not alter the underlying Sheets records.
+            hira_search_cached.clear()
+            st.session_state.pop("hira_files", None)
+            st.session_state.pop("hira_import_preview", None)
+            st.toast("동기화를 요청했습니다. 최신 Google Sheets 자료를 다시 읽습니다.")
+            st.rerun()
         if st.button("로그아웃", use_container_width=True):
             sign_out()
 
