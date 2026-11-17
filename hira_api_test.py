@@ -183,7 +183,7 @@ st.caption('병원 PC 직접 POST 조회 시험 · Google Sheets 및 기존 HISM
 with st.form('lookup_form'):
     ca, cb = st.columns([4, 1], vertical_alignment='bottom')
     with ca:
-        code = st.text_input('치료재료코드', value='G8207118', max_chars=32)
+        code = st.text_input('치료재료코드', value='', max_chars=32)
     with cb:
         submit = st.form_submit_button('현재 정보 + 변경이력 조회', type='primary', use_container_width=True)
 if submit:
