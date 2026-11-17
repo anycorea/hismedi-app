@@ -163,9 +163,19 @@ def official_lookup(code: str) -> tuple[list[dict], int | None]:
 
 st.set_page_config(page_title='HISMEDI 치료재료 이력 직접조회', layout='wide')
 st.markdown('''<style>
-.block-container {max-width:1500px;padding-top:1.5rem;padding-bottom:2rem}
-h1 {font-size:1.65rem!important;margin-bottom:0.6rem}
-[data-testid="stTabs"] button p {font-size:1rem;font-weight:700}
+/* Keep a safe top zone below Streamlit's floating toolbar on varying monitors. */
+[data-testid="stMainBlockContainer"], .block-container {
+    max-width:1500px!important;
+    padding-top:4.75rem!important;
+    padding-bottom:2.5rem!important;
+}
+/* Avoid collapsing the first heading into the Streamlit toolbar. */
+[data-testid="stMain"] .block-container > div:first-child {margin-top:0!important;}
+[data-testid="stTabs"] button p {font-size:1.05rem!important;font-weight:700!important;}
+[data-testid="stTabs"] [role="tablist"] {gap:1.25rem!important;flex-wrap:wrap;}
+@media (max-height:760px) {
+    [data-testid="stMainBlockContainer"], .block-container {padding-top:3.5rem!important;}
+}
 </style>''', unsafe_allow_html=True)
 st.markdown('### 심평원 치료재료대정보 · 현재 정보 및 변경이력')
 st.caption('병원 PC 직접 POST 조회 시험 · Google Sheets 및 기존 HISMEDI 업무앱은 변경하지 않습니다.')
