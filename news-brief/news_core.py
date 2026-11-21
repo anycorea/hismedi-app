@@ -237,12 +237,20 @@ def parse_source(entry, media,cat):
     original=safe_url(entry.get('link',''))
     if not title or not original: return None
     summary_html = str(entry.get('summary',''))
+    # Some publisher RSS feeds include article content separately. Prefer it
+    # when it is genuinely publisher-authored text (not Google News link lists).
+    content_blocks = entry.get('content') or []
+    if content_blocks and isinstance(content_blocks, list):
+        candidate = max((str(c.get('value','')) for c in content_blocks if isinstance(c,dict)),
+                        key=lambda t: len(clean_text(t)), default='')
+        if len(clean_text(candidate)) > len(clean_text(summary_html)):
+            summary_html = candidate
     # Preserve a substantive publisher excerpt when available, but never a Google
     # News related-headline list. This makes genuine RSS descriptions usable.
-    snippet = clean_text(summary_html)[:1200]
+    snippet = clean_text(summary_html)[:2400]
     linked_headlines = len(BeautifulSoup(summary_html, 'html.parser').find_all('a'))
     if 'news.google.com' in str(media.get('RSS_URL', '')) and linked_headlines >= 2:
-        snippet = ''
+        snippet = ''  # these are unrelated headlines, not article evidence
     media_code=str(media.get('언론사코드','')).strip()
     # Google RSS embeds original publisher name after the title; keep original title unmodified.
     publisher=clean_text(entry.get('source',{}).get('title','')) if entry.get('source') else ''
@@ -534,9 +542,9 @@ def _article_context(article):
     Returns a source label and a bounded extract, not persistent full-text storage.
     """
     raw = str(article.get('요약') or '').strip()
-    if raw.startswith('AI_SUMMARY_V3::'):
+    if raw.startswith('AI_SUMMARY_V4::'):
         return 'cached', raw.split('::', 1)[1]
-    if raw.startswith(('AI_SUMMARY_V1::', 'AI_SUMMARY_V2::')):
+    if raw.startswith(('AI_SUMMARY_V1::', 'AI_SUMMARY_V2::', 'AI_SUMMARY_V3::')):
         raw = ''  # Older summaries were not validated against publisher headlines.
     url = safe_url(article.get('원문URL', ''))
     if not url:
@@ -652,16 +660,48 @@ def _article_context(article):
     return ('rss', raw[:1800]) if len(raw) >= 180 else ('', '')
 
 
-def summarize_article(article, api_key, model='openrouter/free'):
-    """Evidence-based article explanation; refuse title-only pseudo-summaries.
+def _summary_quality(output, source, title):
+    """Reject excerpts, truncated output, echoing headlines and hollow summaries.
 
-    This function only uses publicly accessible article text or substantial
-    publisher-provided descriptions; it does not infer unseen facts from titles.
+    These checks limit false positives; they do not prove factual accuracy.
+    """
+    text = clean_text(output).strip().strip('"“”')
+    source = clean_text(source)
+    title = clean_text(title)
+    if len(text) < 115 or len(text) > 1100:
+        return False, 'TOO_SHORT_OR_LONG'
+    # Do not show a partial quote that ends mid-sentence.
+    if not re.search(r'[.!?。！？][\"”’)]?\s*$', text):
+        return False, 'TRUNCATED'
+    # Typical free-model responses are sometimes copied directly from the source.
+    normalized_text = re.sub(r'\s+', '', text)
+    normalized_source = re.sub(r'\s+', '', source)
+    if len(normalized_text) >= 65 and normalized_text[:min(110,len(normalized_text))] in normalized_source:
+        return False, 'COPIED_EXCERPT'
+    if len(normalized_text) >= 85 and normalized_text in normalized_source:
+        return False, 'COPIED_EXCERPT'
+    # Reject a headline-only rewrite without article detail.
+    if len(text) < 175 and SequenceMatcher(None, _headline_normalized(text),
+                                           _headline_normalized(title)).ratio() > .63:
+        return False, 'HEADLINE_REWRITE'
+    sentences = [x.strip() for x in re.split(r'(?<=[.!?。！？])\s+', text) if x.strip()]
+    normalized_sentences = [re.sub(r'\W+', '', t) for t in sentences]
+    if len(normalized_sentences) > 1 and len(set(normalized_sentences)) < len(normalized_sentences):
+        return False, 'REPEATED_SENTENCE'
+    if len(sentences) < 2:
+        return False, 'NOT_ENOUGH_SENTENCES'
+    return True, ''
+
+
+def summarize_article(article, api_key, model='openrouter/free'):
+    """Only summarize adequately sourced article text, not just a headline.
+
+    Fails closed and never stores model output that does not pass quality checks.
     """
     if model != 'openrouter/free':
         raise ValueError('무료 모델만 허용합니다.')
     raw = str(article.get('요약') or '').strip()
-    if raw.startswith('AI_SUMMARY_V3::'):
+    if raw.startswith('AI_SUMMARY_V4::'):
         return raw.split('::', 1)[1]
     title = clean_text(article.get('제목', ''))[:220]
     if not title:
@@ -669,35 +709,40 @@ def summarize_article(article, api_key, model='openrouter/free'):
     source_kind, source_text = _article_context(article)
     if source_kind == 'cached':
         return source_text
-    if not source_text:
-        raise ValueError('ARTICLE_CONTENT_UNAVAILABLE')
+    # A short description cannot support the detailed contextual summary the user requested.
+    minimum = 430 if source_kind == 'article' else 350
+    if len(clean_text(source_text)) < minimum:
+        raise ValueError('ARTICLE_CONTENT_INSUFFICIENT')
     prompt = (
-        '당신은 한국어 뉴스 편집자입니다. 다음 기사 자료만 근거로 독자가 제목만 봤을 때 알 수 없는 '
-        '핵심 정보를 쉽고 명확하게 설명하세요. 핵심 사실(누가 무엇을 언제 어떻게), 구체적 배경·수치·발언, '
-        '독자에게 미치는 영향 중 자료에 있는 것만 선택하여 총 3~5문장으로 쓰세요. '
-        '약 250~450자 내외를 목표로 하되 정보가 부족하면 짧게 답하세요. '
-        '제목을 바꿔 쓰는 식의 반복은 금지합니다. 기사에 없는 숫자나 배경, 예측은 절대 만들지 마세요. '
-        '내용이 빈약해 실질적 추가 정보를 전달할 수 없다면 정확히 "내용 부족"이라고만 답하세요. '
-        'AI 요약 등의 머리말, 마크다운, 출처 URL은 넣지 마세요.\n'
-        + json.dumps({'제목': title, '자료종류': source_kind, '본문발췌': source_text[:5300]}, ensure_ascii=False)
+        '한국어 뉴스 전문 편집자 역할입니다. 주어진 본문에서 확인할 수 있는 내용만 사용하세요.\n'
+        '독자는 제목을 이미 읽었습니다. 제목을 다시 말하지 말고, 본문에서 확인된 구체적 사실을 설명하세요.\n'
+        '첫 문장에는 가장 중요한 실제 사실을, 이후에는 배경 및 경과, 수치·일정·발언, 직접적 영향 중 '
+        '본문에 나온 사실만 간결하게 작성하세요. 3~5개의 완결된 한국어 문장, 약 200~400자.\n'
+        '자료에 없는 사실이나 예상, 일반론은 추가하지 마세요. 문장을 원문에서 복사하지 마세요.\n'
+        '짧은 자료라면 있는 사실만 사용하되 실질적 핵심 정보가 없다면 정확히 내용 부족이라고 답하세요.\n'
+        '제목·머리말·불릿·마크다운·출처 URL 없이 본문 문장만 반환하세요.\n'
+        + json.dumps({'기사제목': title, '자료유형': source_kind,
+                      '확인된기사내용': source_text[:5700]}, ensure_ascii=False)
     )
     try:
         response = requests.post('https://openrouter.ai/api/v1/chat/completions',
             headers={'Authorization': 'Bearer ' + api_key.strip(),
                      'Content-Type': 'application/json', 'X-Title': 'News Brief'},
-            json={'model': 'openrouter/free',
-                  'messages': [{'role': 'user', 'content': prompt}],
-                  'temperature': .1, 'max_tokens': 650, 'stream': False},
-            timeout=(5, 35))
+            json={'model': model, 'messages': [{'role': 'user', 'content': prompt}],
+                  'temperature': .15, 'max_tokens': 950, 'stream': False},
+            timeout=(5, 40))
         if response.status_code in (402, 429):
-            raise RuntimeError('무료 AI 사용 한도에 도달했거나 현재 사용 가능한 모델이 없습니다.')
+            raise RuntimeError('무료 AI의 사용 한도에 도달했습니다.')
         response.raise_for_status()
         message = response.json()['choices'][0]['message']['content']
         if isinstance(message, list):
             message = ' '.join(str(part.get('text', '')) for part in message if isinstance(part, dict))
-        output = clean_text(message).strip().strip('"“”')[:800]
-        if not output or output == '내용 부족' or len(output) < 45:
+        output = clean_text(message).strip().strip('"“”')
+        if output == '내용 부족':
             raise ValueError('ARTICLE_CONTENT_INSUFFICIENT')
+        ok, reason = _summary_quality(output, source_text, title)
+        if not ok:
+            raise ValueError('ARTICLE_SUMMARY_QUALITY_' + reason)
         return output
-    except (requests.RequestException, KeyError, IndexError, TypeError) as exc:
+    except (requests.RequestException, KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
         raise RuntimeError('기사 요약 생성 실패') from exc

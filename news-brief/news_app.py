@@ -494,7 +494,7 @@ def header_menu():
 def render_article_summary(article):
     """Run AI only on an explicit article click; persist once per article."""
     value = str(article.get('요약') or '').strip()
-    cached = value.startswith('AI_SUMMARY_V3::')
+    cached = value.startswith('AI_SUMMARY_V4::')
     if cached:
         st.markdown('<div class="article-explainer">' + esc(value.split('::', 1)[1])
                     + '</div>', unsafe_allow_html=True)
@@ -517,7 +517,7 @@ def render_article_summary(article):
                     with st.spinner('선택한 기사 내용을 확인하는 중…'):
                         brief = summarize_article(article, token)
                     persisted = patch_record(book(), 'News', '뉴스ID', article['뉴스ID'],
-                                             {'요약': 'AI_SUMMARY_V3::' + brief,
+                                             {'요약': 'AI_SUMMARY_V4::' + brief,
                                               '원문URL': article.get('_resolved_url') or article.get('원문URL', '')})
                     if persisted:
                         append_records(book(), 'Collection_Log', [dict(zip(HEADERS['Collection_Log'],
@@ -534,7 +534,9 @@ def render_article_summary(article):
                     elif str(exc) == 'ARTICLE_SOURCE_LINK_UNRESOLVED':
                         st.caption('Google 뉴스에서 언론사 원문 주소를 확인하지 못했습니다.')
                     elif str(exc) == 'ARTICLE_CONTENT_INSUFFICIENT':
-                        st.caption('원문에서 요약에 필요한 내용이 충분히 확보되지 않았습니다.')
+                        st.caption('기사 본문이 충분하지 않아 정확한 요약을 제공할 수 없습니다.')
+                    elif str(exc).startswith('ARTICLE_SUMMARY_QUALITY_'):
+                        st.caption('AI가 정확하고 완결된 요약을 만들지 못해 표시하지 않았습니다.')
                     else:
                         st.caption('기사 내용 확인 중 오류가 발생했습니다.')
                 except RuntimeError as exc:
