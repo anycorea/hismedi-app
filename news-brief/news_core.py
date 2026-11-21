@@ -7,6 +7,7 @@ import os
 import re
 import time
 import random
+from difflib import SequenceMatcher
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import quote
 from datetime import datetime, timezone, timedelta
@@ -437,6 +438,20 @@ def _resolve_google_news_url(url):
     return url
 
 
+def _title_matches(requested_title, page_title):
+    """Reject clearly unrelated pages; allow publisher prefixes and headline edits."""
+    def normalize(value):
+        value = clean_text(value).casefold()
+        value = re.sub(r'\s*[-|–]\s*(연합뉴스|중앙일보|동아일보|mbc|jtbc|네이버 뉴스).*$', '', value, flags=re.I)
+        return re.sub(r'[^0-9a-z가-힣]+', '', value)
+    a, b = normalize(requested_title), normalize(page_title)
+    if not a or not b:
+        return False
+    if len(a) >= 14 and (a in b or b in a):
+        return True
+    return SequenceMatcher(None, a, b).ratio() >= 0.53
+
+
 def _article_context(article):
     """Read a short extract of publicly accessible publisher HTML, never paywalls.
 
@@ -444,10 +459,10 @@ def _article_context(article):
     Returns a source label and a bounded extract, not persistent full-text storage.
     """
     raw = str(article.get('요약') or '').strip()
-    if raw.startswith('AI_SUMMARY_V2::'):
+    if raw.startswith('AI_SUMMARY_V3::'):
         return 'cached', raw.split('::', 1)[1]
-    if raw.startswith('AI_SUMMARY_V1::'):
-        raw = ''  # V1 is headline-only and should not be treated as article evidence.
+    if raw.startswith(('AI_SUMMARY_V1::', 'AI_SUMMARY_V2::')):
+        raw = ''  # Older summaries were not validated against publisher headlines.
     url = safe_url(article.get('원문URL', ''))
     if not url:
         return '', ''
@@ -486,6 +501,15 @@ def _article_context(article):
             if len(blob) >= max_bytes:
                 break
         soup = BeautifulSoup(bytes(blob[:max_bytes]), 'html.parser')
+        # Google News aggregations can land on a different story; never summarize
+        # such a page or cache its body under the clicked article ID.
+        expected_title = clean_text(article.get('제목', ''))
+        meta_title = soup.select_one('meta[property="og:title"]')
+        found_title = clean_text(meta_title.get('content', '')) if meta_title else ''
+        if not found_title and soup.title:
+            found_title = clean_text(soup.title.get_text(' ', strip=True))
+        if found_title and not _title_matches(expected_title, found_title):
+            raise ValueError('ARTICLE_TITLE_MISMATCH')
         # Reject obvious paywall/blocked responses rather than inventing content.
         head_desc = ''
         meta = soup.select_one('meta[property="og:description"],meta[name="description"]')
@@ -536,7 +560,10 @@ def _article_context(article):
             return 'description', head_desc[:2300]
         if len(raw) >= 200:
             return 'rss', raw[:1800]
-    except (requests.RequestException, ValueError, TypeError):
+    except ValueError as exc:
+        if str(exc) == 'ARTICLE_TITLE_MISMATCH':
+            raise
+    except (requests.RequestException, TypeError):
         pass
     return ('rss', raw[:1800]) if len(raw) >= 200 else ('', '')
 
@@ -550,7 +577,7 @@ def summarize_article(article, api_key, model='openrouter/free'):
     if model != 'openrouter/free':
         raise ValueError('무료 모델만 허용합니다.')
     raw = str(article.get('요약') or '').strip()
-    if raw.startswith('AI_SUMMARY_V2::'):
+    if raw.startswith('AI_SUMMARY_V3::'):
         return raw.split('::', 1)[1]
     title = clean_text(article.get('제목', ''))[:220]
     if not title:

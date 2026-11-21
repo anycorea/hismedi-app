@@ -7,6 +7,7 @@ import time
 import re
 from difflib import SequenceMatcher
 from collections import Counter, defaultdict
+import hashlib
 from zoneinfo import ZoneInfo
 
 import streamlit as st
@@ -53,27 +54,37 @@ footer, div[data-testid="stDecoration"] {display:none!important}
 .news-desc {color:#647789;font-size:.87rem;line-height:1.6;margin-top:8px;word-break:keep-all}
 .related{margin-top:8px;font-size:.78rem;color:#168162}.related summary{cursor:pointer;font-weight:650}.related a{color:#0d765a;text-decoration:none}.related a:hover{text-decoration:underline}
 .anycorea {text-align:center;color:#9aa5b0;font-size:.70rem;padding:14px 0}
-/* Related reports: tiny understated control, not another section heading. */
-[class*="st-key-article_tile_"] [data-testid="stExpander"] {border:none!important;background:transparent!important;margin-top:2px!important}
-[class*="st-key-article_tile_"] [data-testid="stExpander"] summary {padding:2px 0!important;color:#77879a!important;font-size:.73rem!important;min-height:0!important}
-[class*="st-key-article_tile_"] [data-testid="stExpander"] summary p {font-size:.73rem!important}
-/* Headlines lead. A compact metadata column stays right-aligned on desktop. */
-[class*="st-key-article_tile_"] {background:#fff;border:1px solid #e1e8ee;border-radius:10px;padding:10px 14px;margin-bottom:8px;box-shadow:0 1px 1px rgba(10,35,52,.018)}
+/* Stable article container identity: CSS never references row or page index. */
+[class*="st-key-article_tile_"] {background:#fff;border:1px solid #e3e8ee;border-radius:9px;padding:11px 14px;margin-bottom:7px}
 [class*="st-key-article_tile_"] [data-testid="stHorizontalBlock"] {align-items:center;gap:12px}
-[class*="st-key-article_tile_"] .stButton, [class*="st-key-article_tile_"] .stButton > div {width:100%}
-[class*="st-key-article_tile_"] .stButton button {display:block!important;background:transparent!important;border:0!important;box-shadow:none!important;min-height:0!important;padding:0!important;width:100%!important;justify-content:flex-start!important;text-align:left!important;color:#1b2d42!important;font-size:1.04rem!important;font-weight:760!important;line-height:1.45!important;white-space:normal!important;height:auto!important}
-[class*="st-key-article_tile_"] .stButton button p {white-space:normal!important;text-align:left!important;word-break:keep-all!important;font-weight:760!important;font-size:inherit!important;line-height:inherit!important}
-[class*="st-key-article_tile_"] .stButton button:hover {color:#08785b!important;text-decoration:underline;text-underline-offset:3px}
-.news-right-meta {text-align:right;font-size:.71rem;line-height:1.4;color:#758396;white-space:nowrap}
-.news-right-meta .meta-category {color:#607689;font-weight:700}
-.article-explainer {font-size:.94rem;line-height:1.8;color:#263b51;background:#f2f7f5;border-left:3px solid #116b53;padding:12px 14px;border-radius:5px;word-break:keep-all;margin:9px 0}
-.article-source-note {font-size:.74rem;color:#758499;margin:7px 0}
-.article-original a {display:inline-block;font-size:.85rem;font-weight:750;color:#08785b;text-decoration:none;padding:7px 0}
-.article-original a:hover{text-decoration:underline}
+[class*="st-key-article_open_"] button {
+ display:flex!important;justify-content:flex-start!important;text-align:left!important;
+ width:100%!important;background:transparent!important;border:0!important;
+ box-shadow:none!important;padding:0!important;min-height:0!important;height:auto!important;
+ color:#1b2d42!important;font-size:1.07rem!important;font-weight:760!important;
+ line-height:1.46!important;white-space:normal!important;
+}
+[class*="st-key-article_open_"] button p,
+[class*="st-key-article_open_"] button [data-testid="stMarkdownContainer"] {
+ width:100%!important;max-width:100%!important;text-align:left!important;
+ margin:0!important;white-space:normal!important;word-break:keep-all!important;
+ overflow-wrap:anywhere!important;font-size:inherit!important;font-weight:inherit!important;
+ line-height:inherit!important;
+}
+[class*="st-key-article_open_"] button:hover p {color:#0b7456!important}
+.news-right-meta{text-align:right;font-size:.72rem;line-height:1.5;color:#718092;word-break:keep-all}
+.news-right-meta .meta-category{color:#657387;font-weight:650}
+.article-explainer{font-size:.94rem;line-height:1.78;color:#263b51;background:#f3f7f5;
+  border-left:3px solid #116b53;padding:12px 14px;border-radius:5px;
+  word-break:keep-all;margin:9px 0}
+.article-source-note{font-size:.73rem;color:#748294;margin:7px 0}
+.article-original a{display:inline-block;font-size:.86rem;font-weight:730;color:#08785b;text-decoration:none;padding:6px 0}
+/* Real responsive stacking is handled by Streamlit columns; title never centres. */
 @media(max-width:700px){
- [class*="st-key-article_tile_"] {background:transparent;border:0;border-bottom:1px solid #e1e6ed;border-radius:0;padding:9px 2px;margin-bottom:2px}
- [class*="st-key-article_tile_"] .stButton button {font-size:1.07rem!important}
- .news-right-meta{text-align:left;font-size:.67rem;margin-top:-4px;white-space:normal}
+ [class*="st-key-article_tile_"]{border:0;border-bottom:1px solid #e0e7ee;border-radius:0;background:transparent;padding:11px 1px;margin-bottom:0}
+ [class*="st-key-article_open_"] button{font-size:1.075rem!important}
+ .news-right-meta{text-align:left;font-size:.69rem;white-space:normal;}
+ [class*="st-key-article_tile_"] [data-testid="stHorizontalBlock"]{gap:3px!important}
 }
 /* Avoid decorative wrappers: the headline and settings are the only toolbar. */
 .brand{white-space:nowrap}
@@ -464,7 +475,7 @@ def header_menu():
 def render_article_summary(article):
     """Run AI only on an explicit article click; persist once per article."""
     value = str(article.get('요약') or '').strip()
-    cached = value.startswith('AI_SUMMARY_V2::')
+    cached = value.startswith('AI_SUMMARY_V3::')
     if cached:
         st.markdown('<div class="article-explainer">' + esc(value.split('::', 1)[1])
                     + '</div>', unsafe_allow_html=True)
@@ -484,10 +495,10 @@ def render_article_summary(article):
                 st.caption('오늘의 기사 요약 한도에 도달했습니다. 원문을 이용해 주세요.')
             else:
                 try:
-                    with st.spinner('기사를 간추리는 중…'):
+                    with st.spinner('선택한 기사 내용을 확인하는 중…'):
                         brief = summarize_article(article, token)
                     persisted = patch_record(book(), 'News', '뉴스ID', article['뉴스ID'],
-                                             {'요약': 'AI_SUMMARY_V2::' + brief,
+                                             {'요약': 'AI_SUMMARY_V3::' + brief,
                                               '원문URL': article.get('_resolved_url') or article.get('원문URL', '')})
                     if persisted:
                         append_records(book(), 'Collection_Log', [dict(zip(HEADERS['Collection_Log'],
@@ -497,8 +508,10 @@ def render_article_summary(article):
                     st.markdown('<div class="article-explainer">' + esc(brief)
                                 + '</div>', unsafe_allow_html=True)
                 except ValueError as exc:
-                    if str(exc) == 'ARTICLE_CONTENT_UNAVAILABLE':
-                        st.caption('이 기사는 제목 외에 확인할 수 있는 본문이 없어 정확한 요약을 만들 수 없습니다.')
+                    if str(exc) == 'ARTICLE_TITLE_MISMATCH':
+                        st.caption('원문이 다른 기사로 연결되어 요약하지 않았습니다.')
+                    elif str(exc) == 'ARTICLE_CONTENT_UNAVAILABLE':
+                        st.caption('기사 본문을 확인할 수 없습니다. 원문에서 확인해 주세요.')
                     elif str(exc) == 'ARTICLE_CONTENT_INSUFFICIENT':
                         st.caption('확인된 내용이 부족해 요약을 제공하지 않습니다.')
                     else:
@@ -515,6 +528,12 @@ def render_article_summary(article):
                     unsafe_allow_html=True)
 
 
+def toggle_article(article_id):
+    """Use immutable article ID, not list position, to target the right tile."""
+    current = st.session_state.get('opened_news_id')
+    st.session_state['opened_news_id'] = None if current == article_id else article_id
+
+
 def render_news_tile(group, index, known, cmap):
     article = group[0]
     key = str(article.get('뉴스ID'))
@@ -524,11 +543,12 @@ def render_news_tile(group, index, known, cmap):
         display_title = display_title[:-(len(actual) + 3)]
     published = str(article.get('발행일시', ''))[5:16]
     category = cmap.get(article.get('카테고리코드'), '')
-    with st.container(key=f'article_tile_{index}'):
-        title_col, meta_col = st.columns([4.6, 1.5], vertical_alignment='center', gap='small')
+    stable_id = hashlib.sha256(key.encode('utf-8')).hexdigest()[:16]
+    with st.container(key=f'article_tile_{stable_id}'):
+        title_col, meta_col = st.columns([5, 1.7], vertical_alignment='center', gap='small')
         with title_col:
-            if st.button(display_title, key=f'article_open_{key}', use_container_width=True):
-                st.session_state['opened_news_id'] = (None if st.session_state.get('opened_news_id') == key else key)
+            st.button(display_title, key=f'article_open_{stable_id}', type='tertiary',
+                      use_container_width=True, on_click=toggle_article, args=(key,))
         with meta_col:
             metadata = ' · '.join(x for x in (category, actual, published) if x)
             st.markdown('<div class="news-right-meta">' + esc(metadata) + '</div>', unsafe_allow_html=True)
