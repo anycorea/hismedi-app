@@ -8,6 +8,7 @@ import re
 import time
 import random
 from difflib import SequenceMatcher
+from functools import lru_cache
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import quote
 from datetime import datetime, timezone, timedelta
@@ -399,6 +400,66 @@ def clean_old_rows(book, days=7):
 
 
 
+
+# Resolve headlines from a publisher's own feed before using Google's
+# undocumented intermediate-link decoder. This is particularly useful for
+# older News rows that were originally collected from Google News.
+DIRECT_RSS_BY_PUBLISHER = {
+    '연합뉴스': DIRECT_PUBLISHER_RSS['PUB_YNA'],
+    '동아일보': DIRECT_PUBLISHER_RSS['PUB_DONGA'],
+    'JTBC': DIRECT_PUBLISHER_RSS['PUB_JTBC'],
+}
+
+
+def _headline_normalized(title):
+    title = clean_text(title).casefold()
+    # Google News appends the publisher after a separator; do not treat it
+    # as part of the article title when matching to a direct feed.
+    title = re.sub(r'\s+[-–|]\s+(?:연합뉴스|동아일보|jtbc)(?:\s.*)?$', '', title, flags=re.I)
+    return re.sub(r'[^0-9a-z가-힣]+', '', title)
+
+
+@lru_cache(maxsize=40)
+def _publisher_feed_items(rss_url, window):
+    # `window` is a 15-minute time bucket. It prevents repeated RSS fetches
+    # on repeated clicks while allowing refreshed publisher feeds later.
+    try:
+        response = requests.get(rss_url, timeout=(3, 7),
+                                headers={'User-Agent': 'Mozilla/5.0 NewsBrief RSS Reader'})
+        response.raise_for_status()
+        parsed = feedparser.parse(response.content)
+        return [(clean_text(entry.get('title', '')), safe_url(entry.get('link', '')))
+                for entry in parsed.entries[:200]]
+    except (requests.RequestException, ValueError):
+        return []
+
+
+def _find_publisher_feed_url(article):
+    # This match is intentionally conservative: an unrelated story is much
+    # worse than saying no article body is available.
+    hint = str(article.get('키워드', ''))
+    name = hint.removeprefix('출처:').strip() if hint.startswith('출처:') else ''
+    if not name:
+        code = str(article.get('언론사코드', ''))
+        name = {'PUB_YNA': '연합뉴스', 'PUB_DONGA': '동아일보',
+                'PUB_JTBC': 'JTBC'}.get(code, '')
+    rss_url = DIRECT_RSS_BY_PUBLISHER.get(name)
+    wanted = _headline_normalized(article.get('제목', ''))
+    if not rss_url or len(wanted) < 12:
+        return ''
+    best_score, best_url = 0.0, ''
+    for headline, link in _publisher_feed_items(rss_url, int(time.time() // 900)):
+        other = _headline_normalized(headline)
+        if not other or not link:
+            continue
+        if other == wanted:
+            return link
+        score = SequenceMatcher(None, wanted, other).ratio()
+        if score > best_score:
+            best_score, best_url = score, link
+    return best_url if best_score >= 0.84 else ''
+
+
 def _resolve_google_news_url(url):
     """Best-effort publisher URL for current Google News RSS opaque links.
 
@@ -480,7 +541,9 @@ def _article_context(article):
     url = safe_url(article.get('원문URL', ''))
     if not url:
         return '', ''
-    url = _resolve_google_news_url(url)
+    if (urlparse(url).hostname or '').lower() == 'news.google.com':
+        direct_url = _find_publisher_feed_url(article)
+        url = direct_url or _resolve_google_news_url(url)
     article['_resolved_url'] = url  # transient, not a stored full article body
     if (urlparse(url).hostname or '').lower() == 'news.google.com':
         if len(raw) >= 180:
