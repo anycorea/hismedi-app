@@ -174,9 +174,9 @@ def refresh():
 
 
 def handle_error(exc):
-    st.error('데이터를 불러오지 못했습니다. 잠시 후 새로고침해 주세요.')
-    with st.expander('오류 정보'):
-        st.code(f'{type(exc).__name__}: {exc}', language='text')
+    st.error('뉴스 데이터를 읽는 중 문제가 발생했습니다. 잠시 후 다시 접속해 주세요.')
+    # Exception text may contain request metadata; keep it out of public UI.
+    st.caption(f'오류 종류: {type(exc).__name__} · 자세한 원인은 Streamlit 앱 로그에서 확인')
 
 
 @st.cache_resource
@@ -206,9 +206,14 @@ def maybe_update_news(last_time):
         stale = True
     else:
         try:
-            stamp = datetime.fromisoformat(last_time)
+            stamp = datetime.fromisoformat(last_time.strip().replace('Z', '+00:00'))
+            # Sheets stores local timestamps without an offset. Mixing these
+            # with timezone-aware datetimes previously raised TypeError and
+            # prevented the entire news page from rendering.
+            if stamp.tzinfo is None:
+                stamp = stamp.replace(tzinfo=ZoneInfo('Asia/Seoul'))
             stale = (datetime.now(ZoneInfo('Asia/Seoul')) - stamp).total_seconds() >= 45 * 60
-        except ValueError:
+        except (ValueError, TypeError, AttributeError):
             stale = True
     if not stale and not request:
         return
@@ -423,8 +428,12 @@ def app_home():
     known = {r['언론사코드']: r['언론사명'] for r in data('Media')}
     last_logs = data('Collection_Log')
     last_time = max((str(r.get('실행일시','')) for r in last_logs), default='')
-    maybe_update_news(last_time)
-    update_indicator()
+    try:
+        maybe_update_news(last_time)
+        update_indicator()
+    except Exception as exc:
+        # News should remain readable even when background refresh is unavailable.
+        st.caption('최신 기사 자동 확인이 잠시 지연되고 있습니다. 저장된 뉴스를 표시합니다.')
 
     # The primary layout deliberately contains no collection button, counts or
     # explanatory title. News collection is lazy and background-only.
