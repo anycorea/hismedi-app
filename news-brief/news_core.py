@@ -24,11 +24,8 @@ HEADERS = {
  'Category':['카테고리코드','카테고리명','상위카테고리','정렬순서','사용여부','비고'],
  'Media':['언론사코드','언론사명','언론사분류','홈페이지URL','RSS_URL','로고URL','수집방식','수집주기분','정렬순서','사용여부','비고'],
  'News':['뉴스ID','언론사코드','카테고리코드','제목','원문URL','이미지URL','발행일시','수집일시','요약','키워드','이슈ID','중복여부','노출여부'],
- 'Briefing':['브리핑ID','브리핑일시','카테고리코드','브리핑제목','핵심요약','주요이슈','관련뉴스ID','생성모델','생성일시','노출여부'],
- 'Keywords':['키워드ID','키워드','카테고리코드','우선순위','사용여부','등록일시','비고'],
  'Collection_Log':['로그ID','실행일시','언론사코드','수집방식','수집건수','신규건수','중복건수','처리결과','오류내용','소요시간초'],
  'Settings':['설정키','설정값','설명','수정일시'],
- 'Admin_Log':['로그ID','작업일시','작업자','작업구분','대상시트','대상ID','변경내용'],
 }
 DEFAULT_CATEGORIES = [
  ('ALL','전체','',0),('POL','정치','',10),('ECO','경제','',20),('SOC','사회','',30),
@@ -168,13 +165,23 @@ def append_records(book, sheet, records):
         headers=HEADERS[sheet]
         with_retry(lambda: book.worksheet(sheet).append_rows([[str(record.get(k,'')) for k in headers] for record in records], value_input_option='RAW'))
 
-def patch_record(book,sheet,key_name,key_value,data):
-    ws=book.worksheet(sheet)
-    records=rows(book,sheet)
-    for index, rec in enumerate(records,2):
-        if str(rec.get(key_name,'')) == str(key_value):
-            merged={**rec,**data}
-            with_retry(lambda: ws.update(range_name=f'A{index}',values=[[str(merged.get(k,'')) for k in HEADERS[sheet]]],value_input_option='RAW'))
+def patch_record(book, sheet, key_name, key_value, updates):
+    """Update the matching physical row without shifting when blank rows exist."""
+    ws = book.worksheet(sheet)
+    headers = HEADERS[sheet]
+    values = with_retry(ws.get_all_values)
+    if not values or values[0] != headers:
+        raise ValueError(f'{sheet}: 헤더 구조가 다릅니다.')
+    if key_name not in headers:
+        raise ValueError(f'{sheet}: 키 열이 없습니다: {key_name}')
+    key_pos = headers.index(key_name)
+    for physical_row, cells in enumerate(values[1:], start=2):
+        if len(cells) > key_pos and str(cells[key_pos]) == str(key_value):
+            rec = dict(zip(headers, (cells + [''] * len(headers))[:len(headers)]))
+            rec.update(updates)
+            line = [str(rec.get(k, '')) for k in headers]
+            with_retry(lambda: ws.update(range_name=f'A{physical_row}',
+                                        values=[line], value_input_option='RAW'))
             return True
     return False
 
@@ -224,6 +231,10 @@ def parse_source(entry, media,cat):
     media_code=str(media.get('언론사코드','')).strip()
     # Google RSS embeds original publisher name after the title; keep original title unmodified.
     publisher=clean_text(entry.get('source',{}).get('title','')) if entry.get('source') else ''
+    # Individual publisher searches can omit the RSS <source> element.
+    # In that case the configured publisher remains the correct display name.
+    if not publisher and media_code.startswith('PUB_'):
+        publisher = str(media.get('언론사명', '')).strip()
     media_code=media_code if not publisher else 'SRC_'+uid(publisher)[:12].upper()
     # Name of the actual publisher is retained in keywords (displayed separately in the app).
     keyword=f'출처:{publisher}' if publisher else ''
@@ -328,9 +339,7 @@ def clean_old_rows(book, days=7):
     reference = datetime.now(TZ)
     threshold = reference - timedelta(days=days)
     spec = {'News': ('발행일시', '수집일시'),
-            'Briefing': ('생성일시', '브리핑일시'),
-            'Collection_Log': ('실행일시',),
-            'Admin_Log': ('작업일시',)}
+            'Collection_Log': ('실행일시',)}
     result = {}
     requests_to_send = []
     for sheet, date_keys in spec.items():
@@ -374,136 +383,49 @@ def clean_old_rows(book, days=7):
     return result
 
 
-def _parse_briefing_json(content):
-    """Extract JSON from compatible free-model responses, including fenced output."""
-    if isinstance(content, dict):
-        return content
-    if isinstance(content, list):
-        content = "\n".join(
-            part.get('text', '') for part in content
-            if isinstance(part, dict) and isinstance(part.get('text'), str)
-        )
-    if not isinstance(content, str) or not content.strip():
-        raise ValueError('AI 응답 본문이 비어 있습니다.')
-    text = content.strip().lstrip('\ufeff')
-    if text.startswith('```'):
-        text = re.sub(r'^```(?:json)?\s*', '', text, flags=re.IGNORECASE)
-        text = re.sub(r'\s*```\s*$', '', text).strip()
-    try:
-        obj = json.loads(text)
-        if isinstance(obj, dict):
-            return obj
-    except json.JSONDecodeError:
-        pass
-    decoder = json.JSONDecoder()
-    # Models occasionally prepend commentary or wrap the JSON in fences.
-    for match in re.finditer(r'\{', text):
-        try:
-            obj, _ = decoder.raw_decode(text[match.start():])
-        except json.JSONDecodeError:
-            continue
-        if isinstance(obj, dict) and ('issues' in obj or 'summary' in obj):
-            return obj
-    raise ValueError('응답에서 완전한 JSON 객체를 찾을 수 없습니다.')
 
+def summarize_article(article, api_key, model='openrouter/free'):
+    """Short, strictly source-grounded summary of one requested article.
 
-def ai_briefing(news, api_key='', model='openrouter/free'):
-    """Cited RSS-only briefing, via free OpenRouter. Paid fallback is prohibited."""
-    items = [x for x in news if str(x.get('제목', '')).strip()][:30]
-    if not items:
-        raise ValueError('브리핑을 생성할 뉴스가 없습니다.')
-    if not api_key or api_key.strip().startswith(('발급받은_', 'YOUR_')):
-        raise ValueError('OpenRouter API 키를 Streamlit Secrets에 등록하세요.')
+    We only have RSS title/description; no publisher full text is fetched.
+    No paid-model fallback; a free router error leaves the article unchanged.
+    """
     if model != 'openrouter/free':
-        raise ValueError('비용 방지를 위해 무료 모델 openrouter/free만 허용합니다.')
-    payload = [
-        {'id': str(x['뉴스ID']), 'title': str(x['제목'])[:160],
-         'description': str(x.get('요약', ''))[:200],
-         'publisher': str(x.get('키워드', ''))[:60]}
-        for x in items
-    ]
-    instruction = (
-        '당신은 한국어 뉴스 편집자입니다. 주어진 공개 RSS 제목과 설명으로만 브리핑하세요. '
-        '기사 본문을 확인했다고 주장하거나 사실, 수치, 발언을 지어내지 마세요. '
-        '중요한 이슈를 6~10개로 묶되, 기사 근거가 부족하면 적게 작성하세요. 유사한 사건일 때만 묶으세요. 정치·경제·사회·의료 등 다양한 분야를 골고루 반영하세요. '
-        'point는 1문장으로 간결하게 작성하고, 각 이슈에는 관련 기사 id를 최소 1개 넣으세요. '
-        '입력에 없는 id는 사용하지 마세요. 마크다운과 해설 없이 JSON 객체만 반환하세요. '
-        'JSON 예시: {"title":"오늘의 뉴스","summary":"주요 흐름 1문장",'
-        '"issues":[{"headline":"핵심 제목","point":"사실에 근거한 내용","ids":["기사ID"]}]}.'
+        raise ValueError('무료 모델만 허용합니다.')
+    title = clean_text(article.get('제목', ''))[:220]
+    snippet = clean_text(article.get('요약', ''))[:600]
+    if snippet.startswith('AI_SUMMARY_V1::'):
+        return snippet.split('::', 1)[1]
+    if not title:
+        raise ValueError('기사 제목이 없습니다.')
+    prompt = (
+        '다음은 한국어 뉴스의 제목과 RSS 설명입니다. 전문을 읽은 것으로 가장하지 마세요. '
+        '입력에 명시된 내용만 사용해 간결한 1~3문장 한국어 요약을 작성하세요. '
+        'RSS 설명이 비어 있으면 제목으로 확실하게 알 수 있는 사실만 1문장으로 재정리하세요. '
+        '배경지식이나 추측, 해설, 근거 없는 숫자를 추가하지 마세요. '
+        '제목이나 서두("AI 요약", "요약:") 없이 결과 문장만 반환하세요. '
+        '응답은 280자 이내로 하세요.\n'
+        + json.dumps({'title': title, 'rss_description': snippet}, ensure_ascii=False)
     )
-    body = {
-        'model': 'openrouter/free',
-        'messages': [
-            {'role': 'system', 'content': instruction},
-            {'role': 'user', 'content': json.dumps(payload, ensure_ascii=False)}
-        ],
-        'response_format': {'type': 'json_object'},
-        'temperature': 0.1,
-        'max_tokens': 2300,
-        'stream': False,
-    }
     try:
-        resp = requests.post(
-            'https://openrouter.ai/api/v1/chat/completions',
+        response = requests.post('https://openrouter.ai/api/v1/chat/completions',
             headers={'Authorization': 'Bearer ' + api_key.strip(),
-                     'Content-Type': 'application/json',
-                     'X-Title': 'News Brief'},
-            json=body, timeout=(8, 48))
-    except requests.Timeout as exc:
-        raise RuntimeError('무료 AI 응답이 지연되어 중단했습니다. 뉴스 열람에는 영향이 없습니다.') from exc
-    except requests.RequestException as exc:
-        raise RuntimeError('OpenRouter 연결 실패. 네트워크 상태를 확인하세요.') from exc
-    if resp.status_code == 429:
-        raise RuntimeError('OpenRouter 무료 요청 한도에 도달했습니다. 다음 한도 갱신 후 이용해 주세요.')
-    if resp.status_code in (401, 403):
-        raise RuntimeError('OpenRouter 키가 올바르지 않거나 무료 모델 이용이 제한되었습니다.')
-    if resp.status_code == 402:
-        raise RuntimeError('OpenRouter가 결제를 요구했습니다. 유료 모델로 전환하지 않고 중단했습니다.')
-    if resp.status_code >= 400:
-        try:
-            detail = resp.json().get('error', {}).get('message', '')
-        except (ValueError, TypeError, AttributeError):
-            detail = ''
-        # API payloads can include internal or account details; don't echo them.
-        raise RuntimeError(f'OpenRouter 무료 모델 요청 실패 (HTTP {resp.status_code}). '
-                           '모델 제공 상태를 확인하세요.' + (' JSON 형식 지원 오류일 수 있습니다.' if resp.status_code == 400 else ''))
-    try:
-        envelope = resp.json()
-        choice = envelope['choices'][0]
-        content = choice['message']['content']
-        parsed = _parse_briefing_json(content)
-    except (ValueError, KeyError, IndexError, TypeError) as exc:
-        raise RuntimeError(
-            '무료 AI 응답 형식이 불완전합니다. 이번 요청은 저장하지 않았습니다. '
-            '무료 모델이 바뀔 때 다시 시도할 수 있습니다.'
-        ) from exc
-    allowable = {str(p['id']) for p in payload}
-    issues = []
-    candidates = parsed.get('issues', [])
-    if not isinstance(candidates, list):
-        candidates = []
-    for issue in candidates[:10]:
-        if not isinstance(issue, dict):
-            continue
-        raw_ids = issue.get('ids', [])
-        if not isinstance(raw_ids, list):
-            continue
-        ids = list(dict.fromkeys(str(i) for i in raw_ids if str(i) in allowable))
-        if not ids:
-            continue
-        headline = clean_text(issue.get('headline', ''))[:110]
-        point = clean_text(issue.get('point', ''))[:350]
-        if headline and point:
-            issues.append({'headline': headline, 'point': point, 'ids': ids})
-    if not issues:
-        raise ValueError('근거 기사와 연결된 AI 이슈가 없어 저장하지 않았습니다.')
-    return {'title': clean_text(parsed.get('title', '오늘의 핵심 뉴스'))[:120],
-            'summary': clean_text(parsed.get('summary', ''))[:700],
-            'issues': issues, 'model': 'openrouter/free'}
+                     'Content-Type': 'application/json', 'X-Title': 'News Brief'},
+            json={'model': 'openrouter/free',
+                  'messages': [{'role': 'user', 'content': prompt}],
+                  'temperature': .1, 'max_tokens': 240, 'stream': False},
+            timeout=(5, 25))
+        if response.status_code in (402, 429):
+            raise RuntimeError('무료 AI 이용량 또는 사용 가능 상태를 확인하세요.')
+        response.raise_for_status()
+        message = response.json()['choices'][0]['message']['content']
+        if isinstance(message, list):
+            message = ' '.join(str(part.get('text', '')) for part in message if isinstance(part, dict))
+        output = clean_text(message).strip().strip('"“”')[:280]
+        if not output:
+            raise ValueError('AI 응답이 비어 있습니다.')
+        return output
+    except (requests.RequestException, ValueError, KeyError, IndexError, TypeError) as exc:
+        raise RuntimeError('기사 요약 생성 실패') from exc
 
-def save_briefing(book,result,cat='ALL'):
-    ids=list(dict.fromkeys(id for issue in result['issues'] for id in issue['ids']))
-    record=dict(zip(HEADERS['Briefing'],[
-        uid(now()+cat),now(),cat,result['title'],result['summary'],json.dumps(result['issues'],ensure_ascii=False),
-        ','.join(ids),result['model'],now(),'Y']))
-    append_records(book,'Briefing',[record]);return record
+

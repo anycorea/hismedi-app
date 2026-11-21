@@ -1,4 +1,4 @@
-"""News Brief: readable news + RSS-grounded AI briefings, Google Sheets backend."""
+"""News Brief: compact article list with on-demand summaries."""
 import html
 import json
 from datetime import datetime, timedelta
@@ -9,9 +9,9 @@ from difflib import SequenceMatcher
 from zoneinfo import ZoneInfo
 
 import streamlit as st
-from news_core import (HEADERS, ai_briefing, append_records, collect, connect, enabled,
-                       initialize, now, patch_record, rows, safe_url, save_briefing, validate,
-                       clean_old_rows, recent_news)
+from news_core import (HEADERS, append_records, collect, connect, enabled,
+                       initialize, now, patch_record, rows, safe_url,
+                       clean_old_rows, recent_news, summarize_article)
 
 st.set_page_config(page_title='News Brief | AI 뉴스브리핑', page_icon='📰',
                    layout='wide', initial_sidebar_state='collapsed')
@@ -50,24 +50,25 @@ footer, div[data-testid="stDecoration"] {display:none!important}
 .news-title a {color:#1b2d42;text-decoration:none}
 .news-title a:hover {color:#08785b;text-decoration:underline;text-underline-offset:3px}
 .news-desc {color:#647789;font-size:.87rem;line-height:1.6;margin-top:8px;word-break:keep-all}
-.summary-hero {background:#fff;border:1px solid #e0e8ee;border-left:4px solid #148669;border-radius:13px;padding:20px 22px;margin:12px 0 18px}
-.summary-hero h3 {font-size:1.13rem;margin:0 0 8px;letter-spacing:-.015em;color:#182c42}
-.summary-hero p {color:#53677b;line-height:1.7;font-size:.94rem;margin:0}
-.issue-grid {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
-.issue-card {background:white;border:1px solid #e2e9ef;border-radius:12px;padding:17px 18px}
-.issue-number {font-weight:850;font-size:.76rem;color:#148669;margin-bottom:6px}
-.issue-title {font-size:1rem;font-weight:760;color:#1b2e43;line-height:1.48;word-break:keep-all}
-.issue-point {color:#566a7d;line-height:1.65;font-size:.88rem;margin:10px 0 9px;word-break:keep-all}
-.issue-links {font-size:.78rem;color:#237a62;line-height:1.6}
-.issue-links a {color:#087859;text-decoration:none;margin-right:12px}
-.issue-links a:hover {text-decoration:underline}
-.empty-ai {background:#fff;border:1px solid #e2e9ef;border-radius:12px;padding:22px;color:#52677c}
 .related{margin-top:8px;font-size:.78rem;color:#168162}.related summary{cursor:pointer;font-weight:650}.related a{color:#0d765a;text-decoration:none}.related a:hover{text-decoration:underline}
 .anycorea {text-align:center;color:#9aa5b0;font-size:.70rem;padding:14px 0}
+/* Article rows are real Streamlit controls: a title click reveals its summary. */
+[class*="st-key-article_tile_"] {background:white;border:1px solid #e2e9ef;border-radius:10px;padding:10px 14px;margin-bottom:10px}
+[class*="st-key-article_tile_"] .stButton button {background:none!important;border:0!important;box-shadow:none!important;min-height:0!important;padding:0!important;justify-content:flex-start!important;text-align:left!important;color:#1b2d42!important;font-size:1.03rem!important;font-weight:725!important;line-height:1.48!important;white-space:normal!important;height:auto!important}
+[class*="st-key-article_tile_"] .stButton button p {white-space:normal!important;text-align:left!important;word-break:keep-all}
+[class*="st-key-article_tile_"] .stButton button:hover {color:#08785b!important}
+.article-explainer {font-size:.90rem;line-height:1.65;color:#3c5064;word-break:keep-all;margin:7px 0}
+.article-source-note {font-size:.74rem;color:#758499;margin:7px 0}
+.article-original a {display:inline-block;font-size:.85rem;font-weight:750;color:#08785b;text-decoration:none;padding:7px 0}
+.article-original a:hover{text-decoration:underline}
+@media(max-width:700px){
+ [class*="st-key-article_tile_"] {background:transparent;border:0;border-bottom:1px solid #e1e6ed;border-radius:0;padding:9px 2px;margin-bottom:1px}
+ [class*="st-key-article_tile_"] .stButton button {font-size:1.05rem!important}
+}
 /* Avoid decorative wrappers: the headline and settings are the only toolbar. */
 .brand{white-space:nowrap}
 .news-grid{gap:8px 10px}
-.st-key-news_view_mode button{white-space:nowrap}
+
 @media(max-width:700px){.brand{font-size:1.09rem}.brand-mark{width:27px;height:27px}}
 
 /* Layout only this app's masthead, not Streamlit columns used elsewhere.
@@ -140,73 +141,9 @@ def data(sheet):
     return rows(book(), sheet)
 
 
-@st.cache_data(ttl=300, show_spinner=False)
-def sheet_problems():
-    return validate(book())
-
-
-@st.cache_resource
-def briefing_guard():
-    # Shared per running app process; Google Sheets remains the durable successful cache.
-    return {'lock': threading.Lock(), 'failed_until': {}}
-
-
-def latest_brief(category):
-    exact = [r for r in data('Briefing') if enabled(r.get('노출여부'))
-             and str(r.get('카테고리코드')) == category]
-    exact.sort(key=lambda r: str(r.get('생성일시', '')), reverse=True)
-    return exact[0] if exact else None
-
-
-def briefing_is_fresh(brief):
-    if not brief:
-        return False
-    try:
-        stamp = datetime.fromisoformat(str(brief.get('생성일시', '')).strip())
-        return datetime.fromisoformat(now()) - stamp < timedelta(hours=6)
-    except (ValueError, TypeError):
-        return False
-
-
-def auto_briefing(category, articles):
-    """Generate only for missing/old briefings; one generation at a time per process."""
-    token = str(setting('news_brief', 'openrouter_api_key', '')).strip()
-    if not token:
-        return 'OpenRouter 무료 API 키가 등록되지 않아 저장된 브리핑만 표시합니다.'
-    if not articles:
-        return '요약할 뉴스가 아직 없습니다.'
-    guard = briefing_guard()
-    key = str(category)
-    current = datetime.fromisoformat(now())
-    with guard['lock']:
-        # Re-read the persistent sheet after obtaining the lock so other sessions reuse output.
-        data.clear()
-        if briefing_is_fresh(latest_brief(category)):
-            return None
-        # Cap successful automatic briefs per day across all categories.
-        today = now()[:10]
-        daily_count = sum(1 for r in data('Briefing')
-                          if str(r.get('생성일시', '')).startswith(today)
-                          and str(r.get('생성모델', '')).startswith('openrouter/'))
-        if daily_count >= 8:
-            return '오늘의 자동 AI 브리핑 생성 한도(8회)에 도달했습니다. 저장된 브리핑을 표시합니다.'
-        if guard['failed_until'].get(key, datetime.min) > current:
-            return '무료 AI가 일시적으로 응답하지 않아 기존 브리핑을 표시합니다. 잠시 후 다시 이용할 수 있습니다.'
-        try:
-            with st.spinner('최신 뉴스를 AI가 간추리고 있습니다…'):
-                result = ai_briefing(articles, api_key=token, model='openrouter/free')
-                save_briefing(book(), result, category)
-            data.clear()
-            return None
-        except Exception as exc:
-            # A 30 minute failure cooldown avoids repeated free API calls on page refresh.
-            guard['failed_until'][key] = current + timedelta(minutes=30)
-            return 'AI 브리핑 자동 생성에 실패했습니다. 기존 브리핑을 표시합니다. (' + str(exc)[:145] + ')'
-
 
 def refresh():
     data.clear()
-    sheet_problems.clear()
 
 
 def handle_error(exc):
@@ -220,13 +157,8 @@ def news_update_guard():
     # Process-wide, so simultaneous iPhone/iPad/PC visits cannot launch multiple collects.
     return {'lock': threading.Lock(), 'state_lock': threading.Lock(),
             'running': False, 'last_start': 0.0, 'last_end': 0.0,
-            'last_report': None, 'last_error': '', 'version': 0}
+            'last_report': None, 'last_error': '', 'version': 0, 'source_signature': ''}
 
-
-def on_view_change():
-    """Selecting Latest News explicitly requests a fresh check, not a forced RSS call."""
-    if st.session_state.get('news_view_mode') == '최신 뉴스':
-        st.session_state['news_user_requested_latest'] = True
 
 
 def maybe_update_news(last_time):
@@ -251,15 +183,22 @@ def maybe_update_news(last_time):
             stale = (datetime.now(ZoneInfo('Asia/Seoul')) - stamp).total_seconds() >= 45 * 60
         except (ValueError, TypeError, AttributeError):
             stale = True
-    if not stale and not request:
+    codes = target_source_codes()
+    signature = ','.join(sorted(codes))
+    if not codes:
+        return
+    source_changed = guard['source_signature'] != signature
+    if not stale and not request and not source_changed:
         return
     # User explicitly tapping latest may refresh sooner, but never more often than 5 min.
     elapsed = time.monotonic() - guard['last_start']
-    if guard['last_start'] and elapsed < (300 if request else 900):
+    if guard['last_start'] and elapsed < (300 if request or source_changed else 900):
         return
     if not guard['lock'].acquire(blocking=False):
         return
     # Everything consumed by the background thread is copied before it starts.
+    source_codes = codes
+    guard['source_signature'] = signature
     config = {'gcp_service_account': dict(st.secrets['gcp_service_account']),
               'gsheet': {'spreadsheet_id': str(st.secrets['gsheet']['spreadsheet_id'])}}
     with guard['state_lock']:
@@ -270,7 +209,7 @@ def maybe_update_news(last_time):
     def worker():
         try:
             b = connect(config)
-            result = collect(b, limit_per_feed=20)
+            result = collect(b, limit_per_feed=12, source_codes=source_codes)
             deleted = clean_old_rows(b, days=7)
             with guard['state_lock']:
                 guard['last_report'] = {**result, 'deleted': sum(deleted.values())}
@@ -369,26 +308,33 @@ def cluster_titles(articles):
     return groups
 
 
-def save_bookmarks(article_ids):
-    news = {str(r.get('뉴스ID')): r for r in data('News')}
-    existing = preference('bookmarked_articles_v1', [])
-    saved = {str(v.get('id')): v for v in existing if isinstance(v, dict)}
-    for news_id in article_ids:
-        r = news.get(str(news_id))
-        if r:
-            saved[str(news_id)] = {'id': str(news_id), 'title': str(r.get('제목',''))[:220],
-                                   'url': safe_url(r.get('원문URL')),
-                                   'publisher': str(r.get('키워드','')).removeprefix('출처:'),
-                                   'saved': now()}
-    save_preference('bookmarked_articles_v1', list(saved.values())[-120:],
-                    '7일 이후에도 원문 링크를 유지하는 북마크')
-
 
 def publisher(item, known):
     keyword = str(item.get('키워드', ''))
     if keyword.startswith('출처:'):
         return keyword[3:].strip() or '출처 미상'
     return known.get(item.get('언론사코드'), item.get('언론사코드') or '출처 미상')
+
+
+DEFAULT_FAVORITES = ['MBC', 'JTBC', '중앙일보', '동아일보', '연합뉴스']
+
+
+def effective_favorites():
+    """Saved favorites win; a fresh installation starts with five publishers."""
+    return favorite_names() or DEFAULT_FAVORITES
+
+
+def target_source_codes():
+    """Fetch only sources corresponding to the active favorite publisher list.
+
+    Prefer Media tab rows (allows custom registered feeds), and use the
+    built-in code list for the five default outlets. Do not fall back to the
+    entire national news catalog on initial load.
+    """
+    selected = {name.casefold().strip() for name in effective_favorites()}
+    return [str(row.get('언론사코드')) for row in data('Media')
+            if str(row.get('언론사명', '')).casefold().strip() in selected
+            and enabled(row.get('사용여부'))]
 
 
 def favorite_names():
@@ -402,7 +348,7 @@ def favorites_editor(articles, known, inline=False):
     saved = favorite_names()
     st.caption('선택한 언론사는 모든 기기에서 공통으로 사용합니다.')
     with st.form('favorite_editor'):
-        chosen = st.multiselect('즐겨찾기 언론사', sorted(set(names + saved)), default=saved,
+        chosen = st.multiselect('즐겨찾기 언론사', sorted(set(names + saved)), default=(saved or DEFAULT_FAVORITES),
                                 placeholder='언론사 검색·선택')
         submit = st.form_submit_button('즐겨찾기 저장', use_container_width=True)
     if submit:
@@ -422,7 +368,8 @@ def header_menu():
             st.session_state['category_selection'] = 'ALL' if 'ALL' in codes else codes[0]
         st.selectbox('뉴스 분야', codes, format_func=lambda c: cmap.get(c,c),
                      key='category_selection')
-        st.selectbox('언론사 보기', ['전체 언론사', '⭐ 즐겨찾기'],
+        st.session_state.setdefault('news_favorite_mode', '⭐ 즐겨찾기')
+        st.selectbox('언론사 보기', ['⭐ 즐겨찾기', '전체 언론사'],
                      key='news_favorite_mode')
         with st.expander('언론사 즐겨찾기 관리'):
             articles = [r for r in data('News') if recent_news(r, 7)]
@@ -449,6 +396,79 @@ def header_menu():
                     st.rerun()
 
 
+def render_article_summary(article):
+    """Run AI only on an explicit article click; persist once per article."""
+    value = str(article.get('요약') or '').strip()
+    cached = value.startswith('AI_SUMMARY_V1::')
+    if cached:
+        st.markdown('<div class="article-explainer">' + esc(value.split('::', 1)[1])
+                    + '</div>', unsafe_allow_html=True)
+    else:
+        # An RSS snippet is not labeled or presented as a generated summary.
+        token = str(setting('news_brief', 'openrouter_api_key', '')).strip()
+        if not token:
+            st.caption('AI 연결 정보가 없어 원문을 확인해 주세요.')
+        else:
+            # A shared, persistent limit conserves the free tier. Avoid any
+            # model calls on page loads or repeated clicks of saved summaries.
+            today = now()[:10]
+            records = data('Collection_Log')
+            used = sum(1 for r in records if str(r.get('언론사코드')) == 'ARTICLE_AI'
+                       and str(r.get('실행일시', '')).startswith(today))
+            if used >= 12:
+                st.caption('오늘의 기사 요약 한도에 도달했습니다. 원문을 이용해 주세요.')
+            else:
+                try:
+                    with st.spinner('기사를 간추리는 중…'):
+                        brief = summarize_article(article, token)
+                    persisted = patch_record(book(), 'News', '뉴스ID', article['뉴스ID'],
+                                             {'요약': 'AI_SUMMARY_V1::' + brief})
+                    if persisted:
+                        append_records(book(), 'Collection_Log', [dict(zip(HEADERS['Collection_Log'],
+                            [str(article['뉴스ID']) + '-' + now(), now(), 'ARTICLE_AI', 'AI',
+                             1, 1, 0, '성공', '', 0]))])
+                        data.clear()
+                    st.markdown('<div class="article-explainer">' + esc(brief)
+                                + '</div>', unsafe_allow_html=True)
+                except Exception:
+                    st.caption('지금은 요약을 생성하지 못했습니다. 원문을 이용해 주세요.')
+    st.markdown('<div class="article-source-note">제목·RSS 정보 기준 · 기사 전문 미확인</div>',
+                unsafe_allow_html=True)
+    url = safe_url(article.get('원문URL', ''))
+    if url:
+        st.markdown('<div class="article-original"><a href="' + esc(url)
+                    + '" target="_blank" rel="noopener noreferrer">원문 보기 ↗</a></div>',
+                    unsafe_allow_html=True)
+
+
+def render_news_tile(group, index, known, cmap):
+    article = group[0]
+    key = str(article.get('뉴스ID'))
+    actual = publisher(article, known)
+    display_title = str(article.get('제목', ''))
+    if display_title.endswith(' - ' + actual):
+        display_title = display_title[:-(len(actual) + 3)]
+    published = str(article.get('발행일시', ''))[5:16]
+    label = esc(actual) + ' · ' + esc(cmap.get(article.get('카테고리코드'), '')) + ' · ' + esc(published)
+    with st.container(key=f'article_tile_{index}'):
+        st.markdown('<div class="news-meta"><span class="news-source">' + esc(actual)
+                    + '</span><span class="news-category">'
+                    + esc(cmap.get(article.get('카테고리코드'), ''))
+                    + '</span><span>' + esc(published) + '</span></div>', unsafe_allow_html=True)
+        if st.button(display_title, key=f'article_open_{key}', use_container_width=True):
+            st.session_state['opened_news_id'] = None if st.session_state.get('opened_news_id') == key else key
+        if st.session_state.get('opened_news_id') == key:
+            render_article_summary(article)
+        if len(group) > 1:
+            with st.expander(f'관련 보도 {len(group)-1}건'):
+                for other in group[1:8]:
+                    u = safe_url(other.get('원문URL', ''))
+                    if u:
+                        st.markdown('[' + publisher(other, known).replace('[', '').replace(']', '')
+                                    + ' · ' + str(other.get('제목', ''))[:60].replace('[', '').replace(']', '')
+                                    + '](' + u + ')')
+
+
 def app_home():
     ensure_setup()
     categories = [r for r in data('Category') if enabled(r.get('사용여부'))]
@@ -463,7 +483,8 @@ def app_home():
     all_items.sort(key=lambda r: str(r.get('발행일시', '')), reverse=True)
     known = {r['언론사코드']: r['언론사명'] for r in data('Media')}
     last_logs = data('Collection_Log')
-    last_time = max((str(r.get('실행일시','')) for r in last_logs), default='')
+    last_time = max((str(r.get('실행일시','')) for r in last_logs
+                     if str(r.get('수집방식','')).upper() == 'RSS'), default='')
     try:
         maybe_update_news(last_time)
         update_indicator()
@@ -476,43 +497,15 @@ def app_home():
     if not all_items and not news_update_guard()['running']:
         st.caption('최근 7일 뉴스가 없습니다. 최신 기사 확인을 시도하고 있습니다.')
 
-    old = st.session_state.get('news_category', 'ALL')
-    catcodes = list(cmap)
-    if old not in catcodes:
-        old = catcodes[0]
-    mode = st.session_state.get('news_view_mode', '최신 뉴스') or '최신 뉴스'
     # Category, publisher selection, favorites and all filters are contained in
     # the single compact header menu (rendered by main()).
     category = st.session_state.get('category_selection', 'ALL')
     if category not in cmap:
         category = 'ALL'
-    favorite_mode = st.session_state.get('news_favorite_mode', '전체 언론사')
+    favorite_mode = st.session_state.get('news_favorite_mode', '⭐ 즐겨찾기')
 
-    # Bookmarks do not get removed with 7-day news retention.
-    if mode == '🔖 보관함':
-        saved = preference('bookmarked_articles_v1', [])
-        if not saved:
-            st.info('저장한 기사가 없습니다. 최신 뉴스의 🔖 저장 메뉴에서 추가할 수 있습니다.')
-            return
-        with st.popover('북마크 관리'):
-            opts = {str(i): str(a.get('title', ''))[:95] for i, a in enumerate(saved) if isinstance(a, dict)}
-            with st.form('remove_saved'):
-                removing = st.multiselect('삭제할 북마크', list(opts), format_func=lambda x: opts[x])
-                if st.form_submit_button('선택 삭제'):
-                    save_preference('bookmarked_articles_v1', [a for i, a in enumerate(saved) if str(i) not in removing], '저장한 기사')
-                    st.rerun()
-        tiles = []
-        for a in reversed(saved):
-            url = safe_url(a.get('url',''))
-            if url:
-                tiles.append('<article class="news-tile"><div class="news-meta">🔖 '
-                             + esc(a.get('publisher','')) + '</div><div class="news-title"><a href="'
-                             + esc(url) + '" target="_blank" rel="noopener noreferrer">'
-                             + esc(a.get('title','')) + ' ↗</a></div></article>')
-        st.markdown('<div class="news-grid">' + ''.join(tiles) + '</div>', unsafe_allow_html=True)
-        return
 
-    favorites = favorite_names() if favorite_mode == '⭐ 즐겨찾기' else []
+    favorites = effective_favorites() if favorite_mode == '⭐ 즐겨찾기' else []
     items = [r for r in all_items if category == 'ALL' or r.get('카테고리코드') == category]
     if favorite_mode == '⭐ 즐겨찾기':
         items = [r for r in items if publisher(r, known) in favorites]
@@ -541,55 +534,9 @@ def app_home():
         clusters.sort(key=lambda g: str(g[0].get('발행일시','')), reverse=True)
         clusters.sort(key=lambda g: not any(x in str(r.get('제목','')).casefold() for r in g for x in priority))
 
-    if mode == '✨ AI 브리핑':
-        brief = latest_brief(category)
-        if not briefing_is_fresh(brief):
-            if category == 'ALL':
-                buckets = {}
-                for r in items:
-                    buckets.setdefault(str(r.get('카테고리코드','ALL')), []).append(r)
-                balanced = []
-                while len(balanced) < 30 and any(buckets.values()):
-                    for group in buckets.values():
-                        if group and len(balanced) < 30:
-                            balanced.append(group.pop(0))
-                source_items = balanced
-            else:
-                source_items = items[:30]
-            message = auto_briefing(category, source_items)
-            if message:
-                st.caption(message)
-        brief = latest_brief(category) or (latest_brief('ALL') if category != 'ALL' else None)
-        if not brief:
-            st.info('AI 브리핑이 아직 없습니다. 무료 AI가 가능한 경우 이 화면에서 생성됩니다.')
-            return
-        st.markdown('<div class="summary-hero"><h3>' + esc(brief.get('브리핑제목'))
-                    + '</h3><p>' + esc(brief.get('핵심요약')) + '</p></div>', unsafe_allow_html=True)
-        try:
-            issues = json.loads(brief.get('주요이슈') or '[]')
-        except (ValueError, TypeError):
-            issues = []
-        idmap = {str(r.get('뉴스ID')): r for r in all_items}
-        cards = []
-        for i, issue in enumerate(issues[:10], 1):
-            related = [idmap[str(k)] for k in issue.get('ids', []) if str(k) in idmap]
-            links = []
-            for r in related[:3]:
-                url = safe_url(r.get('원문URL',''))
-                if url:
-                    links.append(f'<a href="{esc(url)}" target="_blank" rel="noopener noreferrer">'
-                                 f'{esc(publisher(r, known))} ↗</a>')
-            cards.append('<article class="issue-card"><div class="issue-number">ISSUE '
-                         + str(i).zfill(2) + '</div><div class="issue-title">'
-                         + esc(issue.get('headline')) + '</div><p class="issue-point">'
-                         + esc(issue.get('point')) + '</p><div class="issue-links">'
-                         + ' '.join(links) + '</div></article>')
-        st.markdown('<div class="issue-grid">' + ''.join(cards) + '</div>', unsafe_allow_html=True)
-        st.caption('OpenRouter 무료 AI · RSS 제목·설명 기반 (본문 검증 아님) · 생성 ' + str(brief.get('생성일시',''))[:16])
-        return
 
     if not items:
-        st.info('선택한 조건의 뉴스가 없습니다. 필터를 바꾸거나 최신 뉴스 갱신을 눌러 주세요.')
+        st.info('선택한 조건의 뉴스가 없습니다. ☰ 메뉴에서 언론사나 기간을 확인해 주세요.')
         return
     limit = int(st.session_state.get('news_limit',40))
     pages = max(1, (len(clusters) + limit - 1)//limit)
@@ -597,58 +544,29 @@ def app_home():
         st.session_state.news_page = 1
     page = int(st.session_state.get('news_page',1))
     shown = clusters[(page-1)*limit:page*limit]
-    excerpts = bool(st.session_state.get('news_excerpts',False))
-    tiles = []
-    for group in shown:
-        article = group[0]
-        url = safe_url(article.get('원문URL',''))
-        display_title = str(article.get('제목',''))
-        actual = publisher(article, known)
-        if display_title.endswith(' - ' + actual):
-            display_title = display_title[:-(len(actual)+3)]
-        title = esc(display_title)
-        name = esc(actual)
-        cat = esc(cmap.get(article.get('카테고리코드',''),''))
-        published = esc(str(article.get('발행일시',''))[5:16])
-        title_html = (f'<a href="{esc(url)}" target="_blank" rel="noopener noreferrer">{title} ↗</a>' if url else title)
-        desc = (f'<div class="news-desc">{esc(str(article.get("요약",""))[:220])}</div>'
-                if excerpts and article.get('요약') else '')
-        media_links = []
-        if len(group) > 1:
-            for other in group[1:8]:
-                other_url = safe_url(other.get('원문URL',''))
-                if other_url:
-                    media_links.append(f'<a href="{esc(other_url)}" target="_blank" rel="noopener noreferrer">'
-                                       + esc(publisher(other, known)) + ' ↗</a>')
-        related = ('<details class="related"><summary>관련 보도 ' + str(len(group)-1)
-                   + '건 펼치기</summary>' + ' · '.join(media_links) + '</details>') if media_links else ''
-        tiles.append('<article class="news-tile"><div class="news-meta"><span class="news-source">'
-                     + name + '</span><span class="news-category">' + cat
-                     + '</span><span>' + published + '</span></div><div class="news-title">'
-                     + title_html + '</div>' + desc + related + '</article>')
-    st.markdown('<div class="news-grid">' + ''.join(tiles) + '</div>', unsafe_allow_html=True)
-    # Shared bookmark UI stays compact and works even with HTML-rendered news cards.
-    with st.popover('🔖 기사 저장'):
-        lookup = {str(group[0]['뉴스ID']): group[0] for group in shown}
-        with st.form('bookmark_add'):
-            chosen = st.multiselect('보관할 기사', list(lookup),
-                                    format_func=lambda x: str(lookup[x].get('제목',''))[:100])
-            if st.form_submit_button('북마크에 저장') and chosen:
-                save_bookmarks(chosen)
-                st.success(f'{len(chosen)}개 저장했습니다.')
+    # Native Streamlit buttons allow inline on-demand AI without leaving the app.
+    # Two columns on wide screens; Streamlit stacks them on phone widths.
+    for i in range(0, len(shown), 2):
+        left, right = st.columns(2, gap='small')
+        with left:
+            render_news_tile(shown[i], i, known, cmap)
+        if i + 1 < len(shown):
+            with right:
+                render_news_tile(shown[i+1], i+1, known, cmap)
+
     if pages > 1:
         st.number_input('페이지 이동', min_value=1, max_value=pages, step=1, key='news_page')
-    st.caption('기사 클릭 시 원문으로 이동합니다. 유사 기사 묶음은 제목 비교에 의한 추정입니다.')
+    
 
 
 def main():
     try:
         ensure_setup()
-        # The latest update is a single understated text element, placed directly
-        # after the three navigation choices. Avoid Streamlit embed=true: it removes
+        # Avoid Streamlit embed=true: it removes
         # the header clearance on some mobile browsers.
         logs = data('Collection_Log')
-        last_stamp = max((str(r.get('실행일시','')) for r in logs), default='')
+        last_stamp = max((str(r.get('실행일시','')) for r in logs
+                          if str(r.get('수집방식','')).upper() == 'RSS'), default='')
         timestamp = last_stamp[5:16].replace('-', '.') if last_stamp else '기록 없음'
         with st.container(key='news_header'):
             brandcol, navcol, timecol, menucol = st.columns(
@@ -658,9 +576,8 @@ def main():
                             '<span>간추린 뉴스</span></div>',
                             unsafe_allow_html=True)
             with navcol:
-                st.segmented_control('화면', ['최신 뉴스', '✨ AI 브리핑', '🔖 보관함'],
-                                     default='최신 뉴스', label_visibility='collapsed',
-                                     key='news_view_mode', on_change=on_view_change)
+                st.button('최신 뉴스', key='latest_news_button', use_container_width=True,
+                          on_click=lambda: st.session_state.update(news_user_requested_latest=True))
                 st.markdown(f'<div class="mobile-updated">Updated {esc(timestamp)}</div>',
                             unsafe_allow_html=True)
             with timecol:
