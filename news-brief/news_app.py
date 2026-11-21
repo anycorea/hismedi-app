@@ -3,6 +3,7 @@ import html
 import json
 from datetime import datetime, timedelta
 import threading
+import time
 import re
 from difflib import SequenceMatcher
 from zoneinfo import ZoneInfo
@@ -27,8 +28,8 @@ header[data-testid="stHeader"] {background:#f7f9fc}
 .brand-mark {width:29px;height:29px;display:inline-flex;align-items:center;justify-content:center;background:#0d765a;color:white;border-radius:9px;font-size:1rem}
 .brand-small {font-size:.72rem;color:#7c8a99;font-weight:600;letter-spacing:0}
 .page-note {color:#7a8899;font-size:.76rem;margin:0 0 7px}
-.header-stats {color:#7a8899;font-size:.76rem;text-align:right;white-space:nowrap;line-height:1.35}
-@media(max-width:900px){.header-stats {font-size:.69rem;white-space:normal}}
+.header-updated{color:#718195;font-size:.77rem;white-space:nowrap;text-align:left}
+@media(max-width:900px){.header-updated{font-size:.72rem}}
 .pill-status {color:#65778c;font-size:.77rem;white-space:nowrap}
 .editor-heading {font-size:1.03rem;font-weight:800;color:#152941;letter-spacing:-.025em;margin:4px 0 7px}
 .news-grid {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 12px;align-items:stretch}
@@ -37,7 +38,7 @@ header[data-testid="stHeader"] {background:#f7f9fc}
 .news-meta {display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:#7c8a98;font-size:.74rem;margin-bottom:5px}
 .news-source {display:inline-block;color:#167352;background:#e8f5ee;font-weight:750;border-radius:6px;padding:3px 8px;overflow-wrap:anywhere}
 .news-category {color:#617b92;font-weight:700}
-.news-title {font-size:var(--news-title-size,1.03rem);line-height:1.4;letter-spacing:-.018em;font-weight:735;overflow-wrap:anywhere;word-break:keep-all}
+.news-title {font-size:1.03rem;line-height:1.4;letter-spacing:-.018em;font-weight:735;overflow-wrap:anywhere;word-break:keep-all}
 .news-title a {color:#1b2d42;text-decoration:none}
 .news-title a:hover {color:#08785b;text-decoration:underline;text-underline-offset:3px}
 .news-desc {color:#647789;font-size:.87rem;line-height:1.6;margin-top:8px;word-break:keep-all}
@@ -54,13 +55,28 @@ header[data-testid="stHeader"] {background:#f7f9fc}
 .issue-links a:hover {text-decoration:underline}
 .empty-ai {background:#fff;border:1px solid #e2e9ef;border-radius:12px;padding:22px;color:#52677c}
 .related{margin-top:8px;font-size:.78rem;color:#168162}.related summary{cursor:pointer;font-weight:650}.related a{color:#0d765a;text-decoration:none}.related a:hover{text-decoration:underline}
-.anycorea {text-align:center;color:#9aa5b0;font-size:.70rem;padding:22px 0}
+.anycorea {text-align:center;color:#9aa5b0;font-size:.70rem;padding:14px 0}
+/* Avoid decorative wrappers: the headline and settings are the only toolbar. */
+.brand{white-space:nowrap}
+.news-grid{gap:8px 10px}
+.st-key-news_view_mode button{white-space:nowrap}
+@media(max-width:700px){.brand{font-size:1.09rem}.brand-mark{width:27px;height:27px}}
+/* On phones/tablets let the header wrap compactly rather than stack full-width columns. */
+@media(max-width:950px){
+ .st-key-news_header [data-testid="stHorizontalBlock"]{flex-wrap:wrap!important;gap:.3rem .65rem!important}
+ .st-key-news_header [data-testid="column"]{width:auto!important;min-width:0!important;flex:0 0 auto!important}
+ .st-key-news_header [data-testid="column"]:nth-child(2){flex:1 1 280px!important}
+ .st-key-news_header [data-testid="column"]:nth-child(3){order:4!important}
+ .st-key-news_header [data-testid="column"]:nth-child(4){order:3!important}
+}
+
+
 @media(max-width:850px){.news-grid,.issue-grid{grid-template-columns:1fr}}
 @media(max-width:700px){
  .block-container{padding-left:.72rem;padding-right:.72rem;padding-bottom:1.5rem}
  .brand{font-size:1.13rem}
  .news-tile{padding:12px 13px;border-radius:9px}
- .news-title{font-size:max(var(--news-title-size,1.03rem),1.04rem)}
+ .news-title{font-size:1.05rem}
  .summary-hero{padding:16px}
  .brand-small{display:none}
 }
@@ -165,7 +181,89 @@ def handle_error(exc):
 
 @st.cache_resource
 def news_update_guard():
-    return {'lock': threading.Lock(), 'last': None}
+    # Process-wide, so simultaneous iPhone/iPad/PC visits cannot launch multiple collects.
+    return {'lock': threading.Lock(), 'state_lock': threading.Lock(),
+            'running': False, 'last_start': 0.0, 'last_end': 0.0,
+            'last_report': None, 'last_error': '', 'version': 0}
+
+
+def on_view_change():
+    """Selecting Latest News explicitly requests a fresh check, not a forced RSS call."""
+    if st.session_state.get('news_view_mode') == '최신 뉴스':
+        st.session_state['news_user_requested_latest'] = True
+
+
+def maybe_update_news(last_time):
+    """Start a bounded non-blocking update only if data is stale.
+
+    Do not run on every Streamlit rerun. The background worker is intentionally
+    isolated from Streamlit context and never touches st.session_state or st.secrets.
+    """
+    guard = news_update_guard()
+    st.session_state.setdefault('seen_collect_version', guard['version'])
+    request = bool(st.session_state.pop('news_user_requested_latest', False))
+    if not last_time:
+        stale = True
+    else:
+        try:
+            stamp = datetime.fromisoformat(last_time)
+            stale = (datetime.now(ZoneInfo('Asia/Seoul')) - stamp).total_seconds() >= 45 * 60
+        except ValueError:
+            stale = True
+    if not stale and not request:
+        return
+    # User explicitly tapping latest may refresh sooner, but never more often than 5 min.
+    elapsed = time.monotonic() - guard['last_start']
+    if guard['last_start'] and elapsed < (300 if request else 900):
+        return
+    if not guard['lock'].acquire(blocking=False):
+        return
+    # Everything consumed by the background thread is copied before it starts.
+    config = {'gcp_service_account': dict(st.secrets['gcp_service_account']),
+              'gsheet': {'spreadsheet_id': str(st.secrets['gsheet']['spreadsheet_id'])}}
+    with guard['state_lock']:
+        guard['running'] = True
+        guard['last_start'] = time.monotonic()
+        guard['last_error'] = ''
+
+    def worker():
+        try:
+            b = connect(config)
+            result = collect(b, limit_per_feed=20)
+            deleted = clean_old_rows(b, days=7)
+            with guard['state_lock']:
+                guard['last_report'] = {**result, 'deleted': sum(deleted.values())}
+                guard['last_error'] = ''
+        except Exception as exc:
+            with guard['state_lock']:
+                guard['last_error'] = f'{type(exc).__name__}: {str(exc)[:220]}'
+        finally:
+            with guard['state_lock']:
+                guard['running'] = False
+                guard['last_end'] = time.monotonic()
+                guard['version'] += 1
+            guard['lock'].release()
+
+    threading.Thread(target=worker, name='NewsBrief-RSS', daemon=True).start()
+
+
+@st.fragment(run_every='20s')
+def update_indicator():
+    """Refresh the whole screen only when a background collection finishes."""
+    guard = news_update_guard()
+    with guard['state_lock']:
+        running = guard['running']
+        version = guard['version']
+        error = guard['last_error']
+    if running:
+        st.caption('새 뉴스를 확인하는 중입니다. 기존 기사는 계속 이용할 수 있습니다.')
+    elif st.session_state.get('seen_collect_version', version) != version:
+        st.session_state.seen_collect_version = version
+        refresh()
+        st.rerun(scope='app')
+    elif error and st.session_state.get('seen_error_version') != version:
+        st.session_state.seen_error_version = version
+        st.caption('최근 뉴스 갱신에 실패했습니다. 저장된 뉴스를 표시합니다.')
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
@@ -230,22 +328,6 @@ def cluster_titles(articles):
     return groups
 
 
-def collect_on_click():
-    """Single explicit action; no background scheduler or implicit AI charges."""
-    guard = news_update_guard()
-    if not guard['lock'].acquire(blocking=False):
-        return {'busy': True}
-    try:
-        b = book()
-        ensure_setup()
-        result = collect(b, limit_per_feed=20)
-        deleted = clean_old_rows(b, days=7)
-        refresh()
-        return {**result, 'deleted': sum(deleted.values()), 'busy': False}
-    finally:
-        guard['lock'].release()
-
-
 def save_bookmarks(article_ids):
     news = {str(r.get('뉴스ID')): r for r in data('News')}
     existing = preference('bookmarked_articles_v1', [])
@@ -273,22 +355,60 @@ def favorite_names():
     return preference('favorite_publishers', [])
 
 
-def favorites_editor(articles, known):
+def favorites_editor(articles, known, inline=False):
     """Public app preference editor: no separate administrator page."""
     names = sorted({publisher(r, known) for r in articles})
     saved = favorite_names()
-    with st.popover('☆ 언론사 선택', use_container_width=True):
-        st.caption('표시할 언론사를 선택합니다. 저장하면 모든 기기에 공통 적용됩니다.')
-        with st.form('favorite_editor'):
-            chosen = st.multiselect('즐겨찾기 언론사', sorted(set(names + saved)), default=saved,
-                                    placeholder='검색해서 여러 언론사 선택')
-            submit = st.form_submit_button('즐겨찾기 저장', type='primary', use_container_width=True)
-        if submit:
-            save_preference('favorite_publishers', chosen, '공통 즐겨찾기 언론사')
-            st.rerun()
+    st.caption('선택한 언론사는 모든 기기에서 공통으로 사용합니다.')
+    with st.form('favorite_editor'):
+        chosen = st.multiselect('즐겨찾기 언론사', sorted(set(names + saved)), default=saved,
+                                placeholder='언론사 검색·선택')
+        submit = st.form_submit_button('즐겨찾기 저장', use_container_width=True)
+    if submit:
+        save_preference('favorite_publishers', chosen, '공통 즐겨찾기 언론사')
+        st.rerun()
 
 
-def app_home(stats_placeholder=None):
+def header_menu():
+    # One menu instead of a full-width toolbar; this is especially important on iPad.
+    with st.popover('☰ 메뉴', use_container_width=True):
+        categories = [r for r in data('Category') if enabled(r.get('사용여부'))]
+        categories.sort(key=lambda r: int(r.get('정렬순서') or 999))
+        cmap = {r['카테고리코드']: r['카테고리명'] for r in categories}
+        codes = list(cmap) or ['ALL']
+        saved = st.session_state.get('category_selection', 'ALL')
+        if saved not in codes:
+            st.session_state['category_selection'] = 'ALL' if 'ALL' in codes else codes[0]
+        st.selectbox('뉴스 분야', codes, format_func=lambda c: cmap.get(c,c),
+                     key='category_selection')
+        st.selectbox('언론사 보기', ['전체 언론사', '⭐ 즐겨찾기'],
+                     key='news_favorite_mode')
+        with st.expander('언론사 즐겨찾기 관리'):
+            articles = [r for r in data('News') if recent_news(r, 7)]
+            known = {r['언론사코드']: r['언론사명'] for r in data('Media')}
+            favorites_editor(articles, known, inline=True)
+        st.text_input('뉴스 검색', placeholder='제목 또는 언론사', key='news_search')
+        st.selectbox('기간', ['오늘', '어제', '최근 7일'], index=2, key='news_date')
+        st.selectbox('정렬', ['최신순', '언론사순', '관련 보도 많은 순'], key='news_sort')
+        st.toggle('유사 기사 묶기', value=True, key='news_group')
+        st.toggle('RSS 설명 표시', value=False, key='news_excerpts')
+        st.select_slider('한 화면 기사 수', options=[20,40,60], value=40,
+                         key='news_limit')
+        with st.expander('관심 / 제외 키워드'):
+            saved_include = preference('priority_keywords_v1', [])
+            saved_exclude = preference('excluded_keywords_v1', [])
+            with st.form('keywords_form'):
+                include = st.text_input('관심 키워드', value=', '.join(saved_include))
+                exclude = st.text_input('제외 키워드', value=', '.join(saved_exclude))
+                if st.form_submit_button('키워드 저장'):
+                    def terms(raw):
+                        return list(dict.fromkeys(t.strip() for t in raw.split(',') if t.strip()))[:25]
+                    save_preference('priority_keywords_v1', terms(include), '관심 키워드')
+                    save_preference('excluded_keywords_v1', terms(exclude), '제외 키워드')
+                    st.rerun()
+
+
+def app_home():
     ensure_setup()
     categories = [r for r in data('Category') if enabled(r.get('사용여부'))]
     categories.sort(key=lambda r: int(r.get('정렬순서') or 999))
@@ -303,67 +423,25 @@ def app_home(stats_placeholder=None):
     known = {r['언론사코드']: r['언론사명'] for r in data('Media')}
     last_logs = data('Collection_Log')
     last_time = max((str(r.get('실행일시','')) for r in last_logs), default='')
-    if stats_placeholder is not None:
-        stats_placeholder.markdown(
-            f'<div class="header-stats">{len(all_items):,}개 기사 · '
-            f'{len({publisher(r, known) for r in all_items}):,}개 언론사 · '
-            f'마지막 갱신 {esc(last_time[5:16]) or "기록 없음"}</div>',
-            unsafe_allow_html=True)
+    maybe_update_news(last_time)
+    update_indicator()
 
-    # Collection is triggered only by the compact header button.
-    report = st.session_state.pop('news_refresh_report', None)
-    if report:
-        st.caption(f"갱신 완료 · 신규 {report['new']}건 · 오류 소스 {report['errors']}곳 · "
-                   f"7일 경과 정리 {report['deleted']}행 · {report['seconds']}초")
-    elif not all_items:
-        st.caption('저장된 최근 뉴스가 없습니다. 상단의 ↻ 갱신을 눌러 주세요.')
-    if st.session_state.pop('news_refresh_busy', False):
-        st.warning('다른 뉴스 갱신 작업이 실행 중입니다.')
-    error = st.session_state.pop('news_refresh_error', '')
-    if error:
-        st.error('수집이 완료되지 않았습니다. 기존 뉴스는 유지됩니다.')
-        with st.expander('수집 오류 내용'):
-            st.code(error)
+    # The primary layout deliberately contains no collection button, counts or
+    # explanatory title. News collection is lazy and background-only.
+    if not all_items and not news_update_guard()['running']:
+        st.caption('최근 7일 뉴스가 없습니다. 최신 기사 확인을 시도하고 있습니다.')
 
     old = st.session_state.get('news_category', 'ALL')
     catcodes = list(cmap)
     if old not in catcodes:
         old = catcodes[0]
-    tcol, catcol, favcol, editcol, filtercol = st.columns(
-        [2.1, 1.8, 1.5, 1.3, .85], vertical_alignment='center', gap='small')
-    with tcol:
-        mode = st.segmented_control('보기', ['최신 뉴스', '✨ AI 브리핑', '🔖 보관함'],
-                                    default='최신 뉴스', label_visibility='collapsed',
-                                    key='news_view_mode') or '최신 뉴스'
-    with catcol:
-        category = st.selectbox('뉴스 분야', catcodes, index=catcodes.index(old),
-                                format_func=lambda c: cmap[c], label_visibility='collapsed',
-                                key='category_selection')
-        st.session_state.news_category = category
-    with favcol:
-        favorite_mode = st.selectbox('언론사', ['전체 언론사', '⭐ 즐겨찾기'],
-                                     label_visibility='collapsed', key='news_favorite_mode')
-    with editcol:
-        favorites_editor(all_items, known)
-    with filtercol:
-        with st.popover('☰ 필터', use_container_width=True):
-            st.text_input('검색', placeholder='제목·언론사', key='news_search')
-            st.selectbox('기간', ['오늘', '어제', '최근 7일'], index=2, key='news_date')
-            st.selectbox('정렬', ['최신순', '언론사순', '관련 보도 많은 순'], key='news_sort')
-            st.toggle('유사 기사 묶어보기', value=True, key='news_group')
-            st.toggle('RSS 요약 설명', value=False, key='news_excerpts')
-            st.select_slider('페이지당 기사', options=[20, 40, 60], value=40, key='news_limit')
-            saved_include = preference('priority_keywords_v1', [])
-            saved_exclude = preference('excluded_keywords_v1', [])
-            with st.form('keywords_form'):
-                include = st.text_input('관심 키워드 (쉼표 구분)', value=', '.join(saved_include))
-                exclude = st.text_input('제외 키워드 (쉼표 구분)', value=', '.join(saved_exclude))
-                if st.form_submit_button('키워드 저장'):
-                    def terms(raw):
-                        return list(dict.fromkeys(t.strip() for t in raw.split(',') if t.strip()))[:25]
-                    save_preference('priority_keywords_v1', terms(include), '관심 뉴스 키워드')
-                    save_preference('excluded_keywords_v1', terms(exclude), '숨길 뉴스 키워드')
-                    st.rerun()
+    mode = st.session_state.get('news_view_mode', '최신 뉴스') or '최신 뉴스'
+    # Category, publisher selection, favorites and all filters are contained in
+    # the single compact header menu (rendered by main()).
+    category = st.session_state.get('category_selection', 'ALL')
+    if category not in cmap:
+        category = 'ALL'
+    favorite_mode = st.session_state.get('news_favorite_mode', '전체 언론사')
 
     # Bookmarks do not get removed with 7-day news retention.
     if mode == '🔖 보관함':
@@ -474,15 +552,6 @@ def app_home(stats_placeholder=None):
         st.session_state.news_page = 1
     page = int(st.session_state.get('news_page',1))
     shown = clusters[(page-1)*limit:page*limit]
-    # Shared bookmark UI stays compact and works even with HTML-rendered news cards.
-    with st.popover('🔖 기사 저장'):
-        lookup = {str(group[0]['뉴스ID']): group[0] for group in shown}
-        with st.form('bookmark_add'):
-            chosen = st.multiselect('보관할 기사', list(lookup),
-                                    format_func=lambda x: str(lookup[x].get('제목',''))[:100])
-            if st.form_submit_button('북마크에 저장') and chosen:
-                save_bookmarks(chosen)
-                st.success(f'{len(chosen)}개 저장했습니다.')
     excerpts = bool(st.session_state.get('news_excerpts',False))
     tiles = []
     for group in shown:
@@ -513,45 +582,45 @@ def app_home(stats_placeholder=None):
                      + '</span><span>' + published + '</span></div><div class="news-title">'
                      + title_html + '</div>' + desc + related + '</article>')
     st.markdown('<div class="news-grid">' + ''.join(tiles) + '</div>', unsafe_allow_html=True)
+    # Shared bookmark UI stays compact and works even with HTML-rendered news cards.
+    with st.popover('🔖 기사 저장'):
+        lookup = {str(group[0]['뉴스ID']): group[0] for group in shown}
+        with st.form('bookmark_add'):
+            chosen = st.multiselect('보관할 기사', list(lookup),
+                                    format_func=lambda x: str(lookup[x].get('제목',''))[:100])
+            if st.form_submit_button('북마크에 저장') and chosen:
+                save_bookmarks(chosen)
+                st.success(f'{len(chosen)}개 저장했습니다.')
     if pages > 1:
         st.number_input('페이지 이동', min_value=1, max_value=pages, step=1, key='news_page')
     st.caption('기사 클릭 시 원문으로 이동합니다. 유사 기사 묶음은 제목 비교에 의한 추정입니다.')
 
 
 def main():
-    # Header stays on a single row on wide displays; no forced top-padding overrides.
-    brandcol, refreshcol, statscol, fontcol = st.columns(
-        [2.2, 1.3, 5.8, .55], vertical_alignment='center', gap='small')
-    with brandcol:
-        st.markdown('<div class="brand"><span class="brand-mark">N</span> 간추린 뉴스'
-                    '<span class="brand-small">NEWS BRIEF</span></div>', unsafe_allow_html=True)
-    with refreshcol:
-        if st.button('↻ 최신 뉴스 갱신', type='primary', use_container_width=True,
-                     key='header_news_refresh'):
-            with st.spinner('최근 24시간 뉴스 수집 · 7일 경과 기사 정리 중…'):
-                try:
-                    report = collect_on_click()
-                    if report.get('busy'):
-                        st.session_state['news_refresh_busy'] = True
-                    else:
-                        st.session_state['news_refresh_report'] = report
-                except Exception as exc:
-                    st.session_state['news_refresh_error'] = f'{type(exc).__name__}: {exc}'
-            st.rerun()
-    with statscol:
-        stats_placeholder = st.empty()
-    with fontcol:
-        with st.popover('Aa', help='글자 크기 설정', use_container_width=True):
-            font = st.radio('글자 크기', ['기본', '크게', '아주 크게'], key='font_pref')
-            if st.button('새로고침'):
-                refresh()
-                st.rerun()
-    sizes = {'기본': '1.03rem', '크게': '1.2rem', '아주 크게': '1.42rem'}
-    font = st.session_state.get('font_pref', '기본')
-    st.markdown('<style>:root{--news-title-size:' + sizes[font] + '}</style>',
-                unsafe_allow_html=True)
     try:
-        app_home(stats_placeholder)
+        ensure_setup()
+        # The latest update is a single understated text element, placed directly
+        # after the three navigation choices. Avoid Streamlit embed=true: it removes
+        # the header clearance on some mobile browsers.
+        logs = data('Collection_Log')
+        last_stamp = max((str(r.get('실행일시','')) for r in logs), default='')
+        timestamp = last_stamp[5:16].replace('-', '.') if last_stamp else '기록 없음'
+        with st.container(key='news_header'):
+            brandcol, navcol, timecol, menucol = st.columns(
+                [2.1, 4.2, 1.7, 1.1], vertical_alignment='center', gap='small')
+            with brandcol:
+                st.markdown('<div class="brand"><span class="brand-mark">N</span>간추린 뉴스</div>',
+                            unsafe_allow_html=True)
+            with navcol:
+                st.segmented_control('화면', ['최신 뉴스', '✨ AI 브리핑', '🔖 보관함'],
+                                     default='최신 뉴스', label_visibility='collapsed',
+                                     key='news_view_mode', on_change=on_view_change)
+            with timecol:
+                st.markdown(f'<div class="header-updated">Updated {esc(timestamp)}</div>',
+                            unsafe_allow_html=True)
+            with menucol:
+                header_menu()
+        app_home()
     except Exception as exc:
         handle_error(exc)
     st.markdown('<div class="anycorea">Created by anycorea</div>', unsafe_allow_html=True)
