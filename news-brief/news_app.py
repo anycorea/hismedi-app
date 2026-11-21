@@ -113,6 +113,25 @@ footer, div[data-testid="stDecoration"] {display:none!important}
  .summary-hero{padding:16px}
  .brand-small{display:none}
 }
+
+/* The headline is the primary element. Target Streamlit's native tertiary
+   button and ALL inner text nodes, not a brittle generated class name. */
+[data-testid="stButton"] button[kind="tertiary"],
+[data-testid="stButton"] button[data-testid="stBaseButton-tertiary"] {
+  display:flex!important; justify-content:flex-start!important;
+  align-items:flex-start!important; text-align:left!important;
+  padding:0!important; margin:0!important; width:100%!important;
+  background:transparent!important; border:0!important; box-shadow:none!important;
+  white-space:normal!important; height:auto!important; min-height:0!important;
+  color:#192b40!important; font-size:1.09rem!important; font-weight:760!important;
+}
+[data-testid="stButton"] button[kind="tertiary"] *,
+[data-testid="stButton"] button[data-testid="stBaseButton-tertiary"] * {
+  text-align:left!important; justify-content:flex-start!important;
+  margin-left:0!important; margin-right:auto!important;
+  white-space:normal!important; word-break:keep-all!important;
+  overflow-wrap:anywhere!important; font-weight:760!important;
+}
 </style>''', unsafe_allow_html=True)
 
 
@@ -512,12 +531,16 @@ def render_article_summary(article):
                         st.caption('원문이 다른 기사로 연결되어 요약하지 않았습니다.')
                     elif str(exc) == 'ARTICLE_CONTENT_UNAVAILABLE':
                         st.caption('기사 본문을 확인할 수 없습니다. 원문에서 확인해 주세요.')
+                    elif str(exc) == 'ARTICLE_SOURCE_LINK_UNRESOLVED':
+                        st.caption('Google 뉴스에서 언론사 원문 주소를 확인하지 못했습니다.')
                     elif str(exc) == 'ARTICLE_CONTENT_INSUFFICIENT':
-                        st.caption('확인된 내용이 부족해 요약을 제공하지 않습니다.')
+                        st.caption('원문에서 요약에 필요한 내용이 충분히 확보되지 않았습니다.')
                     else:
-                        st.caption('요약에 필요한 기사 내용을 확인하지 못했습니다.')
+                        st.caption('기사 내용 확인 중 오류가 발생했습니다.')
+                except RuntimeError as exc:
+                    st.caption('무료 AI 응답 오류: ' + str(exc)[:130])
                 except Exception:
-                    st.caption('지금은 요약을 생성하지 못했습니다. 원문을 이용해 주세요.')
+                    st.caption('기사 요약 처리 중 오류가 발생했습니다. 원문을 이용해 주세요.')
     if cached or 'brief' in locals():
         st.markdown('<div class="article-source-note">공개 기사 자료 기준 · 원문에서 사실 확인 권장</div>',
                     unsafe_allow_html=True)
@@ -545,7 +568,7 @@ def render_news_tile(group, index, known, cmap):
     category = cmap.get(article.get('카테고리코드'), '')
     stable_id = hashlib.sha256(key.encode('utf-8')).hexdigest()[:16]
     with st.container(key=f'article_tile_{stable_id}'):
-        title_col, meta_col = st.columns([5, 1.7], vertical_alignment='center', gap='small')
+        title_col, meta_col = st.columns([6, 1.7], vertical_alignment='center', gap='small')
         with title_col:
             st.button(display_title, key=f'article_open_{stable_id}', type='tertiary',
                       use_container_width=True, on_click=toggle_article, args=(key,))

@@ -94,6 +94,16 @@ PRIMARY_MEDIA = [
  ('PUB_KUKJE','국제신문','지역','https://www.kookje.co.kr','kookje.co.kr','LOCAL'),
 ]
 
+# Prefer publisher RSS feeds with direct article URLs. This avoids the Google
+# News intermediate link for newly collected stories. The list is deliberately
+# small: only sources with externally documented feeds are enabled here.
+DIRECT_PUBLISHER_RSS = {
+    'PUB_DONGA': 'https://rss.donga.com/total.xml',
+    'PUB_YNA': 'https://www.yna.co.kr/rss/news.xml',
+    'PUB_JTBC': 'https://fs.jtbc.co.kr/RSS/newsflash.xml',
+}
+
+
 
 def now(): return datetime.now(TZ).strftime('%Y-%m-%d %H:%M:%S')
 def enabled(v): return str(v or '').strip().upper() not in ('N','NO','FALSE','0','OFF','미사용')
@@ -226,9 +236,12 @@ def parse_source(entry, media,cat):
     original=safe_url(entry.get('link',''))
     if not title or not original: return None
     summary_html = str(entry.get('summary',''))
-    # Google News summaries are often a list of other headlines rather than a synopsis.
-    # Never misrepresent that list as a verified article summary.
-    snippet = '' if 'news.google.com' in str(media.get('RSS_URL','')) else clean_text(summary_html)[:450]
+    # Preserve a substantive publisher excerpt when available, but never a Google
+    # News related-headline list. This makes genuine RSS descriptions usable.
+    snippet = clean_text(summary_html)[:1200]
+    linked_headlines = len(BeautifulSoup(summary_html, 'html.parser').find_all('a'))
+    if 'news.google.com' in str(media.get('RSS_URL', '')) and linked_headlines >= 2:
+        snippet = ''
     media_code=str(media.get('언론사코드','')).strip()
     # Google RSS embeds original publisher name after the title; keep original title unmodified.
     publisher=clean_text(entry.get('source',{}).get('title','')) if entry.get('source') else ''
@@ -266,7 +279,8 @@ def collect(book, limit_per_feed=22, source_codes=None):
     def fetch(item):
         t = time.monotonic()
         try:
-            url = safe_url(item['RSS_URL'])
+            code = str(item.get('언론사코드', ''))
+            url = DIRECT_PUBLISHER_RSS.get(code) or safe_url(item['RSS_URL'])
             r = requests.get(url, headers={'User-Agent': 'Mozilla/5.0 NewsBrief/1.0 RSS reader'}, timeout=(5, 10))
             r.raise_for_status()
             parsed = feedparser.parse(r.content)
@@ -468,6 +482,10 @@ def _article_context(article):
         return '', ''
     url = _resolve_google_news_url(url)
     article['_resolved_url'] = url  # transient, not a stored full article body
+    if (urlparse(url).hostname or '').lower() == 'news.google.com':
+        if len(raw) >= 180:
+            return 'rss', raw[:1800]
+        raise ValueError('ARTICLE_SOURCE_LINK_UNRESOLVED')
     parsed = urlparse(url)
     host = (parsed.hostname or '').lower()
     # An aggregator URL may redirect to a publisher; verify the final host.
@@ -547,7 +565,10 @@ def _article_context(article):
                          '.article_view p', '.news_body p', '#articleBody p',
                          '.article_txt p', '.article-body-content p', '.article_content p',
                          '.news_cnt_detail_wrap p', '#article-view-content-div p',
-                         '#newsct_article p', 'main p'):
+                         '#newsct_article p', '#articleBodyContents p',
+                         '.news-article p', '.article_view_content p',
+                         '.article-body-wrap p', '.article-body-text p',
+                         '.view_txt p', '#articeBody p', 'main p'):
             parts = [clean_text(p.get_text(' ', strip=True)) for p in soup.select(selector)]
             parts = [x for x in parts if 28 <= len(x) <= 1800]
             if sum(map(len, parts)) >= 300:
@@ -556,16 +577,16 @@ def _article_context(article):
         text = ' '.join(structured)[:6500]
         if len(text) >= 280:
             return 'article', text
-        if len(head_desc) >= 160:
+        if len(head_desc) >= 120:
             return 'description', head_desc[:2300]
-        if len(raw) >= 200:
+        if len(raw) >= 180:
             return 'rss', raw[:1800]
     except ValueError as exc:
         if str(exc) == 'ARTICLE_TITLE_MISMATCH':
             raise
     except (requests.RequestException, TypeError):
         pass
-    return ('rss', raw[:1800]) if len(raw) >= 200 else ('', '')
+    return ('rss', raw[:1800]) if len(raw) >= 180 else ('', '')
 
 
 def summarize_article(article, api_key, model='openrouter/free'):
@@ -612,7 +633,7 @@ def summarize_article(article, api_key, model='openrouter/free'):
         if isinstance(message, list):
             message = ' '.join(str(part.get('text', '')) for part in message if isinstance(part, dict))
         output = clean_text(message).strip().strip('"“”')[:800]
-        if not output or output == '내용 부족' or len(output) < 60:
+        if not output or output == '내용 부족' or len(output) < 45:
             raise ValueError('ARTICLE_CONTENT_INSUFFICIENT')
         return output
     except (requests.RequestException, KeyError, IndexError, TypeError) as exc:
