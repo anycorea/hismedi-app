@@ -1,4 +1,5 @@
 """News_Brief shared Google Sheets + RSS routines; no service keys in source."""
+import calendar
 import hashlib
 import html
 import json
@@ -52,7 +53,7 @@ def safe_url(v):
 def get_config(secret=None):
     if secret is not None:
         sa = dict(secret['gcp_service_account'])
-        sheet_id = str(secret.get('news_brief',{}).get('spreadsheet_id','')).strip()
+        sheet_id = str(secret.get('gsheet',{}).get('spreadsheet_id') or secret.get('news_brief',{}).get('spreadsheet_id') or '').strip()
     else:
         sa = json.loads(os.environ['GCP_SERVICE_ACCOUNT_JSON'])
         sheet_id = os.environ['NEWS_SPREADSHEET_ID'].strip()
@@ -107,7 +108,7 @@ def clean_text(raw):
 def display_time(entry):
     parsed=entry.get('published_parsed') or entry.get('updated_parsed')
     if parsed:
-        try: return datetime.fromtimestamp(time.mktime(parsed),timezone.utc).astimezone(TZ).strftime('%Y-%m-%d %H:%M:%S')
+        try: return datetime.fromtimestamp(calendar.timegm(parsed),timezone.utc).astimezone(TZ).strftime('%Y-%m-%d %H:%M:%S')
         except Exception: pass
     return now()
 

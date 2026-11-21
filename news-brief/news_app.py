@@ -12,14 +12,11 @@ from news_core import (HEADERS, ai_briefing, append_records, collect, connect, e
 st.set_page_config(page_title='AI 뉴스브리핑 | News_Brief',page_icon='📰',layout='wide',initial_sidebar_state='collapsed')
 st.markdown('''<style>
 :root{color-scheme:light} .stApp{background:#f8fafc;color:#102033}
-.block-container{padding-top:1.05rem;max-width:1450px;padding-bottom:4rem}
+.block-container{max-width:1450px}
 header[data-testid="stHeader"]{background:#f8fafc}
 #MainMenu, footer,div[data-testid="stDecoration"]{visibility:hidden}
 .stButton button,.stLinkButton a{min-height:44px;border-radius:10px;font-weight:700}
 .stTextInput input,.stSelectbox>div{min-height:44px}
-.main-brand{border-bottom:3px solid #123e78;padding:0 0 .8rem;margin-bottom:1rem}
-.main-brand h1{font-size:clamp(1.7rem,3.6vw,2.65rem);color:#102c52;margin:0;font-weight:850;letter-spacing:-.03em}
-.main-brand p{font-size:1rem;color:#52637b;margin:.25rem 0 0}
 .news-card{background:#fff;border:1px solid #dbe4f0;border-left:4px solid #3976c4;border-radius:12px;padding:1.1rem 1.15rem;margin:0 0 .85rem;box-shadow:0 2px 8px #14375a08;overflow-wrap:anywhere}
 .news-card .meta{font-size:.9rem;color:#52637b;margin-bottom:.5rem;font-weight:650}
 .news-card .headline{font-size:var(--news-title-size,1.25rem);font-weight:800;line-height:1.47;margin:.1rem 0 .6rem}
@@ -31,7 +28,7 @@ header[data-testid="stHeader"]{background:#f8fafc}
 .news-badge{display:inline-block;border-radius:5px;padding:3px 8px;background:#dceafc;color:#194981;font-size:.8rem;font-weight:750;margin-right:.35rem}
 .anycorea{text-align:center;color:#62748c;font-size:.85rem;padding:1.8rem 0 0}
 div[data-testid="stVerticalBlock"]{gap:.7rem}
-@media(max-width:800px){.block-container{padding:1rem .85rem 4rem}.main-brand h1{font-size:1.65rem}.news-card{padding:1rem}.news-card .headline{font-size:max(var(--news-title-size,1.25rem),1.15rem)}.news-card .summary{line-height:1.8}.main-brand p{font-size:.9rem}}
+@media(max-width:800px){.block-container{padding-left:.85rem;padding-right:.85rem}.news-card{padding:1rem}.news-card .headline{font-size:max(var(--news-title-size,1.25rem),1.15rem)}.news-card .summary{line-height:1.8}.main-brand p{font-size:.9rem}}
 </style>''',unsafe_allow_html=True)
 
 def esc(value):return html.escape(str(value or ''),quote=True)
@@ -188,6 +185,9 @@ def app_home():
     categories=[r for r in get_data('Category') if enabled(r.get('사용여부'))]
     cats=sorted(categories,key=lambda x:int(x.get('정렬순서') or 999))
     cmap={r['카테고리코드']:r['카테고리명'] for r in cats}
+    if not cmap:
+        st.info('카테고리가 비어 있습니다. 관리자 → 상태·초기화에서 초기 데이터를 등록하세요.')
+        return
     names=media_name_map(get_book())
     selected=st.session_state.get('category','ALL')
     if selected not in cmap:selected='ALL'
@@ -233,10 +233,11 @@ def app_home():
     st.caption(f'{page} / {maxpage} 페이지 · 기사 제목을 누르면 제공된 원문 URL이 새 창으로 열립니다.')
 
 def main():
-    st.markdown('<div class="main-brand"><h1>📰 AI 뉴스브리핑</h1><p>읽기 편한 뉴스, 짧고 명확한 핵심 정리 · News_Brief</p></div>',unsafe_allow_html=True)
+    st.title('📰 AI 뉴스브리핑')
+    st.write('읽기 편한 뉴스, 짧고 명확한 핵심 정리 · News_Brief')
     st.caption('iPhone · iPad · PC 대응 | 브라우저 핀치 확대 허용 · 글자 크기 조절')
     a,b,c=st.columns([2,2,1.5],vertical_alignment='bottom')
-    with a:mode=st.segmented_control('화면',options=['뉴스','관리자'],default='뉴스',label_visibility='collapsed')
+    with a:mode=st.radio('화면',options=['뉴스','관리자'],horizontal=True,label_visibility='collapsed')
     with b:font=st.selectbox('글자 크기',['기본','크게','아주 크게'],label_visibility='collapsed')
     with c:
         if st.button('↻ 새로고침'):invalidate();st.rerun()
