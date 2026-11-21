@@ -384,28 +384,109 @@ def clean_old_rows(book, days=7):
 
 
 
-def summarize_article(article, api_key, model='openrouter/free'):
-    """Short, strictly source-grounded summary of one requested article.
+def _article_context(article):
+    """Read a short extract of publicly accessible publisher HTML, never paywalls.
 
-    We only have RSS title/description; no publisher full text is fetched.
-    No paid-model fallback; a free router error leaves the article unchanged.
+    Does not attempt to bypass subscriptions, Google News redirects or access controls.
+    Returns a source label and a bounded extract, not persistent full-text storage.
+    """
+    raw = str(article.get('요약') or '').strip()
+    if raw.startswith('AI_SUMMARY_V2::'):
+        return 'cached', raw.split('::', 1)[1]
+    if raw.startswith('AI_SUMMARY_V1::'):
+        raw = ''  # V1 is headline-only and should not be treated as article evidence.
+    url = safe_url(article.get('원문URL', ''))
+    if not url:
+        return '', ''
+    parsed = urlparse(url)
+    host = (parsed.hostname or '').lower()
+    # An aggregator URL may redirect to a publisher; verify the final host.
+    # Never treat the aggregator's own page as article body.
+    # Avoid local/private/loopback IP targets in an untrusted feed.
+    import ipaddress
+    try:
+        addr = ipaddress.ip_address(host)
+        if not addr.is_global:
+            return '', ''
+    except ValueError:
+        if not host or host in {'localhost', 'localhost.localdomain'} or host.endswith(('.local', '.internal')):
+            return '', ''
+    if parsed.port not in (None, 80, 443):
+        return '', ''
+    try:
+        r = requests.get(url, timeout=(4, 9), allow_redirects=True,
+                         headers={'User-Agent': 'Mozilla/5.0 (compatible; NewsBriefReader/1.0)'},
+                         stream=True)
+        r.raise_for_status()
+        final_host = (urlparse(r.url).hostname or '').lower()
+        if final_host == 'news.google.com' or final_host.endswith('.news.google.com'):
+            return 'rss', raw[:1800] if len(raw) >= 220 else ''
+        ct = r.headers.get('Content-Type', '').lower()
+        if 'html' not in ct:
+            return 'rss', raw[:1800] if len(raw) >= 220 else ''
+        max_bytes = 700_000
+        blob = bytearray()
+        for chunk in r.iter_content(chunk_size=32768):
+            blob.extend(chunk)
+            if len(blob) >= max_bytes:
+                break
+        soup = BeautifulSoup(bytes(blob[:max_bytes]), 'html.parser')
+        # Reject obvious paywall/blocked responses rather than inventing content.
+        head_desc = ''
+        meta = soup.select_one('meta[property="og:description"],meta[name="description"]')
+        if meta:
+            head_desc = clean_text(meta.get('content', ''))
+        for tag in soup.select('script,style,nav,footer,header,aside,form,button,figcaption'):
+            tag.decompose()
+        structured = []
+        for selector in ('article p', '[itemprop="articleBody"] p', '.article-body p',
+                         '.article_view p', '.news_body p', '#articleBody p',
+                         '.article_txt p', 'main p'):
+            parts = [clean_text(p.get_text(' ', strip=True)) for p in soup.select(selector)]
+            parts = [x for x in parts if 28 <= len(x) <= 1800]
+            if sum(map(len, parts)) >= 300:
+                structured = parts
+                break
+        text = ' '.join(structured)[:6500]
+        if len(text) >= 280:
+            return 'article', text
+        if len(head_desc) >= 220:
+            return 'description', head_desc[:2300]
+        if len(raw) >= 220:
+            return 'rss', raw[:1800]
+    except (requests.RequestException, ValueError, TypeError):
+        pass
+    return ('rss', raw[:1800]) if len(raw) >= 220 else ('', '')
+
+
+def summarize_article(article, api_key, model='openrouter/free'):
+    """Evidence-based article explanation; refuse title-only pseudo-summaries.
+
+    This function only uses publicly accessible article text or substantial
+    publisher-provided descriptions; it does not infer unseen facts from titles.
     """
     if model != 'openrouter/free':
         raise ValueError('무료 모델만 허용합니다.')
+    raw = str(article.get('요약') or '').strip()
+    if raw.startswith('AI_SUMMARY_V2::'):
+        return raw.split('::', 1)[1]
     title = clean_text(article.get('제목', ''))[:220]
-    snippet = clean_text(article.get('요약', ''))[:600]
-    if snippet.startswith('AI_SUMMARY_V1::'):
-        return snippet.split('::', 1)[1]
     if not title:
         raise ValueError('기사 제목이 없습니다.')
+    source_kind, source_text = _article_context(article)
+    if source_kind == 'cached':
+        return source_text
+    if not source_text:
+        raise ValueError('ARTICLE_CONTENT_UNAVAILABLE')
     prompt = (
-        '다음은 한국어 뉴스의 제목과 RSS 설명입니다. 전문을 읽은 것으로 가장하지 마세요. '
-        '입력에 명시된 내용만 사용해 간결한 1~3문장 한국어 요약을 작성하세요. '
-        'RSS 설명이 비어 있으면 제목으로 확실하게 알 수 있는 사실만 1문장으로 재정리하세요. '
-        '배경지식이나 추측, 해설, 근거 없는 숫자를 추가하지 마세요. '
-        '제목이나 서두("AI 요약", "요약:") 없이 결과 문장만 반환하세요. '
-        '응답은 280자 이내로 하세요.\n'
-        + json.dumps({'title': title, 'rss_description': snippet}, ensure_ascii=False)
+        '당신은 한국어 뉴스 편집자입니다. 다음 기사 자료만 근거로 독자가 제목만 봤을 때 알 수 없는 '
+        '핵심 정보를 쉽고 명확하게 설명하세요. 핵심 사실(누가 무엇을 언제 어떻게), 구체적 배경·수치·발언, '
+        '독자에게 미치는 영향 중 자료에 있는 것만 선택하여 총 3~5문장으로 쓰세요. '
+        '약 250~450자 내외를 목표로 하되 정보가 부족하면 짧게 답하세요. '
+        '제목을 바꿔 쓰는 식의 반복은 금지합니다. 기사에 없는 숫자나 배경, 예측은 절대 만들지 마세요. '
+        '내용이 빈약해 실질적 추가 정보를 전달할 수 없다면 정확히 "내용 부족"이라고만 답하세요. '
+        'AI 요약 등의 머리말, 마크다운, 출처 URL은 넣지 마세요.\n'
+        + json.dumps({'제목': title, '자료종류': source_kind, '본문발췌': source_text[:5300]}, ensure_ascii=False)
     )
     try:
         response = requests.post('https://openrouter.ai/api/v1/chat/completions',
@@ -413,19 +494,17 @@ def summarize_article(article, api_key, model='openrouter/free'):
                      'Content-Type': 'application/json', 'X-Title': 'News Brief'},
             json={'model': 'openrouter/free',
                   'messages': [{'role': 'user', 'content': prompt}],
-                  'temperature': .1, 'max_tokens': 240, 'stream': False},
-            timeout=(5, 25))
+                  'temperature': .1, 'max_tokens': 650, 'stream': False},
+            timeout=(5, 35))
         if response.status_code in (402, 429):
-            raise RuntimeError('무료 AI 이용량 또는 사용 가능 상태를 확인하세요.')
+            raise RuntimeError('무료 AI 사용 한도에 도달했거나 현재 사용 가능한 모델이 없습니다.')
         response.raise_for_status()
         message = response.json()['choices'][0]['message']['content']
         if isinstance(message, list):
             message = ' '.join(str(part.get('text', '')) for part in message if isinstance(part, dict))
-        output = clean_text(message).strip().strip('"“”')[:280]
-        if not output:
-            raise ValueError('AI 응답이 비어 있습니다.')
+        output = clean_text(message).strip().strip('"“”')[:800]
+        if not output or output == '내용 부족' or len(output) < 60:
+            raise ValueError('ARTICLE_CONTENT_INSUFFICIENT')
         return output
-    except (requests.RequestException, ValueError, KeyError, IndexError, TypeError) as exc:
+    except (requests.RequestException, KeyError, IndexError, TypeError) as exc:
         raise RuntimeError('기사 요약 생성 실패') from exc
-
-

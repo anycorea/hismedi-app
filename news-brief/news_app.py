@@ -71,42 +71,17 @@ footer, div[data-testid="stDecoration"] {display:none!important}
 
 @media(max-width:700px){.brand{font-size:1.09rem}.brand-mark{width:27px;height:27px}}
 
-/* Layout only this app's masthead, not Streamlit columns used elsewhere.
-   Desktop: single line. Mobile/tablet portrait: two clean rows. */
+/* Masthead: logo + updated at left, one menu at right. */
 .st-key-news_header [data-testid="stHorizontalBlock"] {
- display:grid!important;
- grid-template-columns:minmax(145px,1.8fr) minmax(310px,3.2fr) minmax(130px,1.25fr) minmax(98px,.85fr);
- gap:12px;align-items:center;
+ display:grid!important;grid-template-columns:minmax(0,1fr) minmax(94px,max-content)!important;
+ align-items:center;gap:10px;
 }
 .st-key-news_header [data-testid="stHorizontalBlock"] > div {
  width:100%!important;min-width:0!important;max-width:none!important;flex:none!important;
 }
-.st-key-news_header [data-testid="stHorizontalBlock"] > div:nth-child(1) {grid-area:brand}
-.st-key-news_header [data-testid="stHorizontalBlock"] > div:nth-child(2) {grid-area:nav}
-.st-key-news_header [data-testid="stHorizontalBlock"] > div:nth-child(3) {grid-area:updated}
-.st-key-news_header [data-testid="stHorizontalBlock"] > div:nth-child(4) {grid-area:menu}
-.st-key-news_header [data-testid="stHorizontalBlock"] {
- grid-template-areas:"brand nav updated menu";
-}
-.st-key-news_header [data-testid="stHorizontalBlock"] > div:nth-child(2) {overflow-x:auto;scrollbar-width:none}
-.st-key-news_header [data-testid="stHorizontalBlock"] > div:nth-child(2)::-webkit-scrollbar {display:none}
-.mobile-updated{display:none}
-@media(max-width:900px){
- .st-key-news_header [data-testid="stHorizontalBlock"] {
-  grid-template-columns:minmax(0,1fr) minmax(88px,max-content)!important;
-  grid-template-areas:"brand menu" "nav nav";
-  gap:6px 12px;
- }
- .st-key-news_header [data-testid="stHorizontalBlock"] > div:nth-child(3){display:none}
- .mobile-updated{display:block;font-size:.69rem;color:#8290a0;margin-top:7px;text-align:right;font-weight:500;white-space:nowrap;line-height:1.4}
- .st-key-news_header [data-testid="stHorizontalBlock"] > div:nth-child(2){overflow-x:auto;white-space:nowrap}
- .block-container{padding-top:1.1rem!important}
-}
-@media(max-width:450px){
- .st-key-news_header [data-testid="stHorizontalBlock"] {gap:3px 8px}
- .st-key-news_header .stButton button {font-size:.85rem}
-}
-
+.brand{display:flex;align-items:center;flex-wrap:wrap;gap:5px 10px}
+.brand-updated{color:#8290a0;font-size:.71rem;font-weight:500;white-space:nowrap}
+@media(max-width:700px){.brand{gap:3px 7px}.brand-updated{font-size:.66rem}}
 
 @media(max-width:850px){.news-grid,.issue-grid{grid-template-columns:1fr}}
 @media(max-width:700px){
@@ -399,7 +374,7 @@ def header_menu():
 def render_article_summary(article):
     """Run AI only on an explicit article click; persist once per article."""
     value = str(article.get('요약') or '').strip()
-    cached = value.startswith('AI_SUMMARY_V1::')
+    cached = value.startswith('AI_SUMMARY_V2::')
     if cached:
         st.markdown('<div class="article-explainer">' + esc(value.split('::', 1)[1])
                     + '</div>', unsafe_allow_html=True)
@@ -422,7 +397,7 @@ def render_article_summary(article):
                     with st.spinner('기사를 간추리는 중…'):
                         brief = summarize_article(article, token)
                     persisted = patch_record(book(), 'News', '뉴스ID', article['뉴스ID'],
-                                             {'요약': 'AI_SUMMARY_V1::' + brief})
+                                             {'요약': 'AI_SUMMARY_V2::' + brief})
                     if persisted:
                         append_records(book(), 'Collection_Log', [dict(zip(HEADERS['Collection_Log'],
                             [str(article['뉴스ID']) + '-' + now(), now(), 'ARTICLE_AI', 'AI',
@@ -430,10 +405,18 @@ def render_article_summary(article):
                         data.clear()
                     st.markdown('<div class="article-explainer">' + esc(brief)
                                 + '</div>', unsafe_allow_html=True)
+                except ValueError as exc:
+                    if str(exc) == 'ARTICLE_CONTENT_UNAVAILABLE':
+                        st.caption('이 기사는 제목 외에 확인할 수 있는 본문이 없어 정확한 요약을 만들 수 없습니다.')
+                    elif str(exc) == 'ARTICLE_CONTENT_INSUFFICIENT':
+                        st.caption('확인된 내용이 부족해 요약을 제공하지 않습니다.')
+                    else:
+                        st.caption('요약에 필요한 기사 내용을 확인하지 못했습니다.')
                 except Exception:
                     st.caption('지금은 요약을 생성하지 못했습니다. 원문을 이용해 주세요.')
-    st.markdown('<div class="article-source-note">제목·RSS 정보 기준 · 기사 전문 미확인</div>',
-                unsafe_allow_html=True)
+    if cached or 'brief' in locals():
+        st.markdown('<div class="article-source-note">공개 기사 자료 기준 · 원문에서 사실 확인 권장</div>',
+                    unsafe_allow_html=True)
     url = safe_url(article.get('원문URL', ''))
     if url:
         st.markdown('<div class="article-original"><a href="' + esc(url)
@@ -569,19 +552,11 @@ def main():
                           if str(r.get('수집방식','')).upper() == 'RSS'), default='')
         timestamp = last_stamp[5:16].replace('-', '.') if last_stamp else '기록 없음'
         with st.container(key='news_header'):
-            brandcol, navcol, timecol, menucol = st.columns(
-                [2.1, 4.2, 1.7, 1.1], vertical_alignment='center', gap='small')
+            brandcol, menucol = st.columns([7, 1], vertical_alignment='center', gap='small')
             with brandcol:
                 st.markdown('<div class="brand"><span class="brand-mark">N</span>'
-                            '<span>간추린 뉴스</span></div>',
-                            unsafe_allow_html=True)
-            with navcol:
-                st.button('최신 뉴스', key='latest_news_button', use_container_width=True,
-                          on_click=lambda: st.session_state.update(news_user_requested_latest=True))
-                st.markdown(f'<div class="mobile-updated">Updated {esc(timestamp)}</div>',
-                            unsafe_allow_html=True)
-            with timecol:
-                st.markdown(f'<div class="header-updated">Updated {esc(timestamp)}</div>',
+                            '<span>간추린 뉴스</span>'
+                            f'<span class="brand-updated">Updated {esc(timestamp)}</span></div>',
                             unsafe_allow_html=True)
             with menucol:
                 header_menu()
