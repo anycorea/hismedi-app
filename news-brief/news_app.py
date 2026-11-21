@@ -310,31 +310,20 @@ def app_home(stats_placeholder=None):
             f'마지막 갱신 {esc(last_time[5:16]) or "기록 없음"}</div>',
             unsafe_allow_html=True)
 
-    # One intentional refresh button; no RSS calls on normal page views.
-    rcol, info = st.columns([1.3, 6], vertical_alignment='center')
-    with rcol:
-        if st.button('↻ 최신 뉴스 갱신', type='primary', use_container_width=True):
-            with st.spinner('최근 24시간 뉴스 수집 및 7일 경과 데이터 정리 중…'):
-                try:
-                    report = collect_on_click()
-                    if report.get('busy'):
-                        st.warning('다른 뉴스 갱신 작업이 실행 중입니다.')
-                    else:
-                        st.session_state['news_refresh_report'] = report
-                        st.rerun()
-                except Exception as exc:
-                    st.error('수집이 완료되지 않았습니다. 기존 뉴스는 유지됩니다.')
-                    with st.expander('수집 오류 내용'):
-                        st.code(f'{type(exc).__name__}: {exc}')
-    with info:
-        report = st.session_state.pop('news_refresh_report', None)
-        if report:
-            st.caption(f"갱신 완료 · 신규 {report['new']}건 · 오류 소스 {report['errors']}곳 · "
-                       f"7일 경과 정리 {report['deleted']}행 · {report['seconds']}초")
-        elif not all_items:
-            st.caption('저장된 최근 뉴스가 없습니다. 최신 뉴스 갱신을 눌러 주세요.')
-        else:
-            st.caption('최근 24시간 수집 · 7일 보관 · 갱신 버튼을 누를 때만 RSS 요청')
+    # Collection is triggered only by the compact header button.
+    report = st.session_state.pop('news_refresh_report', None)
+    if report:
+        st.caption(f"갱신 완료 · 신규 {report['new']}건 · 오류 소스 {report['errors']}곳 · "
+                   f"7일 경과 정리 {report['deleted']}행 · {report['seconds']}초")
+    elif not all_items:
+        st.caption('저장된 최근 뉴스가 없습니다. 상단의 ↻ 갱신을 눌러 주세요.')
+    if st.session_state.pop('news_refresh_busy', False):
+        st.warning('다른 뉴스 갱신 작업이 실행 중입니다.')
+    error = st.session_state.pop('news_refresh_error', '')
+    if error:
+        st.error('수집이 완료되지 않았습니다. 기존 뉴스는 유지됩니다.')
+        with st.expander('수집 오류 내용'):
+            st.code(error)
 
     old = st.session_state.get('news_category', 'ALL')
     catcodes = list(cmap)
@@ -530,11 +519,25 @@ def app_home(stats_placeholder=None):
 
 
 def main():
-    brandcol, statscol, fontcol = st.columns([4.5, 4.8, .7],
-                                             vertical_alignment='center', gap='small')
+    # Header stays on a single row on wide displays; no forced top-padding overrides.
+    brandcol, refreshcol, statscol, fontcol = st.columns(
+        [2.2, 1.3, 5.8, .55], vertical_alignment='center', gap='small')
     with brandcol:
         st.markdown('<div class="brand"><span class="brand-mark">N</span> 간추린 뉴스'
                     '<span class="brand-small">NEWS BRIEF</span></div>', unsafe_allow_html=True)
+    with refreshcol:
+        if st.button('↻ 최신 뉴스 갱신', type='primary', use_container_width=True,
+                     key='header_news_refresh'):
+            with st.spinner('최근 24시간 뉴스 수집 · 7일 경과 기사 정리 중…'):
+                try:
+                    report = collect_on_click()
+                    if report.get('busy'):
+                        st.session_state['news_refresh_busy'] = True
+                    else:
+                        st.session_state['news_refresh_report'] = report
+                except Exception as exc:
+                    st.session_state['news_refresh_error'] = f'{type(exc).__name__}: {exc}'
+            st.rerun()
     with statscol:
         stats_placeholder = st.empty()
     with fontcol:
