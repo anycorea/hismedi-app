@@ -16,13 +16,21 @@ from news_core import (HEADERS, ai_briefing, append_records, collect, connect, e
 st.set_page_config(page_title='News Brief | AI 뉴스브리핑', page_icon='📰',
                    layout='wide', initial_sidebar_state='collapsed')
 
-# No custom fixed heading positioning. Retain the Streamlit default content padding.
+# App-only setting; does not modify other apps in the shared GitHub repository.
+st.set_option('client.toolbarMode', 'minimal')
+
+# Compact, stable layout for a standalone direct URL (not iframe embed mode).
+# Streamlit's own app header is hidden; the app provides its own navigation.
+# No fixed-position elements or viewport/zoom restrictions are introduced.
 st.markdown('''<style>
-/* Default Streamlit top offset prevents header clipping across releases. */
+/* Keep a small, stable top clearance. Never position the app title over the
+   Streamlit toolbar, including Safari home-screen and iPad split view. */
 .stApp {background:#f7f9fc;color:#15253b}
-.block-container {max-width:1880px;padding-bottom:1.5rem}
-header[data-testid="stHeader"] {background:#f7f9fc}
-#MainMenu, footer, div[data-testid="stDecoration"] {visibility:hidden}
+.block-container {max-width:1880px;padding-top:1.25rem!important;padding-bottom:1.5rem}
+/* Hide Streamlit's chrome, not the app controls. Host-provided overlays outside
+   this document (e.g. Community Cloud widgets) cannot be controlled here. */
+header[data-testid="stHeader"], [data-testid="stToolbar"], #MainMenu,
+footer, div[data-testid="stDecoration"] {display:none!important}
 .stButton button, .stLinkButton a {min-height:42px;border-radius:11px}
 .brand {display:flex;align-items:center;gap:9px;font-size:1.25rem;font-weight:840;color:#10263f;letter-spacing:-.035em}
 .brand-mark {width:29px;height:29px;display:inline-flex;align-items:center;justify-content:center;background:#0d765a;color:white;border-radius:9px;font-size:1rem}
@@ -61,8 +69,42 @@ header[data-testid="stHeader"] {background:#f7f9fc}
 .news-grid{gap:8px 10px}
 .st-key-news_view_mode button{white-space:nowrap}
 @media(max-width:700px){.brand{font-size:1.09rem}.brand-mark{width:27px;height:27px}}
-/* Keep Streamlit's native responsive column behavior on iOS.
-   Do not override column widths or order: that caused overlapping tabs. */
+
+/* Layout only this app's masthead, not Streamlit columns used elsewhere.
+   Desktop: single line. Mobile/tablet portrait: two clean rows. */
+.st-key-news_header [data-testid="stHorizontalBlock"] {
+ display:grid!important;
+ grid-template-columns:minmax(145px,1.8fr) minmax(310px,3.2fr) minmax(130px,1.25fr) minmax(98px,.85fr);
+ gap:12px;align-items:center;
+}
+.st-key-news_header [data-testid="stHorizontalBlock"] > div {
+ width:100%!important;min-width:0!important;max-width:none!important;flex:none!important;
+}
+.st-key-news_header [data-testid="stHorizontalBlock"] > div:nth-child(1) {grid-area:brand}
+.st-key-news_header [data-testid="stHorizontalBlock"] > div:nth-child(2) {grid-area:nav}
+.st-key-news_header [data-testid="stHorizontalBlock"] > div:nth-child(3) {grid-area:updated}
+.st-key-news_header [data-testid="stHorizontalBlock"] > div:nth-child(4) {grid-area:menu}
+.st-key-news_header [data-testid="stHorizontalBlock"] {
+ grid-template-areas:"brand nav updated menu";
+}
+.st-key-news_header [data-testid="stHorizontalBlock"] > div:nth-child(2) {overflow-x:auto;scrollbar-width:none}
+.st-key-news_header [data-testid="stHorizontalBlock"] > div:nth-child(2)::-webkit-scrollbar {display:none}
+.mobile-updated{display:none}
+@media(max-width:900px){
+ .st-key-news_header [data-testid="stHorizontalBlock"] {
+  grid-template-columns:minmax(0,1fr) minmax(88px,max-content)!important;
+  grid-template-areas:"brand menu" "nav nav";
+  gap:6px 12px;
+ }
+ .st-key-news_header [data-testid="stHorizontalBlock"] > div:nth-child(3){display:none}
+ .mobile-updated{display:block;font-size:.69rem;color:#8290a0;margin-top:2px;font-weight:500;white-space:nowrap}
+ .st-key-news_header [data-testid="stHorizontalBlock"] > div:nth-child(2){overflow-x:auto;white-space:nowrap}
+ .block-container{padding-top:1.1rem!important}
+}
+@media(max-width:450px){
+ .st-key-news_header [data-testid="stHorizontalBlock"] {gap:3px 8px}
+ .st-key-news_header .stButton button {font-size:.85rem}
+}
 
 
 @media(max-width:850px){.news-grid,.issue-grid{grid-template-columns:1fr}}
@@ -612,7 +654,9 @@ def main():
             brandcol, navcol, timecol, menucol = st.columns(
                 [2.1, 4.2, 1.7, 1.1], vertical_alignment='center', gap='small')
             with brandcol:
-                st.markdown('<div class="brand"><span class="brand-mark">N</span>간추린 뉴스</div>',
+                st.markdown('<div class="brand"><span class="brand-mark">N</span>'
+                            '<span>간추린 뉴스<span class="mobile-updated">Updated '
+                            + esc(timestamp) + '</span></span></div>',
                             unsafe_allow_html=True)
             with navcol:
                 st.segmented_control('화면', ['최신 뉴스', '✨ AI 브리핑', '🔖 보관함'],
