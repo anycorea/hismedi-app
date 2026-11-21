@@ -334,7 +334,7 @@ def _parse_briefing_json(content):
 
 def ai_briefing(news, api_key='', model='openrouter/free'):
     """Cited RSS-only briefing, via free OpenRouter. Paid fallback is prohibited."""
-    items = [x for x in news if str(x.get('제목', '')).strip()][:18]
+    items = [x for x in news if str(x.get('제목', '')).strip()][:30]
     if not items:
         raise ValueError('브리핑을 생성할 뉴스가 없습니다.')
     if not api_key or api_key.strip().startswith(('발급받은_', 'YOUR_')):
@@ -350,7 +350,7 @@ def ai_briefing(news, api_key='', model='openrouter/free'):
     instruction = (
         '당신은 한국어 뉴스 편집자입니다. 주어진 공개 RSS 제목과 설명으로만 브리핑하세요. '
         '기사 본문을 확인했다고 주장하거나 사실, 수치, 발언을 지어내지 마세요. '
-        '중요한 이슈를 3~5개로 묶되, 유사한 사건일 때만 묶으세요. '
+        '중요한 이슈를 6~10개로 묶되, 기사 근거가 부족하면 적게 작성하세요. 유사한 사건일 때만 묶으세요. 정치·경제·사회·의료 등 다양한 분야를 골고루 반영하세요. '
         'point는 1문장으로 간결하게 작성하고, 각 이슈에는 관련 기사 id를 최소 1개 넣으세요. '
         '입력에 없는 id는 사용하지 마세요. 마크다운과 해설 없이 JSON 객체만 반환하세요. '
         'JSON 예시: {"title":"오늘의 뉴스","summary":"주요 흐름 1문장",'
@@ -364,7 +364,7 @@ def ai_briefing(news, api_key='', model='openrouter/free'):
         ],
         'response_format': {'type': 'json_object'},
         'temperature': 0.1,
-        'max_tokens': 1550,
+        'max_tokens': 2300,
         'stream': False,
     }
     try:
@@ -407,7 +407,7 @@ def ai_briefing(news, api_key='', model='openrouter/free'):
     candidates = parsed.get('issues', [])
     if not isinstance(candidates, list):
         candidates = []
-    for issue in candidates[:7]:
+    for issue in candidates[:10]:
         if not isinstance(issue, dict):
             continue
         raw_ids = issue.get('ids', [])

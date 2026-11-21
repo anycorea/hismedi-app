@@ -3,7 +3,8 @@ import hashlib
 import hmac
 import html
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
+import threading
 
 import streamlit as st
 from news_core import (HEADERS, ai_briefing, append_records, collect, connect, enabled,
@@ -87,6 +88,66 @@ def data(sheet):
 @st.cache_data(ttl=300, show_spinner=False)
 def sheet_problems():
     return validate(book())
+
+
+@st.cache_resource
+
+def briefing_guard():
+    # Shared per running app process; Google Sheets remains the durable successful cache.
+    return {'lock': threading.Lock(), 'failed_until': {}}
+
+
+def latest_brief(category):
+    exact = [r for r in data('Briefing') if enabled(r.get('노출여부'))
+             and str(r.get('카테고리코드')) == category]
+    exact.sort(key=lambda r: str(r.get('생성일시', '')), reverse=True)
+    return exact[0] if exact else None
+
+
+def briefing_is_fresh(brief):
+    if not brief:
+        return False
+    try:
+        stamp = datetime.fromisoformat(str(brief.get('생성일시', '')).strip())
+        return datetime.fromisoformat(now()) - stamp < timedelta(hours=6)
+    except (ValueError, TypeError):
+        return False
+
+
+def auto_briefing(category, articles):
+    """Generate only for missing/old briefings; one generation at a time per process."""
+    token = str(setting('news_brief', 'openrouter_api_key', '')).strip()
+    if not token:
+        return 'OpenRouter 무료 API 키가 등록되지 않아 저장된 브리핑만 표시합니다.'
+    if not articles:
+        return '요약할 뉴스가 아직 없습니다.'
+    guard = briefing_guard()
+    key = str(category)
+    current = datetime.fromisoformat(now())
+    with guard['lock']:
+        # Re-read the persistent sheet after obtaining the lock so other sessions reuse output.
+        data.clear()
+        if briefing_is_fresh(latest_brief(category)):
+            return None
+        # Cap successful automatic briefs per day across all categories.
+        today = now()[:10]
+        daily_count = sum(1 for r in data('Briefing')
+                          if str(r.get('생성일시', '')).startswith(today)
+                          and str(r.get('생성모델', '')).startswith('openrouter/'))
+        if daily_count >= 8:
+            return '오늘의 자동 AI 브리핑 생성 한도(8회)에 도달했습니다. 저장된 브리핑을 표시합니다.'
+        if guard['failed_until'].get(key, datetime.min) > current:
+            return '무료 AI가 일시적으로 응답하지 않아 기존 브리핑을 표시합니다. 잠시 후 다시 이용할 수 있습니다.'
+        try:
+            with st.spinner('최신 뉴스를 AI가 간추리고 있습니다…'):
+                result = ai_briefing(articles, api_key=token, model='openrouter/free')
+                save_briefing(book(), result, category)
+            data.clear()
+            return None
+        except Exception as exc:
+            # A 30 minute failure cooldown avoids repeated free API calls on page refresh.
+            guard['failed_until'][key] = current + timedelta(minutes=30)
+            return 'AI 브리핑 자동 생성에 실패했습니다. 기존 브리핑을 표시합니다. (' + str(exc)[:145] + ')'
 
 
 def refresh():
@@ -481,18 +542,34 @@ def app_home(stats_placeholder=None):
         items = [r for r in items if search in (str(r.get('제목', '')) + ' ' + publisher(r, known)).casefold()]
 
     if mode == '✨ AI 브리핑':
-        # AI API calls remain manual/controlled. Display only genuinely generated briefings.
-        recent = [r for r in data('Briefing') if enabled(r.get('노출여부'))
-                  and (r.get('카테고리코드') == category or
-                       (category != 'ALL' and r.get('카테고리코드') == 'ALL'))]
-        recent.sort(key=lambda r: str(r.get('생성일시', '')), reverse=True)
-        if not recent:
+        # Opening the AI tab uses the stored briefing if newer than 6 hours.
+        # Only a stale/missing category triggers one free AI request.
+        existing = latest_brief(category)
+        if not briefing_is_fresh(existing):
+            # Round-robin across categories for a broader briefing than the 30 newest articles.
+            if category == 'ALL':
+                buckets = {}
+                for item in items:
+                    buckets.setdefault(str(item.get('카테고리코드', 'ALL')), []).append(item)
+                balanced = []
+                while len(balanced) < 30 and any(buckets.values()):
+                    for group in buckets.values():
+                        if group and len(balanced) < 30:
+                            balanced.append(group.pop(0))
+                input_items = balanced
+            else:
+                input_items = items[:30]
+            message = auto_briefing(category, input_items)
+            if message:
+                st.caption(message)
+        brief = latest_brief(category)
+        if not brief and category != 'ALL':
+            brief = latest_brief('ALL')
+        if not brief:
             st.markdown('<div class="empty-ai"><strong>아직 생성된 AI 브리핑이 없습니다.</strong>'
-                        '<p>관리자 → AI 브리핑에서 생성하면 이곳에만 표시됩니다. '
-                        '헤드라인을 AI 요약인 것처럼 반복하지 않습니다.</p></div>',
+                        '<p>무료 AI가 사용 가능해지면 이 화면에서 자동 생성됩니다. 기사 목록은 정상 이용할 수 있습니다.</p></div>',
                         unsafe_allow_html=True)
             return
-        brief = recent[0]
         st.markdown('<div class="summary-hero"><h3>' + esc(brief.get('브리핑제목')) +
                     '</h3><p>' + esc(brief.get('핵심요약')) + '</p></div>', unsafe_allow_html=True)
         try:
@@ -501,7 +578,7 @@ def app_home(stats_placeholder=None):
             issues = []
         idmap = {str(r.get('뉴스ID')): r for r in all_items}
         cards = []
-        for i, issue in enumerate(issues[:7], 1):
+        for i, issue in enumerate(issues[:10], 1):
             related = [idmap[str(k)] for k in issue.get('ids', []) if str(k) in idmap]
             links = []
             for r in related[:3]:
@@ -515,7 +592,7 @@ def app_home(stats_placeholder=None):
                          + esc(issue.get('point')) + '</p><div class="issue-links">'
                          + ' '.join(links) + '</div></article>')
         st.markdown('<div class="issue-grid">' + ''.join(cards) + '</div>', unsafe_allow_html=True)
-        st.caption('OpenRouter 무료 AI 작성 · RSS 제목과 설명만 분석 · 기사 본문 전체 검증이 아닙니다 · '
+        st.caption('OpenRouter 무료 AI 작성 · 최근 브리핑 재사용(최대 6시간) · RSS 제목과 설명만 분석 · 기사 본문 전체 검증이 아닙니다 · '
                    + str(brief.get('생성일시', ''))[:16])
         return
 
