@@ -97,7 +97,7 @@ footer, div[data-testid="stDecoration"] {display:none!important}
   gap:6px 12px;
  }
  .st-key-news_header [data-testid="stHorizontalBlock"] > div:nth-child(3){display:none}
- .mobile-updated{display:block;font-size:.69rem;color:#8290a0;margin-top:2px;font-weight:500;white-space:nowrap}
+ .mobile-updated{display:block;font-size:.69rem;color:#8290a0;margin-top:7px;text-align:right;font-weight:500;white-space:nowrap;line-height:1.4}
  .st-key-news_header [data-testid="stHorizontalBlock"] > div:nth-child(2){overflow-x:auto;white-space:nowrap}
  .block-container{padding-top:1.1rem!important}
 }
@@ -655,13 +655,14 @@ def main():
                 [2.1, 4.2, 1.7, 1.1], vertical_alignment='center', gap='small')
             with brandcol:
                 st.markdown('<div class="brand"><span class="brand-mark">N</span>'
-                            '<span>간추린 뉴스<span class="mobile-updated">Updated '
-                            + esc(timestamp) + '</span></span></div>',
+                            '<span>간추린 뉴스</span></div>',
                             unsafe_allow_html=True)
             with navcol:
                 st.segmented_control('화면', ['최신 뉴스', '✨ AI 브리핑', '🔖 보관함'],
                                      default='최신 뉴스', label_visibility='collapsed',
                                      key='news_view_mode', on_change=on_view_change)
+                st.markdown(f'<div class="mobile-updated">Updated {esc(timestamp)}</div>',
+                            unsafe_allow_html=True)
             with timecol:
                 st.markdown(f'<div class="header-updated">Updated {esc(timestamp)}</div>',
                             unsafe_allow_html=True)
