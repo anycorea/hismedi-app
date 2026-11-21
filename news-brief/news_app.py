@@ -163,14 +163,14 @@ def ensure_first_news():
         result = collect(b, 18)
         refresh()
     # AI summaries are optional and require a configured API key.
-    api_key = setting('news_brief', 'openai_api_key', '')
+    api_key = setting('news_brief', 'gemini_api_key', '')
     if api_key and not rows(b, 'Briefing'):
         articles = [x for x in rows(b, 'News') if enabled(x.get('노출여부'))]
         articles.sort(key=lambda x: str(x.get('발행일시','')), reverse=True)
         if articles:
             try:
                 briefing = ai_briefing(articles, api_key=api_key,
-                     model=setting('news_brief','ai_model','gpt-4.1-mini'))
+                     model=setting('news_brief','gemini_model','gemini-2.5-flash'))
                 save_briefing(b, briefing, 'ALL')
                 refresh()
             except Exception:
@@ -222,6 +222,41 @@ def manage_media():
         st.success('저장했습니다.')
 
 
+def favorite_names():
+    """Shared editorial favorites in existing Settings sheet; no new columns."""
+    row = next((r for r in data('Settings') if r.get('설정키') == 'favorite_publishers'), None)
+    if not row:
+        return []
+    try:
+        value = json.loads(row.get('설정값') or '[]')
+        return [str(n) for n in value if isinstance(n, str)] if isinstance(value, list) else []
+    except (ValueError, TypeError):
+        return []
+
+
+def manage_favorites():
+    """Admin-curated publisher favorites; actual RSS article publishers, not feed groups."""
+    articles = data('News')
+    known = {r['언론사코드']: r['언론사명'] for r in data('Media')}
+    names = sorted({publisher(item, known) for item in articles if enabled(item.get('노출여부'))})
+    saved = favorite_names()
+    st.caption('기사에 표시된 실제 언론사를 선택합니다. 수집용 RSS 소스와는 별도로 관리됩니다.')
+    with st.form('favorites_form'):
+        chosen = st.multiselect('즐겨찾기 언론사', sorted(set(names + saved)), default=saved,
+                                placeholder='언론사 검색 후 여러 곳 선택')
+        submitted = st.form_submit_button('⭐ 즐겨찾기 저장', type='primary')
+    if submitted:
+        rec = dict(zip(HEADERS['Settings'], ['favorite_publishers', json.dumps(chosen, ensure_ascii=False),
+                                              '뉴스 화면 공동 즐겨찾기 언론사', now()]))
+        if not patch_record(book(), 'Settings', '설정키', 'favorite_publishers', rec):
+            append_records(book(), 'Settings', [rec])
+        refresh()
+        write_log('즐겨찾기', 'Settings', 'favorite_publishers', f'{len(chosen)}개 언론사')
+        st.success(f'언론사 {len(chosen)}곳의 즐겨찾기를 저장했습니다.')
+        st.rerun()
+    st.caption('저장된 즐겨찾기는 모든 기기에서 공통으로 표시됩니다. 개인별 계정 즐겨찾기는 아직 제공하지 않습니다.')
+
+
 def manage_categories():
     categories = data('Category')
     if categories:
@@ -266,10 +301,10 @@ def manual_collection():
 
 def make_brief():
     st.caption('RSS에서 제공된 제목·요약에 근거합니다. 기사 본문을 검증한 것으로 표현하지 않습니다.')
-    token = setting('news_brief', 'openai_api_key', '')
-    model = setting('news_brief', 'ai_model', 'gpt-4.1-mini')
+    token = setting('news_brief', 'gemini_api_key', '')
+    model = setting('news_brief', 'gemini_model', 'gemini-2.5-flash')
     if not token:
-        st.info('AI 기능을 쓰려면 이 앱의 Streamlit Secrets에 [news_brief] openai_api_key를 등록하세요.')
+        st.info('AI 브리핑을 사용하려면 Streamlit Secrets의 [news_brief]에 gemini_api_key를 등록하세요. OpenAI API 키는 사용하지 않습니다.')
     cats = [r for r in data('Category') if enabled(r.get('사용여부'))]
     selected = st.selectbox('브리핑 분야', [r['카테고리코드'] for r in cats] or ['ALL'])
     if st.button('AI 브리핑 생성·저장', type='primary', disabled=not bool(token)):
@@ -281,7 +316,7 @@ def make_brief():
             save_briefing(book(), result, selected)
         refresh()
         write_log('AI브리핑', 'Briefing', selected, result['title'])
-        st.success('AI 브리핑 생성 완료')
+        st.success('Gemini 브리핑 생성·저장 완료')
         st.json(result)
 
 
@@ -326,7 +361,7 @@ def app_admin():
         st.rerun()
     # st.tabs evaluates ALL panels on every rerun. A single selector avoids
     # numerous Google Sheets API reads, quota errors and lengthy loading.
-    sections = ['상태·초기화', '언론사 관리', '카테고리 관리', '뉴스 수집', 'AI 브리핑', '설정·기록']
+    sections = ['상태·초기화', '⭐ 언론사 즐겨찾기', '언론사 관리', '카테고리 관리', '뉴스 수집', 'AI 브리핑', '설정·기록']
     section = st.selectbox('관리 메뉴', sections, label_visibility='collapsed')
     if section == '상태·초기화':
         problems = sheet_problems()
@@ -335,6 +370,8 @@ def app_admin():
         else:
             st.success('8개 시트 헤더 정상 · 서식 변경 없음')
             start_data()
+    elif section == '⭐ 언론사 즐겨찾기':
+        manage_favorites()
     elif section == '언론사 관리':
         manage_media()
     elif section == '카테고리 관리':
@@ -377,6 +414,11 @@ def app_home():
             limit = st.select_slider('한 페이지 기사 수', options=[15, 30, 50], value=30,
                                      key='news_limit')
             st.caption('기본 화면은 뉴스를 읽는 데 집중하도록 구성했습니다.')
+    # Keep filtering outside the expander for one-tap access on all devices.
+    favorite_mode = st.radio('언론사 보기', ['전체 언론사', '⭐ 즐겨찾기'],
+                             horizontal=True, label_visibility='collapsed',
+                             key='news_favorite_mode')
+    saved_favorites = favorite_names() if favorite_mode == '⭐ 즐겨찾기' else []
     search = st.session_state.get('news_search', '')
     show_excerpt = st.session_state.get('news_excerpts', False)
     limit = st.session_state.get('news_limit', 30)
@@ -386,6 +428,8 @@ def app_home():
     known = {r['언론사코드']:r['언론사명'] for r in data('Media')}
     all_items.sort(key=lambda x:str(x.get('발행일시','')),reverse=True)
     items = [r for r in all_items if category == 'ALL' or r.get('카테고리코드') == category]
+    if favorite_mode == '⭐ 즐겨찾기':
+        items = [r for r in items if publisher(r, known) in saved_favorites]
     if search.strip():
         q=search.strip().casefold()
         items=[r for r in items if q in (str(r.get('제목',''))+' '+publisher(r,known)).casefold()]
@@ -393,12 +437,16 @@ def app_home():
     last_updated = max((r.get('수집일시','') for r in all_items), default='')
     st.caption(f'기사 {len(items):,}건 · 언론사 {unique_sources:,}곳 · 마지막 수집 {last_updated[:16] or "기록 없음"}')
     if not items:
-        st.info('선택한 조건의 뉴스가 없습니다. 분야 또는 검색어를 변경해 보세요.');return
+        if favorite_mode == '⭐ 즐겨찾기' and not saved_favorites:
+            st.info('즐겨찾기 언론사가 아직 없습니다. 관리자 → ⭐ 언론사 즐겨찾기에서 먼저 선택해 주세요.')
+        else:
+            st.info('선택한 조건의 뉴스가 없습니다. 분야·검색어 또는 즐겨찾기를 변경해 보세요.')
+        return
 
     # Digest is deterministic editorial selection from exact article headlines.
     # It is not labelled as AI, nor does it invent unseen article-body facts.
     brief_rows = [r for r in data('Briefing') if enabled(r.get('노출여부'))
-                  and r.get('카테고리코드') == category]
+                  and (r.get('카테고리코드') == category or (category != 'ALL' and r.get('카테고리코드') == 'ALL'))]
     brief_rows.sort(key=lambda x:str(x.get('생성일시','')),reverse=True)
     left,right=st.columns([1.75,1],gap='large')
     with left:
@@ -420,9 +468,11 @@ def app_home():
         st.markdown('<div class="panel">'+''.join(lines)+'</div>',unsafe_allow_html=True)
         if pages>1:st.caption(f'{page} / {pages} 페이지')
     with right:
-        st.markdown('<div class="section-head">✨ 핵심 이슈 TOP 7</div>',unsafe_allow_html=True)
+        st.markdown('<div class="section-head">✨ AI 브리핑 · 핵심 이슈</div>' if brief_rows else '<div class="section-head">📌 주요 헤드라인 7</div>',unsafe_allow_html=True)
         if brief_rows:
             latest=brief_rows[0]
+            if latest.get('카테고리코드') != category:
+                st.caption('전체 뉴스 AI 브리핑 · 현재 선택한 분야 또는 즐겨찾기만의 분석은 아닙니다.')
             st.markdown(f'<div class="panel"><strong>{esc(latest.get("브리핑제목"))}</strong>'
                         f'<div class="notice">{esc(latest.get("핵심요약"))}</div></div>',unsafe_allow_html=True)
             try: issues=json.loads(latest.get('주요이슈') or '[]')
