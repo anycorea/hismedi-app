@@ -14,30 +14,39 @@ st.set_page_config(page_title='News Brief | AI 뉴스브리핑', page_icon='📰
 
 # No custom fixed heading positioning. Retain the Streamlit default content padding.
 st.markdown('''<style>
-/* Use Streamlit default top spacing; do not override viewport zoom. */
-.stApp{background:#f8fafc;color:#17263a}
-.block-container{max-width:1320px}
-header[data-testid="stHeader"]{background:#f8fafc}
+/* Preserve Streamlit's standard document top spacing and native zoom. */
+.stApp{background:#f7f9fc;color:#13243a}
+.block-container{max-width:1450px}
+header[data-testid="stHeader"]{background:#f7f9fc}
 #MainMenu,footer,div[data-testid="stDecoration"]{visibility:hidden}
-.stButton button,.stLinkButton a{min-height:44px;border-radius:10px}
-.news-card{background:#fff;border:1px solid #dce5ee;border-radius:12px;
- padding:1rem 1.15rem;margin:.52rem 0;overflow-wrap:anywhere}
-.news-card .meta{font-size:.86rem;color:#52677b;margin-bottom:.38rem}
-.news-card .headline{font-size:var(--news-title-size,1.19rem);font-weight:750;line-height:1.55}
-.news-card .summary{font-size:var(--news-body-size,1rem);color:#40536b;line-height:1.65;margin-top:.35rem}
-.news-card a{color:#142e4c;text-decoration:none}
-.news-card a:hover{text-decoration:underline;color:#1761a4}
-.brief-box{border:1px solid #d3e2f5;border-radius:12px;background:#eef5ff;
- padding:1rem 1.1rem;line-height:1.68;color:#233e5b;margin:.6rem 0}
-.brief-box .brief-title{font-weight:750;font-size:1.05rem}
-.brief-box .brief-note{color:#64748b;font-size:.82rem;margin-top:.4rem}
-.anycorea{text-align:center;color:#708198;font-size:.73rem;padding:1rem 0}
-.brand{font-weight:800;font-size:1.2rem;line-height:1.5;color:#172e4b;padding:.1rem 0 .3rem}
+.stButton button,.stLinkButton a{min-height:42px;border-radius:10px}
+.brand{font-weight:850;font-size:1.34rem;letter-spacing:-.035em;color:#132c47}
+.brand span{font-size:.75rem;font-weight:600;letter-spacing:0;color:#708196;margin-left:.4rem}
+.section-head{font-size:1.08rem;font-weight:800;color:#102e4a;margin:.65rem 0 .45rem}
+.headline-row{display:flex;gap:12px;align-items:flex-start;border-bottom:1px solid #e7edf3;padding:12px 4px;line-height:1.55}
+.headline-row:hover{background:#f1f7f5}
+.media-badge{flex:0 0 96px;text-align:center;border-radius:5px;background:#e5f6eb;color:#168149;font-size:.78rem;font-weight:750;padding:4px 6px;overflow-wrap:anywhere}
+.headline-main{flex:1;min-width:0}
+.headline-main a{font-size:var(--news-title-size,1.07rem);line-height:1.52;font-weight:680;color:#152c43;text-decoration:none;overflow-wrap:anywhere}
+.headline-main a:hover{color:#13804b;text-decoration:underline}
+.headline-time{font-size:.78rem;color:#77889b;margin-top:3px}
+.headline-summary{font-size:.88rem;color:#516579;margin-top:5px;line-height:1.5}
+.panel{background:white;border:1px solid #e3eaf1;border-radius:12px;padding:14px 16px;margin-bottom:12px}
+.issue{padding:11px 0;border-bottom:1px solid #e9edf2}
+.issue:last-child{border:0}
+.issue .num{font-size:.82rem;color:#148d58;font-weight:800;vertical-align:top;margin-right:8px}
+.issue a{font-weight:650;font-size:.98rem;color:#21374d;line-height:1.52;text-decoration:none}
+.issue a:hover{text-decoration:underline;color:#168149}
+.issue .source{font-size:.78rem;color:#7b8996;margin:4px 0 0 23px}
+.notice{font-size:.79rem;color:#6c7c8a;line-height:1.5}
+.anycorea{text-align:center;color:#8793a0;font-size:.73rem;padding:1rem 0}
 @media(max-width:800px){
- .block-container{padding-left:.8rem;padding-right:.8rem}
- .news-card{padding:.85rem .95rem}
- .news-card .headline{font-size:max(var(--news-title-size,1.19rem),1.13rem)}
- .brand{font-size:1.09rem}
+ .block-container{padding-left:.65rem;padding-right:.65rem}
+ .headline-row{padding:12px 1px;gap:8px}
+ .media-badge{flex-basis:65px;font-size:.7rem;padding:4px 3px}
+ .headline-main a{font-size:max(var(--news-title-size,1.07rem),1.02rem)}
+ .panel{padding:11px 12px}
+ .brand{font-size:1.15rem}
 }
 </style>''', unsafe_allow_html=True)
 
@@ -339,93 +348,130 @@ def app_admin():
 
 
 def app_home():
-    # Load actual articles on first visit; no initial button needed.
-    with st.spinner('첫 뉴스 데이터를 준비하고 있습니다…'):
-        outcome = ensure_first_news()
-    if outcome.get('errors') and outcome.get('new') == 0:
-        st.warning('일부 뉴스 소스에 접속하지 못했습니다. 관리자 기록에서 원인을 확인할 수 있습니다.')
-    categories = [r for r in data('Category') if enabled(r.get('사용여부'))]
-    categories.sort(key=lambda r: int(r.get('정렬순서') or 999))
-    cmap = {r['카테고리코드']: r['카테고리명'] for r in categories}
-    if not categories:
-        st.info('아직 뉴스 카테고리가 없습니다. 관리자에서 기본 데이터 등록을 실행하세요.')
-        return
-    cat_options = list(cmap)
-    default = st.session_state.get('news_category', 'ALL')
-    if default not in cmap:
-        default = cat_options[0]
-    header_left, header_right = st.columns([3, 1], vertical_alignment='bottom')
-    with header_left:
-        selected = st.selectbox('뉴스 분야', cat_options,
-                                index=cat_options.index(default),
-                                format_func=lambda c: cmap[c],
-                                label_visibility='collapsed')
-        st.session_state.news_category = selected
-    with header_right:
-        if st.button('☰ 검색·필터', use_container_width=True):
-            st.session_state.news_filters = not st.session_state.get('news_filters', False)
-    search, source, no_dup, compact, amount = '', '전체', True, False, 20
-    known = {r['언론사코드']: r['언론사명'] for r in data('Media')}
-    if st.session_state.get('news_filters', False):
-        with st.container(border=True):
-            search = st.text_input('기사 검색', placeholder='제목·기사 요약·언론사')
-            source_rows = data('News')
-            available = sorted({publisher(r, known) for r in source_rows})
-            source = st.selectbox('언론사', ['전체'] + available)
-            a, b = st.columns(2)
-            no_dup = a.checkbox('중복 숨김', True)
-            compact = b.checkbox('제목만 보기', False)
-            amount = st.select_slider('페이지당 기사', [10, 20, 30, 50], value=20)
+    # News can be used immediately without running a separate collection command.
+    with st.spinner('뉴스를 불러오는 중…'):
+        status = ensure_first_news()
+    if status.get('errors') and not data('News'):
+        st.warning('뉴스 RSS 접속에 실패했습니다. 나중에 다시 접속하거나 관리자 기록을 확인하세요.')
 
-    briefs = [r for r in data('Briefing') if enabled(r.get('노출여부')) and
-              r.get('카테고리코드') == selected]
-    briefs.sort(key=lambda r: str(r.get('생성일시', '')), reverse=True)
-    if briefs:
-        latest = briefs[0]
-        st.markdown(f'<div class="brief-box"><div class="brief-title">AI 핵심 브리핑 · {esc(cmap[selected])}</div>'
-                    f'<strong>{esc(latest.get("브리핑제목"))}</strong><div>{esc(latest.get("핵심요약"))}</div>'
-                    f'<div class="brief-note">{esc(latest.get("생성일시"))} · RSS 제목·요약 기반</div></div>',
-                    unsafe_allow_html=True)
-        try:
-            issues = json.loads(latest.get('주요이슈') or '[]')
-        except (ValueError, TypeError):
-            issues = []
-        for index, issue in enumerate(issues, 1):
-            with st.expander(f'{index}. {issue.get("headline", "주요 이슈")}'):
-                st.write(issue.get('point', ''))
-                articles = {r['뉴스ID']: r for r in data('News')}
-                for article_id in issue.get('ids', []):
-                    record = articles.get(article_id)
-                    if record and safe_url(record.get('원문URL', '')):
-                        st.link_button(str(record.get('제목', '기사 보기'))[:75], record['원문URL'])
-    elif selected == 'ALL':
-        st.caption('AI 브리핑은 API 키가 설정되면 생성됩니다. 아래의 기사는 실제 RSS 수집 결과입니다.')
-    st.markdown(f'**{esc(cmap[selected])} 최신 뉴스**')
-    news = [r for r in data('News') if enabled(r.get('노출여부'))
-            and (selected == 'ALL' or r.get('카테고리코드') == selected)]
-    if no_dup:
-        news = [r for r in news if str(r.get('중복여부', 'N')).upper() != 'Y']
-    if source != '전체':
-        news = [r for r in news if publisher(r, known) == source]
+    categories = [r for r in data('Category') if enabled(r.get('사용여부'))]
+    def order(row):
+        try: return int(row.get('정렬순서') or 999)
+        except (TypeError, ValueError): return 999
+    categories.sort(key=order)
+    cmap = {r['카테고리코드']: r['카테고리명'] for r in categories}
+    if not cmap:
+        st.info('표시할 카테고리가 없습니다.'); return
+    catcodes = list(cmap)
+    old = st.session_state.get('news_category', 'ALL')
+    if old not in catcodes: old = catcodes[0]
+    topcat, tools = st.columns([5, 1], vertical_alignment='bottom')
+    with topcat:
+        category = st.selectbox('분야', catcodes, index=catcodes.index(old),
+                                format_func=lambda c:cmap[c], label_visibility='collapsed')
+        st.session_state.news_category = category
+    with tools:
+        with st.popover('☰ 필터', use_container_width=True):
+            search = st.text_input('기사 검색', placeholder='제목 또는 언론사', key='news_search')
+            show_excerpt = st.toggle('RSS 설명 표시', value=False, key='news_excerpts')
+            limit = st.select_slider('한 페이지 기사 수', options=[15, 30, 50], value=30,
+                                     key='news_limit')
+            st.caption('기본 화면은 뉴스를 읽는 데 집중하도록 구성했습니다.')
+    search = st.session_state.get('news_search', '')
+    show_excerpt = st.session_state.get('news_excerpts', False)
+    limit = st.session_state.get('news_limit', 30)
+
+    all_items = [x for x in data('News') if enabled(x.get('노출여부'))
+                 and str(x.get('중복여부','N')).upper() != 'Y']
+    known = {r['언론사코드']:r['언론사명'] for r in data('Media')}
+    all_items.sort(key=lambda x:str(x.get('발행일시','')),reverse=True)
+    items = [r for r in all_items if category == 'ALL' or r.get('카테고리코드') == category]
     if search.strip():
-        q = search.strip().casefold()
-        news = [r for r in news if q in ' '.join([
-            str(r.get('제목', '')), str(r.get('요약', '')), publisher(r, known)]).casefold()]
-    news.sort(key=lambda r: str(r.get('발행일시', '')), reverse=True)
-    if not news:
-        st.info('표시할 뉴스가 없습니다. 관리자에서 뉴스 수집을 실행하거나 필터를 확인하세요.')
-        return
-    pages = max(1, (len(news) + amount - 1) // amount)
-    page = st.number_input(f'{len(news):,}건 · 페이지', 1, pages, value=1, step=1)
-    for item in news[(page-1)*amount:page*amount]:
-        news_card(item, known, compact)
-    st.caption(f'{page}/{pages} 페이지 · 제목을 누르면 기사 제공 링크로 이동합니다.')
+        q=search.strip().casefold()
+        items=[r for r in items if q in (str(r.get('제목',''))+' '+publisher(r,known)).casefold()]
+    unique_sources = len({publisher(r,known) for r in items})
+    last_updated = max((r.get('수집일시','') for r in all_items), default='')
+    st.caption(f'기사 {len(items):,}건 · 언론사 {unique_sources:,}곳 · 마지막 수집 {last_updated[:16] or "기록 없음"}')
+    if not items:
+        st.info('선택한 조건의 뉴스가 없습니다. 분야 또는 검색어를 변경해 보세요.');return
+
+    # Digest is deterministic editorial selection from exact article headlines.
+    # It is not labelled as AI, nor does it invent unseen article-body facts.
+    brief_rows = [r for r in data('Briefing') if enabled(r.get('노출여부'))
+                  and r.get('카테고리코드') == category]
+    brief_rows.sort(key=lambda x:str(x.get('생성일시','')),reverse=True)
+    left,right=st.columns([1.75,1],gap='large')
+    with left:
+        st.markdown(f'<div class="section-head">📰 {esc(cmap.get(category,"전체"))} 헤드라인</div>',unsafe_allow_html=True)
+        pages=max(1,(len(items)+limit-1)//limit)
+        if st.session_state.get('news_page',1)>pages:st.session_state.news_page=1
+        page=st.number_input('페이지',min_value=1,max_value=pages,value=1,step=1,key='news_page',label_visibility='collapsed') if pages>1 else 1
+        lines=[]
+        for item in items[(page-1)*limit:page*limit]:
+            url=safe_url(item.get('원문URL',''))
+            title=esc(item.get('제목',''))
+            name=esc(publisher(item,known))
+            when=esc(str(item.get('발행일시',''))[5:16])
+            tag=(f'<a href="{esc(url)}" target="_blank" rel="noopener noreferrer">{title}</a>' if url else title)
+            snippet=(f'<div class="headline-summary">{esc(str(item.get("요약", ""))[:200])}</div>'
+                     if show_excerpt and item.get('요약') else '')
+            lines.append(f'<div class="headline-row"><span class="media-badge">{name}</span>'
+                         f'<div class="headline-main">{tag}<div class="headline-time">{when}</div>{snippet}</div></div>')
+        st.markdown('<div class="panel">'+''.join(lines)+'</div>',unsafe_allow_html=True)
+        if pages>1:st.caption(f'{page} / {pages} 페이지')
+    with right:
+        st.markdown('<div class="section-head">✨ 핵심 이슈 TOP 7</div>',unsafe_allow_html=True)
+        if brief_rows:
+            latest=brief_rows[0]
+            st.markdown(f'<div class="panel"><strong>{esc(latest.get("브리핑제목"))}</strong>'
+                        f'<div class="notice">{esc(latest.get("핵심요약"))}</div></div>',unsafe_allow_html=True)
+            try: issues=json.loads(latest.get('주요이슈') or '[]')
+            except (ValueError,TypeError):issues=[]
+            id_map={r.get('뉴스ID'):r for r in all_items}
+            cards=[]
+            for ix,issue in enumerate(issues[:7],1):
+                target=next((id_map[k] for k in issue.get('ids',[]) if k in id_map),None)
+                url=safe_url(target.get('원문URL','')) if target else ''
+                headline=esc(issue.get('headline',''))
+                headline=(f'<a href="{esc(url)}" target="_blank" rel="noopener noreferrer">{headline}</a>' if url else headline)
+                cards.append(f'<div class="issue"><span class="num">{ix}.</span>{headline}'
+                             f'<div class="source">{esc(issue.get("point",""))}</div></div>')
+            st.markdown('<div class="panel">'+''.join(cards)+'</div>',unsafe_allow_html=True)
+            st.caption('AI 작성 · 제공된 RSS 제목·설명 기반 · 원문 사실검증 아님')
+        else:
+            # One strong headline per category, then fill remaining slots by recency.
+            chosen=[]; cats_seen=set(); ids=set()
+            for r in items:
+                cat=r.get('카테고리코드','')
+                if cat not in cats_seen:
+                    chosen.append(r);cats_seen.add(cat);ids.add(r.get('뉴스ID'))
+                if len(chosen)>=7:break
+            for r in items:
+                if len(chosen)>=7:break
+                if r.get('뉴스ID') not in ids:
+                    chosen.append(r);ids.add(r.get('뉴스ID'))
+            cards=[]
+            for ix,r in enumerate(chosen,1):
+                title=esc(r.get('제목',''))
+                url=safe_url(r.get('원문URL',''))
+                link=(f'<a href="{esc(url)}" target="_blank" rel="noopener noreferrer">{title}</a>' if url else title)
+                cards.append(f'<div class="issue"><span class="num">{ix}.</span>{link}'
+                             f'<div class="source">{esc(publisher(r,known))} · {esc(str(r.get("발행일시",""))[5:16])}</div></div>')
+            st.markdown('<div class="panel">'+''.join(cards)+'</div>',unsafe_allow_html=True)
+            st.caption('헤드라인 기반 자동 선별 · AI 요약이 아닙니다. 제목을 누르면 기사로 이동합니다.')
+        st.markdown('<div class="section-head">📊 분야별 뉴스</div>',unsafe_allow_html=True)
+        counts={key:sum(1 for r in all_items if r.get('카테고리코드')==key) for key in catcodes if key!='ALL'}
+        top=sorted(counts.items(),key=lambda x:x[1],reverse=True)[:6]
+        st.markdown('<div class="panel">'+''.join(
+            f'<div class="issue">{esc(cmap.get(k,k))} <span style="float:right;color:#168149;font-weight:750">{v:,}건</span></div>'
+            for k,v in top)+'</div>',unsafe_allow_html=True)
+    st.caption('원문 및 기사 저작권은 해당 언론사에 있습니다. Google 뉴스 RSS 제공 링크가 원문으로 연결될 수 있습니다.')
 
 
 def main():
     left, right = st.columns([4, 2], vertical_alignment='center')
     with left:
-        st.markdown('<div class="brand">📰 News Brief <span style="font-size:.78rem;font-weight:500;color:#718096">AI 뉴스브리핑</span></div>', unsafe_allow_html=True)
+        st.markdown('<div class="brand">📰 간추린 뉴스 <span>News Brief</span></div>', unsafe_allow_html=True)
     with right:
         view = st.selectbox('화면', ['뉴스', '관리자'], label_visibility='collapsed')
     # Compact options: readable news first, settings only when requested.
