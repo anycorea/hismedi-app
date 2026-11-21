@@ -6,6 +6,7 @@ import json
 import os
 import re
 import time
+import random
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
@@ -66,13 +67,25 @@ def connect(secret=None):
     creds=Credentials.from_service_account_info(account,scopes=['https://www.googleapis.com/auth/spreadsheets'])
     return gspread.authorize(creds).open_by_key(sheet_id)
 
+def with_retry(action):
+    """Short, bounded retries for transient Sheets API quota/server errors."""
+    for attempt in range(4):
+        try:
+            return action()
+        except gspread.exceptions.APIError as exc:
+            status = getattr(getattr(exc, 'response', None), 'status_code', None)
+            if status not in (429, 500, 502, 503, 504) or attempt == 3:
+                raise
+            time.sleep(min(1.5 * (2 ** attempt) + random.random(), 8))
+
+
 def rows(book, sheet):
     """Read data using the manually maintained header; handle header-only sheets.
 
     `get_all_records` can be sensitive to empty rows/columns or gspread
     version-specific record conversion. Keep everything as original text.
     """
-    values = book.worksheet(sheet).get_all_values()
+    values = with_retry(lambda: book.worksheet(sheet).get_all_values())
     if not values:
         raise ValueError(f'{sheet}: 1행에 헤더가 없습니다.')
     headers = HEADERS[sheet]
@@ -90,7 +103,7 @@ def validate(book):
     bad=[]
     for sheet, headers in HEADERS.items():
         try:
-            actual=book.worksheet(sheet).row_values(1)
+            actual=with_retry(lambda: book.worksheet(sheet).row_values(1))
             if actual != headers: bad.append(f'{sheet}: 헤더 또는 순서가 다릅니다.')
         except gspread.WorksheetNotFound: bad.append(f'{sheet}: 시트가 없습니다.')
     return bad
@@ -98,7 +111,7 @@ def validate(book):
 def append_records(book, sheet, records):
     if records:
         headers=HEADERS[sheet]
-        book.worksheet(sheet).append_rows([[str(record.get(k,'')) for k in headers] for record in records], value_input_option='RAW')
+        with_retry(lambda: book.worksheet(sheet).append_rows([[str(record.get(k,'')) for k in headers] for record in records], value_input_option='RAW'))
 
 def patch_record(book,sheet,key_name,key_value,data):
     ws=book.worksheet(sheet)
@@ -106,13 +119,14 @@ def patch_record(book,sheet,key_name,key_value,data):
     for index, rec in enumerate(records,2):
         if str(rec.get(key_name,'')) == str(key_value):
             merged={**rec,**data}
-            ws.update(range_name=f'A{index}',values=[[str(merged.get(k,'')) for k in HEADERS[sheet]]],value_input_option='RAW')
+            with_retry(lambda: ws.update(range_name=f'A{index}',values=[[str(merged.get(k,'')) for k in HEADERS[sheet]]],value_input_option='RAW'))
             return True
     return False
 
 def initialize(book):
     """Insert rows only; never create sheets or format any cells."""
-    if validate(book): raise ValueError('구글시트의 헤더를 먼저 확인하세요: '+ '; '.join(validate(book)))
+    problems = validate(book)
+    if problems: raise ValueError('구글시트의 헤더를 먼저 확인하세요: '+ '; '.join(problems))
     if not rows(book,'Category'):
         append_records(book,'Category',[dict(zip(HEADERS['Category'],[code,name,parent,order,'Y',''])) for code,name,parent,order in DEFAULT_CATEGORIES])
     if not rows(book,'Media'):
