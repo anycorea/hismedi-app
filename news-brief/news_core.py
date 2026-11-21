@@ -9,8 +9,8 @@ import time
 import random
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import quote
-from datetime import datetime, timezone
-from urllib.parse import urlparse
+from datetime import datetime, timezone, timedelta
+from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse
 from zoneinfo import ZoneInfo
 
 import feedparser
@@ -262,7 +262,8 @@ def collect(book, limit_per_feed=22, source_codes=None):
                 raise ValueError('RSS에서 기사를 찾을 수 없습니다')
             records = [parse_source(e,item,clean_text(item.get('비고')) or 'ALL')
                        for e in parsed.entries[:limit_per_feed]]
-            return item, [x for x in records if x], '', time.monotonic()-t
+            recent = [x for x in records if x and recent_news(x, days=1)]
+            return item, recent, '', time.monotonic()-t
         except Exception as exc:
             return item, [], f'{type(exc).__name__}: {exc}'[:250], time.monotonic()-t
 
@@ -298,6 +299,79 @@ def collect(book, limit_per_feed=22, source_codes=None):
     return {'sources': len(logs), 'new': len(new),
             'errors': sum(bool(x['오류내용']) for x in logs),
             'seconds': round(time.monotonic()-start, 1)}
+
+
+def _stamp(text):
+    """Return an aware Asia/Seoul datetime or None for malformed timestamps."""
+    try:
+        stamp = datetime.fromisoformat(str(text or '').strip().replace('Z', '+00:00'))
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=TZ)
+        return stamp.astimezone(TZ)
+    except (TypeError, ValueError):
+        return None
+
+
+def recent_news(item, days=7, reference=None):
+    """Published time wins; missing/invalid publish time falls back to collected time."""
+    date = _stamp(item.get('발행일시')) or _stamp(item.get('수집일시'))
+    reference = reference or datetime.now(TZ)
+    return date is not None and reference - timedelta(days=days) <= date <= reference + timedelta(hours=1)
+
+
+def clean_old_rows(book, days=7):
+    """Bulk-delete expired rows, preserving manual headers, styles and all Settings.
+
+    Runs only on explicit refresh. BatchUpdate uses reverse contiguous row ranges,
+    so indices remain correct when Google executes the requests sequentially.
+    """
+    reference = datetime.now(TZ)
+    threshold = reference - timedelta(days=days)
+    spec = {'News': ('발행일시', '수집일시'),
+            'Briefing': ('생성일시', '브리핑일시'),
+            'Collection_Log': ('실행일시',),
+            'Admin_Log': ('작업일시',)}
+    result = {}
+    requests_to_send = []
+    for sheet, date_keys in spec.items():
+        ws = book.worksheet(sheet)
+        values = with_retry(ws.get_all_values)
+        headers = HEADERS[sheet]
+        if not values or values[0] != headers:
+            raise ValueError(f'{sheet}: 헤더 구조가 달라서 과거 데이터 정리를 중단했습니다.')
+        expired = []
+        for physical_row, cells in enumerate(values[1:], start=2):
+            rec = dict(zip(headers, (cells + [''] * len(headers))[:len(headers)]))
+            if not any(rec.values()):
+                continue
+            date = next((d for key in date_keys if (d := _stamp(rec.get(key))) is not None), None)
+            # Rows without a valid date are kept for safety rather than erased.
+            if date is not None and date < threshold:
+                expired.append(physical_row)
+        result[sheet] = len(expired)
+        if not expired:
+            continue
+        groups = []
+        first = last = expired[0]
+        for n in expired[1:]:
+            if n == last + 1:
+                last = n
+            else:
+                groups.append((first, last))
+                first = last = n
+        groups.append((first, last))
+        # Reverse within each sheet; deletes below cannot move rows above.
+        for first, last in reversed(groups):
+            requests_to_send.append({'deleteDimension': {'range': {
+                'sheetId': ws.id, 'dimension': 'ROWS',
+                'startIndex': first - 1, 'endIndex': last}}})
+    if requests_to_send:
+        # Avoid overly large request bodies; all row indexes calculated before
+        # deleting and reversed independently within each sheet.
+        for index in range(0, len(requests_to_send), 100):
+            batch = requests_to_send[index:index + 100]
+            with_retry(lambda batch=batch: book.batch_update({'requests': batch}))
+    return result
 
 
 def _parse_briefing_json(content):
