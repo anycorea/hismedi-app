@@ -33,7 +33,7 @@ HEADERS = {
 DEFAULT_CATEGORIES = [
  ('ALL','전체','',0),('POL','정치','',10),('ECO','경제','',20),('SOC','사회','',30),
  ('WORLD','국제','',40),('MED','의료·건강','',50),('SCI','IT·과학','',60),
- ('SPORT','스포츠','',70),('CULT','문화·연예','',80),('LOCAL','지역','',90),('LIFE','생활','',100),
+ ('SPORT','스포츠','',70),('AUTO','자동차','',75),('CULT','문화·연예','',80),('LOCAL','지역','',90),('LIFE','생활','',100),
 ]
 # Initial sources are discoverability feeds, not a representation of all Korean news outlets.
 def google_search(query):
@@ -54,6 +54,7 @@ DEFAULT_MEDIA = [
  ('GOOGLE_HEALTH','의료·건강 뉴스 모음','의료','https://news.google.com/',google_search('의료 병원 질병 건강 when:3d'),'MED'),
  ('GOOGLE_TECH','IT·과학 뉴스 모음','IT','https://news.google.com/',google_topic('TECHNOLOGY'),'SCI'),
  ('GOOGLE_SPORT','스포츠 뉴스 모음','스포츠','https://news.google.com/',google_topic('SPORTS'),'SPORT'),
+ ('GOOGLE_AUTO','자동차 뉴스 모음','자동차','https://news.google.com/',google_search('자동차 신차 전기차 완성차 모빌리티 when:3d'),'AUTO'),
  ('GOOGLE_CULT','문화·연예 뉴스 모음','문화','https://news.google.com/',google_topic('ENTERTAINMENT'),'CULT'),
  ('GOOGLE_LOCAL','지역 뉴스 모음','지역','https://news.google.com/',google_search('지역 지방자치 지자체 when:3d'),'LOCAL'),
  ('GOOGLE_LIFE','생활 뉴스 모음','생활','https://news.google.com/',google_search('생활 소비자 날씨 교통 when:3d'),'LIFE'),
