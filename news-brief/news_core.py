@@ -67,7 +67,24 @@ def connect(secret=None):
     return gspread.authorize(creds).open_by_key(sheet_id)
 
 def rows(book, sheet):
-    return book.worksheet(sheet).get_all_records(expected_headers=HEADERS[sheet],numericise_ignore=['all'])
+    """Read data using the manually maintained header; handle header-only sheets.
+
+    `get_all_records` can be sensitive to empty rows/columns or gspread
+    version-specific record conversion. Keep everything as original text.
+    """
+    values = book.worksheet(sheet).get_all_values()
+    if not values:
+        raise ValueError(f'{sheet}: 1행에 헤더가 없습니다.')
+    headers = HEADERS[sheet]
+    if values[0] != headers:
+        raise ValueError(f'{sheet}: 1행 헤더 또는 열 순서가 등록된 구조와 다릅니다.')
+    result = []
+    for line in values[1:]:
+        if not any(str(cell).strip() for cell in line):
+            continue
+        padded = (line + [''] * len(headers))[:len(headers)]
+        result.append(dict(zip(headers, padded)))
+    return result
 
 def validate(book):
     bad=[]

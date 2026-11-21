@@ -252,8 +252,15 @@ def main():
         if mode=='관리자':app_admin()
         else:app_home()
     except Exception as exc:
-        st.error('Google Sheets 연결 또는 처리에 문제가 발생했습니다. 비밀키·공유 권한·시트 ID를 확인하세요.')
-        if authorized():st.exception(exc)
+        # Separate a processing failure from a credential failure. The original
+        # generic message incorrectly directed users to reset valid secrets.
+        st.error('뉴스브리핑 데이터 처리 중 오류가 발생했습니다. 아래 상세 내용을 확인해 주세요.')
+        if authorized():
+            st.code(f'{type(exc).__name__}: {exc}',language='text')
+            with st.expander('오류 상세 (관리자 전용)'):
+                st.exception(exc)
+        else:
+            st.info('관리자 화면에서 오류 상세를 확인할 수 있습니다.')
     st.markdown('<div class="anycorea">Created by anycorea · 기사 저작권은 각 언론사에 있습니다.</div>',unsafe_allow_html=True)
 
 if __name__=='__main__':main()
