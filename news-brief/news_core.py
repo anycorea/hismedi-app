@@ -384,6 +384,59 @@ def clean_old_rows(book, days=7):
 
 
 
+def _resolve_google_news_url(url):
+    """Best-effort publisher URL for current Google News RSS opaque links.
+
+    Google uses an undocumented page signature + Fbv4je RPC. Only attempted
+    when someone opens a specific article; failure retains original link.
+    """
+    parsed = urlparse(url)
+    if (parsed.hostname or '').lower() != 'news.google.com':
+        return url
+    match = re.search(r'/(?:rss/)?(?:articles|read)/([^/?#]+)', parsed.path)
+    if not match:
+        return url
+    article_id = match.group(1)
+    if not re.fullmatch(r'[A-Za-z0-9_-]{12,2048}', article_id):
+        return url
+    try:
+        page = requests.get('https://news.google.com/rss/articles/' + article_id,
+                            timeout=(3, 7), headers={'User-Agent':'Mozilla/5.0', 'Accept-Language':'ko-KR,ko;q=0.9'})
+        if page.status_code != 200:
+            return url
+        sg = re.search(r'data-n-a-sg="([^"]+)"', page.text)
+        ts = re.search(r'data-n-a-ts="(\d+)"', page.text)
+        if not sg or not ts:
+            return url
+        inner = ['garturlreq',
+                 [['X','X',['X','X'],None,None,1,1,'KR:ko',None,1,None,None,None,None,None,0,1],
+                  'X','X',1,[1,1,1],1,1,None,0,0,None,0],
+                 article_id,int(ts.group(1)),sg.group(1)]
+        payload = {'f.req': json.dumps([[['Fbv4je',json.dumps(inner),None,'generic']]])}
+        result = requests.post('https://news.google.com/_/DotsSplashUi/data/batchexecute',
+                               data=payload, timeout=(3,8), headers={'User-Agent':'Mozilla/5.0'})
+        if result.status_code != 200:
+            return url
+        # XSSI prefix / framing is not a stable published API: fail closed.
+        for line in result.text.splitlines():
+            if 'Fbv4je' not in line:
+                continue
+            try:
+                parsed_rpc = json.loads(line)
+                for entry in parsed_rpc:
+                    if isinstance(entry,list) and len(entry)>2 and entry[0]=='wrb.fr':
+                        decoded = json.loads(entry[2])
+                        found = decoded[1] if isinstance(decoded,list) and len(decoded)>1 else ''
+                        valid = safe_url(found)
+                        if valid and (urlparse(valid).hostname or '').lower() != 'news.google.com':
+                            return valid
+            except (ValueError, TypeError, IndexError):
+                continue
+    except (requests.RequestException, TypeError, ValueError):
+        pass
+    return url
+
+
 def _article_context(article):
     """Read a short extract of publicly accessible publisher HTML, never paywalls.
 
@@ -398,6 +451,8 @@ def _article_context(article):
     url = safe_url(article.get('원문URL', ''))
     if not url:
         return '', ''
+    url = _resolve_google_news_url(url)
+    article['_resolved_url'] = url  # transient, not a stored full article body
     parsed = urlparse(url)
     host = (parsed.hostname or '').lower()
     # An aggregator URL may redirect to a publisher; verify the final host.
@@ -436,12 +491,39 @@ def _article_context(article):
         meta = soup.select_one('meta[property="og:description"],meta[name="description"]')
         if meta:
             head_desc = clean_text(meta.get('content', ''))
+        # A number of publishers expose the editorial text in schema.org
+        # NewsArticle JSON-LD even when their CSS class names change.
+        jsonld_bodies = []
+        for script in soup.select('script[type="application/ld+json"]'):
+            if not script.string:
+                continue
+            try:
+                structured_data = json.loads(script.string)
+            except (TypeError, ValueError):
+                continue
+            queue = structured_data if isinstance(structured_data, list) else [structured_data]
+            while queue:
+                node = queue.pop()
+                if isinstance(node, list):
+                    queue.extend(node)
+                elif isinstance(node, dict):
+                    if isinstance(node.get('@graph'), list):
+                        queue.extend(node['@graph'])
+                    article_body = node.get('articleBody')
+                    if isinstance(article_body, str):
+                        body = clean_text(article_body)
+                        if 280 <= len(body) <= 100_000:
+                            jsonld_bodies.append(body[:6500])
+        if jsonld_bodies:
+            return 'article', max(jsonld_bodies, key=len)
         for tag in soup.select('script,style,nav,footer,header,aside,form,button,figcaption'):
             tag.decompose()
         structured = []
         for selector in ('article p', '[itemprop="articleBody"] p', '.article-body p',
                          '.article_view p', '.news_body p', '#articleBody p',
-                         '.article_txt p', 'main p'):
+                         '.article_txt p', '.article-body-content p', '.article_content p',
+                         '.news_cnt_detail_wrap p', '#article-view-content-div p',
+                         '#newsct_article p', 'main p'):
             parts = [clean_text(p.get_text(' ', strip=True)) for p in soup.select(selector)]
             parts = [x for x in parts if 28 <= len(x) <= 1800]
             if sum(map(len, parts)) >= 300:
@@ -450,13 +532,13 @@ def _article_context(article):
         text = ' '.join(structured)[:6500]
         if len(text) >= 280:
             return 'article', text
-        if len(head_desc) >= 220:
+        if len(head_desc) >= 160:
             return 'description', head_desc[:2300]
-        if len(raw) >= 220:
+        if len(raw) >= 200:
             return 'rss', raw[:1800]
     except (requests.RequestException, ValueError, TypeError):
         pass
-    return ('rss', raw[:1800]) if len(raw) >= 220 else ('', '')
+    return ('rss', raw[:1800]) if len(raw) >= 200 else ('', '')
 
 
 def summarize_article(article, api_key, model='openrouter/free'):

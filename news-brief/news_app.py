@@ -57,18 +57,23 @@ footer, div[data-testid="stDecoration"] {display:none!important}
 [class*="st-key-article_tile_"] [data-testid="stExpander"] {border:none!important;background:transparent!important;margin-top:2px!important}
 [class*="st-key-article_tile_"] [data-testid="stExpander"] summary {padding:2px 0!important;color:#77879a!important;font-size:.73rem!important;min-height:0!important}
 [class*="st-key-article_tile_"] [data-testid="stExpander"] summary p {font-size:.73rem!important}
-/* Article rows are real Streamlit controls: a title click reveals its summary. */
-[class*="st-key-article_tile_"] {background:white;border:1px solid #e2e9ef;border-radius:10px;padding:10px 14px;margin-bottom:10px}
-[class*="st-key-article_tile_"] .stButton button {background:none!important;border:0!important;box-shadow:none!important;min-height:0!important;padding:0!important;justify-content:flex-start!important;text-align:left!important;color:#1b2d42!important;font-size:1.03rem!important;font-weight:725!important;line-height:1.48!important;white-space:normal!important;height:auto!important}
-[class*="st-key-article_tile_"] .stButton button p {white-space:normal!important;text-align:left!important;word-break:keep-all}
-[class*="st-key-article_tile_"] .stButton button:hover {color:#08785b!important}
+/* Headlines lead. A compact metadata column stays right-aligned on desktop. */
+[class*="st-key-article_tile_"] {background:#fff;border:1px solid #e1e8ee;border-radius:10px;padding:10px 14px;margin-bottom:8px;box-shadow:0 1px 1px rgba(10,35,52,.018)}
+[class*="st-key-article_tile_"] [data-testid="stHorizontalBlock"] {align-items:center;gap:12px}
+[class*="st-key-article_tile_"] .stButton, [class*="st-key-article_tile_"] .stButton > div {width:100%}
+[class*="st-key-article_tile_"] .stButton button {display:block!important;background:transparent!important;border:0!important;box-shadow:none!important;min-height:0!important;padding:0!important;width:100%!important;justify-content:flex-start!important;text-align:left!important;color:#1b2d42!important;font-size:1.04rem!important;font-weight:760!important;line-height:1.45!important;white-space:normal!important;height:auto!important}
+[class*="st-key-article_tile_"] .stButton button p {white-space:normal!important;text-align:left!important;word-break:keep-all!important;font-weight:760!important;font-size:inherit!important;line-height:inherit!important}
+[class*="st-key-article_tile_"] .stButton button:hover {color:#08785b!important;text-decoration:underline;text-underline-offset:3px}
+.news-right-meta {text-align:right;font-size:.71rem;line-height:1.4;color:#758396;white-space:nowrap}
+.news-right-meta .meta-category {color:#607689;font-weight:700}
 .article-explainer {font-size:.94rem;line-height:1.8;color:#263b51;background:#f2f7f5;border-left:3px solid #116b53;padding:12px 14px;border-radius:5px;word-break:keep-all;margin:9px 0}
 .article-source-note {font-size:.74rem;color:#758499;margin:7px 0}
 .article-original a {display:inline-block;font-size:.85rem;font-weight:750;color:#08785b;text-decoration:none;padding:7px 0}
 .article-original a:hover{text-decoration:underline}
 @media(max-width:700px){
- [class*="st-key-article_tile_"] {background:transparent;border:0;border-bottom:1px solid #e1e6ed;border-radius:0;padding:9px 2px;margin-bottom:1px}
- [class*="st-key-article_tile_"] .stButton button {font-size:1.05rem!important}
+ [class*="st-key-article_tile_"] {background:transparent;border:0;border-bottom:1px solid #e1e6ed;border-radius:0;padding:9px 2px;margin-bottom:2px}
+ [class*="st-key-article_tile_"] .stButton button {font-size:1.07rem!important}
+ .news-right-meta{text-align:left;font-size:.67rem;margin-top:-4px;white-space:normal}
 }
 /* Avoid decorative wrappers: the headline and settings are the only toolbar. */
 .brand{white-space:nowrap}
@@ -482,7 +487,8 @@ def render_article_summary(article):
                     with st.spinner('기사를 간추리는 중…'):
                         brief = summarize_article(article, token)
                     persisted = patch_record(book(), 'News', '뉴스ID', article['뉴스ID'],
-                                             {'요약': 'AI_SUMMARY_V2::' + brief})
+                                             {'요약': 'AI_SUMMARY_V2::' + brief,
+                                              '원문URL': article.get('_resolved_url') or article.get('원문URL', '')})
                     if persisted:
                         append_records(book(), 'Collection_Log', [dict(zip(HEADERS['Collection_Log'],
                             [str(article['뉴스ID']) + '-' + now(), now(), 'ARTICLE_AI', 'AI',
@@ -502,7 +508,7 @@ def render_article_summary(article):
     if cached or 'brief' in locals():
         st.markdown('<div class="article-source-note">공개 기사 자료 기준 · 원문에서 사실 확인 권장</div>',
                     unsafe_allow_html=True)
-    url = safe_url(article.get('원문URL', ''))
+    url = safe_url(article.get('_resolved_url') or article.get('원문URL', ''))
     if url:
         st.markdown('<div class="article-original"><a href="' + esc(url)
                     + '" target="_blank" rel="noopener noreferrer">원문 보기 ↗</a></div>',
@@ -517,15 +523,15 @@ def render_news_tile(group, index, known, cmap):
     if display_title.endswith(' - ' + actual):
         display_title = display_title[:-(len(actual) + 3)]
     published = str(article.get('발행일시', ''))[5:16]
-    label = esc(actual) + ' · ' + esc(cmap.get(article.get('카테고리코드'), '')) + ' · ' + esc(published)
+    category = cmap.get(article.get('카테고리코드'), '')
     with st.container(key=f'article_tile_{index}'):
-        if st.button(display_title, key=f'article_open_{key}', use_container_width=True):
-            st.session_state['opened_news_id'] = None if st.session_state.get('opened_news_id') == key else key
-        # Headline first: category, newspaper and time are deliberately subtle.
-        st.markdown('<div class="news-meta"><span class="news-category">'
-                    + esc(cmap.get(article.get('카테고리코드'), ''))
-                    + '</span><span>' + esc(actual) + '</span><span>'
-                    + esc(published) + '</span></div>', unsafe_allow_html=True)
+        title_col, meta_col = st.columns([4.6, 1.5], vertical_alignment='center', gap='small')
+        with title_col:
+            if st.button(display_title, key=f'article_open_{key}', use_container_width=True):
+                st.session_state['opened_news_id'] = (None if st.session_state.get('opened_news_id') == key else key)
+        with meta_col:
+            metadata = ' · '.join(x for x in (category, actual, published) if x)
+            st.markdown('<div class="news-right-meta">' + esc(metadata) + '</div>', unsafe_allow_html=True)
         if st.session_state.get('opened_news_id') == key:
             render_article_summary(article)
         if len(group) > 1:
