@@ -7,6 +7,8 @@ import os
 import re
 import time
 import random
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from urllib.parse import quote
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
@@ -34,13 +36,30 @@ DEFAULT_CATEGORIES = [
  ('SPORT','스포츠','',70),('CULT','문화·연예','',80),('LOCAL','지역','',90),('LIFE','생활','',100),
 ]
 # Initial sources are discoverability feeds, not a representation of all Korean news outlets.
+def google_search(query):
+    return f'https://news.google.com/rss/search?q={quote(query)}&hl=ko&gl=KR&ceid=KR:ko'
+
+
+def google_topic(topic):
+    return f'https://news.google.com/rss/headlines/section/topic/{topic}?hl=ko&gl=KR&ceid=KR:ko'
+
+
+# Source entries are RSS aggregations; publishers are extracted from each article.
+# This does not imply coverage of every Korean newspaper.
 DEFAULT_MEDIA = [
+ ('GOOGLE_POL','정치 뉴스 모음','정치','https://news.google.com/',google_search('정치 국회 정부 when:3d'),'POL'),
+ ('GOOGLE_BUS','경제 뉴스 모음','경제','https://news.google.com/',google_topic('BUSINESS'),'ECO'),
+ ('GOOGLE_SOC','사회 뉴스 모음','사회','https://news.google.com/',google_search('사회 사건 교육 법원 when:3d'),'SOC'),
+ ('GOOGLE_WORLD','국제 뉴스 모음','국제','https://news.google.com/',google_topic('WORLD'),'WORLD'),
+ ('GOOGLE_HEALTH','의료·건강 뉴스 모음','의료','https://news.google.com/',google_search('의료 병원 질병 건강 when:3d'),'MED'),
+ ('GOOGLE_TECH','IT·과학 뉴스 모음','IT','https://news.google.com/',google_topic('TECHNOLOGY'),'SCI'),
+ ('GOOGLE_SPORT','스포츠 뉴스 모음','스포츠','https://news.google.com/',google_topic('SPORTS'),'SPORT'),
+ ('GOOGLE_CULT','문화·연예 뉴스 모음','문화','https://news.google.com/',google_topic('ENTERTAINMENT'),'CULT'),
+ ('GOOGLE_LOCAL','지역 뉴스 모음','지역','https://news.google.com/',google_search('지역 지방자치 지자체 when:3d'),'LOCAL'),
+ ('GOOGLE_LIFE','생활 뉴스 모음','생활','https://news.google.com/',google_search('생활 소비자 날씨 교통 when:3d'),'LIFE'),
  ('GOOGLE_TOP','종합 뉴스 모음','종합','https://news.google.com/','https://news.google.com/rss?hl=ko&gl=KR&ceid=KR:ko','ALL'),
- ('GOOGLE_BUS','경제 뉴스 모음','경제','https://news.google.com/','https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=ko&gl=KR&ceid=KR:ko','ECO'),
- ('GOOGLE_TECH','IT·과학 뉴스 모음','IT·과학','https://news.google.com/','https://news.google.com/rss/headlines/section/topic/TECHNOLOGY?hl=ko&gl=KR&ceid=KR:ko','SCI'),
- ('GOOGLE_SPORT','스포츠 뉴스 모음','스포츠','https://news.google.com/','https://news.google.com/rss/headlines/section/topic/SPORTS?hl=ko&gl=KR&ceid=KR:ko','SPORT'),
- ('GOOGLE_HEALTH','의료·건강 뉴스 모음','의료·건강','https://news.google.com/','https://news.google.com/rss/search?q=%EC%9D%98%EB%A3%8C+OR+%EB%B3%91%EC%9B%90+OR+%EA%B1%B4%EA%B0%95&hl=ko&gl=KR&ceid=KR:ko','MED'),
 ]
+
 
 def now(): return datetime.now(TZ).strftime('%Y-%m-%d %H:%M:%S')
 def enabled(v): return str(v or '').strip().upper() not in ('N','NO','FALSE','0','OFF','미사용')
@@ -124,13 +143,21 @@ def patch_record(book,sheet,key_name,key_value,data):
     return False
 
 def initialize(book):
-    """Insert rows only; never create sheets or format any cells."""
+    """Seed only missing category/media codes; never modify manual formatting."""
     problems = validate(book)
-    if problems: raise ValueError('구글시트의 헤더를 먼저 확인하세요: '+ '; '.join(problems))
-    if not rows(book,'Category'):
-        append_records(book,'Category',[dict(zip(HEADERS['Category'],[code,name,parent,order,'Y',''])) for code,name,parent,order in DEFAULT_CATEGORIES])
-    if not rows(book,'Media'):
-        append_records(book,'Media',[dict(zip(HEADERS['Media'],[code,name,group,home,rss,'','RSS',30,order*10,'Y',cat])) for order,(code,name,group,home,rss,cat) in enumerate(DEFAULT_MEDIA,1)])
+    if problems:
+        raise ValueError('구글시트 헤더를 확인하세요: ' + '; '.join(problems))
+    known_categories = {r['카테고리코드'] for r in rows(book, 'Category')}
+    cat_records = [dict(zip(HEADERS['Category'], [code,name,parent,order,'Y','']))
+                   for code,name,parent,order in DEFAULT_CATEGORIES if code not in known_categories]
+    append_records(book, 'Category', cat_records)
+    known_media = {r['언론사코드'] for r in rows(book, 'Media')}
+    media_records = [dict(zip(HEADERS['Media'], [code,name,group,home,rss,'','RSS',30,order*10,'Y',cat]))
+                     for order,(code,name,group,home,rss,cat) in enumerate(DEFAULT_MEDIA,1)
+                     if code not in known_media]
+    append_records(book, 'Media', media_records)
+    return {'categories_added': len(cat_records), 'sources_added': len(media_records)}
+
 
 def clean_text(raw):
     txt=BeautifulSoup(str(raw or ''),'html.parser').get_text(' ',strip=True)
@@ -147,8 +174,10 @@ def parse_source(entry, media,cat):
     title=clean_text(entry.get('title',''))
     original=safe_url(entry.get('link',''))
     if not title or not original: return None
-    snippet=clean_text(entry.get('summary',''))
-    snippet=re.sub(r'\s+',' ',snippet)[:450]
+    summary_html = str(entry.get('summary',''))
+    # Google News summaries are often a list of other headlines rather than a synopsis.
+    # Never misrepresent that list as a verified article summary.
+    snippet = '' if 'news.google.com' in str(media.get('RSS_URL','')) else clean_text(summary_html)[:450]
     media_code=str(media.get('언론사코드','')).strip()
     # Google RSS embeds original publisher name after the title; keep original title unmodified.
     publisher=clean_text(entry.get('source',{}).get('title','')) if entry.get('source') else ''
@@ -165,36 +194,68 @@ def parse_source(entry, media,cat):
 def media_name_map(book):
     return {r['언론사코드']:r['언론사명'] for r in rows(book,'Media')}
 
-def collect(book, limit_per_feed=35, source_codes=None):
-    start=time.monotonic()
-    existing={str(x.get('뉴스ID')) for x in rows(book,'News')}
-    new=[]; logs=[]; sources=rows(book,'Media')
-    for media in sources:
-        if not enabled(media.get('사용여부')): continue
-        code=str(media.get('언론사코드',''))
-        if source_codes is not None and code not in source_codes: continue
-        feed=safe_url(media.get('RSS_URL',''))
-        if not feed: continue
-        t=time.monotonic(); count=0;added=0;dup=0;err=''
+def collect(book, limit_per_feed=22, source_codes=None):
+    """Fetch feeds concurrently; write each sheet in batches to limit API calls."""
+    start = time.monotonic()
+    known = rows(book, 'News')
+    existing = {str(x.get('뉴스ID')) for x in known}
+    existing_titles = {(re.sub(r'\W+', '', str(x.get('제목',''))).casefold(),
+                        str(x.get('발행일시',''))[:10]) for x in known}
+    sources = [m for m in rows(book, 'Media') if enabled(m.get('사용여부'))
+               and safe_url(m.get('RSS_URL'))
+               and (source_codes is None or str(m.get('언론사코드')) in source_codes)]
+
+    # A legacy installation may list GOOGLE_TOP first; preserve topical labels.
+    sources.sort(key=lambda m: str(m.get('비고', 'ALL')).upper() == 'ALL')
+
+    def fetch(item):
+        t = time.monotonic()
         try:
-            response=requests.get(feed,headers={'User-Agent':'NewsBrief/1.0 (+RSS reader)'},timeout=15)
-            response.raise_for_status()
-            parsed=feedparser.parse(response.content)
-            if parsed.bozo and not parsed.entries: raise ValueError('RSS 형식을 읽을 수 없습니다.')
-            cat=clean_text(media.get('비고','')) or 'ALL'
-            for entry in parsed.entries[:limit_per_feed]:
-                record=parse_source(entry,media,cat)
-                if record is None: continue
-                count+=1
-                if record['뉴스ID'] in existing: dup+=1; continue
-                existing.add(record['뉴스ID']);new.append(record);added+=1
-        except Exception as exc: err=str(exc)[:250]
-        logs.append(dict(zip(HEADERS['Collection_Log'],[
-            uid(now()+code),now(),code,'RSS',count,added,dup,'오류' if err else '성공',err,round(time.monotonic()-t,2)])))
-    # Chunk writes to avoid excessively large request payloads.
-    for i in range(0,len(new),200):append_records(book,'News',new[i:i+200])
-    append_records(book,'Collection_Log',logs)
-    return {'sources':len(logs),'new':len(new),'errors':sum(bool(x['오류내용']) for x in logs),'seconds':round(time.monotonic()-start,1)}
+            url = safe_url(item['RSS_URL'])
+            r = requests.get(url, headers={'User-Agent': 'Mozilla/5.0 NewsBrief/1.0 RSS reader'}, timeout=(5, 10))
+            r.raise_for_status()
+            parsed = feedparser.parse(r.content)
+            if not parsed.entries:
+                raise ValueError('RSS에서 기사를 찾을 수 없습니다')
+            records = [parse_source(e,item,clean_text(item.get('비고')) or 'ALL')
+                       for e in parsed.entries[:limit_per_feed]]
+            return item, [x for x in records if x], '', time.monotonic()-t
+        except Exception as exc:
+            return item, [], f'{type(exc).__name__}: {exc}'[:250], time.monotonic()-t
+
+    fetched = {}
+    if sources:
+        with ThreadPoolExecutor(max_workers=min(6, len(sources))) as pool:
+            futures = [pool.submit(fetch, m) for m in sources]
+            for f in as_completed(futures):
+                media, articles, err, seconds = f.result()
+                fetched[str(media['언론사코드'])] = (articles, err, seconds)
+
+    new, logs = [], []
+    # Topic feeds first, general feed last; category labels remain useful.
+    for media in sources:
+        code = str(media['언론사코드'])
+        articles, err, seconds = fetched.get(code, ([], '수집 결과 없음', 0.0))
+        added, duplicates = 0, 0
+        for article in articles:
+            title_key = (re.sub(r'\W+', '', article['제목']).casefold(), article['발행일시'][:10])
+            if article['뉴스ID'] in existing or title_key in existing_titles:
+                duplicates += 1
+                continue
+            existing.add(article['뉴스ID'])
+            existing_titles.add(title_key)
+            new.append(article)
+            added += 1
+        logs.append(dict(zip(HEADERS['Collection_Log'], [
+            uid(now()+code), now(), code, 'RSS', len(articles), added, duplicates,
+            '오류' if err else '성공', err, round(seconds, 2)])))
+    for i in range(0, len(new), 150):
+        append_records(book, 'News', new[i:i+150])
+    append_records(book, 'Collection_Log', logs)
+    return {'sources': len(logs), 'new': len(new),
+            'errors': sum(bool(x['오류내용']) for x in logs),
+            'seconds': round(time.monotonic()-start, 1)}
+
 
 def ai_briefing(news, api_key='', model='gpt-4.1-mini'):
     """Summarize only RSS metadata supplied. Never claim article body verified."""

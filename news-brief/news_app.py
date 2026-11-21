@@ -14,30 +14,30 @@ st.set_page_config(page_title='News Brief | AI 뉴스브리핑', page_icon='📰
 
 # No custom fixed heading positioning. Retain the Streamlit default content padding.
 st.markdown('''<style>
-:root{color-scheme:light}
+/* Use Streamlit default top spacing; do not override viewport zoom. */
 .stApp{background:#f8fafc;color:#17263a}
-.block-container{max-width:1340px}
+.block-container{max-width:1320px}
 header[data-testid="stHeader"]{background:#f8fafc}
 #MainMenu,footer,div[data-testid="stDecoration"]{visibility:hidden}
-.stButton button,.stLinkButton a{min-height:42px;border-radius:10px}
-.news-card{background:white;border:1px solid #dfe6ee;border-radius:12px;
- padding:1rem 1.15rem;margin:.5rem 0;overflow-wrap:anywhere}
-.news-card .meta{font-size:.88rem;color:#596b7c;margin-bottom:.35rem}
-.news-card .headline{font-size:var(--news-title-size,1.18rem);font-weight:750;line-height:1.55}
-.news-card .summary{font-size:var(--news-body-size,1rem);color:#40536b;line-height:1.72;margin-top:.45rem}
-.news-card a{color:#172e4b;text-decoration:none}
+.stButton button,.stLinkButton a{min-height:44px;border-radius:10px}
+.news-card{background:#fff;border:1px solid #dce5ee;border-radius:12px;
+ padding:1rem 1.15rem;margin:.52rem 0;overflow-wrap:anywhere}
+.news-card .meta{font-size:.86rem;color:#52677b;margin-bottom:.38rem}
+.news-card .headline{font-size:var(--news-title-size,1.19rem);font-weight:750;line-height:1.55}
+.news-card .summary{font-size:var(--news-body-size,1rem);color:#40536b;line-height:1.65;margin-top:.35rem}
+.news-card a{color:#142e4c;text-decoration:none}
 .news-card a:hover{text-decoration:underline;color:#1761a4}
-.brief-box{border:1px solid #cddff5;border-radius:12px;background:#ecf4ff;
- padding:1rem 1.1rem;line-height:1.7;color:#233e5b;margin:.6rem 0}
-.brief-box .brief-title{font-weight:750;font-size:1.06rem}
-.brief-box .brief-note{color:#64748b;font-size:.84rem;margin-top:.4rem}
-.anycorea{text-align:center;color:#7a8595;font-size:.76rem;padding:1.1rem 0}
-.brand{font-weight:800;font-size:1.3rem;line-height:1.5;color:#172e4b;padding:.05rem 0 .55rem}
+.brief-box{border:1px solid #d3e2f5;border-radius:12px;background:#eef5ff;
+ padding:1rem 1.1rem;line-height:1.68;color:#233e5b;margin:.6rem 0}
+.brief-box .brief-title{font-weight:750;font-size:1.05rem}
+.brief-box .brief-note{color:#64748b;font-size:.82rem;margin-top:.4rem}
+.anycorea{text-align:center;color:#708198;font-size:.73rem;padding:1rem 0}
+.brand{font-weight:800;font-size:1.2rem;line-height:1.5;color:#172e4b;padding:.1rem 0 .3rem}
 @media(max-width:800px){
- .block-container{padding-left:.85rem;padding-right:.85rem}
+ .block-container{padding-left:.8rem;padding-right:.8rem}
  .news-card{padding:.85rem .95rem}
- .news-card .headline{font-size:max(var(--news-title-size,1.18rem),1.13rem)}
- .brand{font-size:1.15rem}
+ .news-card .headline{font-size:max(var(--news-title-size,1.19rem),1.13rem)}
+ .brand{font-size:1.09rem}
 }
 </style>''', unsafe_allow_html=True)
 
@@ -107,7 +107,7 @@ def news_card(item, known, compact=False):
     source = esc(publisher(item, known))
     when = esc(str(item.get('발행일시', ''))[:16])
     summary = esc(str(item.get('요약', '')).strip()[:280])
-    short = '' if compact else f'<div class="summary">{summary or "제공된 기사 요약이 없습니다."}</div>'
+    short = '' if compact or not summary else f'<div class="summary">{summary}</div>'
     st.markdown(f'<article class="news-card"><div class="meta">{source} · {when}</div>'
                 f'<div class="headline">{link}</div>{short}</article>',
                 unsafe_allow_html=True)
@@ -124,34 +124,50 @@ def handle_error(exc):
 
 
 def start_data():
-    st.caption('구글시트 헤더·서식은 그대로 두고 초기 등록, 뉴스 수집, AI 요약을 한 번에 처리합니다.')
-    if st.button('초기 등록 + 뉴스 수집 + AI 브리핑', type='primary'):
-        with st.spinner('뉴스 소스를 등록하고 기사를 수집하고 있습니다'):
-            initialize(book())
-            refresh()
-            result = collect(book(), 25)
-            refresh()
-        st.success(f"초기 등록 및 기사 수집 완료 · 신규 {result['new']}건 / 소스 오류 {result['errors']}개")
-        ai_key = setting('news_brief', 'openai_api_key', '')
-        if ai_key:
-            items = [r for r in data('News') if enabled(r.get('노출여부'))]
-            items.sort(key=lambda r: str(r.get('발행일시', '')), reverse=True)
-            if items:
-                try:
-                    with st.spinner('AI가 주요 뉴스를 요약하고 있습니다'):
-                        output = ai_briefing(items, api_key=ai_key,
-                                             model=setting('news_brief', 'ai_model', 'gpt-4.1-mini'))
-                        save_briefing(book(), output, 'ALL')
-                    refresh()
-                    st.success('AI 브리핑 생성까지 완료했습니다.')
-                except Exception as exc:
-                    st.warning(f'기사는 수집했지만 AI 브리핑 생성은 실패했습니다: {type(exc).__name__}: {exc}')
-        else:
-            st.info('AI API 키가 아직 없어 기사 수집까지만 완료했습니다. AI 기능은 키 등록 후 활성화됩니다.')
-        write_log('초기등록/수집', 'Category/Media/News', detail=result)
-    left, right = st.columns(2)
-    left.metric('카테고리', len(data('Category')))
-    right.metric('뉴스 소스', len(data('Media')))
+    st.caption('초기 소스 등록과 첫 기사 수집은 뉴스 화면 접속 시 자동으로 진행됩니다.')
+    items = data('Category')
+    media = data('Media')
+    articles = data('News')
+    left, middle, right = st.columns(3)
+    left.metric('카테고리', len(items))
+    middle.metric('뉴스 소스', len(media))
+    right.metric('저장된 뉴스', len(articles))
+    st.caption('기본 뉴스가 보인 뒤 정기 수집과 별도 수집 기능은 마지막 단계에 설정합니다.')
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def ensure_first_news():
+    """One-time setup for empty sheets, not a continuous crawler.
+
+    Cache prevents repeated requests on each visitor's rerun. Existing articles
+    are never wiped or force-refetched; recurring collection comes later.
+    """
+    b = book()
+    existing_categories = rows(b, 'Category')
+    existing_media = rows(b, 'Media')
+    existing_news = rows(b, 'News')
+    result = {'sources': 0, 'new': 0, 'errors': 0}
+    if not existing_categories or not existing_media or not existing_news:
+        initialize(b)
+        refresh()
+    if not existing_news:
+        result = collect(b, 18)
+        refresh()
+    # AI summaries are optional and require a configured API key.
+    api_key = setting('news_brief', 'openai_api_key', '')
+    if api_key and not rows(b, 'Briefing'):
+        articles = [x for x in rows(b, 'News') if enabled(x.get('노출여부'))]
+        articles.sort(key=lambda x: str(x.get('발행일시','')), reverse=True)
+        if articles:
+            try:
+                briefing = ai_briefing(articles, api_key=api_key,
+                     model=setting('news_brief','ai_model','gpt-4.1-mini'))
+                save_briefing(b, briefing, 'ALL')
+                refresh()
+            except Exception:
+                # News should remain readable if the optional AI service fails.
+                pass
+    return result
 
 
 def manage_media():
@@ -235,18 +251,8 @@ def manage_categories():
 
 
 def manual_collection():
-    source_rows = [r for r in data('Media') if enabled(r.get('사용여부')) and safe_url(r.get('RSS_URL'))]
-    options = [r['언론사코드'] for r in source_rows]
-    chosen = st.multiselect('수집할 뉴스 소스', options, default=options)
-    max_count = st.select_slider('소스별 최대 기사', [10, 20, 30, 50], value=30)
-    if st.button('뉴스 수집 실행', type='primary', disabled=not chosen):
-        with st.spinner('RSS 뉴스를 수집하고 있습니다'):
-            result = collect(book(), max_count, set(chosen))
-        refresh()
-        write_log('수동수집', 'News', detail=result)
-        st.success(f"수집 완료 · 신규 {result['new']}건 / 오류 {result['errors']}개 소스")
-        if result['errors']:
-            st.warning('일부 소스의 수집 실패 원인은 설정·기록에서 확인하세요.')
+    st.info('별도 수집 버튼과 GitHub 정기 수집은 뉴스 화면 검수 후 마지막 단계에 연결합니다.')
+    st.caption('첫 기사 수집은 뉴스 화면에 접속하면 자동 진행됩니다.')
 
 
 def make_brief():
@@ -333,6 +339,11 @@ def app_admin():
 
 
 def app_home():
+    # Load actual articles on first visit; no initial button needed.
+    with st.spinner('첫 뉴스 데이터를 준비하고 있습니다…'):
+        outcome = ensure_first_news()
+    if outcome.get('errors') and outcome.get('new') == 0:
+        st.warning('일부 뉴스 소스에 접속하지 못했습니다. 관리자 기록에서 원인을 확인할 수 있습니다.')
     categories = [r for r in data('Category') if enabled(r.get('사용여부'))]
     categories.sort(key=lambda r: int(r.get('정렬순서') or 999))
     cmap = {r['카테고리코드']: r['카테고리명'] for r in categories}
@@ -388,7 +399,7 @@ def app_home():
                     if record and safe_url(record.get('원문URL', '')):
                         st.link_button(str(record.get('제목', '기사 보기'))[:75], record['원문URL'])
     elif selected == 'ALL':
-        st.caption('AI 브리핑은 관리자가 첫 브리핑을 생성하면 표시됩니다.')
+        st.caption('AI 브리핑은 API 키가 설정되면 생성됩니다. 아래의 기사는 실제 RSS 수집 결과입니다.')
     st.markdown(f'**{esc(cmap[selected])} 최신 뉴스**')
     news = [r for r in data('News') if enabled(r.get('노출여부'))
             and (selected == 'ALL' or r.get('카테고리코드') == selected)]
