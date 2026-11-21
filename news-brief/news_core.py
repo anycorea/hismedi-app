@@ -299,13 +299,42 @@ def collect(book, limit_per_feed=22, source_codes=None):
             'seconds': round(time.monotonic()-start, 1)}
 
 
-def ai_briefing(news, api_key='', model='openrouter/free'):
-    """Generate a cited Korean briefing using only OpenRouter's free router.
+def _parse_briefing_json(content):
+    """Extract JSON from compatible free-model responses, including fenced output."""
+    if isinstance(content, dict):
+        return content
+    if isinstance(content, list):
+        content = "\n".join(
+            part.get('text', '') for part in content
+            if isinstance(part, dict) and isinstance(part.get('text'), str)
+        )
+    if not isinstance(content, str) or not content.strip():
+        raise ValueError('AI 응답 본문이 비어 있습니다.')
+    text = content.strip().lstrip('\ufeff')
+    if text.startswith('```'):
+        text = re.sub(r'^```(?:json)?\s*', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'\s*```\s*$', '', text).strip()
+    try:
+        obj = json.loads(text)
+        if isinstance(obj, dict):
+            return obj
+    except json.JSONDecodeError:
+        pass
+    decoder = json.JSONDecoder()
+    # Models occasionally prepend commentary or wrap the JSON in fences.
+    for match in re.finditer(r'\{', text):
+        try:
+            obj, _ = decoder.raw_decode(text[match.start():])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict) and ('issues' in obj or 'summary' in obj):
+            return obj
+    raise ValueError('응답에서 완전한 JSON 객체를 찾을 수 없습니다.')
 
-    Public RSS titles/descriptions only; no private Sheet data or credentials.
-    Never route to a paid model, even when model is misconfigured in Secrets.
-    """
-    items = [x for x in news if str(x.get('제목', '')).strip()][:35]
+
+def ai_briefing(news, api_key='', model='openrouter/free'):
+    """Cited RSS-only briefing, via free OpenRouter. Paid fallback is prohibited."""
+    items = [x for x in news if str(x.get('제목', '')).strip()][:18]
     if not items:
         raise ValueError('브리핑을 생성할 뉴스가 없습니다.')
     if not api_key or api_key.strip().startswith(('발급받은_', 'YOUR_')):
@@ -313,30 +342,29 @@ def ai_briefing(news, api_key='', model='openrouter/free'):
     if model != 'openrouter/free':
         raise ValueError('비용 방지를 위해 무료 모델 openrouter/free만 허용합니다.')
     payload = [
-        {'id': str(x['뉴스ID']), 'title': str(x['제목'])[:200],
-         'rss_description': str(x.get('요약', ''))[:380],
-         'publisher': str(x.get('키워드', ''))[:90],
-         'published': str(x.get('발행일시', ''))[:19]}
+        {'id': str(x['뉴스ID']), 'title': str(x['제목'])[:160],
+         'description': str(x.get('요약', ''))[:200],
+         'publisher': str(x.get('키워드', ''))[:60]}
         for x in items
     ]
     instruction = (
-        '당신은 대한민국 뉴스 편집자입니다. 아래 공개 RSS의 기사 제목, 출처, 제공된 설명만 근거로 '
-        '짧고 명확한 한국어 뉴스브리핑을 만드세요. 기사의 전문을 읽었다고 주장하지 마세요. '
-        '제공되지 않은 사실, 수치, 전망, 인용을 창작하지 마세요. 동일 사건만 신중하게 묶고 '
-        '중요도와 분야 균형에 따라 최대 7개 이슈를 선정하세요. '
-        '각 point는 근거 있는 1~2문장으로, 정보 부족 시 제목에 따르면이라고 명시하세요. '
-        'ids에는 입력에 실제 존재하는 id만 넣으세요. 반드시 JSON 객체만 출력하세요. '
-        '형식: {"title":"오늘의 주요 뉴스","summary":"전체 흐름 2~3문장",'
-        '"issues":[{"headline":"핵심 제목","point":"검증 가능한 정리","ids":["기사ID"]}]}.'
+        '당신은 한국어 뉴스 편집자입니다. 주어진 공개 RSS 제목과 설명으로만 브리핑하세요. '
+        '기사 본문을 확인했다고 주장하거나 사실, 수치, 발언을 지어내지 마세요. '
+        '중요한 이슈를 3~5개로 묶되, 유사한 사건일 때만 묶으세요. '
+        'point는 1문장으로 간결하게 작성하고, 각 이슈에는 관련 기사 id를 최소 1개 넣으세요. '
+        '입력에 없는 id는 사용하지 마세요. 마크다운과 해설 없이 JSON 객체만 반환하세요. '
+        'JSON 예시: {"title":"오늘의 뉴스","summary":"주요 흐름 1문장",'
+        '"issues":[{"headline":"핵심 제목","point":"사실에 근거한 내용","ids":["기사ID"]}]}.'
     )
     body = {
         'model': 'openrouter/free',
         'messages': [
             {'role': 'system', 'content': instruction},
-            {'role': 'user', 'content': '[공개 RSS 데이터]\n' + json.dumps(payload, ensure_ascii=False)}
+            {'role': 'user', 'content': json.dumps(payload, ensure_ascii=False)}
         ],
-        'temperature': 0.2,
-        'max_tokens': 2600,
+        'response_format': {'type': 'json_object'},
+        'temperature': 0.1,
+        'max_tokens': 1550,
         'stream': False,
     }
     try:
@@ -345,39 +373,47 @@ def ai_briefing(news, api_key='', model='openrouter/free'):
             headers={'Authorization': 'Bearer ' + api_key.strip(),
                      'Content-Type': 'application/json',
                      'X-Title': 'News Brief'},
-            json=body, timeout=(8, 90))
+            json=body, timeout=(8, 48))
+    except requests.Timeout as exc:
+        raise RuntimeError('무료 AI 응답이 지연되어 중단했습니다. 뉴스 열람에는 영향이 없습니다.') from exc
     except requests.RequestException as exc:
-        raise RuntimeError('OpenRouter 연결에 실패했습니다. 네트워크 상태를 확인하세요.') from exc
+        raise RuntimeError('OpenRouter 연결 실패. 네트워크 상태를 확인하세요.') from exc
     if resp.status_code == 429:
-        raise RuntimeError('OpenRouter 무료 호출 한도에 도달했습니다. 무료 한도 갱신 후 다시 시도하세요.')
+        raise RuntimeError('OpenRouter 무료 요청 한도에 도달했습니다. 다음 한도 갱신 후 이용해 주세요.')
     if resp.status_code in (401, 403):
-        raise RuntimeError('OpenRouter API 키가 유효하지 않거나 무료 모델 이용이 제한되었습니다.')
+        raise RuntimeError('OpenRouter 키가 올바르지 않거나 무료 모델 이용이 제한되었습니다.')
     if resp.status_code == 402:
-        raise RuntimeError('OpenRouter가 잔액을 요구했습니다. 유료 결제 없이 무료 라우터만 사용하도록 설정되어 있으며 호출을 중단했습니다.')
+        raise RuntimeError('OpenRouter가 결제를 요구했습니다. 유료 모델로 전환하지 않고 중단했습니다.')
     if resp.status_code >= 400:
-        raise RuntimeError(f'OpenRouter API 요청 실패 (HTTP {resp.status_code}). 무료 모델 가용성을 확인하세요.')
+        try:
+            detail = resp.json().get('error', {}).get('message', '')
+        except (ValueError, TypeError, AttributeError):
+            detail = ''
+        # API payloads can include internal or account details; don't echo them.
+        raise RuntimeError(f'OpenRouter 무료 모델 요청 실패 (HTTP {resp.status_code}). '
+                           '모델 제공 상태를 확인하세요.' + (' JSON 형식 지원 오류일 수 있습니다.' if resp.status_code == 400 else ''))
     try:
-        response = resp.json()
-        choices = response['choices']
-        content = choices[0]['message']['content']
-        if isinstance(content, list):
-            content = ''.join(x.get('text', '') for x in content if isinstance(x, dict))
-        if not isinstance(content, str) or not content.strip():
-            raise ValueError('빈 응답')
-        text = content.strip()
-        if text.startswith('```'):
-            text = re.sub(r'^```(?:json)?\s*|\s*```$', '', text).strip()
-        parsed = json.loads(text)
-        if not isinstance(parsed, dict):
-            raise ValueError('JSON 객체가 아닙니다.')
+        envelope = resp.json()
+        choice = envelope['choices'][0]
+        content = choice['message']['content']
+        parsed = _parse_briefing_json(content)
     except (ValueError, KeyError, IndexError, TypeError) as exc:
-        raise RuntimeError('무료 AI 모델이 올바른 JSON 브리핑을 반환하지 않았습니다. 다른 시간에 재시도하세요.') from exc
-    allowable = {p['id'] for p in payload}
+        raise RuntimeError(
+            '무료 AI 응답 형식이 불완전합니다. 이번 요청은 저장하지 않았습니다. '
+            '무료 모델이 바뀔 때 다시 시도할 수 있습니다.'
+        ) from exc
+    allowable = {str(p['id']) for p in payload}
     issues = []
-    for issue in parsed.get('issues', [])[:7]:
+    candidates = parsed.get('issues', [])
+    if not isinstance(candidates, list):
+        candidates = []
+    for issue in candidates[:7]:
         if not isinstance(issue, dict):
             continue
-        ids = [str(i) for i in issue.get('ids', []) if str(i) in allowable]
+        raw_ids = issue.get('ids', [])
+        if not isinstance(raw_ids, list):
+            continue
+        ids = list(dict.fromkeys(str(i) for i in raw_ids if str(i) in allowable))
         if not ids:
             continue
         headline = clean_text(issue.get('headline', ''))[:110]
@@ -385,7 +421,7 @@ def ai_briefing(news, api_key='', model='openrouter/free'):
         if headline and point:
             issues.append({'headline': headline, 'point': point, 'ids': ids})
     if not issues:
-        raise ValueError('기사 근거가 연결된 이슈가 없습니다. 저장하지 않았습니다.')
+        raise ValueError('근거 기사와 연결된 AI 이슈가 없어 저장하지 않았습니다.')
     return {'title': clean_text(parsed.get('title', '오늘의 핵심 뉴스'))[:120],
             'summary': clean_text(parsed.get('summary', ''))[:700],
             'issues': issues, 'model': 'openrouter/free'}
