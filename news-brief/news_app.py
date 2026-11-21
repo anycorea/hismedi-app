@@ -14,9 +14,9 @@ st.set_page_config(page_title='News Brief | AI 뉴스브리핑', page_icon='📰
 
 # No custom fixed heading positioning. Retain the Streamlit default content padding.
 st.markdown('''<style>
-/* Compact content shell, no fixed or negative positioning. */
+/* Default Streamlit top offset prevents header clipping across releases. */
 .stApp {background:#f7f9fc;color:#15253b}
-.block-container {max-width:1880px;padding-top:1.25rem;padding-bottom:1.5rem}
+.block-container {max-width:1880px;padding-bottom:1.5rem}
 header[data-testid="stHeader"] {background:#f7f9fc}
 #MainMenu, footer, div[data-testid="stDecoration"] {visibility:hidden}
 .stButton button, .stLinkButton a {min-height:42px;border-radius:11px}
@@ -24,6 +24,8 @@ header[data-testid="stHeader"] {background:#f7f9fc}
 .brand-mark {width:29px;height:29px;display:inline-flex;align-items:center;justify-content:center;background:#0d765a;color:white;border-radius:9px;font-size:1rem}
 .brand-small {font-size:.72rem;color:#7c8a99;font-weight:600;letter-spacing:0}
 .page-note {color:#7a8899;font-size:.76rem;margin:0 0 7px}
+.header-stats {color:#7a8899;font-size:.76rem;text-align:right;white-space:nowrap;line-height:1.35}
+@media(max-width:900px){.header-stats {font-size:.69rem;white-space:normal}}
 .pill-status {color:#65778c;font-size:.77rem;white-space:nowrap}
 .editor-heading {font-size:1.03rem;font-weight:800;color:#152941;letter-spacing:-.025em;margin:4px 0 7px}
 .news-grid {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 12px;align-items:stretch}
@@ -51,7 +53,7 @@ header[data-testid="stHeader"] {background:#f7f9fc}
 .anycorea {text-align:center;color:#9aa5b0;font-size:.70rem;padding:22px 0}
 @media(max-width:850px){.news-grid,.issue-grid{grid-template-columns:1fr}}
 @media(max-width:700px){
- .block-container{padding:.8rem .72rem 1.5rem}
+ .block-container{padding-left:.72rem;padding-right:.72rem;padding-bottom:1.5rem}
  .brand{font-size:1.13rem}
  .news-tile{padding:12px 13px;border-radius:9px}
  .news-title{font-size:max(var(--news-title-size,1.03rem),1.04rem)}
@@ -422,7 +424,7 @@ def app_admin():
         settings_panel()
 
 
-def app_home():
+def app_home(stats_placeholder=None):
     # Preserve the working first-run initialization, without a separate collection button.
     with st.spinner('뉴스를 불러오는 중…'):
         status = ensure_first_news()
@@ -445,6 +447,14 @@ def app_home():
                  and str(r.get('중복여부', 'N')).upper() != 'Y']
     all_items.sort(key=lambda r: str(r.get('발행일시', '')), reverse=True)
     known = {r['언론사코드']: r['언론사명'] for r in data('Media')}
+    # Global collection status belongs in the compact upper-right header, not the article area.
+    if stats_placeholder is not None:
+        total_sources = len({publisher(r, known) for r in all_items})
+        newest = max((str(r.get('수집일시', '')) for r in all_items), default='')
+        stats_placeholder.markdown(
+            f'<div class="header-stats">{len(all_items):,}개 기사 · {total_sources:,}개 언론사'
+            f' · 마지막 수집 {esc(newest[:16]) or "기록 없음"}</div>',
+            unsafe_allow_html=True)
 
     catcodes = list(cmap)
     old = st.session_state.get('news_category', 'ALL')
@@ -481,10 +491,6 @@ def app_home():
     search = str(st.session_state.get('news_search', '')).strip().casefold()
     if search:
         items = [r for r in items if search in (str(r.get('제목', '')) + ' ' + publisher(r, known)).casefold()]
-    n_sources = len({publisher(r, known) for r in items})
-    last = max((str(r.get('수집일시', '')) for r in all_items), default='')
-    st.markdown(f'<div class="page-note">{len(items):,}개 기사 &nbsp;·&nbsp; {n_sources:,}개 언론사'
-                f' &nbsp;·&nbsp; 마지막 수집 {esc(last[:16]) or "기록 없음"}</div>', unsafe_allow_html=True)
 
     if mode == '✨ AI 브리핑':
         # AI API calls remain manual/controlled. Display only genuinely generated briefings.
@@ -532,8 +538,6 @@ def app_home():
             st.info('선택한 조건의 기사가 없습니다. 분야나 검색 조건을 변경해 주세요.')
         return
 
-    st.markdown('<div class="editor-heading">' + esc(cmap.get(category, '전체'))
-                + ' 최신 기사</div>', unsafe_allow_html=True)
     limit = int(st.session_state.get('news_limit', 40))
     pages = max(1, (len(items) + limit - 1) // limit)
     if st.session_state.get('news_page', 1) > pages:
@@ -567,11 +571,13 @@ def app_home():
 
 def main():
     # Keep all always-visible controls in one row on wide screens.
-    brandcol, spacer, fontcol, viewcol = st.columns([4.7, .35, .55, 1.45],
+    brandcol, statscol, fontcol, viewcol = st.columns([3.25, 3.8, .55, 1.3],
                                                     vertical_alignment='center', gap='small')
     with brandcol:
         st.markdown('<div class="brand"><span class="brand-mark">N</span> 간추린 뉴스'
                     '<span class="brand-small">NEWS BRIEF</span></div>', unsafe_allow_html=True)
+    with statscol:
+        stats_placeholder = st.empty()
     with fontcol:
         with st.popover('Aa', help='글자 크기 설정', use_container_width=True):
             font = st.radio('글자 크기', ['기본', '크게', '아주 크게'], horizontal=False)
@@ -587,7 +593,7 @@ def main():
         if view == '관리자':
             app_admin()
         else:
-            app_home()
+            app_home(stats_placeholder)
     except Exception as exc:
         handle_error(exc)
     st.markdown('<div class="anycorea">Created by anycorea</div>', unsafe_allow_html=True)
