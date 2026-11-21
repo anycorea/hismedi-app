@@ -61,14 +61,8 @@ header[data-testid="stHeader"] {background:#f7f9fc}
 .news-grid{gap:8px 10px}
 .st-key-news_view_mode button{white-space:nowrap}
 @media(max-width:700px){.brand{font-size:1.09rem}.brand-mark{width:27px;height:27px}}
-/* On phones/tablets let the header wrap compactly rather than stack full-width columns. */
-@media(max-width:950px){
- .st-key-news_header [data-testid="stHorizontalBlock"]{flex-wrap:wrap!important;gap:.3rem .65rem!important}
- .st-key-news_header [data-testid="column"]{width:auto!important;min-width:0!important;flex:0 0 auto!important}
- .st-key-news_header [data-testid="column"]:nth-child(2){flex:1 1 280px!important}
- .st-key-news_header [data-testid="column"]:nth-child(3){order:4!important}
- .st-key-news_header [data-testid="column"]:nth-child(4){order:3!important}
-}
+/* Keep Streamlit's native responsive column behavior on iOS.
+   Do not override column widths or order: that caused overlapping tabs. */
 
 
 @media(max-width:850px){.news-grid,.issue-grid{grid-template-columns:1fr}}
