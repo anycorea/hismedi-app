@@ -202,20 +202,8 @@ def ensure_first_news():
             if not patch_record(b, 'Settings', '설정키', 'publisher_seed_v2', record):
                 append_records(b, 'Settings', [record])
             refresh()
-    # AI summaries are optional and require a configured API key.
-    api_key = setting('news_brief', 'gemini_api_key', '')
-    if api_key and not rows(b, 'Briefing'):
-        articles = [x for x in rows(b, 'News') if enabled(x.get('노출여부'))]
-        articles.sort(key=lambda x: str(x.get('발행일시','')), reverse=True)
-        if articles:
-            try:
-                briefing = ai_briefing(articles, api_key=api_key,
-                     model=setting('news_brief','gemini_model','gemini-2.5-flash'))
-                save_briefing(b, briefing, 'ALL')
-                refresh()
-            except Exception:
-                # News should remain readable if the optional AI service fails.
-                pass
+    # AI generation is deliberately manual, to prevent unexpected free-quota use
+    # by page visitors and to avoid repeated API requests on Streamlit reruns.
     return result
 
 
@@ -341,10 +329,10 @@ def manual_collection():
 
 def make_brief():
     st.caption('RSS에서 제공된 제목·요약에 근거합니다. 기사 본문을 검증한 것으로 표현하지 않습니다.')
-    token = setting('news_brief', 'gemini_api_key', '')
-    model = setting('news_brief', 'gemini_model', 'gemini-2.5-flash')
+    token = setting('news_brief', 'openrouter_api_key', '')
+    model = 'openrouter/free'
     if not token:
-        st.info('AI 브리핑을 사용하려면 Streamlit Secrets의 [news_brief]에 gemini_api_key를 등록하세요. OpenAI API 키는 사용하지 않습니다.')
+        st.info('AI 브리핑을 사용하려면 Streamlit Secrets의 [news_brief]에 openrouter_api_key를 등록하세요. 무료 모델만 사용합니다.')
     cats = [r for r in data('Category') if enabled(r.get('사용여부'))]
     selected = st.selectbox('브리핑 분야', [r['카테고리코드'] for r in cats] or ['ALL'])
     if st.button('AI 브리핑 생성·저장', type='primary', disabled=not bool(token)):
@@ -356,7 +344,7 @@ def make_brief():
             save_briefing(book(), result, selected)
         refresh()
         write_log('AI브리핑', 'Briefing', selected, result['title'])
-        st.success('Gemini 브리핑 생성·저장 완료')
+        st.success('OpenRouter 무료 AI 브리핑 생성·저장 완료')
         st.json(result)
 
 
@@ -527,7 +515,7 @@ def app_home(stats_placeholder=None):
                          + esc(issue.get('point')) + '</p><div class="issue-links">'
                          + ' '.join(links) + '</div></article>')
         st.markdown('<div class="issue-grid">' + ''.join(cards) + '</div>', unsafe_allow_html=True)
-        st.caption('Gemini AI 작성 · RSS 제목과 설명만 분석 · 기사 본문 전체 검증이 아닙니다 · '
+        st.caption('OpenRouter 무료 AI 작성 · RSS 제목과 설명만 분석 · 기사 본문 전체 검증이 아닙니다 · '
                    + str(brief.get('생성일시', ''))[:16])
         return
 

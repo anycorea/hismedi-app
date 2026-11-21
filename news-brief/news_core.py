@@ -299,62 +299,79 @@ def collect(book, limit_per_feed=22, source_codes=None):
             'seconds': round(time.monotonic()-start, 1)}
 
 
-def ai_briefing(news, api_key='', model='gemini-2.5-flash'):
-    """Build a source-bound Gemini digest from public RSS metadata only.
+def ai_briefing(news, api_key='', model='openrouter/free'):
+    """Generate a cited Korean briefing using only OpenRouter's free router.
 
-    No article bodies, private information or Sheets credentials are sent.
-    This is deliberately one API request, shared via the Briefing sheet.
+    Public RSS titles/descriptions only; no private Sheet data or credentials.
+    Never route to a paid model, even when model is misconfigured in Secrets.
     """
     items = [x for x in news if str(x.get('제목', '')).strip()][:35]
     if not items:
         raise ValueError('브리핑을 생성할 뉴스가 없습니다.')
-    if not api_key:
-        raise ValueError('Google AI Studio에서 Gemini API 키를 발급받아 Streamlit Secrets에 등록하세요.')
-    # Never allow user-configured URLs or an arbitrary model endpoint.
-    if not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9._-]{1,90}', str(model)):
-        raise ValueError('Gemini 모델 이름이 올바르지 않습니다.')
+    if not api_key or api_key.strip().startswith(('발급받은_', 'YOUR_')):
+        raise ValueError('OpenRouter API 키를 Streamlit Secrets에 등록하세요.')
+    if model != 'openrouter/free':
+        raise ValueError('비용 방지를 위해 무료 모델 openrouter/free만 허용합니다.')
     payload = [
-        {'id': x['뉴스ID'], 'title': str(x['제목'])[:200],
+        {'id': str(x['뉴스ID']), 'title': str(x['제목'])[:200],
          'rss_description': str(x.get('요약', ''))[:380],
          'publisher': str(x.get('키워드', ''))[:90],
          'published': str(x.get('발행일시', ''))[:19]}
         for x in items
     ]
     instruction = (
-        '당신은 대한민국 뉴스 편집자입니다. 아래 공개 RSS의 기사 제목, 출처, 제공된 설명만 근거로 한국어 뉴스브리핑을 만드세요. '
-        '기사 본문을 직접 읽었다고 주장하지 말고 제공되지 않은 사실, 인용, 수치, 원인 또는 전망을 창작하지 마세요. '
-        '유사한 사건은 묶고 중요도와 분야 균형을 고려해 핵심 이슈 최대 7개를 선별하세요. '
-        '각 이슈의 point는 짧지만 의미 있는 1~2문장으로 작성하세요. 정보가 부족하면 제목에 따르면이라고 명시하세요. '
-        '기사 간 연관성을 확신할 수 없으면 묶지 마세요. issues의 ids에는 실제 입력된 id만 사용하세요. '
-        '최상위 JSON 객체만 반환하세요. 형식: '
-        '{"title":"오늘의 주요 뉴스","summary":"전체 흐름 2~3문장",'
-        '"issues":[{"headline":"핵심 제목","point":"근거 있는 설명","ids":["기사ID"]}]}.'
+        '당신은 대한민국 뉴스 편집자입니다. 아래 공개 RSS의 기사 제목, 출처, 제공된 설명만 근거로 '
+        '짧고 명확한 한국어 뉴스브리핑을 만드세요. 기사의 전문을 읽었다고 주장하지 마세요. '
+        '제공되지 않은 사실, 수치, 전망, 인용을 창작하지 마세요. 동일 사건만 신중하게 묶고 '
+        '중요도와 분야 균형에 따라 최대 7개 이슈를 선정하세요. '
+        '각 point는 근거 있는 1~2문장으로, 정보 부족 시 제목에 따르면이라고 명시하세요. '
+        'ids에는 입력에 실제 존재하는 id만 넣으세요. 반드시 JSON 객체만 출력하세요. '
+        '형식: {"title":"오늘의 주요 뉴스","summary":"전체 흐름 2~3문장",'
+        '"issues":[{"headline":"핵심 제목","point":"검증 가능한 정리","ids":["기사ID"]}]}.'
     )
-    url = f'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent'
     body = {
-        'contents': [{'role': 'user', 'parts': [{'text': instruction + '\n\n[공개 RSS 데이터]\n' + json.dumps(payload, ensure_ascii=False)}]}],
-        'generationConfig': {'responseMimeType': 'application/json', 'temperature': 0.2,
-                             'maxOutputTokens': 2400}
+        'model': 'openrouter/free',
+        'messages': [
+            {'role': 'system', 'content': instruction},
+            {'role': 'user', 'content': '[공개 RSS 데이터]\n' + json.dumps(payload, ensure_ascii=False)}
+        ],
+        'temperature': 0.2,
+        'max_tokens': 2600,
+        'stream': False,
     }
     try:
-        resp = requests.post(url, headers={'x-goog-api-key': api_key, 'Content-Type': 'application/json'},
-                             json=body, timeout=(8, 90))
+        resp = requests.post(
+            'https://openrouter.ai/api/v1/chat/completions',
+            headers={'Authorization': 'Bearer ' + api_key.strip(),
+                     'Content-Type': 'application/json',
+                     'X-Title': 'News Brief'},
+            json=body, timeout=(8, 90))
     except requests.RequestException as exc:
-        raise RuntimeError('Gemini API 연결에 실패했습니다. 네트워크 연결을 확인하세요.') from exc
+        raise RuntimeError('OpenRouter 연결에 실패했습니다. 네트워크 상태를 확인하세요.') from exc
     if resp.status_code == 429:
-        raise RuntimeError('Gemini 무료 사용량 또는 호출 빈도 제한에 도달했습니다. 잠시 후 다시 시도하세요.')
+        raise RuntimeError('OpenRouter 무료 호출 한도에 도달했습니다. 무료 한도 갱신 후 다시 시도하세요.')
     if resp.status_code in (401, 403):
-        raise RuntimeError('Gemini API 키가 유효하지 않거나 프로젝트에서 해당 모델을 사용할 수 없습니다.')
+        raise RuntimeError('OpenRouter API 키가 유효하지 않거나 무료 모델 이용이 제한되었습니다.')
+    if resp.status_code == 402:
+        raise RuntimeError('OpenRouter가 잔액을 요구했습니다. 유료 결제 없이 무료 라우터만 사용하도록 설정되어 있으며 호출을 중단했습니다.')
     if resp.status_code >= 400:
-        # Avoid exposing request or credential details from upstream responses.
-        raise RuntimeError(f'Gemini API 요청 실패 (HTTP {resp.status_code}). Google AI Studio의 모델/사용량 설정을 확인하세요.')
+        raise RuntimeError(f'OpenRouter API 요청 실패 (HTTP {resp.status_code}). 무료 모델 가용성을 확인하세요.')
     try:
-        candidates = resp.json().get('candidates', [])
-        parts = candidates[0].get('content', {}).get('parts', []) if candidates else []
-        answer = ''.join(part.get('text', '') for part in parts)
-        parsed = json.loads(answer)
+        response = resp.json()
+        choices = response['choices']
+        content = choices[0]['message']['content']
+        if isinstance(content, list):
+            content = ''.join(x.get('text', '') for x in content if isinstance(x, dict))
+        if not isinstance(content, str) or not content.strip():
+            raise ValueError('빈 응답')
+        text = content.strip()
+        if text.startswith('```'):
+            text = re.sub(r'^```(?:json)?\s*|\s*```$', '', text).strip()
+        parsed = json.loads(text)
+        if not isinstance(parsed, dict):
+            raise ValueError('JSON 객체가 아닙니다.')
     except (ValueError, KeyError, IndexError, TypeError) as exc:
-        raise RuntimeError('Gemini가 올바른 JSON 브리핑을 반환하지 않았습니다.') from exc
+        raise RuntimeError('무료 AI 모델이 올바른 JSON 브리핑을 반환하지 않았습니다. 다른 시간에 재시도하세요.') from exc
     allowable = {p['id'] for p in payload}
     issues = []
     for issue in parsed.get('issues', [])[:7]:
@@ -365,13 +382,13 @@ def ai_briefing(news, api_key='', model='gemini-2.5-flash'):
             continue
         headline = clean_text(issue.get('headline', ''))[:110]
         point = clean_text(issue.get('point', ''))[:350]
-        if headline:
+        if headline and point:
             issues.append({'headline': headline, 'point': point, 'ids': ids})
     if not issues:
-        raise ValueError('유효한 기사 출처가 연결된 이슈를 생성하지 못했습니다.')
+        raise ValueError('기사 근거가 연결된 이슈가 없습니다. 저장하지 않았습니다.')
     return {'title': clean_text(parsed.get('title', '오늘의 핵심 뉴스'))[:120],
             'summary': clean_text(parsed.get('summary', ''))[:700],
-            'issues': issues, 'model': model}
+            'issues': issues, 'model': 'openrouter/free'}
 
 def save_briefing(book,result,cat='ALL'):
     ids=list(dict.fromkeys(id for issue in result['issues'] for id in issue['ids']))
