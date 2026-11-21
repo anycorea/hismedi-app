@@ -61,6 +61,41 @@ DEFAULT_MEDIA = [
 ]
 
 
+# Curated publisher-targeted Google News searches. A Google News result is not
+# guaranteed for every publisher; queries complement the topical feeds.
+# Media rows remain editable in the app, and manual spreadsheet headers stay intact.
+PRIMARY_MEDIA = [
+ ('PUB_JOONGANG','중앙일보','종합','https://www.joongang.co.kr','joongang.co.kr','ALL'),
+ ('PUB_CHOSUN','조선일보','종합','https://www.chosun.com','chosun.com','ALL'),
+ ('PUB_DONGA','동아일보','종합','https://www.donga.com','donga.com','ALL'),
+ ('PUB_HANI','한겨레','종합','https://www.hani.co.kr','hani.co.kr','ALL'),
+ ('PUB_KHAN','경향신문','종합','https://www.khan.co.kr','khan.co.kr','ALL'),
+ ('PUB_HANKOOK','한국일보','종합','https://www.hankookilbo.com','hankookilbo.com','ALL'),
+ ('PUB_YNA','연합뉴스','통신','https://www.yna.co.kr','yna.co.kr','ALL'),
+ ('PUB_NEWSIS','뉴시스','통신','https://www.newsis.com','newsis.com','ALL'),
+ ('PUB_NEWS1','뉴스1','통신','https://www.news1.kr','news1.kr','ALL'),
+ ('PUB_MK','매일경제','경제','https://www.mk.co.kr','mk.co.kr','ECO'),
+ ('PUB_HK','한국경제','경제','https://www.hankyung.com','hankyung.com','ECO'),
+ ('PUB_SE','서울경제','경제','https://www.sedaily.com','sedaily.com','ECO'),
+ ('PUB_MT','머니투데이','경제','https://www.mt.co.kr','mt.co.kr','ECO'),
+ ('PUB_EDAILY','이데일리','경제','https://www.edaily.co.kr','edaily.co.kr','ECO'),
+ ('PUB_KBS','KBS','방송','https://news.kbs.co.kr','kbs.co.kr','ALL'),
+ ('PUB_MBC','MBC','방송','https://imnews.imbc.com','imbc.com','ALL'),
+ ('PUB_SBS','SBS','방송','https://news.sbs.co.kr','sbs.co.kr','ALL'),
+ ('PUB_YTN','YTN','방송','https://www.ytn.co.kr','ytn.co.kr','ALL'),
+ ('PUB_JTBC','JTBC','방송','https://news.jtbc.co.kr','jtbc.co.kr','ALL'),
+ ('PUB_ETNEWS','전자신문','IT','https://www.etnews.com','etnews.com','SCI'),
+ ('PUB_ZDNET','지디넷코리아','IT','https://zdnet.co.kr','zdnet.co.kr','SCI'),
+ ('PUB_MEDTIMES','메디칼타임즈','의료','https://www.medicaltimes.com','medicaltimes.com','MED'),
+ ('PUB_DOCNEWS','의협신문','의료','https://www.doctorsnews.co.kr','doctorsnews.co.kr','MED'),
+ ('PUB_DAILYMEDI','데일리메디','의료','https://www.dailymedi.com','dailymedi.com','MED'),
+ ('PUB_SPORTSSEOUL','스포츠서울','스포츠','https://www.sportsseoul.com','sportsseoul.com','SPORT'),
+ ('PUB_SPORTSCHOSUN','스포츠조선','스포츠','https://sports.chosun.com','sports.chosun.com','SPORT'),
+ ('PUB_BUSAN','부산일보','지역','https://www.busan.com','busan.com','LOCAL'),
+ ('PUB_KUKJE','국제신문','지역','https://www.kookje.co.kr','kookje.co.kr','LOCAL'),
+]
+
+
 def now(): return datetime.now(TZ).strftime('%Y-%m-%d %H:%M:%S')
 def enabled(v): return str(v or '').strip().upper() not in ('N','NO','FALSE','0','OFF','미사용')
 def uid(s): return hashlib.sha256(str(s).encode('utf-8')).hexdigest()[:24]
@@ -155,6 +190,13 @@ def initialize(book):
     media_records = [dict(zip(HEADERS['Media'], [code,name,group,home,rss,'','RSS',30,order*10,'Y',cat]))
                      for order,(code,name,group,home,rss,cat) in enumerate(DEFAULT_MEDIA,1)
                      if code not in known_media]
+    # Register important individual outlets without overwriting existing rows.
+    for idx, (code, name, group, home, domain, cat) in enumerate(PRIMARY_MEDIA, 1):
+        if code not in known_media:
+            media_records.append(dict(zip(HEADERS['Media'], [
+                code, name, group, home, google_search(f'site:{domain} when:3d'), '',
+                'Google News RSS 검색', 60, (len(DEFAULT_MEDIA) + idx) * 10, 'Y', cat
+            ])))
     append_records(book, 'Media', media_records)
     return {'categories_added': len(cat_records), 'sources_added': len(media_records)}
 
@@ -257,29 +299,79 @@ def collect(book, limit_per_feed=22, source_codes=None):
             'seconds': round(time.monotonic()-start, 1)}
 
 
-def ai_briefing(news, api_key='', model='gpt-4.1-mini'):
-    """Summarize only RSS metadata supplied. Never claim article body verified."""
-    items=[x for x in news if str(x.get('제목','')).strip()][:15]
-    if not items: raise ValueError('브리핑을 생성할 뉴스가 없습니다.')
-    if not api_key: raise ValueError('AI API 키가 없습니다. 관리자에게 키 등록을 요청하세요.')
-    payload=[{'title':x['제목'],'summary':str(x.get('요약',''))[:450], 'source':str(x.get('키워드','')), 'id':x['뉴스ID']} for x in items]
-    instruction=('너는 뉴스 편집자다. 오직 제공된 제목과 RSS 요약만 근거로 한국어 핵심 뉴스 브리핑을 작성한다. '
-      '검증하지 못한 숫자, 날짜, 관계, 직접인용과 원문 내용을 절대 추가하지 않는다. '
-      '관련 뉴스 3~5개를 선정해 각 이슈를 한 문장으로 명료하게 요약한다. '
-      '단정할 수 없는 경우 제목에 따르면/보도에 따르면 표현을 사용한다. '
-      '출력은 JSON 객체로만: {"title":"...","summary":"세 문장 이하","issues":[{"headline":"...","point":"...","ids":["뉴스ID"]}]}')
-    body={'model':model,'instructions':instruction,'input':json.dumps(payload,ensure_ascii=False),'text':{'format':{'type':'json_object'}},'max_output_tokens':1100}
-    r=requests.post('https://api.openai.com/v1/responses',headers={'Authorization':f'Bearer {api_key}','Content-Type':'application/json'},json=body,timeout=80)
-    r.raise_for_status()
-    result=r.json(); output=''.join(t.get('text','') for item in result.get('output',[]) for t in item.get('content',[]) if t.get('type')=='output_text')
-    data=json.loads(output)
-    allowable={p['id'] for p in payload}
-    issues=[]
-    for issue in data.get('issues',[])[:5]:
-        ids=[s for s in issue.get('ids',[]) if s in allowable]
-        issues.append({'headline':str(issue.get('headline',''))[:110],'point':str(issue.get('point',''))[:350],'ids':ids})
-    if not issues:raise ValueError('AI가 유효한 브리핑을 생성하지 못했습니다.')
-    return {'title':str(data.get('title','오늘의 핵심 뉴스'))[:120], 'summary':str(data.get('summary',''))[:700], 'issues':issues,'model':model}
+def ai_briefing(news, api_key='', model='gemini-2.5-flash'):
+    """Build a source-bound Gemini digest from public RSS metadata only.
+
+    No article bodies, private information or Sheets credentials are sent.
+    This is deliberately one API request, shared via the Briefing sheet.
+    """
+    items = [x for x in news if str(x.get('제목', '')).strip()][:35]
+    if not items:
+        raise ValueError('브리핑을 생성할 뉴스가 없습니다.')
+    if not api_key:
+        raise ValueError('Google AI Studio에서 Gemini API 키를 발급받아 Streamlit Secrets에 등록하세요.')
+    # Never allow user-configured URLs or an arbitrary model endpoint.
+    if not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9._-]{1,90}', str(model)):
+        raise ValueError('Gemini 모델 이름이 올바르지 않습니다.')
+    payload = [
+        {'id': x['뉴스ID'], 'title': str(x['제목'])[:200],
+         'rss_description': str(x.get('요약', ''))[:380],
+         'publisher': str(x.get('키워드', ''))[:90],
+         'published': str(x.get('발행일시', ''))[:19]}
+        for x in items
+    ]
+    instruction = (
+        '당신은 대한민국 뉴스 편집자입니다. 아래 공개 RSS의 기사 제목, 출처, 제공된 설명만 근거로 한국어 뉴스브리핑을 만드세요. '
+        '기사 본문을 직접 읽었다고 주장하지 말고 제공되지 않은 사실, 인용, 수치, 원인 또는 전망을 창작하지 마세요. '
+        '유사한 사건은 묶고 중요도와 분야 균형을 고려해 핵심 이슈 최대 7개를 선별하세요. '
+        '각 이슈의 point는 짧지만 의미 있는 1~2문장으로 작성하세요. 정보가 부족하면 제목에 따르면이라고 명시하세요. '
+        '기사 간 연관성을 확신할 수 없으면 묶지 마세요. issues의 ids에는 실제 입력된 id만 사용하세요. '
+        '최상위 JSON 객체만 반환하세요. 형식: '
+        '{"title":"오늘의 주요 뉴스","summary":"전체 흐름 2~3문장",'
+        '"issues":[{"headline":"핵심 제목","point":"근거 있는 설명","ids":["기사ID"]}]}.'
+    )
+    url = f'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent'
+    body = {
+        'contents': [{'role': 'user', 'parts': [{'text': instruction + '\n\n[공개 RSS 데이터]\n' + json.dumps(payload, ensure_ascii=False)}]}],
+        'generationConfig': {'responseMimeType': 'application/json', 'temperature': 0.2,
+                             'maxOutputTokens': 2400}
+    }
+    try:
+        resp = requests.post(url, headers={'x-goog-api-key': api_key, 'Content-Type': 'application/json'},
+                             json=body, timeout=(8, 90))
+    except requests.RequestException as exc:
+        raise RuntimeError('Gemini API 연결에 실패했습니다. 네트워크 연결을 확인하세요.') from exc
+    if resp.status_code == 429:
+        raise RuntimeError('Gemini 무료 사용량 또는 호출 빈도 제한에 도달했습니다. 잠시 후 다시 시도하세요.')
+    if resp.status_code in (401, 403):
+        raise RuntimeError('Gemini API 키가 유효하지 않거나 프로젝트에서 해당 모델을 사용할 수 없습니다.')
+    if resp.status_code >= 400:
+        # Avoid exposing request or credential details from upstream responses.
+        raise RuntimeError(f'Gemini API 요청 실패 (HTTP {resp.status_code}). Google AI Studio의 모델/사용량 설정을 확인하세요.')
+    try:
+        candidates = resp.json().get('candidates', [])
+        parts = candidates[0].get('content', {}).get('parts', []) if candidates else []
+        answer = ''.join(part.get('text', '') for part in parts)
+        parsed = json.loads(answer)
+    except (ValueError, KeyError, IndexError, TypeError) as exc:
+        raise RuntimeError('Gemini가 올바른 JSON 브리핑을 반환하지 않았습니다.') from exc
+    allowable = {p['id'] for p in payload}
+    issues = []
+    for issue in parsed.get('issues', [])[:7]:
+        if not isinstance(issue, dict):
+            continue
+        ids = [str(i) for i in issue.get('ids', []) if str(i) in allowable]
+        if not ids:
+            continue
+        headline = clean_text(issue.get('headline', ''))[:110]
+        point = clean_text(issue.get('point', ''))[:350]
+        if headline:
+            issues.append({'headline': headline, 'point': point, 'ids': ids})
+    if not issues:
+        raise ValueError('유효한 기사 출처가 연결된 이슈를 생성하지 못했습니다.')
+    return {'title': clean_text(parsed.get('title', '오늘의 핵심 뉴스'))[:120],
+            'summary': clean_text(parsed.get('summary', ''))[:700],
+            'issues': issues, 'model': model}
 
 def save_briefing(book,result,cat='ALL'):
     ids=list(dict.fromkeys(id for issue in result['issues'] for id in issue['ids']))
