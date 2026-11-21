@@ -6,6 +6,7 @@ import threading
 import time
 import re
 from difflib import SequenceMatcher
+from collections import Counter, defaultdict
 from zoneinfo import ZoneInfo
 
 import streamlit as st
@@ -43,21 +44,25 @@ footer, div[data-testid="stDecoration"] {display:none!important}
 .news-grid {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 12px;align-items:stretch}
 .news-tile {background:#fff;border:1px solid #e2e9ef;border-radius:9px;padding:11px 15px;min-width:0;transition:border-color .15s,box-shadow .15s}
 .news-tile:hover {border-color:#b8cbd8;box-shadow:0 4px 15px rgba(17,39,63,.055)}
-.news-meta {display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:#7c8a98;font-size:.74rem;margin-bottom:5px}
-.news-source {display:inline-block;color:#167352;background:#e8f5ee;font-weight:750;border-radius:6px;padding:3px 8px;overflow-wrap:anywhere}
-.news-category {color:#617b92;font-weight:700}
+.news-meta {display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:#718091;font-size:.72rem;margin-top:4px;margin-bottom:2px}
+.news-source {color:#63758a;font-weight:600}
+.news-category {color:#116b53;font-weight:750}
 .news-title {font-size:1.03rem;line-height:1.4;letter-spacing:-.018em;font-weight:735;overflow-wrap:anywhere;word-break:keep-all}
 .news-title a {color:#1b2d42;text-decoration:none}
 .news-title a:hover {color:#08785b;text-decoration:underline;text-underline-offset:3px}
 .news-desc {color:#647789;font-size:.87rem;line-height:1.6;margin-top:8px;word-break:keep-all}
 .related{margin-top:8px;font-size:.78rem;color:#168162}.related summary{cursor:pointer;font-weight:650}.related a{color:#0d765a;text-decoration:none}.related a:hover{text-decoration:underline}
 .anycorea {text-align:center;color:#9aa5b0;font-size:.70rem;padding:14px 0}
+/* Related reports: tiny understated control, not another section heading. */
+[class*="st-key-article_tile_"] [data-testid="stExpander"] {border:none!important;background:transparent!important;margin-top:2px!important}
+[class*="st-key-article_tile_"] [data-testid="stExpander"] summary {padding:2px 0!important;color:#77879a!important;font-size:.73rem!important;min-height:0!important}
+[class*="st-key-article_tile_"] [data-testid="stExpander"] summary p {font-size:.73rem!important}
 /* Article rows are real Streamlit controls: a title click reveals its summary. */
 [class*="st-key-article_tile_"] {background:white;border:1px solid #e2e9ef;border-radius:10px;padding:10px 14px;margin-bottom:10px}
 [class*="st-key-article_tile_"] .stButton button {background:none!important;border:0!important;box-shadow:none!important;min-height:0!important;padding:0!important;justify-content:flex-start!important;text-align:left!important;color:#1b2d42!important;font-size:1.03rem!important;font-weight:725!important;line-height:1.48!important;white-space:normal!important;height:auto!important}
 [class*="st-key-article_tile_"] .stButton button p {white-space:normal!important;text-align:left!important;word-break:keep-all}
 [class*="st-key-article_tile_"] .stButton button:hover {color:#08785b!important}
-.article-explainer {font-size:.90rem;line-height:1.65;color:#3c5064;word-break:keep-all;margin:7px 0}
+.article-explainer {font-size:.94rem;line-height:1.8;color:#263b51;background:#f2f7f5;border-left:3px solid #116b53;padding:12px 14px;border-radius:5px;word-break:keep-all;margin:9px 0}
 .article-source-note {font-size:.74rem;color:#758499;margin:7px 0}
 .article-original a {display:inline-block;font-size:.85rem;font-weight:750;color:#08785b;text-decoration:none;padding:7px 0}
 .article-original a:hover{text-decoration:underline}
@@ -251,37 +256,117 @@ def save_preference(name, value, explanation):
 
 
 def cluster_titles(articles):
-    """Conservative same-event grouping, not a semantic fact-check.
-    Avoid combining articles from the same publisher and require unusually high
-    headline similarity AND shared meaningful tokens.
-    """
-    noise = {'오늘','뉴스','속보','단독','종합','관련','발표','기자','대한','한국','정부'}
-    def words(title):
-        return {w for w in re.findall(r'[가-힣A-Za-z0-9]{2,}', str(title).lower())
-                if w not in noise}
-    groups = []
-    for article in articles:
-        tokens = words(article.get('제목', ''))
-        best = None
-        for group in groups:
-            root = group[0]
-            other = words(root.get('제목', ''))
-            common = tokens & other
-            union = tokens | other
-            if len(common) < 3 or not union:
-                continue
-            jaccard = len(common) / len(union)
-            ratio = SequenceMatcher(None, str(article.get('제목', '')),
-                                    str(root.get('제목', ''))).ratio()
-            if jaccard >= .72 and ratio >= .68:
-                best = group
-                break
-        if best is None:
-            groups.append([article])
-        else:
-            best.append(article)
-    return groups
+    """Conservatively group reports of the *same event*, not an entire topic.
 
+    Candidate indexing avoids pairwise comparisons against every saved article.
+    Publication dates, distinct numbers and a high Korean-headline similarity
+    threshold keep separate events from being silently hidden.
+
+    Every report remains in its original Google Sheet row. Grouping changes
+    presentation only; expanding a group exposes the other publisher links.
+    """
+    generic = {
+        '오늘', '뉴스', '속보', '단독', '종합', '관련', '기자', '대한', '한국',
+        '정부', '최근', '이번', '최신', '보도', '발표', '논란', '확인', '전망',
+        '시장', '국내', '올해', '내년', '어제', '다시', '주요', '문제',
+    }
+
+    def normalized(title):
+        title = str(title or '').casefold()
+        for old, new in (('영업이익', '영업익'), ('예상치', '예상'), ('전망치', '예상'), ('내년부터', '내년'), ('올해부터', '올해')):
+            title = title.replace(old, new)
+        title = re.sub(r'^\s*[\[【][^\]】]{1,16}[\]】]\s*', '', title)
+        title = re.sub(r'\s+[-–—]\s+[^-–—]{2,20}$', '', title)
+        return re.sub(r'[^가-힣a-z0-9]+', ' ', title).strip()
+
+    def tokens(text):
+        return {w for w in text.split() if len(w) >= 2 and w not in generic}
+
+    def grams(text):
+        compact = text.replace(' ', '')
+        return {compact[i:i+3] for i in range(max(0, len(compact)-2))}
+
+    def info(article):
+        headline = normalized(article.get('제목', ''))
+        date = str(article.get('발행일시') or article.get('수집일시') or '')
+        try:
+            day = datetime.fromisoformat(date.replace('Z', '+00:00'))
+            day = day.date()
+        except (ValueError, TypeError):
+            day = None
+        return {'article': article, 'text': headline,
+                'words': tokens(headline), 'grams': grams(headline),
+                'numbers': set(re.findall(r'\d+(?:\.\d+)?', headline)),
+                'date': day, 'category': str(article.get('카테고리코드') or 'ALL')}
+
+    def same_event(a, b):
+        if not a['text'] or not b['text']:
+            return False
+        if a['date'] and b['date'] and abs((a['date'] - b['date']).days) > 2:
+            return False
+        if (a['category'] != b['category'] and 'ALL' not in
+                (a['category'], b['category'])):
+            return False
+        # Two articles with incompatible key figures often concern different
+        # dates/quarters, even when the rest of a headline is identical.
+        if a['numbers'] and b['numbers'] and not (
+                a['numbers'] <= b['numbers'] or b['numbers'] <= a['numbers']):
+            return False
+        # The most common dangerous false positives: same general headline
+        # about different cities, different markets, or opposing positions.
+        exclusive_sets = (
+            {'서울', '부산', '대구', '인천', '광주', '대전', '울산', '제주',
+             '수원', '성남', '고양', '용인', '경기', '강원', '충북', '충남', '전북', '전남', '경북', '경남'},
+            {'매매', '전세', '월세'},
+            {'찬성', '반대'},
+        )
+        for options in exclusive_sets:
+            ea = {w for w in options if w in a['text']}
+            eb = {w for w in options if w in b['text']}
+            if ea and eb and not (ea & eb):
+                return False
+        common = a['words'] & b['words']
+        informative = [w for w in common if len(w) >= 3]
+        if len(common) < 2 or not informative:
+            return False
+        union = a['words'] | b['words']
+        token_jaccard = len(common) / len(union) if union else 0
+        shared_grams = a['grams'] & b['grams']
+        dice = 2 * len(shared_grams) / max(1, len(a['grams']) + len(b['grams']))
+        ratio = SequenceMatcher(None, a['text'], b['text']).ratio()
+        return bool(
+            (ratio >= .85 and token_jaccard >= .48 and dice >= .54) or
+            (dice >= .75 and token_jaccard >= .38) or
+            (token_jaccard >= .62 and dice >= .57 and ratio >= .74) or
+            (ratio >= .76 and dice >= .52 and len(common) >= 2
+             and len(a['numbers'] & b['numbers']) >= 2)
+        )
+
+    groups, anchors = [], []
+    inverted = defaultdict(set)
+    for article in articles:
+        candidate = info(article)
+        # Only consider groups sharing an informative token; avoids O(n^2)
+        # comparisons against the entire 7-day archive.
+        possible = set()
+        for token in candidate['words']:
+            if len(token) >= 3:
+                possible.update(inverted.get(token, ()))
+        matched = None
+        for group_i in sorted(possible):
+            if same_event(candidate, anchors[group_i]):
+                matched = group_i
+                break
+        if matched is None:
+            matched = len(groups)
+            groups.append([article])
+            anchors.append(candidate)
+        else:
+            groups[matched].append(article)
+        for token in candidate['words']:
+            if len(token) >= 3:
+                inverted[token].add(matched)
+    return groups
 
 
 def publisher(item, known):
@@ -434,21 +519,24 @@ def render_news_tile(group, index, known, cmap):
     published = str(article.get('발행일시', ''))[5:16]
     label = esc(actual) + ' · ' + esc(cmap.get(article.get('카테고리코드'), '')) + ' · ' + esc(published)
     with st.container(key=f'article_tile_{index}'):
-        st.markdown('<div class="news-meta"><span class="news-source">' + esc(actual)
-                    + '</span><span class="news-category">'
-                    + esc(cmap.get(article.get('카테고리코드'), ''))
-                    + '</span><span>' + esc(published) + '</span></div>', unsafe_allow_html=True)
         if st.button(display_title, key=f'article_open_{key}', use_container_width=True):
             st.session_state['opened_news_id'] = None if st.session_state.get('opened_news_id') == key else key
+        # Headline first: category, newspaper and time are deliberately subtle.
+        st.markdown('<div class="news-meta"><span class="news-category">'
+                    + esc(cmap.get(article.get('카테고리코드'), ''))
+                    + '</span><span>' + esc(actual) + '</span><span>'
+                    + esc(published) + '</span></div>', unsafe_allow_html=True)
         if st.session_state.get('opened_news_id') == key:
             render_article_summary(article)
         if len(group) > 1:
-            with st.expander(f'관련 보도 {len(group)-1}건'):
-                for other in group[1:8]:
+            # Related publishers are supplementary; never an additional card.
+            with st.expander(f'관련 {len(group)-1}건', expanded=False):
+                for other in group[1:]:
                     u = safe_url(other.get('원문URL', ''))
                     if u:
-                        st.markdown('[' + publisher(other, known).replace('[', '').replace(']', '')
-                                    + ' · ' + str(other.get('제목', ''))[:60].replace('[', '').replace(']', '')
+                        safe_label = (publisher(other, known) + ' · ' +
+                                      str(other.get('제목', ''))[:90]).replace('[', '').replace(']', '')
+                        st.markdown('[' + safe_label.replace('(', '（').replace(')', '）')
                                     + '](' + u + ')')
 
 
